@@ -7,11 +7,13 @@ description: >
   "budget report", "quarterly business review", "QBR deck", "asset lifecycle plan",
   "hardware refresh plan", "how do I do what Lifecycle Insights does", "ScalePad",
   "Lifecycle Manager", "myITprocess", "vCIOToolbox", "DMI score", "maturity score",
-  "how does our scoring compare", or is migrating a partner off a third-party vCIO/QBR
+  "how does our scoring compare", "map a ScalePad PDF to CloudRadial", "import a ScalePad
+  Lifecycle Manager deliverable", "sync ScalePad asset/EOL data to endpoints", "write
+  warranty/EOL dates onto endpoints", or is migrating a partner off a third-party vCIO/QBR
   tool onto CloudRadial. Also use when asked to turn endpoint EOL or warranty data into
   a priced, quarter-scheduled plan.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Client Deliverable Builder
@@ -23,6 +25,19 @@ Report Layout as the delivery vehicle.
 Partners migrating from ScalePad Lifecycle Manager X (formerly Lifecycle Insights),
 myITprocess, or vCIOToolbox arrive with a PDF and ask "can CloudRadial do this."
 Three quarters of it ships today. Be precise about which quarter does not.
+
+For a **ScalePad Lifecycle Manager** PDF specifically — including how to read the PDF and
+how to write its asset/EOL data back onto the real endpoints — follow
+`${CLAUDE_PLUGIN_ROOT}/skills/client-deliverable/references/scalepad-lifecycle-mapping.md`
+alongside the sequence below.
+
+**Automated alternative.** The same ScalePad → CloudRadial mapping also ships as an
+AutomationAI workflow, **ScalePad → CloudRadial Lifecycle Sync**, in the AutomationAI
+Workflows marketplace. It reads the ScalePad Lifecycle Manager *API* and writes straight
+into CloudRadial (endpoints enriched by serial; initiatives and contracts as Planner
+items) — no PDF, on a schedule, with a `plan`/`apply` safety gate. Use **this skill** for a
+guided, human-in-the-loop one-off build; use **that workflow** for recurring, unattended
+sync across a portfolio.
 
 ## Before any tool call
 
@@ -93,6 +108,23 @@ Fields that justify a refresh recommendation, all verified present on the live e
 Note the field names differ from some older docs: the entity uses
 `companyEndpointId`, `expirationDate`, and `os` — not `endpointId`,
 `warrantyExpirationDate`, or `operatingSystem`.
+
+### 3b. Sync ScalePad asset/EOL data into the endpoints (Lifecycle Manager imports)
+
+When the source is a ScalePad Lifecycle Manager PDF, do not stop at a table in the report
+body. ScalePad holds EOL dates, serials, and models the portal often lacks — write them
+onto the real endpoints so they drive `WarrantyExpirationPolicy` and future reports.
+
+Match each asset to an endpoint by `serialNumber`; enrich the match (write the missing
+`expirationDate`, never clobber RMM-supplied fields) or, with the operator's confirmation,
+create a tagged placeholder endpoint for assets not yet in the portal. `expirationDate` is
+directly writable — use `update_resource` / `create_resource`, **not**
+`endpoint_update_warranty` (that does an async manufacturer lookup and ignores the ScalePad
+date). Rows with no serial cannot be safely matched or created — skip them.
+
+Full field map, match/update/create mechanics, required-field caveats, and the
+`pdftotext` extraction recipe:
+`${CLAUDE_PLUGIN_ROOT}/skills/client-deliverable/references/scalepad-lifecycle-mapping.md`.
 
 ### 4. Create Planner Categories if the deliverable needs its own grouping
 

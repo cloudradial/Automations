@@ -49,7 +49,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "setup_status",
     description:
-      "Check whether CloudRadial credentials are configured. Returns {configured, source ('env'|'keychain'), baseUrl, publicKeyHint (last 4 chars of public key)}. Never returns the full keys. Call this BEFORE any other CloudRadial tool — if configured is false, run the setup wizard before doing CloudRadial work.",
+      "Check whether CloudRadial credentials are configured. Returns {configured, source ('env'|'keychain'|'file'), baseUrl, publicKeyHint (last 4 chars of public key)}. Never returns the full keys. Call this BEFORE any other CloudRadial tool — if configured is false, run the setup wizard before doing CloudRadial work.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -60,7 +60,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "configure_credentials",
     description:
-      "Store CloudRadial API credentials in the OS keychain (Windows Credential Manager / macOS Keychain / Linux libsecret). Validates the keys with a live `/v2/odata/company/$count` call before saving — if validation fails, nothing is written. Existing credentials are overwritten. The keys are NEVER logged or returned by this tool.",
+      "Store CloudRadial API credentials securely on this computer — in the OS keychain if the native module is available (Windows Credential Manager / macOS Keychain / Linux libsecret), otherwise an AES-256-encrypted local file. Validates the keys with a live `/v2/odata/company/$count` call before saving — if validation fails, nothing is written. Existing credentials are overwritten. The keys are NEVER logged or returned by this tool.",
     inputSchema: {
       type: "object",
       properties: {
@@ -105,7 +105,7 @@ export const tools: ToolDefinition[] = [
       const status = getStatus();
       return {
         success: true,
-        message: "Credentials validated and stored in the OS keychain.",
+        message: `Credentials validated and stored securely on this computer (${status.source === "keychain" ? "OS keychain" : "encrypted local file"}).`,
         ...status,
       };
     },
@@ -114,7 +114,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "clear_credentials",
     description:
-      "Delete CloudRadial credentials from the OS keychain. Does NOT affect environment variables — if creds were loaded from env vars, this is a no-op. Use to rotate keys or remove the configuration.",
+      "Delete stored CloudRadial credentials from this computer (OS keychain or encrypted local file). Does NOT affect environment variables — if creds were loaded from env vars, this is a no-op. Use to rotate keys or remove the configuration.",
     inputSchema: {
       type: "object",
       properties: {},

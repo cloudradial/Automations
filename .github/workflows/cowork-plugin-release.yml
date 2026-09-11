@@ -18,14 +18,14 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build per-OS plugins
+      - name: Build universal pure-JS plugin
         working-directory: cowork-plugin/cloudradial-ucp
         run: node scripts/build-plugin.mjs
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: cowork-plugin/cloudradial-ucp/cloudradial-ucp-*.plugin
+          files: cowork-plugin/cloudradial-ucp/cloudradial-ucp.plugin
           generate_release_notes: true
           # Auto-mark v*-beta.* / v*-rc.* tags (any tag containing '-') as
           # pre-release so they don't get the "Latest" badge. Plain v*.*.*

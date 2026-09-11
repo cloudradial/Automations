@@ -1,4 +1,4 @@
-import { Entry } from "./keyring-safe.js";
+import { Entry, credentialBackend } from "./keyring-safe.js";
 
 const SERVICE = "cloudradial-ucp-mcp";
 const KEY_PUBLIC = "public_key";
@@ -13,7 +13,12 @@ export interface Credentials {
   baseUrl: string;
 }
 
-export type CredentialSource = "env" | "keychain" | null;
+export type CredentialSource = "env" | "keychain" | "file" | null;
+
+/** Label for stored (non-env) credentials, reflecting the active backend. */
+function storedSource(): "keychain" | "file" {
+  return credentialBackend() === "native" ? "keychain" : "file";
+}
 
 export interface CredentialStatus {
   configured: boolean;
@@ -58,7 +63,7 @@ export function loadCredentials(): { creds: Credentials; source: CredentialSourc
   const env = readEnv();
   if (env) return { creds: env, source: "env" };
   const kc = readKeychain();
-  if (kc) return { creds: kc, source: "keychain" };
+  if (kc) return { creds: kc, source: storedSource() };
   return null;
 }
 
@@ -76,7 +81,7 @@ export function getStatus(): CredentialStatus {
   if (kc) {
     return {
       configured: true,
-      source: "keychain",
+      source: storedSource(),
       baseUrl: kc.baseUrl,
       publicKeyHint: kc.publicKey.slice(-4),
     };

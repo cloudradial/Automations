@@ -19,7 +19,9 @@
     "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist-bundle/index.mjs --external:@napi-rs/keyring"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "optionalDependencies": {
     "@napi-rs/keyring": "1.3.0"
   },
   "devDependencies": {

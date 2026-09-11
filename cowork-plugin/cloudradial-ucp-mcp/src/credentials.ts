@@ -1,4 +1,4 @@
-import { Entry } from "@napi-rs/keyring";
+import { Entry } from "./keyring-safe.js";
 
 const SERVICE = "cloudradial-ucp-mcp";
 const KEY_PUBLIC = "public_key";

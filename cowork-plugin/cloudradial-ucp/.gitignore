@@ -1,6 +1,6 @@
 # Dependencies & build output
 node_modules/
-server/
+server/vendor/
 
 # Local credential config (created by setup wizard)
 cloudradial-config.json

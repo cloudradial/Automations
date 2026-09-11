@@ -86,7 +86,7 @@ CloudRadial API V2
 
 There is **no Azure Function**, no Chrome extension, no separate server to deploy, no npm install at runtime. The plugin contains the MCP server itself — an esbuild-bundled JavaScript file (**pure JS, no native binaries — one build runs on every OS**). The plugin's `.mcp.json` tells your Claude app how to launch it with `node`; installing the plugin auto-registers the server. Credentials are stored **encrypted on your computer** (or supplied via environment variables — see below).
 
-## Skills (11)
+## Skills (14)
 
 Each skill below has a partner-facing **README** with example prompts to try. Click the skill name for its guide.
 
@@ -96,10 +96,13 @@ Each skill below has a partner-facing **README** with example prompts to try. Cl
 | **[portal-setup](skills/portal-setup/README.md)** | Walk a client through their 5-session CloudRadial implementation; 8 CSA pain-point playbooks; content seeding |
 | **[portal-lookup](skills/portal-lookup/README.md)** | Look up companies, check portal status, assess LOMG lifecycle stage, prepare for meetings |
 | **[content-management](skills/content-management/README.md)** | Create and manage articles, catalogs, menus, courses, lessons, and assessments |
+| **[company-management](skills/company-management/README.md)** | Create, update, delete, and group companies; account managers; portal branding |
 | **[user-management](skills/user-management/README.md)** | Look up users by email/name, list users by company, analyze user adoption |
 | **[endpoint-reporting](skills/endpoint-reporting/README.md)** | List endpoints, warranty reports, device inventory, application audits |
+| **[endpoint-lifecycle-cards](skills/endpoint-lifecycle-cards/README.md)** | Maintain one Planner card per hardware-refresh category (Replace, Plan, Upgrade, Retain…) with triage priority |
 | **[course-management](skills/course-management/README.md)** | Create training courses and lessons (from a topic, document, or YouTube link); check enrollments |
 | **[assessment-compliance](skills/assessment-compliance/README.md)** | Review security assessments, compliance tracking, flexible-asset management |
+| **[client-deliverable](skills/client-deliverable/README.md)** | Build a vCIO-style deliverable: IT roadmap, goals, budget, machine audit, Microsoft licenses |
 | **[feedback-analysis](skills/feedback-analysis/README.md)** | Analyze user feedback, CSAT trends, satisfaction reporting |
 | **[service-management](skills/service-management/README.md)** | Services, service installs, domains, products, coverage analysis |
 | **[reporting-admin](skills/reporting-admin/README.md)** | Archives, certificates, company groups, media, tokens, raw API access |

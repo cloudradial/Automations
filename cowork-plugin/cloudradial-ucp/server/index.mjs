@@ -15595,6 +15595,9 @@ var Entry = class {
     return true;
   }
 };
+function credentialBackend() {
+  return selectBackend();
+}
 
 // src/credentials.ts
 var SERVICE = "cloudradial-ucp-mcp";
@@ -15602,6 +15605,9 @@ var KEY_PUBLIC = "public_key";
 var KEY_PRIVATE = "private_key";
 var KEY_BASE_URL = "base_url";
 var DEFAULT_BASE_URL = "https://api.us.cloudradial.com";
+function storedSource() {
+  return credentialBackend() === "native" ? "keychain" : "file";
+}
 function entry(account) {
   return new Entry(SERVICE, account);
 }
@@ -15630,7 +15636,7 @@ function loadCredentials() {
   const env = readEnv();
   if (env) return { creds: env, source: "env" };
   const kc = readKeychain();
-  if (kc) return { creds: kc, source: "keychain" };
+  if (kc) return { creds: kc, source: storedSource() };
   return null;
 }
 function getStatus() {
@@ -15647,7 +15653,7 @@ function getStatus() {
   if (kc) {
     return {
       configured: true,
-      source: "keychain",
+      source: storedSource(),
       baseUrl: kc.baseUrl,
       publicKeyHint: kc.publicKey.slice(-4)
     };
@@ -15781,7 +15787,7 @@ var tools = [
   // -------------------------------------------------------------------------
   {
     name: "setup_status",
-    description: "Check whether CloudRadial credentials are configured. Returns {configured, source ('env'|'keychain'), baseUrl, publicKeyHint (last 4 chars of public key)}. Never returns the full keys. Call this BEFORE any other CloudRadial tool \u2014 if configured is false, run the setup wizard before doing CloudRadial work.",
+    description: "Check whether CloudRadial credentials are configured. Returns {configured, source ('env'|'keychain'|'file'), baseUrl, publicKeyHint (last 4 chars of public key)}. Never returns the full keys. Call this BEFORE any other CloudRadial tool \u2014 if configured is false, run the setup wizard before doing CloudRadial work.",
     inputSchema: {
       type: "object",
       properties: {}
@@ -15790,7 +15796,7 @@ var tools = [
   },
   {
     name: "configure_credentials",
-    description: "Store CloudRadial API credentials in the OS keychain (Windows Credential Manager / macOS Keychain / Linux libsecret). Validates the keys with a live `/v2/odata/company/$count` call before saving \u2014 if validation fails, nothing is written. Existing credentials are overwritten. The keys are NEVER logged or returned by this tool.",
+    description: "Store CloudRadial API credentials securely on this computer \u2014 in the OS keychain if the native module is available (Windows Credential Manager / macOS Keychain / Linux libsecret), otherwise an AES-256-encrypted local file. Validates the keys with a live `/v2/odata/company/$count` call before saving \u2014 if validation fails, nothing is written. Existing credentials are overwritten. The keys are NEVER logged or returned by this tool.",
     inputSchema: {
       type: "object",
       properties: {
@@ -15829,14 +15835,14 @@ var tools = [
       const status = getStatus();
       return {
         success: true,
-        message: "Credentials validated and stored in the OS keychain.",
+        message: `Credentials validated and stored securely on this computer (${status.source === "keychain" ? "OS keychain" : "encrypted local file"}).`,
         ...status
       };
     }
   },
   {
     name: "clear_credentials",
-    description: "Delete CloudRadial credentials from the OS keychain. Does NOT affect environment variables \u2014 if creds were loaded from env vars, this is a no-op. Use to rotate keys or remove the configuration.",
+    description: "Delete stored CloudRadial credentials from this computer (OS keychain or encrypted local file). Does NOT affect environment variables \u2014 if creds were loaded from env vars, this is a no-op. Use to rotate keys or remove the configuration.",
     inputSchema: {
       type: "object",
       properties: {}

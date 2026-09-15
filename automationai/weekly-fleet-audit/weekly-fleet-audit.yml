@@ -1,0 +1,124 @@
+automationsWorkflow: 1
+name: "Weekly Fleet Audit"
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 120
+    properties:
+      webhookEnabled: false
+  # ---------------------------------------------------------------------------
+  # Agent node — runs the CloudRadial UCP Assistant agent toward the goal below.
+  # Config field names (goal / allowedExtensions / model / timeoutSeconds /
+  # autoApprove) are per the "The Agent node" docs. `agentSlug` references the
+  # saved custom agent by its slug; if your portal uses a different key name for
+  # that reference, set it in the node editor after import (or clear it to run
+  # the goal inline with the extensions listed here).
+  # ---------------------------------------------------------------------------
+  - id: node-agent
+    name: Fleet Audit
+    type: agent
+    position:
+      x: 320
+      y: 120
+    properties:
+      agentSlug: cloudradial-ucp-assistant
+      goal: |-
+        For every company in the CloudRadial portal, count the endpoints whose
+        warranty is expired or unknown, and flag any company that has no account
+        manager assigned. Return a short per-company summary sorted by the most
+        out-of-warranty endpoints first, followed by a one-paragraph overview of
+        the whole estate. This is a read-only audit — do not change anything.
+      allowedExtensions:
+      - cloudradial-v2-companies
+      - cloudradial-v2-endpoints
+      model: ''
+      timeoutSeconds: 900
+      autoApprove: false
+  # ---------------------------------------------------------------------------
+  # Email node — sends the agent's `answer` via Postmark (same pattern as the
+  # sample-workflow / cloudradial-status workflows).
+  # ---------------------------------------------------------------------------
+  - id: node-email
+    name: Email Audit
+    type: powershell-script
+    position:
+      x: 540
+      y: 120
+    properties:
+      script: |-
+        $postmarkServerToken = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Postmark-ServerToken' -AsPlainText -ErrorAction SilentlyContinue
+        $postmarkFromEmail   = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Postmark-FromEmail'   -AsPlainText -ErrorAction SilentlyContinue
+        $postmarkApiUrl      = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Postmark-ApiUrl'      -AsPlainText -ErrorAction SilentlyContinue
+
+        # ---- set your recipient ----
+        $recipient = 'team@yourmsp.com'
+
+        $missing = @()
+        if ([string]::IsNullOrWhiteSpace($postmarkServerToken)) { $missing += 'Postmark-ServerToken' }
+        if ([string]::IsNullOrWhiteSpace($postmarkFromEmail))   { $missing += 'Postmark-FromEmail' }
+        if ([string]::IsNullOrWhiteSpace($postmarkApiUrl))      { $missing += 'Postmark-ApiUrl' }
+        if ($missing.Count -gt 0) {
+            $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+            Set-NodeOutput @{ status = 'error'; message = $m }
+            throw $m
+        }
+
+        # The Agent node's output (its 'answer' field) arrives as this node's input.
+        $agent = Get-NodeInput
+        $answer = if ($agent -and $agent.answer) { [string]$agent.answer } else { 'The agent returned no audit output.' }
+        $safe = ($answer -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;')
+
+        $subject = "Weekly Fleet Audit - $((Get-Date).ToString('yyyy-MM-dd'))"
+        $htmlBody = "<html><body><h2>Weekly Fleet Audit</h2><pre style='font-family:Segoe UI,Arial,sans-serif;white-space:pre-wrap'>$safe</pre></body></html>"
+
+        $uri = ($postmarkApiUrl.TrimEnd('/') + '/email')
+        $headers = @{
+            'X-Postmark-Server-Token' = $postmarkServerToken
+            'Accept'                  = 'application/json'
+            'Content-Type'            = 'application/json'
+        }
+        $body = @{
+            From          = $postmarkFromEmail
+            To            = $recipient
+            Subject       = $subject
+            TextBody      = $answer
+            HtmlBody      = $htmlBody
+            MessageStream = 'outbound'
+        } | ConvertTo-Json -Depth 10
+
+        $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body
+
+        Set-NodeOutput @{
+            status     = 'success'
+            message    = "Fleet audit emailed to $recipient"
+            to         = $recipient
+            subject    = $subject
+            postmarkId = $response.MessageID
+        }
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters: []
+      aiExtensions:
+      - postmark
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 760
+      y: 120
+  connections:
+  - source: start
+    target: node-agent
+    sourceHandle: null
+  - source: node-agent
+    target: node-email
+    sourceHandle: null
+  - source: node-email
+    target: end
+    sourceHandle: null
+  startActivityId: start

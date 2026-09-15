@@ -20,6 +20,8 @@ single monolithic script, so every validation and gate is easy to read, test, an
 | **Endpoint Names Token** | [`endpoint-names-token/`](endpoint-names-token/) | Builds a comma-separated endpoint-name list per company and writes it into a company token for portal content/forms. |
 | **KnowBe4 Training Sync** | [`knowbe4/`](knowbe4/) | Manual/scheduled sync: reads KnowBe4 users with incomplete training, writes one CloudRadial flexible asset per user, and opens a ConnectWise ticket for the company summarizing who is overdue. |
 | **Portal Lookup** _(agent)_ | [`portal-lookup/`](portal-lookup/) | Read-only portal briefing — users, endpoints, warranty posture, setup gaps — for meeting prep. Import under **Agents → Custom**. |
+| **CloudRadial UCP Assistant** _(agent)_ | [`cloudradial-ucp/`](cloudradial-ucp/) | General-purpose portal assistant — the AutomationAI analog of the UCP MCP plugin. Looks up, briefs, audits, reports, and (with approval) changes companies, users, endpoints, services, and tokens. Import under **Agents → Custom**. |
+| **Weekly Fleet Audit** | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Demo of an **agent inside a workflow**: an Agent node runs the UCP Assistant to audit warranties / account-manager gaps on a schedule, then a PowerShell node emails the result via Postmark. |
 
 ## Installing a workflow
 

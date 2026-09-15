@@ -38,6 +38,15 @@ PowerShell scripts you can run directly, schedule via RMM, or customize with AI.
 | **Content Bulk Import** | Bulk-create KB articles from CSV | [`content-management/`](content-management/) |
 | **Course Builder** | Create training courses and lessons from CSV | [`course-management/`](course-management/) |
 
+## AutomationAI Workflows
+
+Importable [AutomationAI](automationai/) workflows — `.yml` definitions you import into AutomationAI and run on your runner, triggered by a secure webhook (a CloudRadial form, an Automation, or a ServiceAI Action). Broken out into legible per-step nodes.
+
+| Workflow | What It Does | Folder |
+|----------|-------------|--------|
+| **Password Reset (Self-Service)** | Self-service M365 password reset, gated so a requester can reset only their own account | [`automationai/password-reset/`](automationai/password-reset/) |
+| **Password Reset (ServiceAI Triage)** | Ticket-triggered reset via a ServiceAI Action; resets when the authenticated submitter owns the account, else holds for confirmation | [`automationai/password-reset-triage/`](automationai/password-reset-triage/) |
+
 ## Quick Start
 
 Get your first API call working in 15 minutes:

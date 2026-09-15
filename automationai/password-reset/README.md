@@ -6,6 +6,12 @@ but with **one step per concern** so each gate is legible and independently test
 
 Nodes: **Parse & Validate → Resolve & Ownership Gate → Safety Gates → Reset Password → Finish.**
 
+## Download & import
+
+**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/password-reset/password-reset.yml)
+
+Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Full steps are under [Import & test](#import--test) below.
+
 ## Why this is safe (ownership gate)
 
 A requester may reset **only their own** account. The trusted, portal-injected `submittedByUpn`

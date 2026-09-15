@@ -19,6 +19,7 @@ single monolithic script, so every validation and gate is easy to read, test, an
 | **Certificate Expiration Report** | [`certificate-expiration-report/`](certificate-expiration-report/) | Sweeps SSL certificates across all companies and writes one Planner card per company listing expired / soon-to-expire certs. |
 | **Endpoint Names Token** | [`endpoint-names-token/`](endpoint-names-token/) | Builds a comma-separated endpoint-name list per company and writes it into a company token for portal content/forms. |
 | **Portal Lookup** _(agent)_ | [`portal-lookup/`](portal-lookup/) | Read-only portal briefing — users, endpoints, warranty posture, setup gaps — for meeting prep. Import under **Agents → Custom**. |
+| **CloudRadial UCP Assistant** _(agent)_ | [`cloudradial-ucp/`](cloudradial-ucp/) | General-purpose portal assistant — the AutomationAI analog of the UCP MCP plugin. Looks up, briefs, audits, reports, and (with approval) changes companies, users, endpoints, services, and tokens. Import under **Agents → Custom**. |
 
 ## Installing a workflow
 

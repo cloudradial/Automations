@@ -1,9 +1,15 @@
 # Password Reset (ServiceAI Triage)
 
-The **triage** counterpart to [Password Reset (Self-Service)](../password-reset/README.md). Fired by a
+The **triage** counterpart to [Password Reset (Self-Service)](https://github.com/cloudradial/helpers/tree/main/automationai/password-reset). Fired by a
 **ServiceAI Action in Use-in-Triage mode**, where the trigger is a ticket. The ticket carries the target
 user (email/UPN) + tenant **and** the authenticated requester (`submittedByUPN`), and the workflow decides
 what to do based on who asked.
+
+## Download & import
+
+**Download the workflow:** [`password-reset-triage.yml`](https://github.com/cloudradial/helpers/blob/main/automationai/password-reset-triage/password-reset-triage.yml)
+
+Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Wire a ServiceAI **Use in Triage** Action at the webhook. Full steps are under [Import & test](#import--test) below.
 
 ## Decision logic
 

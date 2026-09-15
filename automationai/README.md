@@ -14,6 +14,7 @@ single monolithic script, so every validation and gate is easy to read, test, an
 |---|---|---|
 | **Password Reset (Self-Service)** | [`password-reset/`](password-reset/) | Self-service M365 password reset with an ownership gate (a requester may reset only their own account) plus disabled / tenant-scope / privileged / risk safeguards. |
 | **Password Reset (ServiceAI Triage)** | [`password-reset-triage/`](password-reset-triage/) | The triage counterpart, fired by a ServiceAI Action from a ticket: requires the authenticated submitter, resets when they own the account, and otherwise holds for human confirmation. |
+| **KnowBe4 Training Sync** | [`knowbe4/`](knowbe4/) | Manual/scheduled sync: reads KnowBe4 users with incomplete training, writes one CloudRadial flexible asset per user, and opens a ConnectWise ticket for the company summarizing who is overdue. |
 
 ## Installing a workflow
 

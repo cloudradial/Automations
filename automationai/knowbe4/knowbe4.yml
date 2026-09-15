@@ -1,0 +1,466 @@
+automationsWorkflow: 1
+name: "KnowBe4 Training Sync"
+description: >-
+  Reads KnowBe4 users with incomplete security-awareness training, writes one
+  CloudRadial flexible asset per user, and opens a single ConnectWise ticket for
+  the company summarizing who is overdue.
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 80
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: fetch-incomplete-users
+    name: Fetch incomplete KnowBe4 users
+    type: powershell-script
+    position:
+      x: 300
+      y: 240
+    properties:
+      script: |-
+        $ErrorActionPreference = 'Stop'
+
+        $kb4ApiUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'KnowBe4-ApiUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $kb4ApiKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'KnowBe4-ApiKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missing = @()
+        if ([string]::IsNullOrWhiteSpace($kb4ApiUrl)) { $missing += 'KnowBe4-ApiUrl' }
+        if ([string]::IsNullOrWhiteSpace($kb4ApiKey)) { $missing += 'KnowBe4-ApiKey' }
+        if ($missing.Count -gt 0) {
+          $message = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        # Strip any region label like "https://us.api.knowbe4.com (US)" -> first token, no trailing slash
+        $baseUrl = ($kb4ApiUrl -split '\s+')[0].TrimEnd('/')
+        $headers = @{ Authorization = "Bearer $kb4ApiKey"; Accept = 'application/json' }
+
+        function Get-Kb4PagedArray {
+          param([Parameter(Mandatory = $true)][string]$Path)
+          $page = 1
+          $perPage = 100
+          $all = [System.Collections.Generic.List[object]]::new()
+          while ($true) {
+            $sep = if ($Path -match '\?') { '&' } else { '?' }
+            $uri = "$baseUrl$Path${sep}page=$page&per_page=$perPage"
+            $batch = @(Invoke-RestMethod -Method Get -Uri $uri -Headers $headers)
+            foreach ($row in $batch) { [void]$all.Add($row) }
+            if ($batch.Count -lt $perPage) { break }
+            $page++
+          }
+          $all.ToArray()
+        }
+
+        $users = @(Get-Kb4PagedArray -Path '/v1/users')
+        $enrollments = @(Get-Kb4PagedArray -Path '/v1/training/enrollments')
+
+        $userMap = @{}
+        foreach ($u in $users) {
+          if ($null -ne $u -and $null -ne $u.id) { $userMap[[string]$u.id] = $u }
+        }
+
+        function Get-EnrollUserId {
+          param($e)
+          if ($null -ne $e.user_id) { return [string]$e.user_id }
+          if ($null -ne $e.user -and $null -ne $e.user.id) { return [string]$e.user.id }
+          return ''
+        }
+
+        $grouped = @{}
+        $incompleteEnrollmentCount = 0
+
+        foreach ($e in $enrollments) {
+          if ($null -eq $e) { continue }
+
+          # Incomplete = not completed and status is not passed/completed
+          $isIncomplete = $true
+          if ($null -ne $e.completion_date -and -not [string]::IsNullOrWhiteSpace([string]$e.completion_date)) { $isIncomplete = $false }
+          if ($null -ne $e.status -and ([string]$e.status) -match '(?i)complete|passed') { $isIncomplete = $false }
+          if (-not $isIncomplete) { continue }
+
+          $userId = Get-EnrollUserId $e
+          if ([string]::IsNullOrWhiteSpace($userId)) { continue }
+
+          $user = if ($userMap.ContainsKey($userId)) { $userMap[$userId] } elseif ($null -ne $e.user) { $e.user } else { $null }
+
+          $displayName = ''
+          if ($null -ne $user) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$user.name)) {
+              $displayName = [string]$user.name
+            } else {
+              $displayName = ((@($user.first_name, $user.last_name) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }) -join ' ').Trim()
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = "User $userId" }
+
+          $email = if ($null -ne $user -and -not [string]::IsNullOrWhiteSpace([string]$user.email)) { [string]$user.email } else { '' }
+
+          $courseName = if (-not [string]::IsNullOrWhiteSpace([string]$e.campaign_name)) { [string]$e.campaign_name }
+            elseif (-not [string]::IsNullOrWhiteSpace([string]$e.module_name)) { [string]$e.module_name }
+            else { 'Unknown Course' }
+
+          if (-not $grouped.ContainsKey($userId)) {
+            $grouped[$userId] = [ordered]@{
+              userId = $userId
+              userName = $displayName
+              email = $email
+              courses = [System.Collections.Generic.List[object]]::new()
+            }
+          }
+          [void]$grouped[$userId].courses.Add([pscustomobject]@{
+            courseName = $courseName
+            status = [string]$e.status
+            enrollmentDate = [string]$e.enrollment_date
+            dueDate = [string]$e.due_date
+          })
+          $incompleteEnrollmentCount++
+        }
+
+        $resultUsers = foreach ($key in $grouped.Keys) {
+          $entry = $grouped[$key]
+          $courses = @($entry.courses.ToArray())
+          $assetName = if (-not [string]::IsNullOrWhiteSpace([string]$entry.email)) { [string]$entry.email } else { [string]$entry.userName }
+          $coursesText = (($courses | ForEach-Object { $_.courseName }) -join '; ')
+
+          [pscustomobject]@{
+            userId = [string]$entry.userId
+            userName = [string]$entry.userName
+            email = [string]$entry.email
+            assetName = [string]$assetName
+            courseCount = @($courses).Count
+            coursesText = [string]$coursesText
+            traitsJson = ([ordered]@{
+              source = 'KnowBe4'
+              knowBe4UserId = [string]$entry.userId
+              userName = [string]$entry.userName
+              email = [string]$entry.email
+              incompleteCourseCount = @($courses).Count
+              incompleteCourses = @($courses)
+            } | ConvertTo-Json -Depth 10 -Compress)
+          }
+        }
+
+        $resultUsers = @($resultUsers | Sort-Object userName, email)
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = "Found $($resultUsers.Count) users with $incompleteEnrollmentCount incomplete KnowBe4 enrollments"
+          users = @($resultUsers)
+          count = $resultUsers.Count
+          enrollmentCount = $incompleteEnrollmentCount
+        }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions:
+      - knowbe4
+  - id: ensure-asset-type
+    name: Ensure CloudRadial flexible asset type
+    type: powershell-script
+    position:
+      x: 540
+      y: 240
+    properties:
+      script: |-
+        $ErrorActionPreference = 'Stop'
+
+        $crBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $crPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $crPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missing = @()
+        foreach ($p in @(
+          @{ n = 'CloudRadial-BaseUrl'; v = $crBaseUrl },
+          @{ n = 'CloudRadial-PublicKey'; v = $crPublicKey },
+          @{ n = 'CloudRadial-PrivateKey'; v = $crPrivateKey }
+        )) { if ([string]::IsNullOrWhiteSpace($p.v)) { $missing += $p.n } }
+        if ($missing.Count -gt 0) {
+          $message = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        $baseUrl = $crBaseUrl.TrimEnd('/')
+        $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $crPublicKey, $crPrivateKey)))
+        $headers = @{ Authorization = "Basic $basic"; Accept = 'application/json' }
+        $writeHeaders = @{ Authorization = "Basic $basic"; Accept = 'application/json'; 'Content-Type' = 'application/json' }
+
+        function Get-Id {
+          param($o)
+          if ($null -eq $o) { return $null }
+          foreach ($k in @('id', 'flexibleAssetTypeId', 'flexibleAssetId')) {
+            $prop = $o.PSObject.Properties[$k]
+            if ($prop -and $prop.Value) { return $prop.Value }
+          }
+          return $null
+        }
+
+        $assetTypeName = 'KnowBe4 Incomplete Training'
+        $escaped = $assetTypeName.Replace("'", "''")
+        $lookupUri = "$baseUrl/v2/odata/flexibleassettype?`$filter=name eq '$escaped'"
+
+        # Read is fine on the OData surface; writes must use the native /v2/flexible-asset-type endpoint.
+        $existing = @((Invoke-RestMethod -Method Get -Uri $lookupUri -Headers $headers).value)
+        if ($existing.Count -ge 1) {
+          $typeId = Get-Id $existing[0]
+          Set-NodeOutput @{ status = 'success'; message = "Using existing flexible asset type '$assetTypeName' (id $typeId)"; flexibleAssetTypeId = $typeId; assetTypeName = $assetTypeName; created = $false }
+          return
+        }
+
+        $body = @{
+          name = $assetTypeName
+          description = 'KnowBe4 users with incomplete security-awareness training.'
+          icon = 'school'
+          showInMenu = $true
+          fields = @(
+            @{ name = 'User'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $true; required = $true },
+            @{ name = 'Email'; kind = 'Text'; order = 2; showInList = $true },
+            @{ name = 'Incomplete Courses'; kind = 'Number'; order = 3; showInList = $true },
+            @{ name = 'Course List'; kind = 'Textbox'; order = 4 },
+            @{ name = 'Updated'; kind = 'Text'; order = 5 }
+          )
+        } | ConvertTo-Json -Depth 8
+
+        $created = Invoke-RestMethod -Method Post -Uri "$baseUrl/v2/flexible-asset-type" -Headers $writeHeaders -Body $body
+        $typeId = Get-Id $created
+        if (-not $typeId) {
+          # Some deployments return no body on create; re-read to resolve the id.
+          $recheck = @((Invoke-RestMethod -Method Get -Uri $lookupUri -Headers $headers).value)
+          if ($recheck.Count -ge 1) { $typeId = Get-Id $recheck[0] }
+        }
+        if (-not $typeId) {
+          $message = "Created the flexible asset type but could not resolve its id from /v2/odata/flexibleassettype."
+          Set-NodeOutput @{ status = 'error'; message = $message; assetTypeName = $assetTypeName }
+          throw $message
+        }
+
+        Set-NodeOutput @{ status = 'success'; message = "Created flexible asset type '$assetTypeName' (id $typeId)"; flexibleAssetTypeId = $typeId; assetTypeName = $assetTypeName; created = $true }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions:
+      - cloudradial-v2-compliance
+  - id: create-assets
+    name: Create CloudRadial flexible assets
+    type: foreach
+    position:
+      x: 800
+      y: 240
+    properties:
+      collectionExpression: "{{ nodes.fetch-incomplete-users.output.users }}"
+      itemVariableName: item
+      bodyLanguage: powershell
+      script: |-
+        $ErrorActionPreference = 'Stop'
+        try {
+          $CompanyId = 1
+
+          $crBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+          $crPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+          $crPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+          $base = $crBaseUrl.TrimEnd('/')
+          $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $crPublicKey, $crPrivateKey)))
+          $headers = @{ Authorization = "Basic $basic"; Accept = 'application/json'; 'Content-Type' = 'application/json' }
+
+          $typeId = [int]$flexibleAssetTypeId
+          $traits = @{
+            user = [string]$item.userName
+            email = [string]$item.email
+            'incomplete-courses' = [int]$item.courseCount
+            'course-list' = [string]$item.coursesText
+            updated = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          }
+          $assetBody = @{ companyId = [int]$CompanyId; flexibleAssetTypeId = $typeId; traits = $traits } | ConvertTo-Json -Depth 8
+          $created = Invoke-RestMethod -Method Post -Uri "$base/v2/flexible-asset" -Headers $headers -Body $assetBody
+
+          $assetId = $null
+          foreach ($k in @('id', 'flexibleAssetId')) {
+            $prop = $created.PSObject.Properties[$k]
+            if ($prop -and $prop.Value) { $assetId = $prop.Value; break }
+          }
+
+          Set-NodeOutput @{
+            status = 'success'
+            assetId = $assetId
+            assetName = [string]$item.assetName
+            userId = [string]$item.userId
+            email = [string]$item.email
+            courseCount = $item.courseCount
+            companyId = $CompanyId
+            flexibleAssetTypeId = $typeId
+          }
+        } catch {
+          Set-NodeOutput @{
+            status = 'error'
+            message = $_.Exception.Message
+            assetName = [string]$item.assetName
+            userId = [string]$item.userId
+            email = [string]$item.email
+            courseCount = $item.courseCount
+            companyId = 1
+            flexibleAssetTypeId = $flexibleAssetTypeId
+          }
+        }
+      mode: sequential
+      maxItems: 1000
+      failurePolicy: continue
+      timeoutSeconds: 600
+      parameters:
+      - name: flexibleAssetTypeId
+        expression: "{{ nodes.ensure-asset-type.output.flexibleAssetTypeId }}"
+      aiExtensions:
+      - cloudradial-v2-compliance
+  - id: summarize-and-ticket
+    name: Summarize assets & open PSA ticket
+    type: powershell-script
+    position:
+      x: 1060
+      y: 240
+    properties:
+      script: |-
+        $resultsInput = Get-NodeInput -Name 'results'
+        $results = @()
+        if ($null -ne $resultsInput) { $results = @($resultsInput) }
+
+        $createdAssets = foreach ($r in $results) {
+          if ($null -eq $r) { continue }
+          if ([string]$r.status -ne 'success') { continue }
+          [pscustomobject]@{
+            assetId = $r.assetId
+            assetName = [string]$r.assetName
+            userId = [string]$r.userId
+            email = [string]$r.email
+            courseCount = $r.courseCount
+            companyId = $r.companyId
+            flexibleAssetTypeId = $r.flexibleAssetTypeId
+          }
+        }
+        $createdAssets = @($createdAssets)
+        $failedCount = @($results | Where-Object { $null -ne $_ -and [string]$_.status -ne 'success' }).Count
+        $companyId = if ($createdAssets.Count -gt 0) { [int]$createdAssets[0].companyId } else { 1 }
+        $flexibleAssetTypeId = if ($createdAssets.Count -gt 0) { $createdAssets[0].flexibleAssetTypeId } else { $null }
+
+        # ----- open ONE ConnectWise ticket for the company admin (only if there are overdue users) -----
+        $OpenTicket = $true
+        $ticketId = $null
+        $ticketWarning = $null
+
+        if ($OpenTicket -and $createdAssets.Count -gt 0) {
+          try {
+            function Secret { param($n) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue }
+
+            $crBase = (Secret 'CloudRadial-BaseUrl').TrimEnd('/')
+            $crBasic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f (Secret 'CloudRadial-PublicKey'), (Secret 'CloudRadial-PrivateKey'))))
+            $crHeaders = @{ Authorization = "Basic $crBasic"; Accept = 'application/json' }
+
+            # Resolve the company's PSA identifier + display name
+            $co = (Invoke-RestMethod -Method Get -Uri "$crBase/v2/odata/company?`$filter=companyId eq $companyId&`$select=name,psaIdentifier" -Headers $crHeaders).value | Select-Object -First 1
+            $psaIdentifier = [string]$co.psaIdentifier
+            $companyName = [string]$co.name
+            if ([string]::IsNullOrWhiteSpace($companyName)) { $companyName = "Company $companyId" }
+
+            $adminEmail = [string](Secret 'KnowBe4-AdminEmail')  # optional; if set, used as the ticket contact
+            $cwBoard = [string](Secret 'CW-ServiceBoard')
+
+            $cwUrl = Secret 'CW-ApiUrl'; $cwCo = Secret 'CW-CompanyID'; $cwPub = Secret 'CW-PublicKey'; $cwPriv = Secret 'CW-PrivateKey'; $cwClient = Secret 'CW-ClientId'
+            $missingCw = @()
+            foreach ($p in @(
+              @{ n = 'CW-ApiUrl'; v = $cwUrl },
+              @{ n = 'CW-CompanyID'; v = $cwCo },
+              @{ n = 'CW-PublicKey'; v = $cwPub },
+              @{ n = 'CW-PrivateKey'; v = $cwPriv },
+              @{ n = 'CW-ClientId'; v = $cwClient },
+              @{ n = 'CW-ServiceBoard'; v = $cwBoard }
+            )) { if ([string]::IsNullOrWhiteSpace($p.v)) { $missingCw += $p.n } }
+            if ($missingCw.Count -gt 0) { throw "Missing ConnectWise secret(s): $($missingCw -join ', ')" }
+
+            $cwBase = $cwUrl.TrimEnd('/')
+            $cwAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$cwCo+$cwPub`:$cwPriv"))
+            $cwHeaders = @{ Authorization = "Basic $cwAuth"; clientId = $cwClient; 'Content-Type' = 'application/json'; Accept = 'application/json' }
+
+            if ($psaIdentifier -match '^\d+$') {
+              $cwCoId = [int]$psaIdentifier
+            } else {
+              $found = Invoke-RestMethod -Method Get -Uri "$cwBase/company/companies?conditions=identifier=`"$psaIdentifier`"" -Headers $cwHeaders
+              $cwCoId = (@($found) | Select-Object -First 1).id
+            }
+            if (-not $cwCoId) { throw "Could not resolve the ConnectWise company for CloudRadial company $companyId (psaIdentifier '$psaIdentifier')." }
+
+            $contactId = $null
+            if (-not [string]::IsNullOrWhiteSpace($adminEmail)) {
+              $c = Invoke-RestMethod -Method Get -Uri "$cwBase/company/contacts?conditions=company/id=$cwCoId AND communicationItems/value like `"$adminEmail`"" -Headers $cwHeaders
+              $contactId = (@($c) | Select-Object -First 1).id
+            }
+
+            $lines = (@($createdAssets) | ForEach-Object {
+              $who = if (-not [string]::IsNullOrWhiteSpace([string]$_.assetName)) { [string]$_.assetName } else { [string]$_.email }
+              "- $who <$($_.email)> - $($_.courseCount) incomplete course(s)"
+            }) -join "`n"
+
+            $ticket = @{
+              summary = "KnowBe4 security training overdue - $($createdAssets.Count) user(s)"
+              board = @{ name = $cwBoard }
+              company = @{ id = $cwCoId }
+              initialDescription = "The following $companyName users are overdue on KnowBe4 security-awareness training:`n$lines"
+            }
+            if ($contactId) { $ticket.contact = @{ id = $contactId } }
+
+            $new = Invoke-RestMethod -Method Post -Uri "$cwBase/service/tickets" -Headers $cwHeaders -Body ($ticket | ConvertTo-Json -Depth 6)
+            $ticketId = $new.id
+          } catch {
+            $ticketWarning = "PSA ticket not created: $($_.Exception.Message)"
+          }
+        }
+
+        $message = "Created $($createdAssets.Count) CloudRadial flexible assets for KnowBe4 users with incomplete training"
+        if ($ticketId) { $message = "$message; opened PSA ticket #$ticketId" }
+        elseif ($ticketWarning) { $message = "$message; $ticketWarning" }
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = $message
+          createdAssets = @($createdAssets)
+          createdCount = $createdAssets.Count
+          failedCount = $failedCount
+          companyId = $companyId
+          flexibleAssetTypeId = $flexibleAssetTypeId
+          ticketId = $ticketId
+          ticketNumber = $ticketId
+          ticketWarning = $ticketWarning
+        }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters:
+      - name: results
+        expression: "{{ nodes.create-assets.output.items }}"
+      aiExtensions: []
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 1300
+      y: 80
+  connections:
+  - source: start
+    target: fetch-incomplete-users
+    sourceHandle: null
+  - source: fetch-incomplete-users
+    target: ensure-asset-type
+    sourceHandle: null
+  - source: ensure-asset-type
+    target: create-assets
+    sourceHandle: null
+  - source: create-assets
+    target: summarize-and-ticket
+    sourceHandle: null
+  - source: summarize-and-ticket
+    target: end
+    sourceHandle: null
+  startActivityId: start

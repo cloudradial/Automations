@@ -1,7 +1,7 @@
 {
   "name": "cloudradial-ucp",
   "displayName": "CloudRadial UCP",
-  "version": "2.1.0",
+  "version": "2.3.0",
   "description": "☁️📡 CloudRadial UCP — the AI-powered service delivery & client success platform, right inside Claude. Look up companies, manage articles/assessments/courses, refresh endpoint warranty, and work with 30+ CloudRadial resource types in plain English. After installing, say \"Setup the CloudRadial Plugin\" for a quick tour and one-step credential setup.",
   "author": {
     "name": "Nick Westgate"
@@ -17,7 +17,11 @@
     "ai",
     "automation",
     "claude",
-    "mcp"
+    "mcp",
+    "vcio",
+    "qbr",
+    "roadmap",
+    "reporting"
   ],
   "repository": "https://github.com/cloudradial/helpers/tree/main/cowork-plugin/cloudradial-ucp"
 }

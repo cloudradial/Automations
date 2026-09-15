@@ -1,9 +1,10 @@
 # AutomationAI Workflows
 
 Importable **CloudRadial AutomationAI** workflows. Unlike the standalone PowerShell scripts elsewhere in
-this repo (which you run directly or via RMM), these are `.yml` workflow definitions you **import into
-AutomationAI**, where they run on your **runner** and are triggered by a **secure webhook** — from a
-CloudRadial catalog form, an Automation, or a ServiceAI Action.
+this repo (which you run directly or via RMM), these are `.yml` workflow/agent definitions you **import into
+AutomationAI**, where they run on your **runner**. Most are triggered by a **secure webhook** (from a
+CloudRadial catalog form, an Automation, or a ServiceAI Action); the reporting ones run on a **schedule**
+(a Routine) or on demand.
 
 Each workflow is broken out into discrete, legible steps (one PowerShell node per concern) rather than a
 single monolithic script, so every validation and gate is easy to read, test, and adjust.
@@ -14,7 +15,11 @@ single monolithic script, so every validation and gate is easy to read, test, an
 |---|---|---|
 | **Password Reset (Self-Service)** | [`password-reset/`](password-reset/) | Self-service M365 password reset with an ownership gate (a requester may reset only their own account) plus disabled / tenant-scope / privileged / risk safeguards. |
 | **Password Reset (ServiceAI Triage)** | [`password-reset-triage/`](password-reset-triage/) | The triage counterpart, fired by a ServiceAI Action from a ticket: requires the authenticated submitter, resets when they own the account, and otherwise holds for human confirmation. |
+| **Domain Expiration Report** | [`domain-expiration-report/`](domain-expiration-report/) | Sweeps managed domains across all companies and writes one Planner card per company listing expired / soon-to-expire domains. |
+| **Certificate Expiration Report** | [`certificate-expiration-report/`](certificate-expiration-report/) | Sweeps SSL certificates across all companies and writes one Planner card per company listing expired / soon-to-expire certs. |
+| **Endpoint Names Token** | [`endpoint-names-token/`](endpoint-names-token/) | Builds a comma-separated endpoint-name list per company and writes it into a company token for portal content/forms. |
 | **KnowBe4 Training Sync** | [`knowbe4/`](knowbe4/) | Manual/scheduled sync: reads KnowBe4 users with incomplete training, writes one CloudRadial flexible asset per user, and opens a ConnectWise ticket for the company summarizing who is overdue. |
+| **Portal Lookup** _(agent)_ | [`portal-lookup/`](portal-lookup/) | Read-only portal briefing — users, endpoints, warranty posture, setup gaps — for meeting prep. Import under **Agents → Custom**. |
 
 ## Installing a workflow
 

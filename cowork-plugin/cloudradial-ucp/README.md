@@ -4,39 +4,36 @@ Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Cla
 
 ## Install — start here
 
-You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer** — they're stored in your computer's keychain and shared automatically with every Claude app on that machine.
+You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer** — they're stored securely on your computer and shared automatically with every Claude app on that machine.
 
-### Step 1 — Download the right file for your computer
+> **Requirement:** Node.js must be installed and on your PATH. The plugin runs its MCP server locally by launching `node` — there's nothing to host and no service to deploy.
 
-Go to the [**releases page**](https://github.com/cloudradial/helpers/releases) and download the **one** file that matches your computer:
+### Step 1 — Install the plugin
 
-| Your computer | File to download |
-|---|---|
-| Mac — Apple Silicon (M1/M2/M3/M4) | `cloudradial-ucp-macos-arm64.plugin` |
-| Mac — Intel (older) | `cloudradial-ucp-macos-x64.plugin` |
-| Windows — most PCs | `cloudradial-ucp-windows-x64.plugin` |
-| Windows on ARM (Surface Pro X, Copilot+ PC) | `cloudradial-ucp-windows-arm64.plugin` |
-| Linux | `cloudradial-ucp-linux-x64.plugin` (or `-linux-arm64`) |
+**From the community marketplace (recommended):**
 
-**Not sure which Mac you have?** Click the  Apple menu → **About This Mac**. If the "Chip" line starts with "Apple," choose **arm64**. If it says "Intel," choose **x64**.
+```
+/plugin marketplace add anthropics/claude-plugins-community
+/plugin install cloudradial-ucp@claude-community
+```
 
-### Step 2 — Install it into your Claude app
+**Or install the single plugin file directly.** Download `cloudradial-ucp.plugin` from the [**releases page**](https://github.com/cloudradial/helpers/releases) — it's one file that works on macOS, Windows, and Linux — then add it to your Claude app:
 
-- **Cowork:** drag the downloaded file into the Cowork window, and approve it when asked.
+- **Cowork:** drag the file into the Cowork window, and approve it when asked.
 - **Claude Desktop:** drag the file into the app (or add it from the plugin gallery), then **quit and reopen** Claude Desktop.
 - **Claude Code:** run `claude /plugin install <path-to-the-downloaded-file>`, then restart Claude Code.
 
-> Using more than one of these apps? Install the **same** downloaded file into each one.
+> Using more than one of these apps? Install it into each one.
 
-### Step 3 — Turn it on
+### Step 2 — Turn it on
 
 Start a new conversation and type:
 
 > **Setup the CloudRadial Plugin**
 
-Claude will ask for your CloudRadial **public key** and **private key** (find them in your CloudRadial admin portal under **Settings → API**), check that they work, and store them securely in your computer's keychain. You only do this once per computer.
+Claude will ask for your CloudRadial **public key** and **private key** (find them in your CloudRadial admin portal under **Settings → API**), check that they work, and store them securely on your computer (encrypted at rest). You only do this once per computer.
 
-### Step 4 — Try something
+### Step 3 — Try something
 
 Pick anything from **What you can do** below, or just ask Claude in your own words.
 
@@ -78,31 +75,34 @@ Copy any of these into Claude and swap in your own company names / IDs:
 ```
 You in Claude
      |
-     |  MCP tool calls (in-process, over stdio)
+     |  MCP tool calls (over stdio)
      v
-Bundled MCP server  (server/index.mjs, inside the .plugin, spawned by your Claude app)
+Bundled MCP server  (server/index.mjs, inside the plugin, spawned by your Claude app)
      |
-     |  HTTPS with HTTP Basic auth (keys from OS keychain)
+     |  HTTPS with HTTP Basic auth (keys from local encrypted store or env vars)
      v
 CloudRadial API V2
 ```
 
-There is **no Azure Function**, no Chrome extension, no separate server to deploy, no npm install at runtime. The `.plugin` file contains the MCP server itself (esbuild-bundled JS + a native keychain binary for your OS). The plugin's `.mcp.json` tells your Claude app how to launch it; installing the plugin auto-registers the server. Credentials live in the OS keychain (Windows Credential Manager / macOS Keychain / Linux libsecret).
+There is **no Azure Function**, no Chrome extension, no separate server to deploy, no npm install at runtime. The plugin contains the MCP server itself — an esbuild-bundled JavaScript file (**pure JS, no native binaries — one build runs on every OS**). The plugin's `.mcp.json` tells your Claude app how to launch it with `node`; installing the plugin auto-registers the server. Credentials are stored **encrypted on your computer** (or supplied via environment variables — see below).
 
-## Skills (11)
+## Skills (14)
 
 Each skill below has a partner-facing **README** with example prompts to try. Click the skill name for its guide.
 
 | Skill | What it does |
 |-------|--------------|
-| **[setup](skills/setup/README.md)** | First-run plugin setup + branded welcome tour — validates and stores credentials in the OS keychain |
+| **[setup](skills/setup/README.md)** | First-run plugin setup + branded welcome tour — validates and stores credentials encrypted on your computer |
 | **[portal-setup](skills/portal-setup/README.md)** | Walk a client through their 5-session CloudRadial implementation; 8 CSA pain-point playbooks; content seeding |
 | **[portal-lookup](skills/portal-lookup/README.md)** | Look up companies, check portal status, assess LOMG lifecycle stage, prepare for meetings |
 | **[content-management](skills/content-management/README.md)** | Create and manage articles, catalogs, menus, courses, lessons, and assessments |
+| **[company-management](skills/company-management/README.md)** | Create, update, delete, and group companies; account managers; portal branding |
 | **[user-management](skills/user-management/README.md)** | Look up users by email/name, list users by company, analyze user adoption |
 | **[endpoint-reporting](skills/endpoint-reporting/README.md)** | List endpoints, warranty reports, device inventory, application audits |
+| **[endpoint-lifecycle-cards](skills/endpoint-lifecycle-cards/README.md)** | Maintain one Planner card per hardware-refresh category (Replace, Plan, Upgrade, Retain…) with triage priority |
 | **[course-management](skills/course-management/README.md)** | Create training courses and lessons (from a topic, document, or YouTube link); check enrollments |
 | **[assessment-compliance](skills/assessment-compliance/README.md)** | Review security assessments, compliance tracking, flexible-asset management |
+| **[client-deliverable](skills/client-deliverable/README.md)** | Build a vCIO-style deliverable: IT roadmap, goals, budget, machine audit, Microsoft licenses |
 | **[feedback-analysis](skills/feedback-analysis/README.md)** | Analyze user feedback, CSAT trends, satisfaction reporting |
 | **[service-management](skills/service-management/README.md)** | Services, service installs, domains, products, coverage analysis |
 | **[reporting-admin](skills/reporting-admin/README.md)** | Archives, certificates, company groups, media, tokens, raw API access |
@@ -114,8 +114,8 @@ The MCP server exposes 17 tools to Claude:
 | Tool | Purpose |
 |------|---------|
 | `setup_status` | Check whether credentials are configured (returns hint only, never the keys) |
-| `configure_credentials` | Validate and store credentials in the OS keychain |
-| `clear_credentials` | Wipe stored credentials from the keychain |
+| `configure_credentials` | Validate and store credentials (encrypted, on your computer) |
+| `clear_credentials` | Wipe stored credentials |
 | `search_companies` | Search companies by partial name |
 | `company_overview` | Full snapshot: details, counts, recent articles + feedback |
 | `list_resources` | List any of 30 resource types with OData filtering |
@@ -139,10 +139,10 @@ Composite-key resources (need extra args on get/update/delete): `archive_item`, 
 
 ## Credentials & security
 
-- **Stored in the OS keychain.** Never written to disk in plain text. Encrypted at rest by the operating system; accessible only to your user account.
+- **Stored encrypted on your computer.** Credentials are written to a local file encrypted with AES-256-GCM, using a key derived from your machine and user account — never in plain text, and usable only on the same computer under the same user. (If the optional OS-keychain module `@napi-rs/keyring` is present in the server, the plugin uses the OS keychain instead — Windows Credential Manager / macOS Keychain / Linux libsecret.)
 - **Validated before storage.** The setup wizard makes a live `GET /v2/odata/company/$count` call before writing anything — bad keys never get saved.
-- **Privacy note for setup.** Because setup happens in chat, your keys appear briefly in the conversation transcript when you paste them. If you prefer the keys never enter the LLM context, set `CLOUDRADIAL_PUBLIC_KEY` and `CLOUDRADIAL_PRIVATE_KEY` environment variables in your MCP client config instead — the server picks those up first and skips the keychain.
-- **To rotate:** re-run the setup wizard (it overwrites the keychain entry). To remove: ask Claude to run `clear_credentials`.
+- **Privacy note for setup.** Because setup happens in chat, your keys appear briefly in the conversation transcript when you paste them. If you prefer the keys never enter the LLM context, set `CLOUDRADIAL_PUBLIC_KEY` and `CLOUDRADIAL_PRIVATE_KEY` environment variables in your MCP client config instead — the server picks those up first and skips the local store entirely. For shared or CI hosts you can also set `CLOUDRADIAL_CRED_SECRET` (adds key-derivation entropy) or `CLOUDRADIAL_CRED_FILE` (relocates the encrypted store).
+- **To rotate:** re-run the setup wizard (it overwrites the stored entry). To remove: ask Claude to run `clear_credentials`.
 
 ## Things to know
 

@@ -167,6 +167,7 @@ OpenAPI: 3.0.1
 - `updateKey`: string [uuid]
 - `isPartnerManaged`: boolean (nullable)
 - `isSubscribed`: boolean
+- `sourcePackageId`: string (nullable)
 - `createdBy`: string (nullable)
 - `modifiedBy`: string (nullable)
 - `dateCreated`: string [date-time]
@@ -509,6 +510,7 @@ OpenAPI: 3.0.1
 - `canBeDeleted`: boolean
 - `templatePackId`: integer [int32] (nullable)
 - `templatePackName`: string (nullable)
+- `templatePackLastPublishDate`: string (nullable)
 
 ### CompanyCatalogResponseStandardAPIResponse
 - `data`: CompanyCatalogResponse
@@ -1825,6 +1827,23 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `psaKey`: integer [int64] — PSA Key identifier for the user
 - `psaSiteKey`: integer [int64] — PSA Site Key identifier for the user
 - `psaChildAccountKey`: integer [int64] — PSA Child Account Key identifier for the user
+
+## Enumerations
+
+Integer enum types surfaced by the API. Values are the accepted `int32` codes; the API does not expose symbolic names for them. Fields typed as one of these (e.g. `Catalog.catalogUsage: CatalogType`) accept only these values.
+
+- `ApplicationUserPriorityType`: 0, 10
+- `CatalogQuestionType`: 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 999
+- `CatalogType`: 0, 10, 99
+- `DataSource`: 0, 1, 2, 5, 10, 20, 30, 100
+- `EnclosureType`: 0, 10, 20, 30, 40, 50, 60, 70, 80, 90
+- `EndpointPlatformType`: 0, 1, 2, 99, -1
+- `FeedbackSource`: 0, 1, 2, 3, 4
+- `FeedbackType`: 0, 1, -1
+- `MatrixPriority`: 0, 1, -1
+- `MatrixStatus`: 0, 1, 10, 20, 30, 40, 50, 60
+- `VariableType`: 0, 1, 2, 3, 4
+- `Windows11Status`: 1, 2, -2, -1
 
 ## Endpoints
 

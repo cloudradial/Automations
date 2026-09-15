@@ -1,0 +1,3 @@
+Built 2026-09-11T16:43:14.667Z
+variant: pure-js (no native keyring binary)
+credentials: encrypted file store by default; OS keychain if @napi-rs/keyring resolves at runtime

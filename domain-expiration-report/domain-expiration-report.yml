@@ -1,0 +1,222 @@
+automationsWorkflow: 1
+name: "Domain Expiration Report"
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 520
+      y: 80
+  - id: node-2
+    name: PowerShell Step
+    type: powershell-script
+    position:
+      x: 300
+      y: -40
+    properties:
+      script: |-
+        $CloudRadialBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $CloudRadialPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $CloudRadialPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missingSecrets = foreach ($pair in @(
+            @{ Name = 'CloudRadial-BaseUrl'; Value = $CloudRadialBaseUrl },
+            @{ Name = 'CloudRadial-PublicKey'; Value = $CloudRadialPublicKey },
+            @{ Name = 'CloudRadial-PrivateKey'; Value = $CloudRadialPrivateKey }
+        )) {
+            if ([string]::IsNullOrWhiteSpace($pair.Value)) { $pair.Name }
+        }
+        if (@($missingSecrets).Count -gt 0) {
+            $msg = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missingSecrets -join ', ')"
+            Set-NodeOutput @{ status = 'error'; message = $msg }
+            throw $msg
+        }
+
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+
+        try {
+            $BaseUrl = $CloudRadialBaseUrl.TrimEnd('/')
+            $PublicKey = $CloudRadialPublicKey
+            $PrivateKey = $CloudRadialPrivateKey
+
+            # ----- CONFIG -----
+            $WindowDays = 60                 # a domain expiring within this many days is "expiring soon"
+            $CompanyIdFilter = @()           # @() = all companies; e.g. @(1,4,7) to scope
+            $PlannerCategory = 'Efficiency'  # Planner card category (partner-defined; 'Efficiency'/7 is proven)
+            $PlannerProductCategoryId = 7
+            $CardSubject = 'Domain Expiration Report'
+            $WriteCards = $true              # $false = report only (node output), no Planner cards written
+
+            $authBytes = [Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $PublicKey, $PrivateKey))
+            $headers = @{ Authorization = ('Basic ' + [Convert]::ToBase64String($authBytes)); Accept = 'application/json' }
+            $runDate = (Get-Date).ToUniversalTime()
+            $cutoff = $runDate.AddDays($WindowDays)
+            $publishDate = $runDate.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+
+            function Invoke-CrApi {
+                param([Parameter(Mandatory)][string]$Path, [string]$Method='GET', [object]$Body, [string]$ContentType='application/json')
+                $url = if ($Path -match '^https?://') { $Path } else { "$BaseUrl$Path" }
+                for ($attempt = 1; $attempt -le 6; $attempt++) {
+                    try {
+                        $callArgs = @{ Uri = $url; Method = $Method; Headers = $headers; ContentType = $ContentType }
+                        if ($null -ne $Body) { $callArgs.Body = ($Body | ConvertTo-Json -Depth 12) }
+                        return Invoke-RestMethod @callArgs
+                    } catch {
+                        $code = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
+                        if (($code -eq 429 -or $code -ge 500) -and $attempt -lt 6) { Start-Sleep -Seconds ([Math]::Min(30, [Math]::Pow(2, $attempt))); continue }
+                        $detail = $null
+                        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
+                        if (-not $detail) { try { $s=$_.Exception.Response.GetResponseStream(); $r=[System.IO.StreamReader]::new($s); $detail=$r.ReadToEnd() } catch {} }
+                        throw ("CloudRadial API $Method $url failed (HTTP $code): $detail")
+                    }
+                }
+            }
+
+            function Get-CrCollection {
+                param([Parameter(Mandatory)][string]$Path)
+                $all = [System.Collections.Generic.List[object]]::new()
+                $pageSize = 100; $skip = 0
+                for ($page = 0; $page -lt 1000; $page++) {
+                    $sep = if ($Path -match '\?') { '&' } else { '?' }
+                    $resp = Invoke-CrApi -Path "${Path}${sep}`$top=$pageSize&`$skip=$skip"
+                    if ($null -eq $resp) { break }
+                    $rows = @()
+                    $vp = $resp.PSObject.Properties['value']
+                    if ($vp -and $null -ne $vp.Value) { $rows = @($vp.Value) } elseif ($resp -is [System.Array]) { $rows = @($resp) }
+                    foreach ($r in $rows) { [void]$all.Add($r) }
+                    if (@($rows).Count -lt $pageSize) { break }
+                    $skip += $pageSize
+                }
+                return $all.ToArray()
+            }
+
+            function Get-Field { param($Obj,[string]$Name) if ($null -eq $Obj) { return $null } $p=$Obj.PSObject.Properties[$Name]; if ($p) { return $p.Value } return $null }
+            function ConvertTo-HtmlText { param($Text) $s=[string]$Text; if ([string]::IsNullOrEmpty($s)) { return '' } return ($s -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;') }
+
+            # Upsert exactly one Planner card (Product) per company, reconciled by deterministic subject.
+            function Set-CompanyCard {
+                param([int]$CompanyId, [string]$Subject, [string]$Summary, [string]$Body, [ref]$Existing)
+                $planCard = @($Existing.Value | Where-Object { ([string](Get-Field $_ 'subject')).Trim() -eq $Subject } | Select-Object -First 1)
+                if (@($planCard).Count -gt 0) {
+                    $cardId = Get-Field $planCard[0] 'productId'
+                    $patch = @(
+                        @{ op='replace'; path='/subject';           value=$Subject },
+                        @{ op='replace'; path='/body';              value=$Body },
+                        @{ op='replace'; path='/summary';           value=$Summary },
+                        @{ op='replace'; path='/category';          value=$PlannerCategory },
+                        @{ op='replace'; path='/productCategoryId'; value=$PlannerProductCategoryId }
+                    )
+                    $null = Invoke-CrApi -Path "/v2/product/$cardId" -Method 'PATCH' -Body $patch -ContentType 'application/json-patch+json'
+                    return 'updated'
+                } else {
+                    $createBody = [ordered]@{
+                        companyId=$CompanyId; productCategoryId=$PlannerProductCategoryId; subject=$Subject;
+                        category=$PlannerCategory; datePublished=$publishDate; body=$Body; summary=$Summary;
+                        isRequired=$false; isShowPrice=$false
+                    }
+                    $null = Invoke-CrApi -Path '/v2/product' -Method 'POST' -Body $createBody
+                    return 'created'
+                }
+            }
+
+            # ----- Company names -----
+            $companyName = @{}
+            $companyFilterClause = if (@($CompanyIdFilter).Count -gt 0) { '?$filter=' + ((@($CompanyIdFilter | ForEach-Object { "companyId eq $([int]$_)" }) -join ' or ')) } else { '' }
+            foreach ($c in @(Get-CrCollection ("/v2/odata/company$companyFilterClause"))) {
+                $cid = [string](Get-Field $c 'companyId'); if ($cid) { $companyName[$cid] = [string](Get-Field $c 'name') }
+            }
+
+            # ----- Domains -----
+            $domains = @(Get-CrCollection ("/v2/odata/domain$companyFilterClause"))
+
+            $counts = [ordered]@{ evaluated=0; expired=0; expiring=0; active=0; unknown=0; cardsCreated=0; cardsUpdated=0; errors=0 }
+            $flaggedByCompany = @{}
+            $allRows = [System.Collections.Generic.List[object]]::new()
+
+            foreach ($d in @($domains)) {
+                if ([bool](Get-Field $d 'isDeleted')) { continue }
+                $counts.evaluated++
+                $companyId = [string](Get-Field $d 'companyId')
+                $name = [string](Get-Field $d 'name')
+                $raw = Get-Field $d 'dateExpires'
+                $end = $null; $parsed = [datetime]::MinValue
+                if ($null -ne $raw -and -not [string]::IsNullOrWhiteSpace([string]$raw) -and [datetime]::TryParse([string]$raw, [ref]$parsed)) { $end = $parsed.ToUniversalTime() }
+
+                $status='unknown'; $daysLeft=$null; $endText=''
+                if ($null -ne $end) {
+                    $endText = $end.ToString('yyyy-MM-dd'); $daysLeft = [int][math]::Floor(($end - $runDate).TotalDays)
+                    if ($end -lt $runDate) { $status='expired' } elseif ($end -le $cutoff) { $status='expiring' } else { $status='active' }
+                }
+                switch ($status) { 'expired' {$counts.expired++} 'expiring' {$counts.expiring++} 'active' {$counts.active++} 'unknown' {$counts.unknown++} }
+
+                $rec = [pscustomobject]@{ companyId=$companyId; company=(if($companyName.ContainsKey($companyId)){$companyName[$companyId]}else{"Company $companyId"}); domain=$name; registrar=[string](Get-Field $d 'registrar'); expires=$endText; daysLeft=$daysLeft; status=$status }
+                [void]$allRows.Add($rec)
+                if ($status -in @('expired','expiring')) {
+                    if (-not $flaggedByCompany.ContainsKey($companyId)) { $flaggedByCompany[$companyId] = [System.Collections.Generic.List[object]]::new() }
+                    [void]$flaggedByCompany[$companyId].Add($rec)
+                }
+            }
+
+            # ----- Per-company Planner cards (plain language) -----
+            $productsByCompany = @{}
+            $firstError = $null
+            foreach ($companyId in @($flaggedByCompany.Keys)) {
+                $items = @($flaggedByCompany[$companyId].ToArray() | Sort-Object { if ($null -eq $_.daysLeft) { [int]::MaxValue } else { $_.daysLeft } })
+                $expiredN = @($items | Where-Object { $_.status -eq 'expired' }).Count
+                $expiringN = @($items | Where-Object { $_.status -eq 'expiring' }).Count
+                $cname = if ($companyName.ContainsKey([string]$companyId)) { $companyName[[string]$companyId] } else { "Company $companyId" }
+
+                $summary = "$expiringN domain(s) expiring within $WindowDays days" + $(if ($expiredN -gt 0) { " and $expiredN already expired" } else { '' }) + '.'
+                $sb = [System.Text.StringBuilder]::new()
+                [void]$sb.Append("<p>As of $($runDate.ToString('yyyy-MM-dd')), $cname has $summary Renew these before they lapse to avoid losing the domain or breaking email and websites.</p><ul>")
+                foreach ($it in $items) {
+                    $when = if ($it.status -eq 'expired') { "expired on $($it.expires)" } else { "expires $($it.expires) ($($it.daysLeft) days away)" }
+                    $reg = if ([string]::IsNullOrWhiteSpace($it.registrar)) { '' } else { " at $(ConvertTo-HtmlText $it.registrar)" }
+                    [void]$sb.Append("<li>$(ConvertTo-HtmlText $it.domain) $when$reg.</li>")
+                }
+                [void]$sb.Append("</ul>")
+                $body = $sb.ToString()
+
+                if (-not $WriteCards) { continue }
+                try {
+                    if (-not $productsByCompany.ContainsKey($companyId)) { $productsByCompany[$companyId] = @(Get-CrCollection ("/v2/odata/product?`$filter=companyId eq $([int]$companyId)")) }
+                    $ref = [ref]$productsByCompany[$companyId]
+                    $action = Set-CompanyCard -CompanyId ([int]$companyId) -Subject $CardSubject -Summary $summary -Body $body -Existing $ref
+                    if ($action -eq 'created') { $counts.cardsCreated++ } else { $counts.cardsUpdated++ }
+                } catch {
+                    $counts.errors++; if ($null -eq $firstError) { $firstError = $_.Exception.Message }
+                }
+            }
+
+            $message = "Evaluated $($counts.evaluated) domains across $(@($companyName.Keys).Count) companies: $($counts.expired) expired, $($counts.expiring) expiring within $WindowDays days. Cards created $($counts.cardsCreated), updated $($counts.cardsUpdated), errors $($counts.errors)."
+            if ($firstError) { $message = "$message FIRST ERROR: $firstError" }
+
+            Set-NodeOutput @{ status='success'; message=$message; windowDays=$WindowDays; counts=$counts; firstError=$firstError; domains=@($allRows.ToArray()) }
+        }
+        catch {
+            $msg = $_.Exception.Message
+            Set-NodeOutput @{ status = 'error'; message = $msg }
+            throw $msg
+        }
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters: []
+  connections:
+  - source: start
+    target: node-2
+    sourceHandle: null
+  - source: node-2
+    target: end
+    sourceHandle: null
+  startActivityId: start

@@ -1,0 +1,544 @@
+automationsWorkflow: 1
+name: CloudRadial Endpoint Tokens
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 80
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: resolve-token-name
+    name: Resolve Token Name
+    type: powershell-script
+    position:
+      x: 320
+      y: 80
+    properties:
+      script: |
+        $nodeInput = Get-NodeInput
+        if ($null -eq $nodeInput) {
+          Write-Information 'No upstream input was provided; defaulting token name.'
+        }
+
+        $requestedTokenName = Get-NodeInput -Name 'tokenName'
+        $resolvedTokenName = [string]$requestedTokenName
+
+        if ([string]::IsNullOrWhiteSpace($resolvedTokenName)) {
+          $resolvedTokenName = 'endpoint_list'
+        }
+        else {
+          $resolvedTokenName = $resolvedTokenName.Trim()
+        }
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = "Using token name '$resolvedTokenName'"
+          tokenName = $resolvedTokenName
+        }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters:
+      - name: tokenName
+        expression: '{{ nodes.start.output.tokenName }}'
+      aiExtensions: []
+  - id: list-companies
+    name: List CloudRadial Companies
+    type: powershell-script
+    position:
+      x: 560
+      y: 80
+    properties:
+      script: |
+        $nodeInput = Get-NodeInput
+        if ($null -eq $nodeInput) {
+          Write-Information 'No upstream input was provided; continuing because this step does not require prior node output.'
+        }
+
+        $crBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $crPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $crPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missing = foreach ($pair in @(
+          @{ Name = 'CloudRadial-BaseUrl'; Value = $crBaseUrl },
+          @{ Name = 'CloudRadial-PublicKey'; Value = $crPublicKey },
+          @{ Name = 'CloudRadial-PrivateKey'; Value = $crPrivateKey }
+        )) {
+          if ([string]::IsNullOrWhiteSpace([string]$pair.Value)) { $pair.Name }
+        }
+
+        if (@($missing).Count -gt 0) {
+          $message = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        $baseUrl = $crBaseUrl.TrimEnd('/')
+        $basicAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $crPublicKey, $crPrivateKey)))
+        $headers = @{
+          Authorization = "Basic $basicAuth"
+          Accept = 'application/json'
+        }
+
+        $nextUri = "$baseUrl/v2/odata/Company?`$select=companyId,name&`$orderby=name"
+        $allCompanies = [System.Collections.Generic.List[object]]::new()
+
+        while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
+          Write-Information "Fetching companies page: $nextUri"
+          $response = Invoke-RestMethod -Method Get -Uri $nextUri -Headers $headers
+
+          foreach ($company in @($response.value)) {
+            [void]$allCompanies.Add([pscustomobject]@{
+              companyId = $company.companyId
+              name = $company.name
+            })
+          }
+
+          $nextUri = $null
+          if ($response.PSObject.Properties.Name -contains '@odata.nextLink') {
+            $nextUri = $response.'@odata.nextLink'
+          }
+        }
+
+        $companyArray = $allCompanies.ToArray()
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = "Retrieved $($companyArray.Count) companies from CloudRadial"
+          companies = @($companyArray)
+          companyCount = $companyArray.Count
+        }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions:
+      - cloudradial-v2-companies
+  - id: build-token-payloads
+    name: Build Endpoint Token Payloads
+    type: powershell-script
+    position:
+      x: 800
+      y: 80
+    properties:
+      script: |
+        $nodeInput = Get-NodeInput
+        if ($null -eq $nodeInput) {
+          $message = 'No input was provided to the payload-building step.'
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        $crBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $crPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $crPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missing = foreach ($pair in @(
+          @{ Name = 'CloudRadial-BaseUrl'; Value = $crBaseUrl },
+          @{ Name = 'CloudRadial-PublicKey'; Value = $crPublicKey },
+          @{ Name = 'CloudRadial-PrivateKey'; Value = $crPrivateKey }
+        )) {
+          if ([string]::IsNullOrWhiteSpace([string]$pair.Value)) { $pair.Name }
+        }
+
+        if (@($missing).Count -gt 0) {
+          $message = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        $companies = Get-NodeInput -Name 'companies'
+        $tokenName = [string](Get-NodeInput -Name 'tokenName')
+        $companyArray = @($companies)
+
+        if ([string]::IsNullOrWhiteSpace($tokenName)) {
+          $tokenName = 'endpoint_list'
+        }
+
+        if ($companyArray.Count -eq 0) {
+          Set-NodeOutput @{
+            status = 'success'
+            message = 'No companies were returned from CloudRadial; no token payloads were built.'
+            payloads = @()
+            companyCount = 0
+            tokenName = $tokenName
+          }
+          return
+        }
+
+        $baseUrl = $crBaseUrl.TrimEnd('/')
+        $basicAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $crPublicKey, $crPrivateKey)))
+        $headers = @{
+          Authorization = "Basic $basicAuth"
+          Accept = 'application/json'
+        }
+
+        $payloads = foreach ($company in $companyArray) {
+          $companyId = $company.companyId
+          $companyName = $company.name
+
+          if ($null -eq $companyId -or [string]::IsNullOrWhiteSpace([string]$companyId)) {
+            [pscustomobject]@{
+              status = 'error'
+              companyId = $null
+              companyName = $companyName
+              tokenName = $tokenName
+              endpointCount = 0
+              endpointList = ''
+              endpointNames = @()
+              message = 'The company item did not contain a valid companyId.'
+            }
+            continue
+          }
+
+          $filter = [System.Uri]::EscapeDataString("companyId eq $companyId")
+          $nextUri = "$baseUrl/v2/odata/Endpoint?`$filter=$filter&`$select=companyEndpointId,name&`$orderby=name"
+          $allEndpointNames = [System.Collections.Generic.List[string]]::new()
+
+          while (-not [string]::IsNullOrWhiteSpace($nextUri)) {
+            Write-Information "Fetching endpoints page for companyId $companyId: $nextUri"
+            $endpointResponse = Invoke-RestMethod -Method Get -Uri $nextUri -Headers $headers
+
+            foreach ($endpoint in @($endpointResponse.value)) {
+              if (-not [string]::IsNullOrWhiteSpace([string]$endpoint.name)) {
+                [void]$allEndpointNames.Add($endpoint.name.Trim())
+              }
+            }
+
+            $nextUri = $null
+            if ($endpointResponse.PSObject.Properties.Name -contains '@odata.nextLink') {
+              $nextUri = $endpointResponse.'@odata.nextLink'
+            }
+          }
+
+          $endpointNames = @($allEndpointNames.ToArray() | Sort-Object -Unique)
+          $endpointList = $endpointNames -join ', '
+
+          [pscustomobject]@{
+            status = 'success'
+            companyId = [int64]$companyId
+            companyName = $companyName
+            tokenName = $tokenName
+            endpointCount = $endpointNames.Count
+            endpointList = $endpointList
+            endpointNames = @($endpointNames)
+            message = "Built endpoint token payload for company '$companyName' with $($endpointNames.Count) endpoints"
+          }
+        }
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = "Built token payloads for $($companyArray.Count) companies"
+          payloads = @($payloads)
+          companyCount = $companyArray.Count
+          tokenName = $tokenName
+        }
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters:
+      - name: companies
+        expression: '{{ nodes.list-companies.output.companies }}'
+      - name: tokenName
+        expression: '{{ nodes.resolve-token-name.output.tokenName }}'
+      aiExtensions:
+      - cloudradial-v2-endpoints
+  - id: check-write-approval
+    name: Check Write Approval
+    type: condition
+    position:
+      x: 1040
+      y: 80
+    properties:
+      match: any
+      rules:
+      - left: '{{ nodes.start.output.approvedToWrite }}'
+        operator: equals
+        right: 'true'
+      - left: '{{ nodes.start.output.approvedToWrite }}'
+        operator: equals
+        right: 'True'
+      - left: '{{ nodes.start.output.approvedToWrite }}'
+        operator: equals
+        right: '1'
+      - left: '{{ nodes.start.output.approvedToWrite }}'
+        operator: equals
+        right: 'yes'
+      - left: '{{ nodes.start.output.approvedToWrite }}'
+        operator: equals
+        right: 'Yes'
+  - id: write-company-tokens
+    name: Write Company Tokens
+    type: powershell-script
+    position:
+      x: 1280
+      y: 80
+    properties:
+      script: |
+        $nodeInput = Get-NodeInput
+        if ($null -eq $nodeInput) {
+          $message = 'No input was provided to the token-writing step.'
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        $crBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $crPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $crPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missing = foreach ($pair in @(
+          @{ Name = 'CloudRadial-BaseUrl'; Value = $crBaseUrl },
+          @{ Name = 'CloudRadial-PublicKey'; Value = $crPublicKey },
+          @{ Name = 'CloudRadial-PrivateKey'; Value = $crPrivateKey }
+        )) {
+          if ([string]::IsNullOrWhiteSpace([string]$pair.Value)) { $pair.Name }
+        }
+
+        if (@($missing).Count -gt 0) {
+          $message = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $message }
+          throw $message
+        }
+
+        $payloads = @((Get-NodeInput -Name 'payloads'))
+        if ($payloads.Count -eq 0) {
+          Set-NodeOutput @{
+            status = 'success'
+            message = 'No token payloads were provided; no company tokens were written.'
+            results = @()
+            successCount = 0
+            errorCount = 0
+          }
+          return
+        }
+
+        $baseUrl = $crBaseUrl.TrimEnd('/')
+        $basicAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $crPublicKey, $crPrivateKey)))
+        $writeHeaders = @{
+          Authorization = "Basic $basicAuth"
+          Accept = 'application/json'
+          'Content-Type' = 'application/json'
+        }
+        $tokenUri = "$baseUrl/v2/token"
+
+        $results = foreach ($payload in $payloads) {
+          if ($null -eq $payload) {
+            [pscustomobject]@{
+              status = 'error'
+              companyId = $null
+              companyName = $null
+              tokenName = 'unknown'
+              endpointCount = 0
+              endpointList = ''
+              endpointNames = @()
+              message = 'Encountered a null payload item.'
+            }
+            continue
+          }
+
+          if ($payload.status -ne 'success') {
+            [pscustomobject]@{
+              status = 'error'
+              companyId = $payload.companyId
+              companyName = $payload.companyName
+              tokenName = $payload.tokenName
+              endpointCount = $payload.endpointCount
+              endpointList = $payload.endpointList
+              endpointNames = @($payload.endpointNames)
+              message = $payload.message
+            }
+            continue
+          }
+
+          $bodyObject = @{
+            companyId = [int64]$payload.companyId
+            token = [string]$payload.tokenName
+            value = [string]$payload.endpointList
+            type = '1'
+          }
+          $bodyJson = $bodyObject | ConvertTo-Json -Depth 5
+
+          try {
+            Write-Information "Upserting token '$($payload.tokenName)' for companyId $($payload.companyId)"
+            $tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenUri -Headers $writeHeaders -Body $bodyJson
+
+            [pscustomobject]@{
+              status = 'success'
+              companyId = [int64]$payload.companyId
+              companyName = $payload.companyName
+              tokenName = $payload.tokenName
+              endpointCount = [int]$payload.endpointCount
+              endpointList = [string]$payload.endpointList
+              endpointNames = @($payload.endpointNames)
+              tokenResponse = $tokenResponse
+              message = "Upserted token '$($payload.tokenName)' for company '$($payload.companyName)' with $($payload.endpointCount) endpoints"
+            }
+          }
+          catch {
+            $errorMessage = $_.Exception.Message
+            [pscustomobject]@{
+              status = 'error'
+              companyId = [int64]$payload.companyId
+              companyName = $payload.companyName
+              tokenName = $payload.tokenName
+              endpointCount = [int]$payload.endpointCount
+              endpointList = [string]$payload.endpointList
+              endpointNames = @($payload.endpointNames)
+              message = "Failed to upsert token '$($payload.tokenName)' for company '$($payload.companyName)': $errorMessage"
+            }
+          }
+        }
+
+        $successItems = foreach ($item in @($results)) {
+          if ($null -ne $item -and $item.status -eq 'success') { $item }
+        }
+        $errorItems = foreach ($item in @($results)) {
+          if ($null -ne $item -and $item.status -ne 'success') { $item }
+        }
+
+        $finalMessage = "Wrote tokens for $($successItems.Count) companies; $($errorItems.Count) company token write(s) failed"
+
+        if ($errorItems.Count -gt 0) {
+          Set-NodeOutput @{
+            status = 'error'
+            message = $finalMessage
+            results = @($results)
+            successCount = $successItems.Count
+            errorCount = $errorItems.Count
+          }
+          throw $finalMessage
+        }
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = $finalMessage
+          results = @($results)
+          successCount = $successItems.Count
+          errorCount = $errorItems.Count
+        }
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters:
+      - name: payloads
+        expression: '{{ nodes.build-token-payloads.output.payloads }}'
+      aiExtensions:
+      - cloudradial-v2-tokens
+  - id: summarize-results
+    name: Summarize Processing Results
+    type: powershell-script
+    position:
+      x: 1520
+      y: 80
+    properties:
+      script: |
+        $nodeInput = Get-NodeInput
+        if ($null -eq $nodeInput) {
+          Set-NodeOutput @{
+            status = 'error'
+            message = 'No input was provided to the summary step.'
+            companyCount = 0
+            processedCount = 0
+            errorCount = 1
+            processedCompanies = @()
+            errors = @('No input was provided to the summary step.')
+          }
+          return
+        }
+
+        $results = Get-NodeInput -Name 'results'
+        $companyCount = Get-NodeInput -Name 'companyCount'
+        if ($null -eq $companyCount -or [string]::IsNullOrWhiteSpace([string]$companyCount)) {
+          $companyCount = 0
+        }
+
+        $resultArray = @($results)
+        $successItems = foreach ($item in $resultArray) {
+          if ($null -ne $item -and $item.status -eq 'success') {
+            $item
+          }
+        }
+        $errorItems = foreach ($item in $resultArray) {
+          if ($null -ne $item -and $item.status -ne 'success') {
+            $item
+          }
+        }
+
+        $processedCompanies = foreach ($item in $successItems) {
+          [pscustomobject]@{
+            companyId = $item.companyId
+            companyName = $item.companyName
+            endpointCount = $item.endpointCount
+            tokenName = $item.tokenName
+          }
+        }
+
+        if ($errorItems.Count -gt 0) {
+          $message = "Processed $($successItems.Count) of $companyCount companies; $($errorItems.Count) company token write(s) failed"
+          Set-NodeOutput @{
+            status = 'error'
+            message = $message
+            companyCount = [int]$companyCount
+            processedCount = $successItems.Count
+            errorCount = $errorItems.Count
+            processedCompanies = @($processedCompanies)
+            errors = @($errorItems)
+          }
+          return
+        }
+
+        Set-NodeOutput @{
+          status = 'success'
+          message = "Processed $($successItems.Count) of $companyCount companies; all company tokens were written successfully"
+          companyCount = [int]$companyCount
+          processedCount = $successItems.Count
+          errorCount = 0
+          processedCompanies = @($processedCompanies)
+          errors = @()
+        }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters:
+      - name: companyCount
+        expression: '{{ nodes.list-companies.output.companyCount }}'
+      - name: results
+        expression: '{{ nodes.write-company-tokens.output.results }}'
+      aiExtensions: []
+  - id: end-no-write
+    name: End Without Writing
+    type: end
+    position:
+      x: 1280
+      y: 80
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 1760
+      y: 80
+  connections:
+  - source: start
+    target: resolve-token-name
+    sourceHandle: null
+  - source: resolve-token-name
+    target: list-companies
+    sourceHandle: null
+  - source: list-companies
+    target: build-token-payloads
+    sourceHandle: null
+  - source: build-token-payloads
+    target: check-write-approval
+    sourceHandle: null
+  - source: check-write-approval
+    target: write-company-tokens
+    sourceHandle: 'true'
+  - source: check-write-approval
+    target: end-no-write
+    sourceHandle: 'false'
+  - source: write-company-tokens
+    target: summarize-results
+    sourceHandle: null
+  - source: summarize-results
+    target: end
+    sourceHandle: null
+  startActivityId: start

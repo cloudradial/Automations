@@ -8,7 +8,7 @@ Nodes: **Parse & Validate → Resolve & Ownership Gate → Safety Gates → Rese
 
 ## Download & import
 
-**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/helpers/blob/main/automationai/password-reset/password-reset.yml)
+**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/password-reset/password-reset.yml)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Full steps are under [Import & test](#import--test) below.
 

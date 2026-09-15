@@ -1,13 +1,13 @@
 # Password Reset (ServiceAI Triage)
 
-The **triage** counterpart to [Password Reset (Self-Service)](https://github.com/cloudradial/helpers/tree/main/automationai/password-reset). Fired by a
+The **triage** counterpart to [Password Reset (Self-Service)](https://github.com/cloudradial/Automations/tree/main/automationai/password-reset). Fired by a
 **ServiceAI Action in Use-in-Triage mode**, where the trigger is a ticket. The ticket carries the target
 user (email/UPN) + tenant **and** the authenticated requester (`submittedByUPN`), and the workflow decides
 what to do based on who asked.
 
 ## Download & import
 
-**Download the workflow:** [`password-reset-triage.yml`](https://github.com/cloudradial/helpers/blob/main/automationai/password-reset-triage/password-reset-triage.yml)
+**Download the workflow:** [`password-reset-triage.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/password-reset-triage/password-reset-triage.yml)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Wire a ServiceAI **Use in Triage** Action at the webhook. Full steps are under [Import & test](#import--test) below.
 
@@ -32,8 +32,7 @@ both top-level and inside a nested `contact` / `submitter` / `authenticatedUser`
 - **Requester:** `submittedByUPN`, `submittedBy`, `submitterUpn`, `authenticatedUpn`, `requestedByUpn`, … (+ `submittedByOfficeId`, `userOfficeId`, … for the object id)
 - **Tenant:** `companyTenantId`, `tenantId`, `customerTenantId` (falls back to the `M365-TenantId` secret)
 
-**If your PSA uses a field name not listed, add it to the matching list in node 1.** (Ideally verify the exact
-names against the deployed self-service workflow's Parse node — the designer was too busy to read live.)
+**If your PSA uses a field name not listed, add it to the matching list in node 1** (the Parse & Validate step).
 
 ## Safety gates (reset path only)
 

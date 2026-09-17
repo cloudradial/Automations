@@ -21,6 +21,8 @@ single monolithic script, so every validation and gate is easy to read, test, an
 | **Portal Lookup** _(agent)_ | [`portal-lookup/`](portal-lookup/) | Read-only portal briefing — users, endpoints, warranty posture, setup gaps — for meeting prep. Import under **Agents → Custom**. |
 | **CloudRadial UCP Assistant** _(agent)_ | [`cloudradial-ucp/`](cloudradial-ucp/) | General-purpose portal assistant — the AutomationAI analog of the UCP MCP plugin. Looks up, briefs, audits, reports, and (with approval) changes companies, users, endpoints, services, and tokens. Import under **Agents → Custom**. |
 | **Weekly Fleet Audit** | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Demo of an **agent inside a workflow**: an Agent node runs the UCP Assistant to audit warranties / account-manager gaps on a schedule, then a PowerShell node emails the result via Postmark. |
+| **Endpoint LifeCycle Manager** _(agent)_ | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Reviews managed computers per company and maintains one Planner card per refresh category (Replace, Plan replacement, Upgrade in place, Retain, Needs data, Human review, VMs), each with a triage priority. Scheduled; writes. Import under **Agents → Custom**. |
+| **ScalePad to CloudRadial Migration** _(agent)_ | [`scalepad-to-cloudradial/`](scalepad-to-cloudradial/) | Migrates ScalePad Lifecycle Manager warranty/lifecycle data and vCIO roadmap initiatives into CloudRadial endpoints and Planner items. Read-first, dry-run default. Import under **Agents → Custom**. |
 
 ## Installing a workflow
 

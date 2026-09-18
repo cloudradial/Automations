@@ -1,0 +1,140 @@
+# ScalePad -> CloudRadial Alignment Agent
+# AutomationAI custom agent (import on the Agents > Custom tab, or reference from an Agent node).
+#
+# Field names follow the documented Agent-node configuration (goal, allowedExtensions, model,
+# timeoutSeconds, approval, input/output contract, knowledge grounding). Before relying on this,
+# export one existing catalog agent from your tenant and diff the exact key casing/structure --
+# AutomationAI's export schema is the source of truth and may differ slightly. [verify]
+#
+# Grounded on: scalepad-to-cloudradial-migration-map.md (place it in the Knowledge folder below).
+
+name: ScalePad to CloudRadial Alignment
+slug: scalepad-cloudradial-alignment
+description: >-
+  Reads a client's ScalePad Lifecycle Manager data, maps each item to its CloudRadial home
+  per the migration map, and produces an apply-plan (then applies on approval). Enriches
+  endpoints, syncs software/flexible-assets, uploads assessments, and archives historical
+  deliverables -- without clobbering RMM data or attempting anything policies don't allow.
+
+# --- Reasoning goal (natural language; supports {{ }} bindings from earlier nodes) ---
+goal: |
+  You align a client's ScalePad Lifecycle Manager data with CloudRadial for company
+  {{ input.companyId }}. Operate strictly per the grounding document
+  "ScalePad Lifecycle Manager -> CloudRadial Migration & Alignment Map".
+
+  Do this:
+  1. Read the client's ScalePad Lifecycle Manager data (hardware lifecycles, initiatives,
+     contracts, assessments) via the ScalePad extension.
+  2. Read existing CloudRadial state for the company (endpoints, endpointapplications,
+     flexible assets, assessments, archive items) before proposing anything. Never write blind.
+  3. Map each ScalePad item to its CloudRadial home using the migration map:
+       - EOL/warranty -> endpoint expirationDate (write directly; NEVER call update-warranty).
+       - serial/model/manufacturer -> endpoint fields, only if the portal value is blank.
+       - purchase date & other no-native-home fields -> endpoint custom-property.
+       - installed software -> endpointapplication records.
+       - documentation-style custom assets -> flexible assets (IT Glue-compatible route if the
+         data originates in IT Glue, otherwise the native flexible-asset API).
+       - maturity/risk assessments -> assessment upload (Excel-backed).
+       - historical QBR PDFs -> report archive (archiveitem).
+  4. Match endpoints by serialNumber. Skip any ScalePad row with no serial -- never invent one.
+  5. Enrich, do not clobber: write only fields the portal is missing; never overwrite
+     RMM-supplied values.
+  6. Creating a placeholder endpoint for an unmanaged asset requires explicit operator approval;
+     if approved, tag it Source=ScalePad and set check-in dates to the extract date.
+
+  Hard constraints:
+  - You CANNOT configure Compliance Policies -- there is no policy API. Only write the endpoint
+    input fields policies read, and report which policies each write will affect
+    (e.g. expirationDate -> Warranty Coverage).
+  - Always produce a PLAN first. In plan mode, describe every intended change and make no writes.
+    In apply mode, only proceed after approval, and only for approved items.
+  - Confirm the portal's currency before writing any price.
+
+  Return the structured output contract: planned, applied, skipped (with reasons), and
+  unmapped items that need human review. Close with counts.
+
+# --- Tools the agent may use. Keep focused: the Designer warns if scope exceeds the tool limit. ---
+allowedExtensions:
+  - scalepad-lifecycle-manager      # ScalePad Lifecycle Manager API (hardware-lifecycles, initiatives, contracts, assessments)
+  - cloudradial-v2-endpoints        # endpoints, endpointapplication, endpoint custom-property
+  - cloudradial-v2-flexible-assets  # /compatibility/* (IT Glue-shaped) + native /v2/flexible-asset*
+  - cloudradial-v2-services         # service / serviceinstall / product (Planner), assessment upload, archiveitem
+  # NOTE: match these slugs to your installed extensions (Extensions > Installed). [verify]
+
+model: ""            # inherit workspace default
+timeoutSeconds: 1800 # max; portfolio reads + multi-turn reasoning can be long
+
+# --- Human-in-the-loop. Never auto-approve writes on a first run. ---
+approval:
+  mode: required           # gate tool calls that mutate CloudRadial
+  autoApprove: false
+  autoApproveReadOnly: true  # allow read/list tools to run without prompting [verify key name]
+
+# --- Grounding ---
+knowledge:
+  - path: /scalepad-cloudradial-alignment/scalepad-to-cloudradial-migration-map.md
+    # Place the migration map in this Knowledge folder so field decisions trace back to it.
+
+# --- Input contract ---
+input:
+  type: object
+  required: [companyId, mode]
+  properties:
+    companyId:
+      type: integer
+      description: CloudRadial company ID to align.
+    scalePadOrgId:
+      type: string
+      description: ScalePad organization ID (if not resolvable from companyId).
+    mode:
+      type: string
+      enum: [plan, apply]
+      description: plan = describe changes, no writes; apply = write approved changes only.
+    flexibleAssetTypeFilter:
+      type: array
+      items: { type: string }
+      description: Optional. Limit flexible-asset sync to these type names.
+    createPlaceholders:
+      type: boolean
+      default: false
+      description: Allow creating placeholder endpoints for unmanaged ScalePad assets (operator opt-in).
+
+# --- Output contract ---
+output:
+  type: object
+  properties:
+    summary:
+      type: object
+      properties:
+        matched:   { type: integer }
+        enriched:  { type: integer }
+        created:   { type: integer }
+        skipped:   { type: integer }
+        unmapped:  { type: integer }
+    planned:
+      type: array
+      items:
+        type: object
+        properties:
+          target:        { type: string, description: "e.g. endpoint/SERIAL, flexible-asset/TYPE, assessment, archiveitem" }
+          action:        { type: string, enum: [enrich, create, upload, archive, skip] }
+          fields:        { type: object, description: "field -> value to write" }
+          policyImpact:  { type: string, description: "which policy this input affects, if any" }
+          reason:        { type: string }
+    applied:
+      type: array
+      items: { type: object }
+    skipped:
+      type: array
+      items:
+        type: object
+        properties:
+          item:   { type: string }
+          reason: { type: string }
+    unmapped:
+      type: array
+      items:
+        type: object
+        properties:
+          item:   { type: string }
+          reason: { type: string }

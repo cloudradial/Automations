@@ -1,0 +1,134 @@
+automationsWorkflow: 1
+name: "Add CC to Ticket"
+description: >-
+  From a form field, add a user / email address to the CC list of an existing
+  ConnectWise ticket (appends to the ticket's notification CC, de-duplicated).
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 540
+      y: 80
+  - id: node-2
+    name: Add CC to ticket
+    type: powershell-script
+    position:
+      x: 320
+      y: -20
+    properties:
+      script: |-
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        $nodeInput = Get-NodeInput
+
+        function Secret { param($n) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue }
+
+        $cwUrl    = Secret 'CW-ApiUrl'
+        $cwCo     = Secret 'CW-CompanyID'
+        $cwPub    = Secret 'CW-PublicKey'
+        $cwPriv   = Secret 'CW-PrivateKey'
+        $cwClient = Secret 'CW-ClientId'
+        $missing = @()
+        foreach ($p in @(@{n='CW-ApiUrl';v=$cwUrl},@{n='CW-CompanyID';v=$cwCo},@{n='CW-PublicKey';v=$cwPub},@{n='CW-PrivateKey';v=$cwPriv},@{n='CW-ClientId';v=$cwClient})) {
+          if ([string]::IsNullOrWhiteSpace($p.v)) { $missing += $p.n }
+        }
+        if ($missing.Count -gt 0) {
+          $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $m }
+          throw $m
+        }
+
+        # read a value from either a flat {key:value} body or the CloudRadial {Ticket:{Questions:[{Id,Answer}]}} shape
+        function Get-Answer {
+          param([string[]]$Names)
+          if ($null -eq $nodeInput) { return '' }
+          foreach ($n in $Names) {
+            $p = $nodeInput.PSObject.Properties[$n]
+            if ($p -and -not [string]::IsNullOrWhiteSpace([string]$p.Value)) { return [string]$p.Value }
+          }
+          $tp = $nodeInput.PSObject.Properties['Ticket']
+          if ($tp -and $tp.Value) {
+            $qp = $tp.Value.PSObject.Properties['Questions']
+            if ($qp -and $qp.Value) {
+              foreach ($q in @($qp.Value)) {
+                if ($null -eq $q) { continue }
+                $idp = $q.PSObject.Properties['Id']; $qid = if ($idp) { [string]$idp.Value } else { '' }
+                $ans = ''
+                $ap = $q.PSObject.Properties['Answer']; if ($ap) { $ans = [string]$ap.Value }
+                if ([string]::IsNullOrWhiteSpace($ans)) { $vp = $q.PSObject.Properties['Value']; if ($vp) { $ans = [string]$vp.Value } }
+                foreach ($n in $Names) { if ($qid -eq $n -and -not [string]::IsNullOrWhiteSpace($ans)) { return $ans } }
+              }
+            }
+          }
+          return ''
+        }
+
+        $ticketId = Get-Answer @('ticketId','ticketNumber','TicketId','ticket','id')
+        $ccEmail  = Get-Answer @('ccEmail','cc','ccUser','addCc','email','user','contactEmail')
+        if ([string]::IsNullOrWhiteSpace($ticketId)) { $m = 'No ticket id supplied. Send ticketId (or ticketNumber) in the payload.'; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+        if ([string]::IsNullOrWhiteSpace($ccEmail))  { $m = 'No CC address supplied. Send ccEmail (the user/email to add) in the payload.'; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+        $ccEmail = $ccEmail.Trim()
+
+        $cwBase = $cwUrl.TrimEnd('/')
+        $cwAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$cwCo+$cwPub`:$cwPriv"))
+        $cwHeaders = @{ Authorization = "Basic $cwAuth"; clientId = $cwClient; 'Content-Type' = 'application/json'; Accept = 'application/json' }
+
+        # read the current ticket + CC list
+        $ticket = Invoke-RestMethod -Method Get -Uri "$cwBase/service/tickets/$ticketId" -Headers $cwHeaders
+        $currentCc = ''
+        $ccp = $ticket.PSObject.Properties['automaticEmailCc']; if ($ccp -and $null -ne $ccp.Value) { $currentCc = [string]$ccp.Value }
+
+        $existing = @()
+        if (-not [string]::IsNullOrWhiteSpace($currentCc)) { $existing = @($currentCc -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+
+        $already = $false
+        foreach ($e in $existing) { if ($e -and $e.ToLower() -eq $ccEmail.ToLower()) { $already = $true; break } }
+
+        if ($already) {
+          Set-NodeOutput @{ status = 'success'; message = "$ccEmail is already on the CC list for ticket #$ticketId — no change."; ticketId = $ticketId; ccEmail = $ccEmail; added = $false }
+          return
+        }
+
+        $newList = @($existing + $ccEmail) -join '; '
+        $patch = @(
+          @{ op = 'replace'; path = 'automaticEmailCc'; value = $newList },
+          @{ op = 'replace'; path = 'automaticEmailCcFlag'; value = $true }
+        ) | ConvertTo-Json -Depth 4
+        # ConvertTo-Json emits a single-object (not array) when there's one item; force an array wrapper
+        if ($patch -notmatch '^\s*\[') { $patch = "[$patch]" }
+
+        $null = Invoke-RestMethod -Method Patch -Uri "$cwBase/service/tickets/$ticketId" -Headers $cwHeaders -Body $patch
+
+        # leave an internal note recording who was added (non-fatal)
+        $noteWarning = $null
+        try {
+          $noteBody = @{ text = "Added $ccEmail to the ticket CC via self-service form."; detailDescriptionFlag = $false; internalAnalysisFlag = $true; resolutionFlag = $false } | ConvertTo-Json -Depth 4
+          $null = Invoke-RestMethod -Method Post -Uri "$cwBase/service/tickets/$ticketId/notes" -Headers $cwHeaders -Body $noteBody
+        } catch { $noteWarning = "Note not added: $($_.Exception.Message)" }
+
+        $message = "Added $ccEmail to the CC list on ticket #$ticketId."
+        if ($noteWarning) { $message = "$message $noteWarning" }
+        Set-NodeOutput @{ status = 'success'; message = $message; ticketId = $ticketId; ccEmail = $ccEmail; added = $true; ccList = $newList; noteWarning = $noteWarning }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  connections:
+  - source: start
+    target: node-2
+    sourceHandle: null
+  - source: node-2
+    target: end
+    sourceHandle: null
+  startActivityId: start

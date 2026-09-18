@@ -1,0 +1,60 @@
+automationsWorkflow: 1
+name: RMM Auto-Remediation
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 80
+      properties:
+        webhookEnabled: false
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 520
+        y: 80
+    - id: node-1
+      name: Agent
+      type: agent
+      position:
+        x: 310
+        y: 110
+      properties:
+        goal: |
+          A Datto RMM alert has fired. Its details are in the trigger input
+          (alertUid, and usually deviceUid and/or siteUid).
+          1. Read the alert (datto_get_device_alerts or datto_get_site_alerts) and
+             the device (datto_get_device; datto_get_device_hardware for disk free
+             space).
+          2. SAFETY: if the device category is Server, do NOT remediate — open a PSA
+             ticket describing the alert and stop.
+          3. For a low-disk alert on a workstation, run the disk-cleanup component
+             with datto_run_quick_job (use the cleanupComponentUid variable), poll
+             datto_get_job until it completes, then re-read datto_get_device_hardware.
+          4. If free space is back above the threshold, resolve the alert
+             (datto_resolve_alert) and report the before/after free-space numbers.
+             Otherwise open a PSA ticket with the detail and leave the alert open.
+          Keep any technical detail in the internal note.
+        model: ""
+        allowedExtensions:
+          - datto-rmm
+          - connectwise-manage
+        timeoutSeconds: 600
+        autoApprove: false
+        agentSlug: rmm-agent
+        inputSchema: |
+          {"type":"object","properties":{"alertUid":{"type":"string"},"deviceUid":{"type":"string"},"siteUid":{"type":"string"}},"required":["alertUid"]}
+        outputSchema: |
+          {"type":"object","properties":{"status":{"type":"string"},"action":{"type":"string"},"deviceUid":{"type":"string"},"alertResolved":{"type":"boolean"},"ticketId":{"type":"string"},"notes":{"type":"string"}}}
+  connections:
+    - source: start
+      target: node-1
+      sourceHandle: null
+    - source: node-1
+      target: end
+      sourceHandle: null
+  startActivityId: start

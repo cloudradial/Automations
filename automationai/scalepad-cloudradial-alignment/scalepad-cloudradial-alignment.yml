@@ -1,0 +1,71 @@
+automationsWorkflow: 1
+name: ScalePad to CloudRadial Alignment
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 80
+      properties:
+        webhookEnabled: false
+    - id: node-1
+      name: Alignment Agent
+      type: agent
+      position:
+        x: 320
+        y: 100
+      properties:
+        # Runs the imported saved agent. Its systemPrompt carries the full procedure and
+        # guardrails; this goal sets the run's scope + mode and folds in the run inputs.
+        goal: |
+          Align the client's ScalePad Lifecycle Manager data with CloudRadial, following your
+          grounding map. Act on the run inputs you are given: align the CloudRadial company
+          identified by companyId (or resolve scalePadClientName through the crosswalk), and
+          run the requested phase in the requested mode (defaults: all phases, plan mode).
+
+          Read ScalePad (hardware lifecycles, initiatives, contracts, assessments) and the
+          current CloudRadial state, then map each item to its CloudRadial home: warranty/EOL
+          to endpoint expirationDate (write it directly, never update-warranty);
+          serial/model/manufacturer only where the portal value is blank; purchase date and
+          other extras to endpoint custom-properties; installed software to
+          endpointApplications; documentation-style assets to flexible assets; maturity/risk
+          assessments to assessment upload; historical QBR PDFs to the report archive.
+
+          Match endpoints by serial and skip any row without one. Enrich, never clobber
+          RMM-supplied data. In plan mode make NO writes - return the full plan with the
+          policy each write would affect (e.g. expirationDate -> Warranty Coverage). In apply
+          mode make only approved changes. Do not attempt to configure policies. Close with
+          the structured summary and counts.
+        model: ""
+        agentSlug: scalepad-cloudradial-alignment
+        # Pre-filled from the agent; kept explicit so the workflow is self-contained.
+        allowedExtensions:
+          - lifecycle-manager
+          - cloudradial-v2-companies
+          - cloudradial-v2-endpoints
+          - cloudradial-v2-services
+        timeoutSeconds: 1800
+        # false = mutating tool calls pause for approval in the Inbox (the plan/apply gate).
+        # Set true only once you trust an unattended apply run.
+        autoApprove: false
+        inputSchema: |
+          {"type":"object","required":["mode"],"properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Omit to resolve from scalePadClientName."},"scalePadClientName":{"type":"string","description":"Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"description":"plan = describe changes, no writes; apply = write approved changes only."},"phase":{"type":"string","enum":["warranty","software","flexible-assets","assessments","archive","roadmap","all"],"description":"Which alignment phase to run. Defaults to all."},"flexibleAssetTypeFilter":{"type":"array","items":{"type":"string"},"description":"Limit flexible-asset sync to these type names."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."}}}
+        outputSchema: |
+          {"type":"object","properties":{"summary":{"type":"string"},"clientsMapped":{"type":"array","items":{"type":"object","properties":{"scalepadClient":{"type":"string"},"cloudradialCompanyId":{"type":"integer"},"matchConfidence":{"type":"string"}}}},"unresolvedClients":{"type":"array","items":{"type":"string"}},"matched":{"type":"integer"},"enriched":{"type":"integer"},"created":{"type":"integer"},"skipped":{"type":"integer"},"planned":{"type":"array","items":{"type":"object","properties":{"target":{"type":"string"},"action":{"type":"string","enum":["enrich","create","upload","archive","skip"]},"fields":{"type":"object"},"policyImpact":{"type":"string"},"reason":{"type":"string"}}}},"unmapped":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"reason":{"type":"string"}}}},"policySpecification":{"type":"array","items":{"type":"object","properties":{"proposedPolicy":{"type":"string"},"input":{"type":"string"},"note":{"type":"string"}}}},"currencyNote":{"type":"string"},"warnings":{"type":"array","items":{"type":"string"}}}}
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 560
+        y: 80
+  connections:
+    - source: start
+      target: node-1
+      sourceHandle: null
+    - source: node-1
+      target: end
+      sourceHandle: null
+  startActivityId: start

@@ -1,0 +1,201 @@
+automationsWorkflow: 1
+name: "Split Request - Support + Quote"
+description: >-
+  From one CloudRadial form submission, create two linked ConnectWise tickets — a
+  support/provisioning ticket and a sales quote request (e.g. new user + new PC) —
+  and cross-reference them.
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 560
+      y: 80
+  - id: node-2
+    name: Create support + quote tickets
+    type: powershell-script
+    position:
+      x: 320
+      y: -30
+    properties:
+      script: |-
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        $nodeInput = Get-NodeInput
+
+        function Secret { param($n) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue }
+
+        $cwUrl    = Secret 'CW-ApiUrl'
+        $cwCo     = Secret 'CW-CompanyID'
+        $cwPub    = Secret 'CW-PublicKey'
+        $cwPriv   = Secret 'CW-PrivateKey'
+        $cwClient = Secret 'CW-ClientId'
+        $missing = @()
+        foreach ($p in @(@{n='CW-ApiUrl';v=$cwUrl},@{n='CW-CompanyID';v=$cwCo},@{n='CW-PublicKey';v=$cwPub},@{n='CW-PrivateKey';v=$cwPriv},@{n='CW-ClientId';v=$cwClient})) {
+          if ([string]::IsNullOrWhiteSpace($p.v)) { $missing += $p.n }
+        }
+        if ($missing.Count -gt 0) {
+          $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $m }
+          throw $m
+        }
+
+        # ---------- read a value from either a flat {key:value} body or the CloudRadial {Ticket:{Questions:[{Id,Answer}]}} shape ----------
+        function Get-Answer {
+          param([string[]]$Names)
+          if ($null -eq $nodeInput) { return '' }
+          foreach ($n in $Names) {
+            $p = $nodeInput.PSObject.Properties[$n]
+            if ($p -and -not [string]::IsNullOrWhiteSpace([string]$p.Value)) { return [string]$p.Value }
+          }
+          $tp = $nodeInput.PSObject.Properties['Ticket']
+          if ($tp -and $tp.Value) {
+            $qp = $tp.Value.PSObject.Properties['Questions']
+            if ($qp -and $qp.Value) {
+              foreach ($q in @($qp.Value)) {
+                if ($null -eq $q) { continue }
+                $idp = $q.PSObject.Properties['Id']; $qid = if ($idp) { [string]$idp.Value } else { '' }
+                $ans = ''
+                $ap = $q.PSObject.Properties['Answer']; if ($ap) { $ans = [string]$ap.Value }
+                if ([string]::IsNullOrWhiteSpace($ans)) { $vp = $q.PSObject.Properties['Value']; if ($vp) { $ans = [string]$vp.Value } }
+                foreach ($n in $Names) { if ($qid -eq $n -and -not [string]::IsNullOrWhiteSpace($ans)) { return $ans } }
+              }
+            }
+          }
+          return ''
+        }
+        function HtmlEsc { param($t) [string]$t }
+
+        # ---------- CONFIG / field mapping ----------
+        $SupportBoard = Get-Answer @('supportBoard'); if ([string]::IsNullOrWhiteSpace($SupportBoard)) { $SupportBoard = Secret 'CW-ServiceBoard' }
+        $QuoteBoard   = Get-Answer @('quoteBoard');   if ([string]::IsNullOrWhiteSpace($QuoteBoard))   { $QuoteBoard   = Secret 'CW-SalesBoard' }
+        if ([string]::IsNullOrWhiteSpace($SupportBoard)) { throw 'No support board set. Provide supportBoard in the payload or a CW-ServiceBoard secret.' }
+        if ([string]::IsNullOrWhiteSpace($QuoteBoard))   { throw 'No quote board set. Provide quoteBoard in the payload or a CW-SalesBoard secret.' }
+
+        # Verified Field IDs from the "Add a New User" form (content item 133)
+        $first = Get-Answer @('firstName','first_name','FirstName')
+        $last  = Get-Answer @('lastName','last_name','LastName')
+        $displayName = (($first + ' ' + $last)).Trim()
+        if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = Get-Answer @('userName','newUserName','displayName','fullName','name') }
+        if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = Get-Answer @('email','newUserEmail','userEmail') }
+        if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = 'New user' }
+
+        $department       = Get-Answer @('department')
+        $jobTitle         = Get-Answer @('jobTitle')
+        $newUserEmail     = Get-Answer @('email','newUserEmail','requestedEmail')
+        $softwareLicenses = Get-Answer @('softwareLicenses')                 # free-text app names
+        $securityGroups   = Get-Answer @('companyFileAccess','securityGroups','securityAccessGroups')  # form's "Security Groups"
+        $details          = Get-Answer @('description','details','notes','requestDetails','otherAdditions')
+        # Equipment questions on the form ship with EMPTY Field IDs; add a "deviceType" (or "hardware") Field ID to pass the requested model.
+        $hardware         = Get-Answer @('deviceType','hardware','equipment','newPc','pc','device')
+        if ([string]::IsNullOrWhiteSpace($hardware)) { $hardware = 'New PC - specification to be quoted (add a deviceType Field ID on the form to pass the requested model).' }
+        $requester        = Get-Answer @('requestedBy','submittedByEmail','submitterEmail','contactEmail','UserEmail')
+        $ticketId         = Get-Answer @('ticketId','TicketId')
+
+        # ---------- ConnectWise ----------
+        $cwBase = $cwUrl.TrimEnd('/')
+        $cwAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$cwCo+$cwPub`:$cwPriv"))
+        $cwHeaders = @{ Authorization = "Basic $cwAuth"; clientId = $cwClient; 'Content-Type' = 'application/json'; Accept = 'application/json' }
+
+        # resolve the CW company: identifier/number in the payload, else CloudRadial companyId -> psaIdentifier
+        $cwCoId = $null
+        $companyIn = Get-Answer @('companyIdentifier','company','companyNumber')
+        if (-not [string]::IsNullOrWhiteSpace($companyIn)) {
+          if ($companyIn -match '^\d+$') { $cwCoId = [int]$companyIn }
+          else {
+            $found = Invoke-RestMethod -Method Get -Uri "$cwBase/company/companies?conditions=identifier=`"$companyIn`"" -Headers $cwHeaders
+            $cwCoId = (@($found) | Select-Object -First 1).id
+          }
+        }
+        if (-not $cwCoId) {
+          $companyName = Get-Answer @('companyName','CompanyName')
+          if (-not [string]::IsNullOrWhiteSpace($companyName)) {
+            $found = Invoke-RestMethod -Method Get -Uri "$cwBase/company/companies?conditions=name like `"$companyName`"" -Headers $cwHeaders
+            $cwCoId = (@($found) | Select-Object -First 1).id
+          }
+        }
+        if (-not $cwCoId) {
+          $crCompanyId = Get-Answer @('companyId','CompanyId')
+          $crBaseUrl = Secret 'CloudRadial-BaseUrl'
+          if (-not [string]::IsNullOrWhiteSpace($crCompanyId) -and -not [string]::IsNullOrWhiteSpace($crBaseUrl)) {
+            $crBasic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f (Secret 'CloudRadial-PublicKey'), (Secret 'CloudRadial-PrivateKey'))))
+            $co = (Invoke-RestMethod -Method Get -Uri "$($crBaseUrl.TrimEnd('/'))/v2/odata/company?`$filter=companyId eq $([int]$crCompanyId)&`$select=name,psaIdentifier" -Headers @{ Authorization = "Basic $crBasic"; Accept = 'application/json' }).value | Select-Object -First 1
+            $psa = [string]$co.psaIdentifier
+            if ($psa -match '^\d+$') { $cwCoId = [int]$psa }
+            elseif (-not [string]::IsNullOrWhiteSpace($psa)) {
+              $found = Invoke-RestMethod -Method Get -Uri "$cwBase/company/companies?conditions=identifier=`"$psa`"" -Headers $cwHeaders
+              $cwCoId = (@($found) | Select-Object -First 1).id
+            }
+          }
+        }
+        if (-not $cwCoId) { throw 'Could not resolve the ConnectWise company. Send companyIdentifier, companyName, or a CloudRadial companyId in the payload.' }
+
+        function New-CwTicket {
+          param([string]$Summary, [string]$Board, [string]$Description)
+          $s = $Summary; if ($s.Length -gt 100) { $s = $s.Substring(0,100) }
+          $body = @{ summary = $s; board = @{ name = $Board }; company = @{ id = $cwCoId }; initialDescription = $Description }
+          Invoke-RestMethod -Method Post -Uri "$cwBase/service/tickets" -Headers $cwHeaders -Body ($body | ConvertTo-Json -Depth 6)
+        }
+
+        $srcNote = if ($ticketId) { " (from request ticket #$ticketId)" } else { '' }
+
+        # 1) support / provisioning ticket
+        $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.Append("New user provisioning request for $displayName$srcNote.")
+        if ($requester)        { [void]$sb.Append("`nRequested by: $requester") }
+        if ($department)       { [void]$sb.Append("`nDepartment: $department") }
+        if ($jobTitle)         { [void]$sb.Append("`nJob title: $jobTitle") }
+        if ($newUserEmail)     { [void]$sb.Append("`nRequested email: $newUserEmail") }
+        if ($softwareLicenses) { [void]$sb.Append("`nSoftware / apps to assign: $softwareLicenses") }
+        if ($securityGroups)   { [void]$sb.Append("`nSecurity groups / access: $securityGroups") }
+        if ($details)          { [void]$sb.Append("`n`nDetails:`n$details") }
+        $supDesc = $sb.ToString()
+        $sup = New-CwTicket -Summary "New User Provisioning - $displayName" -Board $SupportBoard -Description $supDesc
+        $supId = $sup.id
+
+        # 2) sales / quote ticket, referencing the support ticket
+        $forWhom = $displayName + $(if ($department) { " ($department)" } else { '' })
+        $qDesc = "Hardware quote requested for $forWhom$srcNote.`n`nHardware requested:`n$hardware`n`nRelated provisioning ticket: #$supId."
+        $quote = New-CwTicket -Summary "New PC / Hardware Quote - $displayName" -Board $QuoteBoard -Description $qDesc
+        $quoteId = $quote.id
+
+        # 3) cross-link back on the support ticket (non-fatal)
+        $linkWarning = $null
+        try {
+          $noteBody = @{ text = "Quote request created for the hardware: ticket #$quoteId."; detailDescriptionFlag = $false; internalAnalysisFlag = $true; resolutionFlag = $false } | ConvertTo-Json -Depth 4
+          $null = Invoke-RestMethod -Method Post -Uri "$cwBase/service/tickets/$supId/notes" -Headers $cwHeaders -Body $noteBody
+        } catch { $linkWarning = "Cross-link note not added to #$($supId): $($_.Exception.Message)" }
+
+        $message = "Created support ticket #$supId and quote ticket #$quoteId for $displayName."
+        if ($linkWarning) { $message = "$message $linkWarning" }
+        Set-NodeOutput @{
+          status = 'success'
+          message = $message
+          supportTicketId = $supId
+          quoteTicketId = $quoteId
+          companyId = $cwCoId
+          displayName = $displayName
+          linkWarning = $linkWarning
+        }
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  connections:
+  - source: start
+    target: node-2
+    sourceHandle: null
+  - source: node-2
+    target: end
+    sourceHandle: null
+  startActivityId: start

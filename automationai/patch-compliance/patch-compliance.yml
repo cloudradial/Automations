@@ -1,0 +1,61 @@
+automationsWorkflow: 1
+name: Patch Compliance
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 80
+      properties:
+        webhookEnabled: false
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 520
+        y: 80
+    - id: node-1
+      name: Agent
+      type: agent
+      position:
+        x: 310
+        y: 110
+      properties:
+        goal: |
+          Run a patch-compliance pass across the Datto RMM fleet.
+          1. List devices (datto_get_devices) and sites (datto_list_sites).
+          2. For each device read its patch status (datto_get_patch_status / the
+             device record). Treat anything other than FullyPatched as needing
+             attention. Group devices by site and compute a compliance percentage
+             per site.
+          3. Match each site to a CloudRadial company by normalized name (drop
+             ltd/inc/llc/group and punctuation). Skip and report sites with no match.
+          4. For each matched company, create or update ONE Planner card titled
+             "Patch Compliance Report" (upsert — do not duplicate) with the
+             compliance percentage, a plain-language summary, and the devices that
+             need attention.
+          5. Return devices assessed, compliant vs needs-attention, cards written,
+             and any unmatched sites.
+        model: ""
+        allowedExtensions:
+          - datto-rmm
+          - cloudradial-v2-companies
+          - cloudradial-v2-services
+        timeoutSeconds: 900
+        autoApprove: true
+        agentSlug: rmm-agent
+        inputSchema: |
+          {"type":"object","properties":{"siteUid":{"type":"string","description":"Restrict the run to a single Datto site by uid. Omit to run across the whole fleet."}}}
+        outputSchema: |
+          {"type":"object","properties":{"devicesAssessed":{"type":"number"},"compliant":{"type":"number"},"needsAttention":{"type":"number"},"cardsWritten":{"type":"number"},"unmatchedSites":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"}}}
+  connections:
+    - source: start
+      target: node-1
+      sourceHandle: null
+    - source: node-1
+      target: end
+      sourceHandle: null
+  startActivityId: start

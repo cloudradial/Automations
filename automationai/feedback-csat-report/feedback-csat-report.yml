@@ -1,0 +1,204 @@
+automationsWorkflow: 1
+name: "Feedback & CSAT Report"
+description: >-
+  Pulls CloudRadial feedback, computes a CSAT summary per company, and writes one
+  plain-language Feedback & CSAT Planner card per company. (yml conversion of the
+  Get-FeedbackReport.ps1 helper — CSV export becomes Planner cards.)
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 560
+      y: 80
+  - id: node-2
+    name: Feedback & CSAT to Planner cards
+    type: powershell-script
+    position:
+      x: 320
+      y: -30
+    properties:
+      script: |-
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        $nodeInput = Get-NodeInput
+
+        $crBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $crPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $crPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+        $missing = @()
+        foreach ($p in @(@{n='CloudRadial-BaseUrl';v=$crBaseUrl},@{n='CloudRadial-PublicKey';v=$crPublicKey},@{n='CloudRadial-PrivateKey';v=$crPrivateKey})) {
+          if ([string]::IsNullOrWhiteSpace($p.v)) { $missing += $p.n }
+        }
+        if ($missing.Count -gt 0) {
+          $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+          Set-NodeOutput @{ status = 'error'; message = $m }
+          throw $m
+        }
+
+        try {
+          # ---------- CONFIG ----------
+          $WriteCards = $true
+          $PlannerCategory = 'Efficiency'
+          $PlannerProductCategoryId = 7
+          $CardSubject = 'Feedback & CSAT Report'
+          $MaxComments = 3
+          # optional runtime input: DaysBack (limit window)
+          $DaysBack = 0
+          if ($null -ne $nodeInput) { $dp = $nodeInput.PSObject.Properties['DaysBack']; if ($dp -and $dp.Value) { [int]::TryParse([string]$dp.Value, [ref]$DaysBack) | Out-Null } }
+
+          $baseUrl = $crBaseUrl.TrimEnd('/')
+          $runDate = (Get-Date).ToUniversalTime()
+          $publishDate = $runDate.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+          $authBytes = [Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $crPublicKey, $crPrivateKey))
+          $headers = @{ Authorization = ('Basic ' + [Convert]::ToBase64String($authBytes)); Accept = 'application/json' }
+
+          function Invoke-CrApi {
+            param([Parameter(Mandatory)][string]$Path, [string]$Method='GET', [object]$Body)
+            $url = if ($Path -match '^https?://') { $Path } else { "$baseUrl$Path" }
+            $callArgs = @{ Uri = $url; Method = $Method; Headers = $headers; ContentType = 'application/json' }
+            if ($Method -eq 'PATCH') { $callArgs.ContentType = 'application/json-patch+json' }
+            if ($null -ne $Body) { $callArgs.Body = ($Body | ConvertTo-Json -Depth 12) }
+            return Invoke-RestMethod @callArgs
+          }
+          function Get-CrCollection {
+            param([Parameter(Mandatory)][string]$Path)
+            $all = [System.Collections.Generic.List[object]]::new()
+            $ps = 200; $skip = 0
+            for ($pg = 0; $pg -lt 1000; $pg++) {
+              $sep = if ($Path -match '\?') { '&' } else { '?' }
+              $r = Invoke-CrApi -Path "${Path}${sep}`$top=$ps&`$skip=$skip"
+              if ($null -eq $r) { break }
+              $rows = @()
+              $vp = $r.PSObject.Properties['value']
+              if ($vp -and $null -ne $vp.Value) { $rows = @($vp.Value) } elseif ($r -is [System.Array]) { $rows = @($r) }
+              foreach ($x in $rows) { [void]$all.Add($x) }
+              if (@($rows).Count -lt $ps) { break }
+              $skip += $ps
+            }
+            $all.ToArray()
+          }
+          function Get-Field { param($o,[string]$n) if ($null -eq $o) { return $null } $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value } return $null }
+          function ConvertTo-HtmlText { param($t) $s = [string]$t; if ([string]::IsNullOrEmpty($s)) { return '' } ($s -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;') }
+          function Get-NumericRating {
+            param($fb)
+            $num = Get-Field $fb 'feedbackRatingNumber'
+            if ($num -and [double]$num -gt 0) { return [double]$num }
+            switch ([string](Get-Field $fb 'feedbackRating')) { 'Positive' { return 3 } 'Neutral' { return 2 } 'Negative' { return 1 } default { return $null } }
+          }
+
+          function Set-CompanyCard {
+            param([int]$CompanyId, [string]$Subject, [string]$Summary, [string]$Body, [ref]$Existing)
+            $planCard = @($Existing.Value | Where-Object { ([string](Get-Field $_ 'subject')).Trim() -eq $Subject } | Select-Object -First 1)
+            if (@($planCard).Count -gt 0) {
+              $cardId = Get-Field $planCard[0] 'productId'
+              $patch = @(
+                @{ op='replace'; path='/subject'; value=$Subject },
+                @{ op='replace'; path='/body'; value=$Body },
+                @{ op='replace'; path='/summary'; value=$Summary },
+                @{ op='replace'; path='/category'; value=$PlannerCategory },
+                @{ op='replace'; path='/productCategoryId'; value=$PlannerProductCategoryId }
+              )
+              $null = Invoke-CrApi -Path "/v2/product/$cardId" -Method 'PATCH' -Body $patch
+              return 'updated'
+            } else {
+              $createBody = [ordered]@{ companyId=$CompanyId; productCategoryId=$PlannerProductCategoryId; subject=$Subject; category=$PlannerCategory; datePublished=$publishDate; body=$Body; summary=$Summary; isRequired=$false; isShowPrice=$false }
+              $null = Invoke-CrApi -Path '/v2/product' -Method 'POST' -Body $createBody
+              return 'created'
+            }
+          }
+
+          # ---------- pull feedback ----------
+          $fbPath = '/v2/odata/feedback'
+          if ($DaysBack -gt 0) {
+            $cutoff = $runDate.AddDays(-$DaysBack).ToString('yyyy-MM-ddTHH:mm:ssZ')
+            $fbPath = "$fbPath?`$filter=dateCreated ge $cutoff"
+          }
+          $feedback = @(Get-CrCollection $fbPath)
+
+          # company names
+          $companyName = @{}
+          foreach ($c in @(Get-CrCollection '/v2/odata/company')) {
+            $cid = [string](Get-Field $c 'companyId'); if ($cid) { $companyName[$cid] = [string](Get-Field $c 'name') }
+          }
+
+          # group by company
+          $byCompany = @{}
+          foreach ($fb in $feedback) {
+            $cid = [string](Get-Field $fb 'companyId')
+            if ([string]::IsNullOrWhiteSpace($cid)) { continue }
+            if (-not $byCompany.ContainsKey($cid)) { $byCompany[$cid] = [System.Collections.Generic.List[object]]::new() }
+            [void]$byCompany[$cid].Add($fb)
+          }
+
+          $counts = [ordered]@{ feedback=@($feedback).Count; companies=@($byCompany.Keys).Count; cardsCreated=0; cardsUpdated=0; errors=0 }
+          $firstError = $null
+          $productsByCompany = @{}
+          $rows = [System.Collections.Generic.List[object]]::new()
+
+          foreach ($cid in @($byCompany.Keys)) {
+            $items = @($byCompany[$cid].ToArray())
+            $total = $items.Count
+            $positive = @($items | Where-Object { [string](Get-Field $_ 'feedbackRating') -eq 'Positive' }).Count
+            $ratings = @($items | ForEach-Object { Get-NumericRating $_ } | Where-Object { $null -ne $_ })
+            $avg = if (@($ratings).Count -gt 0) { [math]::Round((@($ratings) | Measure-Object -Average).Average, 2) } else { 0 }
+            $pct = if ($total -gt 0) { [math]::Round(100.0 * $positive / $total, 1) } else { 0 }
+            $cname = if ($companyName.ContainsKey($cid)) { $companyName[$cid] } else { "Company $cid" }
+            [void]$rows.Add([pscustomobject]@{ companyId=$cid; company=$cname; total=$total; positive=$positive; positiveRate=$pct; avgRating=$avg })
+            if (-not $WriteCards) { continue }
+
+            $sb = [System.Text.StringBuilder]::new()
+            [void]$sb.Append("<p>As of $($runDate.ToString('yyyy-MM-dd')), $(ConvertTo-HtmlText $cname) has $total feedback response(s) - $pct% positive, average rating $avg" + $(if ($DaysBack -gt 0) { " (last $DaysBack days)" } else { '' }) + ".</p>")
+            $recent = @($items | Sort-Object { $d=Get-Field $_ 'dateCreated'; if ($d) { [datetime]$d } else { [datetime]::MinValue } } -Descending | Select-Object -First $MaxComments)
+            $withComment = @($recent | Where-Object { -not [string]::IsNullOrWhiteSpace([string](Get-Field $_ 'feedbackComment')) })
+            if (@($withComment).Count -gt 0) {
+              [void]$sb.Append("<p>Recent comments:</p><ul>")
+              foreach ($fb in $withComment) {
+                $r = [string](Get-Field $fb 'feedbackRating'); $c = ConvertTo-HtmlText (Get-Field $fb 'feedbackComment')
+                [void]$sb.Append("<li>[$r] $c</li>")
+              }
+              [void]$sb.Append("</ul>")
+            }
+            $summary = "$pct% positive across $total response(s); average rating $avg."
+            $body = $sb.ToString()
+
+            try {
+              if (-not $productsByCompany.ContainsKey($cid)) { $productsByCompany[$cid] = @(Get-CrCollection ("/v2/odata/product?`$filter=companyId eq $([int]$cid)")) }
+              $ref = [ref]$productsByCompany[$cid]
+              $action = Set-CompanyCard -CompanyId ([int]$cid) -Subject $CardSubject -Summary $summary -Body $body -Existing $ref
+              if ($action -eq 'created') { $counts.cardsCreated++ } else { $counts.cardsUpdated++ }
+            } catch { $counts.errors++; if ($null -eq $firstError) { $firstError = $_.Exception.Message } }
+          }
+
+          $message = "Feedback: $($counts.feedback) responses across $($counts.companies) companies. Cards created $($counts.cardsCreated), updated $($counts.cardsUpdated), errors $($counts.errors)."
+          if ($firstError) { $message = "$message FIRST ERROR: $firstError" }
+          Set-NodeOutput @{ status='success'; message=$message; counts=$counts; report=@($rows.ToArray()) }
+        }
+        catch {
+          $msg = $_.Exception.Message
+          Set-NodeOutput @{ status = 'error'; message = $msg }
+          throw $msg
+        }
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters: []
+      aiExtensions:
+      - cloudradial-v2-services
+  connections:
+  - source: start
+    target: node-2
+    sourceHandle: null
+  - source: node-2
+    target: end
+    sourceHandle: null
+  startActivityId: start

@@ -1,8 +1,9 @@
 # CloudRadial AutomationAI - custom agent.
 # Upload on Agents -> Custom (keyed on slug: overwrites any custom agent with this slug).
-# Grounding: attach scalepad-to-cloudradial-migration-map.md in the workspace Knowledge
-# folder and ground this agent on it (Agents -> this agent -> Knowledge). Grounding is a
-# workspace attachment, not part of this export file.
+# Grounding: upload knowledge/scalepad-to-cloudradial-migration-map.md to a Knowledge
+# folder, then turn on "Ground on knowledge" on the WORKFLOW's agent node (the node in
+# scalepad-cloudradial-alignment.yml) and attach the document. Grounding lives on the node,
+# not on this agent, and can't be exported - every install re-attaches it.
 #
 # NOTE: this agent overlaps your existing `scalepad-to-cloudradial` agent (referenced by the
 # LifeCycle Manager to CloudRadial Migration workflow). Kept on a distinct slug so it does not
@@ -13,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.1.0
+  version: 0.1.1
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, syncs software and flexible
@@ -38,15 +39,32 @@ agent:
     **Does not:** configure Compliance Policies (there is no policy API) - it only writes the
     endpoint inputs policies read, and reports which policies each write affects.
   systemPrompt: |
+    YOUR GOAL: align ScalePad Lifecycle Manager data with CloudRadial and return a plan (or,
+    in apply mode, the approved writes) with counts. Begin immediately.
+
     You are a migration assistant that aligns a client's ScalePad Lifecycle Manager data with
     CloudRadial. Operate strictly per your grounding document, the "ScalePad Lifecycle Manager
     -> CloudRadial Migration & Alignment Map." When the map and these instructions conflict,
     follow the map and note the conflict in `warnings`.
 
+    NEVER STOP TO ASK FOR INPUTS. Every input is optional. Use these defaults and state them
+    in `summary`: mode = "plan"; phase = "all"; createPlaceholders = false; maxCompanies = 3.
+    - No companyId and no scalePadClientName: list the ScalePad clients yourself
+      (scalepad_list_clients), crosswalk each to a CloudRadial company (psaIdentifier first,
+      then exact normalized name), and plan for up to maxCompanies matched clients. List the
+      rest in `unresolvedClients` or as "not processed - over maxCompanies" in `warnings`.
+    - mode = "apply" with no companyId or scalePadClientName: do NOT write across the
+      portfolio. Run as "plan" instead and say so in `warnings`.
+    - Phases that need data your tools can't reach - assessments (Excel export), archive
+      (historical QBR PDFs), and flexible assets that live in IT Glue - are not a reason to
+      stop. Put each in `unmapped` with the exact source file or extension the operator must
+      supply, and carry on with the phases you can run (warranty, software, roadmap).
+
     Procedure:
     1. Resolve the target: use input.companyId, or match input.scalePadClientName through the
-       crosswalk. Report every mapping in `clientsMapped` with a matchConfidence, and anything
-       you cannot resolve in `unresolvedClients` / `unmapped` - never guess a company.
+       crosswalk, or self-source as described above. Report every mapping in `clientsMapped`
+       with a matchConfidence, and anything you cannot resolve in `unresolvedClients` /
+       `unmapped` - never guess a company.
     2. Read existing CloudRadial state (endpoints, endpointApplications, flexible assets,
        assessments, archive items) BEFORE proposing anything. Never write blind.
     3. Map each ScalePad item to its CloudRadial home:
@@ -85,7 +103,7 @@ agent:
     - cloudradial-v2-services
   requiredSecretNames: []
   inputSchema: |
-    {"type":"object","required":["mode"],"properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Omit to resolve from scalePadClientName via the crosswalk."},"scalePadClientName":{"type":"string","description":"Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"description":"plan = describe changes, no writes; apply = write approved changes only."},"phase":{"type":"string","enum":["warranty","software","flexible-assets","assessments","archive","roadmap","all"],"description":"Which alignment phase to run. Defaults to all."},"flexibleAssetTypeFilter":{"type":"array","items":{"type":"string"},"description":"Limit flexible-asset sync to these type names."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."}}}
+    {"type":"object","properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Optional - omit to resolve from scalePadClientName, or to let the agent crosswalk ScalePad clients itself (up to maxCompanies)."},"scalePadClientName":{"type":"string","description":"Optional. Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"default":"plan","description":"plan = describe changes, no writes (default); apply = write approved changes only, and only for a named company."},"phase":{"type":"string","enum":["warranty","software","flexible-assets","assessments","archive","roadmap","all"],"default":"all","description":"Which alignment phase to run. Defaults to all."},"flexibleAssetTypeFilter":{"type":"array","items":{"type":"string"},"description":"Limit flexible-asset sync to these type names."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."},"maxCompanies":{"type":"integer","default":3,"description":"When no company is named, how many crosswalked clients to plan for."}}}
   outputSchema: |
     {"type":"object","properties":{"summary":{"type":"string"},"clientsMapped":{"type":"array","items":{"type":"object","properties":{"scalepadClient":{"type":"string"},"cloudradialCompanyId":{"type":"integer"},"matchConfidence":{"type":"string"}}}},"unresolvedClients":{"type":"array","items":{"type":"string"}},"matched":{"type":"integer"},"enriched":{"type":"integer"},"created":{"type":"integer"},"skipped":{"type":"integer"},"planned":{"type":"array","items":{"type":"object","properties":{"target":{"type":"string"},"action":{"type":"string","enum":["enrich","create","upload","archive","skip"]},"fields":{"type":"object"},"policyImpact":{"type":"string"},"reason":{"type":"string"}}}},"unmapped":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"reason":{"type":"string"}}}},"policySpecification":{"type":"array","items":{"type":"object","properties":{"proposedPolicy":{"type":"string"},"input":{"type":"string"},"note":{"type":"string"}}}},"currencyNote":{"type":"string"},"warnings":{"type":"array","items":{"type":"string"}}}}
   # Start runs in dry-run (preview mutating tools) by default - the plan/apply safety gate.

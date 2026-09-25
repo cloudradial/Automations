@@ -7,7 +7,7 @@ agent:
   slug: cloudradial-ucp-assistant
   name: CloudRadial UCP Assistant
   vendor: CloudRadial
-  version: 0.1.0
+  version: 0.1.1
   description: General-purpose CloudRadial portal assistant - the AutomationAI analog of the CloudRadial UCP MCP plugin. Reads and (with approval) updates companies, users, endpoints, services, and tokens across the portal, and answers portal questions, audits, and reporting asks in plain language.
   goal: Act as a general-purpose CloudRadial portal assistant. Understand the request, use the CloudRadial extensions to gather the data you need (companies, users, endpoints, services, tokens), and either answer/report in plain language or - only when clearly asked to change something - make the change after surfacing exactly what will change and getting approval. Prefer reads; treat every create/update/delete as mutating and approval-gated. Never guess an id; resolve it first.
   category: Operations
@@ -83,7 +83,6 @@ agent:
   model: gpt-5.4
   requiredExtensionSlugs:
     - cloudradial-v2-companies
-    - cloudradial-v2-users
     - cloudradial-v2-endpoints
     - cloudradial-v2-services
     - cloudradial-v2-tokens

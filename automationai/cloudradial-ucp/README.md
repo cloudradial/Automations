@@ -6,7 +6,7 @@ A general-purpose CloudRadial **AutomationAI agent** — the platform-native ana
 
 **Download the agent:** [`cloudradial-ucp.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/cloudradial-ucp/cloudradial-ucp.agent.yml)
 
-In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-ucp-assistant`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies`, `cloudradial-v2-users`, `cloudradial-v2-endpoints`, `cloudradial-v2-services`, `cloudradial-v2-tokens`.
+In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-ucp-assistant`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies` (which also carries the user tools), `cloudradial-v2-endpoints`, `cloudradial-v2-services`, `cloudradial-v2-tokens`.
 
 Run it interactively in the **AI Playground**, or give it a goal. Pass a `request` (a question, an audit/report ask, or a change to make) and optionally a `companyName` to focus on one company.
 

@@ -29,7 +29,7 @@ definition:
           Read ScalePad (hardware lifecycles, initiatives, contracts, assessments) and the
           current CloudRadial state, then map each item to its CloudRadial home: warranty/EOL
           to endpoint expirationDate (write it directly, never update-warranty);
-          serial/model/manufacturer only where the portal value is blank; purchase date and
+          serial/model/manufacturer only where the portal value is blank; purchase date to endpoint manufacturedDate (only when blank) and
           other extras to endpoint custom-properties; installed software to
           endpointApplications; documentation-style assets to flexible assets; maturity/risk
           assessments to assessment upload; historical QBR PDFs to the report archive.

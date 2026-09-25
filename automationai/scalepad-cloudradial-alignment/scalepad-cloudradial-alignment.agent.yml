@@ -14,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.1.1
+  version: 0.1.2
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, syncs software and flexible
@@ -71,7 +71,9 @@ agent:
          - EOL/warranty -> endpoint expirationDate. Write it DIRECTLY. Never call
            update-warranty (that does an async manufacturer lookup and ignores the ScalePad date).
          - serial/model/manufacturer -> endpoint fields, only when the portal value is blank.
-         - purchase date and other no-native-home fields -> endpoint custom-property.
+         - purchase date -> endpoint manufacturedDate, only when the portal value is blank
+           (CloudRadial ages devices from it).
+         - other no-native-home fields -> endpoint custom-property.
          - installed software -> endpointApplication records.
          - documentation-style custom assets -> flexible assets (IT Glue-compatible route when
            the data originates in IT Glue, otherwise the native flexible-asset API).

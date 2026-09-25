@@ -39,7 +39,8 @@ right is the whole game:
 | Hardware EOL / warranty date | Endpoint `expirationDate` | `PATCH /v2/endpoint/{serialNumber}` (or `/id/{id}`) | API | ✅ **Warranty Coverage** policy |
 | Serial / model / manufacturer | Endpoint `serialNumber` / `model` / `manufacturer` | `PATCH /v2/endpoint/...` | API | Via age/lifecycle checks |
 | Age / lifecycle | Endpoint `cpu`, ship/manufacture date | `PATCH /v2/endpoint/...` | API | ⚠️ **Old Technology** (derived server-side from `cpu` name), **Past Endpoint Lifecycle** (ship date) |
-| Purchase date & other per-asset extras (no native field) | Endpoint **custom-property** | `POST /v2/endpoint/{serialNumber}/custom-property` | API | ❌ Not policy-evaluable |
+| Purchase date | Endpoint `manufacturedDate` (only when blank) | `PATCH /v2/endpoint/...` | API | ✅ Feeds device age (Past Endpoint Lifecycle, Endpoint LifeCycle Manager) |
+| Other per-asset extras (no native field) | Endpoint **custom-property** | `POST /v2/endpoint/{serialNumber}/custom-property` | API | ❌ Not policy-evaluable |
 | Installed software inventory | `endpointapplication` | `POST /v2/endpointapplication` | API | ✅ Application/Software policies |
 | Managed services / contracts | `service` + `serviceinstall`, or Planner items | `POST /v2/service`, `/v2/serviceinstall`, `/v2/product` | API | Partial |
 | Roadmap / initiatives | Planner items | `POST /v2/product` (`productType:2` + start/end = Timeline) | API + content ZIP (templates) | n/a |
@@ -65,7 +66,7 @@ EOL/warranty data becomes policy-driving CloudRadial data.
 | Manufacturer | `manufacturer` | Only if blank — never overwrite RMM values |
 | Model | `model` | Only if blank |
 | EOL / warranty | `expirationDate` | **The high-value write.** Drives Warranty Coverage policy |
-| Purchased | endpoint **custom-property** `ScalePad Purchase Date` | No native purchase field; do **not** use `manufacturedDate` |
+| Purchased | `manufacturedDate` | Only if blank — never overwrite a date the RMM or agent supplied. This is the date CloudRadial ages the device from, so the Endpoint LifeCycle Manager and the Past Endpoint Lifecycle policy work for ScalePad-sourced devices |
 | Age | — | Derived server-side; do not write |
 
 **Critical mechanics:**

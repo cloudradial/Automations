@@ -63,7 +63,8 @@ Everything below is reachable through the ScalePad API — no exports or files. 
 | Assessments | CloudRadial assessment | `POST /v2/assessment` then `POST /v2/assessment/upload` (Excel) | Its own scoring model |
 | Documentation assets (IT Glue) | **Flexible asset** | `/compatibility/*` (IT Glue-shaped) or `/v2/flexible-asset*` | ❌ Display only |
 | SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | ✅ Certificate / Domain Expiration |
-| QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item`, or email to the archive's inbound address | n/a |
+| QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item` | n/a |
+| Migration run report | **Report Archive** item (HTML) or **knowledge base article** | `POST /v2/archiveitem`, `POST /v2/article` | n/a |
 
 ---
 
@@ -139,7 +140,8 @@ CloudRadial imports assessments only from Excel (support KB 360052746791, *Impor
 
 - The v2 `POST /v2/archiveitem` creates **text/HTML items only** — it has no attachment upload.
 - The legacy API lists a company's archives with their **`inboundAddress`** (`GET /api/beta/archive`), creates an archive (`POST /api/beta/archive`), and has an item route (`POST /api/beta/archive/{archiveId}/item`) that accepts files up to 128 MB **[verify the request body]**.
-- Fallback: email the PDF to the archive's inbound address (limit 20 MB via email). The workflow sends it through Postmark with the PDF attached.
+- If the item route rejects a PDF, it's listed in the migration report for a manual upload (drag-drop into the archive).
+- **Migration report:** the sync writes its own run report into the portal with the documented `POST /v2/archiveitem` (`isHtml: true`) into a *ScalePad Migration* archive, or as a knowledge base article (`POST /v2/article`) if the archive can't be written. No email service is needed.
 - Source: download each deliverable with `GET /lifecycle-manager/v1/deliverables/{id}/pdf`, in the same step that uploads it.
 
 ---
@@ -193,7 +195,7 @@ CloudRadial ships an **IT Glue-compatible** flexible-asset API (`/compatibility/
 6. Tag devices created from ScalePad (`tagNumber = ScalePad`) and separate servers and VMs by ScalePad's `type`.
 7. Do **not** attempt to configure policies — only write policy-input fields, and report which policies the writes affect.
 8. Confirm the portal **currency** before relying on prices — CloudRadial stores the number only.
-9. Close every run with counts: matched, enriched, created, skipped (with reasons), errors.
+9. Close every run with counts: matched, enriched, created, skipped (with reasons), errors — and in apply mode, write that report into the portal (report archive or knowledge base article).
 
 ---
 

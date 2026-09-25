@@ -2,7 +2,7 @@
 # The webhook ships disabled; enable it in-portal only if something other than a manual run or Routine triggers it.
 automationsWorkflow: 1
 name: ScalePad to CloudRadial Sync
-description: 'Deterministic ScalePad Lifecycle Manager to CloudRadial transfer, in phases: devices (workstations, servers, VMs - enrich or create, warranty to expirationDate, purchase date to manufacturedDate), installed software (endpoint applications), assessments (Excel import built in memory), roadmap and budget (initiatives and contracts to Planner cards), and deliverable PDFs to the Report Archive. Follows every ScalePad page. Defaults to plan mode - nothing is written until mode is apply. READ THE README BEFORE IMPORTING.'
+description: 'Deterministic ScalePad Lifecycle Manager to CloudRadial transfer, in phases: devices (workstations, servers, VMs - enrich or create, warranty to expirationDate, purchase date to manufacturedDate), installed software (endpoint applications), assessments (Excel import built in memory), roadmap and budget (initiatives and contracts to Planner cards), and deliverable PDFs to the Report Archive, then writes a migration report into the portal (report archive or knowledge base article). Follows every ScalePad page. Defaults to plan mode - nothing is written until mode is apply. READ THE README BEFORE IMPORTING.'
 definition:
   schemaVersion: 1
   activities:
@@ -28,9 +28,9 @@ definition:
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -152,6 +152,16 @@ definition:
               }
               return $items.ToArray()
           }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
+          }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
           $mode = [string](Get-P $ctx 'mode' 'plan')
@@ -183,7 +193,10 @@ definition:
               includeContracts       = -not ([string](Get-P $ctx 'includeContracts' 'true') -match '^(false|no|0)$')
               archiveName            = [string](Get-P $ctx 'archiveName' 'ScalePad QBR History')
               deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 20)
+              reportTarget           = ([string](Get-P $ctx 'reportTarget' 'archive')).ToLowerInvariant()
+              reportArchiveName      = [string](Get-P $ctx 'reportArchiveName' 'ScalePad Migration')
           }
+          if ($settings.reportTarget -notin @('archive', 'article', 'none')) { Warn "reportTarget '$($settings.reportTarget)' isn't archive, article or none; using archive."; $settings.reportTarget = 'archive' }
 
           # --- ScalePad client ---
           $spClientId = [string](Get-P $ctx 'scalePadClientId' '')
@@ -251,9 +264,9 @@ definition:
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -374,6 +387,16 @@ definition:
                   $next = Get-P $resp '@odata.nextLink'
               }
               return $items.ToArray()
+          }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -529,9 +552,9 @@ definition:
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -652,6 +675,16 @@ definition:
                   $next = Get-P $resp '@odata.nextLink'
               }
               return $items.ToArray()
+          }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -753,9 +786,9 @@ definition:
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -876,6 +909,16 @@ definition:
                   $next = Get-P $resp '@odata.nextLink'
               }
               return $items.ToArray()
+          }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -1072,9 +1115,9 @@ definition:
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -1195,6 +1238,16 @@ definition:
                   $next = Get-P $resp '@odata.nextLink'
               }
               return $items.ToArray()
+          }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -1347,9 +1400,9 @@ definition:
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -1471,6 +1524,16 @@ definition:
               }
               return $items.ToArray()
           }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
+          }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
           $mode = [string](Get-P $ctx 'mode' 'plan')
@@ -1481,8 +1544,8 @@ definition:
           # Step 6 - Deliverable PDFs -> CloudRadial Report Archive
           #   1. Download the PDF from ScalePad to the run's temp folder.
           #   2. Upload it to the archive (POST /api/beta/archive/{id}/item).
-          #   3. If that route rejects the file, email it to the archive's inbound
-          #      address through Postmark (needs the Postmark-* secrets).
+          #   3. If that route rejects the file, list it in the migration report
+          #      (written to the portal by the summary step) as a manual upload.
           #   Nothing is kept after the run.
           # =====================================================================
           $phase = 'archive'
@@ -1490,7 +1553,7 @@ definition:
           $settings = Get-P $ctx 'settings'
           $companyId = [int](Get-P $ctx 'companyId')
           $spClientId = [string](Get-P $ctx 'scalePadClientId')
-          $counts = [ordered]@{ deliverables = 0; alreadyArchived = 0; toArchive = 0; uploaded = 0; emailed = 0; needsManual = 0; errors = 0 }
+          $counts = [ordered]@{ deliverables = 0; alreadyArchived = 0; toArchive = 0; uploaded = 0; needsManual = 0; errors = 0 }
           $items = New-Object System.Collections.ArrayList
 
           if (-not (Get-Command Send-ArchiveUpload -ErrorAction SilentlyContinue)) {
@@ -1516,17 +1579,9 @@ definition:
           }
           else {
               $archiveName = [string](Get-P $settings 'archiveName' 'ScalePad QBR History')
-              $archives = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$companyId")
-              if ($archives.Count -eq 1 -and $null -ne (Get-P $archives[0] 'value')) { $archives = @(Get-P $archives[0] 'value' @()) }
-              $archive = @($archives | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $companyId -and ([string](Get-P $_ 'name')) -eq $archiveName }) | Select-Object -First 1
-              if ($null -eq $archive) {
-                  if ($apply) {
-                      $archive = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $companyId; name = $archiveName; category = 'QBR' })
-                  }
-                  else { Warn "Archive '$archiveName' doesn't exist yet; apply will create it." }
-              }
+              $archive = Get-CrArchive -CompanyId $companyId -Name $archiveName -Create:$apply -Category 'QBR'
+              if ($null -eq $archive) { Warn "Archive '$archiveName' doesn't exist yet; apply will create it." }
               $archiveId = [int](Get-P $archive 'id' 0)
-              $inbound = [string](Get-P $archive 'inboundAddress' '')
 
               $archivedSubjects = New-Object System.Collections.Generic.HashSet[string]
               if ($archiveId -gt 0) {
@@ -1536,7 +1591,6 @@ definition:
                   } catch { Warn "Could not list existing archive items; duplicates are possible. $($_.Exception.Message)" }
               }
 
-              $pm = @{ token = (Get-Secret 'Postmark-ServerToken'); from = (Get-Secret 'Postmark-FromEmail'); url = (Get-Secret 'Postmark-ApiUrl') }
               $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' @{ 'filter[client.id]' = "eq:$spClientId"; sort = '-created_at' })
               $counts.deliverables = $deliverables.Count
               $limit = [int](Get-P $settings 'deliverableLimit' 20)
@@ -1556,19 +1610,8 @@ definition:
                           try { $null = Send-ArchiveUpload -ArchiveId $archiveId -FilePath $file -FileName $fileName; $counts.uploaded++; $item.method = 'api'; $done = $true }
                           catch { $item.apiError = $_.Exception.Message }
                           if (-not $done) {
-                              $size = (Get-Item $file).Length
-                              if ($inbound -and -not (Test-Blank $pm.token) -and -not (Test-Blank $pm.from) -and $size -lt 9MB) {
-                                  $mail = [ordered]@{ From = $pm.from; To = $inbound; Subject = $subject; TextBody = "ScalePad deliverable: $dname"; MessageStream = 'outbound'
-                                      Attachments = @(@{ Name = $fileName; Content = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($file)); ContentType = 'application/pdf' }) }
-                                  $pmBase = if (Test-Blank $pm.url) { 'https://api.postmarkapp.com' } else { $pm.url.TrimEnd('/') }
-                                  $r = Invoke-RestMethod -Method Post -Uri "$pmBase/email" -Headers @{ 'X-Postmark-Server-Token' = $pm.token; Accept = 'application/json' } -ContentType 'application/json' -Body ($mail | ConvertTo-Json -Depth 6)
-                                  if ([int](Get-P $r 'ErrorCode' 0) -ne 0) { throw "Postmark rejected the email: $(Get-P $r 'Message')" }
-                                  $counts.emailed++; $item.method = 'email'
-                              }
-                              else {
-                                  $counts.needsManual++; $item.method = 'manual'
-                                  Warn "'$subject' needs a manual upload: the archive API rejected it ($($item.apiError)) and email fallback isn't available$(if ($size -ge 9MB) { ' (file over 9 MB)' } elseif (-not $inbound) { ' (no archive inbound address)' } else { ' (Postmark secrets missing)' })."
-                              }
+                              $counts.needsManual++; $item.method = 'manual'
+                              Warn "'$subject' needs a manual upload to the '$archiveName' archive: the archive upload route rejected it ($($item.apiError))."
                           }
                       }
                       catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Archive '$subject' failed: $($_.Exception.Message)" }
@@ -1583,13 +1626,13 @@ definition:
           $ctx.results = $results
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
-          Set-NodeOutput @{ status = 'ok'; message = "Archive: $($c.deliverables) deliverables, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.uploaded) uploaded, $($c.emailed) emailed, $($c.needsManual) need manual upload" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
+          Set-NodeOutput @{ status = 'ok'; message = "Archive: $($c.deliverables) deliverables, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.uploaded) uploaded, $($c.needsManual) need manual upload" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
         timeoutSeconds: 900
         retryCount: 0
         parameters: []
         aiExtensions: []
     - id: node-summary
-      name: Summary
+      name: Migration report
       type: powershell-script
       position:
         x: 1460
@@ -1597,14 +1640,14 @@ definition:
       properties:
         script: |
           # =====================================================================
-          #  ScalePad to CloudRadial Sync - Summary
+          #  ScalePad to CloudRadial Sync - Migration report
           #  Deterministic, paged API-to-API transfer. mode "plan" (default) reads
           #  and reports; mode "apply" writes. Every step is self-contained: the
           #  shared helper block is repeated in each so a step can be read alone.
           #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
-          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey;
-          #  optional Postmark-ServerToken, Postmark-FromEmail, Postmark-ApiUrl
-          #  (archive email fallback). See the README before running apply.
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
           # =====================================================================
           # ---- shared helpers (identical in every step of this workflow) ----
           $ErrorActionPreference = 'Stop'
@@ -1726,6 +1769,16 @@ definition:
               }
               return $items.ToArray()
           }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
+          }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
           $mode = [string](Get-P $ctx 'mode' 'plan')
@@ -1733,50 +1786,119 @@ definition:
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
           # =====================================================================
-          # Step 7 - Summary in plain sentences + the full result
+          # Step 7 - Migration report
+          #   Builds a plain-language summary and, in apply mode, writes it into the
+          #   CloudRadial portal so the result is visible there:
+          #     reportTarget = archive (default) -> an HTML item in the company's
+          #                    "ScalePad Migration" report archive (POST /v2/archiveitem)
+          #     reportTarget = article           -> a knowledge base article (POST /v2/article)
+          #     reportTarget = none              -> run output only
+          #   If the archive can't be written, it falls back to an article.
+          #   Plan mode writes nothing - the report is returned in the run output.
           # =====================================================================
           $results = ConvertTo-Dict (Get-P $ctx 'results')
+          $settings = Get-P $ctx 'settings'
+          $companyId = [int](Get-P $ctx 'companyId')
+          $companyName = [string](Get-P $ctx 'companyName')
+          $spName = [string](Get-P $ctx 'scalePadClientName')
+          $runDay = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          function ConvertTo-HtmlText { param($s) [System.Net.WebUtility]::HtmlEncode([string]$s) }
+
           $lines = New-Object System.Collections.ArrayList
-          $null = $lines.Add("ScalePad client '$(Get-P $ctx 'scalePadClientName')' to CloudRadial company '$(Get-P $ctx 'companyName')' ($(Get-P $ctx 'companyId')), $mode mode.")
+          $html = New-Object System.Text.StringBuilder
+          $null = $lines.Add("ScalePad client '$spName' to CloudRadial company '$companyName' ($companyId), $mode mode.")
+          $null = $html.Append("<h2>ScalePad migration - $(ConvertTo-HtmlText $companyName)</h2><p>Run on $runDay in <b>$(if ($apply) { 'apply' } else { 'plan (preview)' })</b> mode, from ScalePad client <b>$(ConvertTo-HtmlText $spName)</b>.</p>")
+          $rows = New-Object System.Collections.ArrayList
+          $attention = New-Object System.Collections.ArrayList
 
           $d = Get-P $results 'devices.counts'
           if ($d) {
               $act = if ($apply) { "Enriched $(Get-P $d 'enriched') and created $(Get-P $d 'created')." } else { "Would enrich $(Get-P $d 'toEnrich') and create $(Get-P $d 'toCreate')." }
               $null = $lines.Add("Devices: $(Get-P $d 'inScope') workstations, servers and VMs in ScalePad, $(Get-P $d 'matched') already in CloudRadial. $act $(Get-P $d 'unchanged') needed nothing, $(Get-P $d 'skipped') were skipped, $(Get-P $d 'errors') errors.")
+              $null = $rows.Add(@('Devices', "$(Get-P $d 'inScope') in ScalePad, $(Get-P $d 'matched') already in CloudRadial", $act, "$(Get-P $d 'skipped') skipped, $(Get-P $d 'errors') errors"))
+              $groups = @{}
+              foreach ($s in @(Get-P $results 'devices.skipped' @())) { $r = [string](Get-P $s 'reason'); if (-not $groups.ContainsKey($r)) { $groups[$r] = New-Object System.Collections.ArrayList }; $null = $groups[$r].Add([string](Get-P $s 'device')) }
+              foreach ($k in $groups.Keys) { $null = $attention.Add("Devices skipped - $k ($($groups[$k].Count)): $((@($groups[$k]) | Select-Object -First 15) -join ', ')") }
           }
           $s = Get-P $results 'software.counts'
           if ($s) {
-              $act = if ($apply) { "created $(Get-P $s 'created')" } else { "$(Get-P $s 'toCreate') would be created" }
-              $null = $lines.Add("Software: $(Get-P $s 'scalePadInstalls') installed items in ScalePad, $(Get-P $s 'alreadyPresent') already in CloudRadial, $act, $(Get-P $s 'noDevice') are on devices not in CloudRadial.")
+              $act = if ($apply) { "Created $(Get-P $s 'created')." } else { "Would create $(Get-P $s 'toCreate')." }
+              $null = $lines.Add("Software: $(Get-P $s 'scalePadInstalls') installed items in ScalePad, $(Get-P $s 'alreadyPresent') already in CloudRadial. $act $(Get-P $s 'noDevice') are on devices not in CloudRadial.")
+              $null = $rows.Add(@('Installed software', "$(Get-P $s 'scalePadInstalls') installs on $(Get-P $s 'devicesWithSoftware') devices", $act, "$(Get-P $s 'noDevice') on devices not in CloudRadial, $(Get-P $s 'errors') errors"))
+              if ([int](Get-P $s 'overCap' 0) -gt 0) { $null = $attention.Add("Software: $(Get-P $s 'overCap') records left for the next run (maxSoftwareWrites).") }
           }
           $a = Get-P $results 'assessments.counts'
           if ($a) {
-              $act = if ($apply) { "imported $(Get-P $a 'imported')" } else { "$(Get-P $a 'toImport') would be imported" }
-              $null = $lines.Add("Assessments: $(Get-P $a 'scalePadAssessments') in ScalePad, $(Get-P $a 'alreadyInCloudRadial') already imported, $act ($(Get-P $a 'questions') questions).")
+              $act = if ($apply) { "Imported $(Get-P $a 'imported')." } else { "Would import $(Get-P $a 'toImport')." }
+              $null = $lines.Add("Assessments: $(Get-P $a 'scalePadAssessments') in ScalePad, $(Get-P $a 'alreadyInCloudRadial') already imported. $act ($(Get-P $a 'questions') questions).")
+              $null = $rows.Add(@('Assessments', "$(Get-P $a 'scalePadAssessments') in ScalePad ($(Get-P $a 'questions') questions)", $act, "$(Get-P $a 'alreadyInCloudRadial') already imported, $(Get-P $a 'errors') errors"))
           }
           $r = Get-P $results 'roadmap.counts'
           if ($r) {
-              $act = if ($apply) { "$(Get-P $r 'created') cards created and $(Get-P $r 'updated') updated" } else { "$(Get-P $r 'toCreate') cards would be created and $(Get-P $r 'toUpdate') updated" }
-              $null = $lines.Add("Roadmap: $(Get-P $r 'initiatives') initiatives and $(Get-P $r 'contracts') contracts; $act.")
+              $act = if ($apply) { "Created $(Get-P $r 'created') cards and updated $(Get-P $r 'updated')." } else { "Would create $(Get-P $r 'toCreate') cards and update $(Get-P $r 'toUpdate')." }
+              $null = $lines.Add("Roadmap: $(Get-P $r 'initiatives') initiatives and $(Get-P $r 'contracts') contracts. $act")
+              $null = $rows.Add(@('Roadmap and budget', "$(Get-P $r 'initiatives') initiatives, $(Get-P $r 'contracts') contracts", $act, "$(Get-P $r 'errors') errors"))
           }
           $ar = Get-P $results 'archive.counts'
           if ($ar) {
-              $act = if ($apply) { "$(Get-P $ar 'uploaded') uploaded, $(Get-P $ar 'emailed') emailed in, $(Get-P $ar 'needsManual') need a manual upload" } else { "$(Get-P $ar 'toArchive') would be archived" }
-              $null = $lines.Add("Report archive: $(Get-P $ar 'deliverables') ScalePad deliverables, $(Get-P $ar 'alreadyArchived') already archived, $act.")
+              $act = if ($apply) { "Uploaded $(Get-P $ar 'uploaded')." } else { "Would archive $(Get-P $ar 'toArchive')." }
+              $null = $lines.Add("Report archive: $(Get-P $ar 'deliverables') ScalePad deliverables, $(Get-P $ar 'alreadyArchived') already archived. $act $(if ($apply) { "$(Get-P $ar 'needsManual') need a manual upload." })")
+              $null = $rows.Add(@('Deliverable PDFs', "$(Get-P $ar 'deliverables') in ScalePad", $act, "$(Get-P $ar 'alreadyArchived') already archived, $(Get-P $ar 'needsManual') need manual upload, $(Get-P $ar 'errors') errors"))
+              $manual = @(@(Get-P $results 'archive.items' @()) | Where-Object { (Get-P $_ 'method') -eq 'manual' } | ForEach-Object { Get-P $_ 'deliverable' })
+              if ($manual.Count -gt 0) { $null = $attention.Add("Upload these PDFs to the '$(Get-P $results 'archive.archiveName')' archive by hand (download them from ScalePad): $($manual -join ', ')") }
           }
 
           $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })
           $errors = 0
           foreach ($ph in @('devices', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
-          Set-NodeOutput @{
-              status   = $(if ($errors -gt 0) { 'completed_with_errors' } else { 'ok' })
-              mode     = $mode
-              summary  = ($lines -join ' ')
-              results  = $results
-              warnings = $allWarnings
-              message  = ($lines -join ' ')
+
+          $null = $html.Append('<table border="1" cellpadding="6" cellspacing="0"><tr><th>Area</th><th>In ScalePad</th><th>Result</th><th>Notes</th></tr>')
+          foreach ($row in $rows) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $row[0])</td><td>$(ConvertTo-HtmlText $row[1])</td><td>$(ConvertTo-HtmlText $row[2])</td><td>$(ConvertTo-HtmlText $row[3])</td></tr>") }
+          $null = $html.Append('</table>')
+          if ($attention.Count -gt 0) { $null = $html.Append('<h3>Needs attention</h3><ul>'); foreach ($x in $attention) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
+          if ($allWarnings.Count -gt 0) { $null = $html.Append('<h3>Warnings</h3><ul>'); foreach ($x in @($allWarnings | Select-Object -First 40)) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
+          $null = $html.Append('<p><i>Written by the AutomationAI workflow "ScalePad to CloudRadial Sync". Devices created from ScalePad are tagged ScalePad.</i></p>')
+
+          # ---- write the report into the portal ----
+          $reportLocation = 'run output only'
+          $target = [string](Get-P $settings 'reportTarget' 'archive')
+          $subject = "ScalePad migration - $runDay"
+          if ($apply -and $target -ne 'none') {
+              $written = $false
+              if ($target -eq 'archive') {
+                  try {
+                      $archName = [string](Get-P $settings 'reportArchiveName' 'ScalePad Migration')
+                      $arch = Get-CrArchive -CompanyId $companyId -Name $archName -Create -Category 'ScalePad'
+                      $archId = [int](Get-P $arch 'id' 0)
+                      if ($archId -le 0) { throw 'no archive id returned' }
+                      $null = Invoke-Cr -Method POST -Path '/v2/archiveitem' -Body ([ordered]@{ companyId = $companyId; archiveId = $archId; subject = $subject; text = $html.ToString(); isHtml = $true; isError = ($errors -gt 0) })
+                      $reportLocation = "Report archive '$archName' (Compliance > Reports), item '$subject'"
+                      $written = $true
+                  }
+                  catch { Warn "Couldn't write the report to the archive ($($_.Exception.Message)); writing it as a knowledge base article instead." }
+              }
+              if (-not $written) {
+                  try {
+                      $null = Invoke-Cr -Method POST -Path '/v2/article' -Body ([ordered]@{ companyId = $companyId; subject = $subject; category = 'ScalePad Migration'; datePublished = (ConvertTo-IsoDate (Get-Date)); body = $html.ToString(); author = 'AutomationAI' })
+                      $reportLocation = "Knowledge base article '$subject' (category ScalePad Migration)"
+                  }
+                  catch { Warn "Couldn't write the report to the portal: $($_.Exception.Message). It's in the run output." }
+              }
           }
-        timeoutSeconds: 120
+          $null = $lines.Add("Report: $reportLocation.")
+          $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })
+
+          Set-NodeOutput @{
+              status         = $(if ($errors -gt 0) { 'completed_with_errors' } else { 'ok' })
+              mode           = $mode
+              summary        = ($lines -join ' ')
+              reportLocation = $reportLocation
+              reportHtml     = $html.ToString()
+              results        = $results
+              warnings       = $allWarnings
+              message        = ($lines -join ' ')
+          }
+        timeoutSeconds: 300
         retryCount: 0
         parameters: []
         aiExtensions: []

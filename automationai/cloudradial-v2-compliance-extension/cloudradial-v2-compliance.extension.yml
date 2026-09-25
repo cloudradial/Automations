@@ -1,0 +1,282 @@
+# CloudRadial AutomationAI - extension export (cloudradial-v2-compliance 0.2.1).
+# Built from the catalog 0.2.0 export with the flexible-asset write fixes. Import on Extensions -> Custom; it overrides the catalog copy in this tenant.
+automationsExtension: 1
+extension:
+  slug: cloudradial-v2-compliance
+  name: CloudRadial v2 API — Compliance & Assets
+  vendor: CloudRadial
+  version: 0.2.1
+  description: Read + write security assessments, certificates and flexible assets in the CloudRadial v2 API.
+  detailsMarkdown: |-
+    ## How it works
+
+    **0.2.1:** flexible-asset writes are usable end to end - `cr_patch_flexible_asset` now carries `name`, `resourceUrl` and `traitsJson` (0.2.0 accepted only the id, so a patch changed nothing), `cr_patch_flexible_asset_type` carries the type's fields, and `cr_create_flexible_asset_type` accepts the type's `fields` in the same call.
+
+    This is one of **eight CloudRadial v2 API domain extensions** (the former single `cloudradial-v2-api` extension, split so no single extension exceeds the 128-tool model cap). This part covers **security assessments, certificates, and flexible assets / their types and fields** with full **read + write** access: `cr_list_*`/`cr_get_*` query the OData v4 collections, and `cr_create_*`/`cr_update_*`/`cr_patch_*`/`cr_delete_*` call the v2 REST write endpoints. Write tools require approval and never run in a dry run.
+
+    All eight parts share the **same** three secrets and Basic-auth profile, so provisioning one API key pair enables every part. Sibling extensions: cloudradial-v2-endpoints, cloudradial-v2-companies, cloudradial-v2-training, cloudradial-v2-content, cloudradial-v2-services, cloudradial-v2-feedback, cloudradial-v2-tokens.
+
+    **Authentication** is HTTP **Basic**: the API **public key** is the username, the API **private key** is the password. Create a key pair in CloudRadial under **Settings -> Integrations -> API** ("+ Add API Key"); the private key is shown only once at creation.
+
+    **Suggested URL:** https://api.us.cloudradial.com (set your regional root, e.g. https://api.eu.cloudradial.com).
+
+    **Secrets**
+    - `CloudRadial-BaseUrl`: regional API root, e.g. `https://api.us.cloudradial.com` (no trailing slash).
+    - `CloudRadial-PublicKey`: API **public key** (Basic-auth username) from Settings -> Integrations -> API.
+    - `CloudRadial-PrivateKey`: API **private key** (Basic-auth password). Shown only at key creation.
+  contextMarkdown: |-
+    # CloudRadial v2 REST API — Compliance & Assets
+
+    Base URL: `https://api.us.cloudradial.com` (regional: `api.eu.cloudradial.com`, `api.au.cloudradial.com`, etc.).
+    Auth is HTTP **Basic**: username = API **public key**, password = API **private key** (`Authorization: Basic base64(publicKey:privateKey)`, `Accept: application/json`).
+
+    This extension covers security assessments, certificates, and flexible assets / their types and fields.
+
+    ## Reading (OData v4, /v2/odata)
+    - **List:** `GET /v2/odata/<EntitySet>` -> `{ "value": [ ... ] }`. Options: `$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$count`, `$expand`.
+    - **Get one:** `GET /v2/odata/<EntitySet>(<key>)` (integer keys bare; string keys quoted).
+    - Most rows are company-scoped; filter by `companyId`.
+
+    ## Writing (REST, /v2/<entity>)
+    - **Create:** `POST /v2/<entity>` with a JSON body of the entity fields.
+    - **Replace:** `PUT /v2/<entity>/<key>` (full update).
+    - **Partial update:** `PATCH /v2/<entity>/<key>` as RFC 6902 JSON-Patch (`application/json-patch+json`); the cr_patch_* tools send only the fields you supply as `replace` ops.
+    - **Delete:** `DELETE /v2/<entity>/<key>` (soft delete where supported).
+    - Write tools require approval and are skipped in dry runs.
+
+    ## Entity sets
+    | Entity set | Key | Notable fields |
+    |---|---|---|
+    | Assessment | assessmentId | assessmentId, companyId, title, category, description, recommendations, tier, scheduleInterval |
+    | Certificate | id | id, companyId, companyDomainId, name, url, expirationDate, issuer, isValid |
+    | FlexibleAsset | id | id, flexibleAssetTypeId, companyId, name, resourceUrl, traitsJson |
+    | FlexibleAssetType | id | id, name, description, icon, showInMenu |
+    | FlexibleAssetField | id | id, flexibleAssetTypeId, order, name, nameKey, kind, hint, decimals |
+
+    Tip: narrow with `$filter`/`$select` to inspect a focused subset, then resolve the record key before any write. (`$top`/`$skip` are owned by the runner's auto-pagination and are not caller inputs.)
+
+    ## Flexible assets
+    - A type's fields define the trait keys: each field's `nameKey` is its name in lowercase with spaces as hyphens (`Serial Number` -> `serial-number`). Create the type with its fields in one `cr_create_flexible_asset_type` call, or add fields later with `cr_create_flexible_asset_field`.
+    - `cr_create_flexible_asset` takes `traits` as an object. Reads return the same values as a JSON string in `traitsJson`.
+    - To update values, send the complete traits object as a JSON string in `cr_patch_flexible_asset` `traitsJson`.
+    - Match existing assets by a stable trait (for example a serial number) inside `traitsJson` before creating, so re-runs do not duplicate.
+  requiredSecretNames:
+    - CloudRadial-BaseUrl
+    - CloudRadial-PublicKey
+    - CloudRadial-PrivateKey
+  invocationProfileJson: '{"baseUrlSecret":"CloudRadial-BaseUrl","auth":{"scheme":"basic","usernameTemplate":"{CloudRadial-PublicKey}","passwordSecret":"CloudRadial-PrivateKey"},"headers":{"Accept":"application/json"}}'
+  companyOnly: false
+  skills:
+    - slug: manage-compliance
+      name: Manage Compliance & Assets
+      description: Use to create, update or delete security assessments, certificates, and flexible assets / their types and fields. Mutating; requires approval.
+      instructions: |-
+        Use to create, update, or delete records. These are mutating calls — every cr_create_/cr_update_/cr_patch_/cr_delete_ tool requires approval and does NOT execute in a dry run.
+        1. Resolve the target first: use the cr_list_*/cr_get_* tools (in this skill) to find the record's key and confirm you have the right one.
+        2. To create, call cr_create_* with the required body fields (the tool's required list).
+        3. To change a few fields, prefer cr_patch_* (JSON-Patch: send only the fields to change). To replace the whole record, use cr_update_*.
+        4. To remove a record, call cr_delete_* with its key. Soft-delete where the API supports it.
+        5. Confirm the mutation with the user before approving; echo back what changed.
+      toolNames:
+        - cr_list_assessment
+        - cr_get_assessment
+        - cr_list_certificate
+        - cr_get_certificate
+        - cr_list_flexible_asset
+        - cr_get_flexible_asset
+        - cr_list_flexible_asset_type
+        - cr_get_flexible_asset_type
+        - cr_list_flexible_asset_field
+        - cr_get_flexible_asset_field
+        - cr_import_assessment_template
+        - cr_create_certificate
+        - cr_update_certificate
+        - cr_patch_certificate
+        - cr_delete_certificate
+        - cr_create_flexible_asset
+        - cr_patch_flexible_asset
+        - cr_delete_flexible_asset
+        - cr_create_flexible_asset_type
+        - cr_patch_flexible_asset_type
+        - cr_delete_flexible_asset_type
+        - cr_create_flexible_asset_field
+      references:
+        - https://support.cloudradial.com/hc/en-us/articles/43433723502612-Understanding-the-CloudRadial-UCP-v2-API-Platform
+        - https://support.cloudradial.com/hc/en-us/articles/360050153571-Using-the-CloudRadial-API
+    - slug: query-compliance
+      name: Query Compliance & Assets
+      description: Use to look up / report on security assessments, certificates, and flexible assets / their types and fields (read-only).
+      instructions: |-
+        1. Identify the entity set(s) relevant to the request (see this skill's tools).
+        2. For a search/listing, call the matching cr_list_* tool with an OData `filter` (e.g. `companyId eq 5` or `contains(name,'acme')`), and use `orderby` to sort. The cr_list_* tools auto-paginate (the runner walks `$skip`/`$top` to exhaustion, capped at maxPages) and return the COMPLETE set, so always filter to narrow large collections rather than paging by hand.
+        3. To fetch one record you already have the key for, call the matching cr_get_* tool.
+        4. Summarize the returned records (`value` array) for the user; offer to refine the filter if the result set is large.
+      toolNames:
+        - cr_list_assessment
+        - cr_get_assessment
+        - cr_list_certificate
+        - cr_get_certificate
+        - cr_list_flexible_asset
+        - cr_get_flexible_asset
+        - cr_list_flexible_asset_type
+        - cr_get_flexible_asset_type
+        - cr_list_flexible_asset_field
+        - cr_get_flexible_asset_field
+      references:
+        - https://support.cloudradial.com/hc/en-us/articles/43433723502612-Understanding-the-CloudRadial-UCP-v2-API-Platform
+        - https://support.cloudradial.com/hc/en-us/articles/360050153571-Using-the-CloudRadial-API
+  tools:
+    - name: cr_create_certificate
+      description: cr create certificate
+      inputSchema: '{"type":"object","properties":{"companyId":{"type":"integer"},"companyDomainId":{"type":"string"},"name":{"type":"string"},"url":{"type":"string"},"expirationDate":{"type":"string"},"issuer":{"type":"string"},"isValid":{"type":"string"},"publicKeyLength":{"type":"string"},"serialNumber":{"type":"string"},"signatureAlgorithm":{"type":"string"},"subject":{"type":"string"},"thumbprint":{"type":"string"},"x509Version":{"type":"string"}},"additionalProperties":false,"required":["companyId","name","url"]}'
+      binding: cr_create_certificate
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"POST","path":"/v2/certificate","args":{"companyId":{"in":"body"},"companyDomainId":{"in":"body"},"name":{"in":"body"},"url":{"in":"body"},"expirationDate":{"in":"body"},"issuer":{"in":"body"},"isValid":{"in":"body"},"publicKeyLength":{"in":"body"},"serialNumber":{"in":"body"},"signatureAlgorithm":{"in":"body"},"subject":{"in":"body"},"thumbprint":{"in":"body"},"x509Version":{"in":"body"}}}'
+    - name: cr_create_flexible_asset
+      description: Create a new flexible asset. traits is an object keyed by each field's nameKey (see cr_list_flexible_asset_field), e.g. {"name":"Core switch","serial-number":"ABC123"}.
+      inputSchema: '{"type":"object","properties":{"flexibleAssetTypeId":{"type":"integer"},"companyId":{"type":"integer"},"resourceUrl":{"type":"string"},"traits":{"type":"object","description":"Field values keyed by field nameKey."}},"additionalProperties":false,"required":["companyId","flexibleAssetTypeId"]}'
+      binding: cr_create_flexible_asset
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"POST","path":"/v2/flexible-asset","args":{"flexibleAssetTypeId":{"in":"body"},"companyId":{"in":"body"},"resourceUrl":{"in":"body"},"traits":{"in":"body"}}}'
+    - name: cr_create_flexible_asset_field
+      description: Create a new flexible asset field
+      inputSchema: '{"type":"object","properties":{"flexibleAssetTypeId":{"type":"integer"},"order":{"type":"integer"},"name":{"type":"string"},"kind":{"type":"string"},"hint":{"type":"string"},"defaultValue":{"type":"string"},"required":{"type":"boolean"},"useForTitle":{"type":"boolean"},"showInList":{"type":"boolean"}},"additionalProperties":false,"required":["flexibleAssetTypeId","kind","name"]}'
+      binding: cr_create_flexible_asset_field
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"POST","path":"/v2/flexible-asset-field","args":{"flexibleAssetTypeId":{"in":"body"},"order":{"in":"body"},"name":{"in":"body"},"kind":{"in":"body"},"hint":{"in":"body"},"defaultValue":{"in":"body"},"required":{"in":"body"},"useForTitle":{"in":"body"},"showInList":{"in":"body"}}}'
+    - name: cr_create_flexible_asset_type
+      description: 'Create a new flexible asset type, optionally with its fields in the same call. Each field becomes a trait key on the assets (its nameKey: the field name in lowercase with spaces as hyphens, e.g. "Serial Number" -> serial-number).'
+      inputSchema: '{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"icon":{"type":"string"},"showInMenu":{"type":"boolean"},"fields":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"kind":{"type":"string","description":"Text, Textbox, Date, Number, Checkbox, Select, Tag, Upload, Percent or Header."},"order":{"type":"integer"},"hint":{"type":"string"},"defaultValue":{"type":"string"},"required":{"type":"boolean"},"useForTitle":{"type":"boolean"},"showInList":{"type":"boolean"}},"required":["name","kind"]},"description":"Fields to create with the type."}},"additionalProperties":false,"required":["name"]}'
+      binding: cr_create_flexible_asset_type
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"POST","path":"/v2/flexible-asset-type","args":{"name":{"in":"body"},"description":{"in":"body"},"icon":{"in":"body"},"showInMenu":{"in":"body"},"fields":{"in":"body"}}}'
+    - name: cr_delete_certificate
+      description: cr delete certificate
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."}},"additionalProperties":false,"required":["id"]}'
+      binding: cr_delete_certificate
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"DELETE","path":"/v2/certificate/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: cr_delete_flexible_asset
+      description: Delete a flexible asset
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."}},"additionalProperties":false,"required":["id"]}'
+      binding: cr_delete_flexible_asset
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"DELETE","path":"/v2/flexible-asset/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: cr_delete_flexible_asset_type
+      description: Delete a flexible asset type
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."}},"additionalProperties":false,"required":["id"]}'
+      binding: cr_delete_flexible_asset_type
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"DELETE","path":"/v2/flexible-asset-type/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: cr_get_assessment
+      description: Get a single Assessment by its key assessmentId (GET /v2/odata/Assessment(key)). Supports $select and $expand.
+      inputSchema: '{"type":"object","properties":{"assessmentId":{"type":"integer","description":"Key of the Assessment"},"select":{"type":"string"},"expand":{"type":"string"}},"required":["assessmentId"],"additionalProperties":false}'
+      binding: cr_get_assessment
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/Assessment({assessmentId})","args":{"assessmentId":{"in":"path","name":"assessmentId"},"select":{"in":"query","name":"$select"},"expand":{"in":"query","name":"$expand"}}}'
+    - name: cr_get_certificate
+      description: Get a single Certificate by its key id (GET /v2/odata/Certificate(key)). Supports $select and $expand.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Key of the Certificate"},"select":{"type":"string"},"expand":{"type":"string"}},"required":["id"],"additionalProperties":false}'
+      binding: cr_get_certificate
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/Certificate({id})","args":{"id":{"in":"path","name":"id"},"select":{"in":"query","name":"$select"},"expand":{"in":"query","name":"$expand"}}}'
+    - name: cr_get_flexible_asset
+      description: Get a single FlexibleAsset by its key id (GET /v2/odata/FlexibleAsset(key)). Supports $select and $expand.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Key of the FlexibleAsset"},"select":{"type":"string"},"expand":{"type":"string"}},"required":["id"],"additionalProperties":false}'
+      binding: cr_get_flexible_asset
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/FlexibleAsset({id})","args":{"id":{"in":"path","name":"id"},"select":{"in":"query","name":"$select"},"expand":{"in":"query","name":"$expand"}}}'
+    - name: cr_get_flexible_asset_field
+      description: Get a single FlexibleAssetField by its key id (GET /v2/odata/FlexibleAssetField(key)). Supports $select and $expand.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Key of the FlexibleAssetField"},"select":{"type":"string"},"expand":{"type":"string"}},"required":["id"],"additionalProperties":false}'
+      binding: cr_get_flexible_asset_field
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/FlexibleAssetField({id})","args":{"id":{"in":"path","name":"id"},"select":{"in":"query","name":"$select"},"expand":{"in":"query","name":"$expand"}}}'
+    - name: cr_get_flexible_asset_type
+      description: Get a single FlexibleAssetType by its key id (GET /v2/odata/FlexibleAssetType(key)). Supports $select and $expand.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Key of the FlexibleAssetType"},"select":{"type":"string"},"expand":{"type":"string"}},"required":["id"],"additionalProperties":false}'
+      binding: cr_get_flexible_asset_type
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/FlexibleAssetType({id})","args":{"id":{"in":"path","name":"id"},"select":{"in":"query","name":"$select"},"expand":{"in":"query","name":"$expand"}}}'
+    - name: cr_import_assessment_template
+      description: Import questions from an assessment template into another assessment.
+      inputSchema: '{"type":"object","properties":{"assessmentId":{"type":"integer"},"templateId":{"type":"integer"},"applyTo":{"type":"string"}},"additionalProperties":false,"required":["assessmentId","templateId"]}'
+      binding: cr_import_assessment_template
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"POST","path":"/v2/assessment/import-template","args":{"assessmentId":{"in":"body"},"templateId":{"in":"body"},"applyTo":{"in":"body"}}}'
+    - name: cr_list_assessment
+      description: 'List/query the Assessment collection (GET /v2/odata/Assessment). OData query options supported. Fields include: assessmentId, companyId, title, category, description, recommendations, tier, scheduleInterval.'
+      inputSchema: '{"type":"object","properties":{"filter":{"type":"string","description":"OData $filter, e.g. companyId eq 5 or contains(name,''acme'')"},"select":{"type":"string","description":"OData $select: comma-separated fields"},"orderby":{"type":"string","description":"OData $orderby, e.g. name asc"},"count":{"type":"boolean","description":"OData $count: include total count"},"expand":{"type":"string","description":"OData $expand: related entities to include"}},"additionalProperties":false}'
+      binding: cr_list_assessment
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/Assessment","args":{"filter":{"in":"query","name":"$filter"},"select":{"in":"query","name":"$select"},"orderby":{"in":"query","name":"$orderby"},"count":{"in":"query","name":"$count"},"expand":{"in":"query","name":"$expand"}},"pagination":{"style":"offset","itemsPath":"value","offsetParam":"$skip","startOffset":0,"pageSizeParam":"$top","pageSize":100,"maxPages":200}}'
+    - name: cr_list_certificate
+      description: 'List/query the Certificate collection (GET /v2/odata/Certificate). OData query options supported. Fields include: id, companyId, companyDomainId, name, url, expirationDate, issuer, isValid.'
+      inputSchema: '{"type":"object","properties":{"filter":{"type":"string","description":"OData $filter, e.g. companyId eq 5 or contains(name,''acme'')"},"select":{"type":"string","description":"OData $select: comma-separated fields"},"orderby":{"type":"string","description":"OData $orderby, e.g. name asc"},"count":{"type":"boolean","description":"OData $count: include total count"},"expand":{"type":"string","description":"OData $expand: related entities to include"}},"additionalProperties":false}'
+      binding: cr_list_certificate
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/Certificate","args":{"filter":{"in":"query","name":"$filter"},"select":{"in":"query","name":"$select"},"orderby":{"in":"query","name":"$orderby"},"count":{"in":"query","name":"$count"},"expand":{"in":"query","name":"$expand"}},"pagination":{"style":"offset","itemsPath":"value","offsetParam":"$skip","startOffset":0,"pageSizeParam":"$top","pageSize":100,"maxPages":200}}'
+    - name: cr_list_flexible_asset
+      description: 'List/query the FlexibleAsset collection (GET /v2/odata/FlexibleAsset). OData query options supported. Fields include: id, flexibleAssetTypeId, companyId, name, resourceUrl, traitsJson.'
+      inputSchema: '{"type":"object","properties":{"filter":{"type":"string","description":"OData $filter, e.g. companyId eq 5 or contains(name,''acme'')"},"select":{"type":"string","description":"OData $select: comma-separated fields"},"orderby":{"type":"string","description":"OData $orderby, e.g. name asc"},"count":{"type":"boolean","description":"OData $count: include total count"},"expand":{"type":"string","description":"OData $expand: related entities to include"}},"additionalProperties":false}'
+      binding: cr_list_flexible_asset
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/FlexibleAsset","args":{"filter":{"in":"query","name":"$filter"},"select":{"in":"query","name":"$select"},"orderby":{"in":"query","name":"$orderby"},"count":{"in":"query","name":"$count"},"expand":{"in":"query","name":"$expand"}},"pagination":{"style":"offset","itemsPath":"value","offsetParam":"$skip","startOffset":0,"pageSizeParam":"$top","pageSize":100,"maxPages":200}}'
+    - name: cr_list_flexible_asset_field
+      description: 'List/query the FlexibleAssetField collection (GET /v2/odata/FlexibleAssetField). OData query options supported. Fields include: id, flexibleAssetTypeId, order, name, nameKey, kind, hint, decimals.'
+      inputSchema: '{"type":"object","properties":{"filter":{"type":"string","description":"OData $filter, e.g. companyId eq 5 or contains(name,''acme'')"},"select":{"type":"string","description":"OData $select: comma-separated fields"},"orderby":{"type":"string","description":"OData $orderby, e.g. name asc"},"count":{"type":"boolean","description":"OData $count: include total count"},"expand":{"type":"string","description":"OData $expand: related entities to include"}},"additionalProperties":false}'
+      binding: cr_list_flexible_asset_field
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/FlexibleAssetField","args":{"filter":{"in":"query","name":"$filter"},"select":{"in":"query","name":"$select"},"orderby":{"in":"query","name":"$orderby"},"count":{"in":"query","name":"$count"},"expand":{"in":"query","name":"$expand"}},"pagination":{"style":"offset","itemsPath":"value","offsetParam":"$skip","startOffset":0,"pageSizeParam":"$top","pageSize":100,"maxPages":200}}'
+    - name: cr_list_flexible_asset_type
+      description: 'List/query the FlexibleAssetType collection (GET /v2/odata/FlexibleAssetType). OData query options supported. Fields include: id, name, description, icon, showInMenu.'
+      inputSchema: '{"type":"object","properties":{"filter":{"type":"string","description":"OData $filter, e.g. companyId eq 5 or contains(name,''acme'')"},"select":{"type":"string","description":"OData $select: comma-separated fields"},"orderby":{"type":"string","description":"OData $orderby, e.g. name asc"},"count":{"type":"boolean","description":"OData $count: include total count"},"expand":{"type":"string","description":"OData $expand: related entities to include"}},"additionalProperties":false}'
+      binding: cr_list_flexible_asset_type
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/v2/odata/FlexibleAssetType","args":{"filter":{"in":"query","name":"$filter"},"select":{"in":"query","name":"$select"},"orderby":{"in":"query","name":"$orderby"},"count":{"in":"query","name":"$count"},"expand":{"in":"query","name":"$expand"}},"pagination":{"style":"offset","itemsPath":"value","offsetParam":"$skip","startOffset":0,"pageSizeParam":"$top","pageSize":100,"maxPages":200}}'
+    - name: cr_patch_certificate
+      description: cr patch certificate
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."},"companyId":{"type":"integer"},"companyDomainId":{"type":"string"},"name":{"type":"string"},"url":{"type":"string"},"expirationDate":{"type":"string"},"issuer":{"type":"string"},"isValid":{"type":"string"},"publicKeyLength":{"type":"string"},"serialNumber":{"type":"string"},"signatureAlgorithm":{"type":"string"},"subject":{"type":"string"},"thumbprint":{"type":"string"},"x509Version":{"type":"string"}},"additionalProperties":false,"required":["id"]}'
+      binding: cr_patch_certificate
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"PATCH","path":"/v2/certificate/{id}","args":{"id":{"in":"path","name":"id"},"companyId":{"in":"body"},"companyDomainId":{"in":"body"},"name":{"in":"body"},"url":{"in":"body"},"expirationDate":{"in":"body"},"issuer":{"in":"body"},"isValid":{"in":"body"},"publicKeyLength":{"in":"body"},"serialNumber":{"in":"body"},"signatureAlgorithm":{"in":"body"},"subject":{"in":"body"},"thumbprint":{"in":"body"},"x509Version":{"in":"body"}},"bodyStyle":"json-patch"}'
+    - name: cr_patch_flexible_asset
+      description: Apply partial updates to an existing flexible asset using JSON Patch. To change field values, read the asset (cr_get_flexible_asset), edit its traitsJson and send the whole object back as traitsJson - keys you leave out are removed.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."},"name":{"type":"string"},"resourceUrl":{"type":"string"},"traitsJson":{"type":"string","description":"The complete traits object as a JSON string, keyed by field nameKey."}},"additionalProperties":false,"required":["id"]}'
+      binding: cr_patch_flexible_asset
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"PATCH","path":"/v2/flexible-asset/{id}","args":{"id":{"in":"path","name":"id"},"name":{"in":"body"},"resourceUrl":{"in":"body"},"traitsJson":{"in":"body"}},"bodyStyle":"json-patch"}'
+    - name: cr_patch_flexible_asset_type
+      description: Apply partial updates to an existing flexible asset type using JSON Patch. Add fields with cr_create_flexible_asset_field.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."},"name":{"type":"string"},"description":{"type":"string"},"icon":{"type":"string"},"showInMenu":{"type":"boolean"}},"additionalProperties":false,"required":["id"]}'
+      binding: cr_patch_flexible_asset_type
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"PATCH","path":"/v2/flexible-asset-type/{id}","args":{"id":{"in":"path","name":"id"},"name":{"in":"body"},"description":{"in":"body"},"icon":{"in":"body"},"showInMenu":{"in":"body"}},"bodyStyle":"json-patch"}'
+    - name: cr_update_certificate
+      description: cr update certificate
+      inputSchema: '{"type":"object","properties":{"id":{"type":"integer","description":"Path key: id."},"companyId":{"type":"integer"},"companyDomainId":{"type":"string"},"name":{"type":"string"},"url":{"type":"string"},"expirationDate":{"type":"string"},"issuer":{"type":"string"},"isValid":{"type":"string"},"publicKeyLength":{"type":"string"},"serialNumber":{"type":"string"},"signatureAlgorithm":{"type":"string"},"subject":{"type":"string"},"thumbprint":{"type":"string"},"x509Version":{"type":"string"}},"additionalProperties":false,"required":["id","companyId","name","url"]}'
+      binding: cr_update_certificate
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"PUT","path":"/v2/certificate/{id}","args":{"id":{"in":"path","name":"id"},"companyId":{"in":"body"},"companyDomainId":{"in":"body"},"name":{"in":"body"},"url":{"in":"body"},"expirationDate":{"in":"body"},"issuer":{"in":"body"},"isValid":{"in":"body"},"publicKeyLength":{"in":"body"},"serialNumber":{"in":"body"},"signatureAlgorithm":{"in":"body"},"subject":{"in":"body"},"thumbprint":{"in":"body"},"x509Version":{"in":"body"}}}'

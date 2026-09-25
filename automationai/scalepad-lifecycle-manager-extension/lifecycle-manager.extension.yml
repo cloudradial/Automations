@@ -1,0 +1,310 @@
+# CloudRadial AutomationAI - extension export (lifecycle-manager 1.2.0).
+# Built from the catalog 1.0.0 export. Import on Extensions -> Custom; it overrides the catalog copy in this tenant.
+automationsExtension: 1
+extension:
+  slug: lifecycle-manager
+  name: Lifecycle Manager
+  vendor: ScalePad
+  version: 1.2.0
+  description: Review hardware lifecycle, warranties, installed software, assessments and deliverables, and drive vCIO initiatives from ScalePad Lifecycle Manager. Every list tool pages automatically.
+  detailsMarkdown: |-
+    ## How it works
+    **1.2.0:** every list tool now pages automatically (cursor), and new tools cover installed software, assessments and deliverables.
+
+    Calls the ScalePad API (Lifecycle Manager, formerly Warranty Master) to review hardware lifecycle and warranty posture, inventory client assets (hardware, SaaS, contracts), surface vCIO insights, and read and advance technology initiatives and their action items. It spans two ScalePad product surfaces on the same host: the **Core API** under `/core/v1/...` (clients, hardware assets, SaaS assets, service contracts) and the **Lifecycle Manager API** under `/lifecycle-manager/v1/...` and `/lifecycle-manager/v2/...` (lifecycle-enriched hardware, the hardware dashboard, initiatives, insights). Every request authenticates with the `x-api-key` header set to the `ScalePad-ApiKey` secret; the base URL is read from the `ScalePad-ApiUrl` secret. All tools are read-only except attaching an existing action item to an initiative, which is mutating and gated by approval.
+
+    **Suggested URL:** `https://api.scalepad.com` (stored in the `ScalePad-ApiUrl` secret). ScalePad is region-partitioned — US/default is `api.scalepad.com`, with `eu.api.scalepad.com`, `ca.api.scalepad.com`, and `au.api.scalepad.com` for other regions. The Core and Lifecycle Manager products are US-only; set `ScalePad-ApiUrl` to the host for your provisioned region.
+
+    **Secrets**
+    - `ScalePad-ApiUrl` — the API base URL, normally `https://api.scalepad.com`. Resolved from Key Vault because the generic HTTP invoker reads its base URL from a secret name. Resource paths (e.g. `/core/v1/clients`) are appended to it.
+    - `ScalePad-ApiKey` — your ScalePad API key, sent in the `x-api-key` request header. Generate it while signed in to ScalePad on your personal API keys page (New API key -> name + expiration; keys expire after 2 years by default). The secret value is shown once on generation — copy it then. A long opaque token string. API access is partner-gated and a paid Lifecycle Manager subscription is required for the `/lifecycle-manager/...` endpoints.
+  contextMarkdown: |-
+    # Lifecycle Manager Extension (ScalePad)
+    ScalePad API for Lifecycle Manager (formerly Warranty Master). The base URL is the `ScalePad-ApiUrl` secret — production/US is `https://api.scalepad.com` (regional hosts: eu./ca./au.api.scalepad.com). Read ScalePad-ApiUrl from Key Vault and append the resource path; never hard-code the host. Core and Lifecycle Manager products are US-only.
+    Auth is the `x-api-key` HTTP header set to the `ScalePad-ApiKey` secret (NOT an Authorization: Bearer token — it is a custom header named x-api-key). Every request also sends `Accept: application/json`. Load both secrets (ScalePad-ApiUrl, ScalePad-ApiKey) from the runner Key Vault before calling the API; never ask the user for the key or put any secret in tool input.
+    Two product surfaces share this host:
+    - Core API under /core/v1/... : GET /core/v1/clients, GET /core/v1/clients/{id}, GET /core/v1/assets/hardware, GET /core/v1/assets/hardware/{id}, GET /core/v1/assets/saas, GET /core/v1/service/contracts.
+    - Lifecycle Manager API under /lifecycle-manager/v1 and /v2 : GET /lifecycle-manager/v1/assets/hardware (lifecycle/warranty-enriched), GET /lifecycle-manager/v1/assets/hardware/lifecycles, GET /lifecycle-manager/v1/assets/hardware/dashboard, GET /lifecycle-manager/v2/initiatives, GET /lifecycle-manager/v1/initiatives/{id}, GET /lifecycle-manager/v1/initiatives/{initiative_id}/action-items, GET /lifecycle-manager/v1/insights, GET /lifecycle-manager/v1/assets/software (installed software per device), GET /lifecycle-manager/v1/assets/software/products and /products/{id}/devices, GET /lifecycle-manager/v1/assessments and /assessments/{id} (full question tree), GET /lifecycle-manager/v1/assessments/criteria/labels, GET /lifecycle-manager/v1/deliverables, and POST /lifecycle-manager/v1/initiatives/{initiative_id}/action-items/{action_item_id} (attach an existing action item to an initiative).
+    Resolve a client id with GET /core/v1/clients (filter by name) BEFORE filtering assets, contracts, or initiatives by client.
+    Filtering/paging conventions:
+    - Core API list endpoints use bracketed query filters of the form filter[field]=op:value, where op is one of eq, in, cont, gt, gte, lt, lte (e.g. filter[name]=cont:Acme, filter[client.id]=eq:client_abc123). Sort with sort=+field or sort=-field. Every list returns { data, total_count, next_cursor }. The runner follows next_cursor automatically on every list tool, so one call returns the complete set - pass page_size 200 and never pass cursor.
+    - Lifecycle Manager list endpoints use either filter[field]=eq:value (e.g. filter[client_id]=eq:client_abc123 on /assets/hardware/lifecycles and the dashboard) or simpler client_id / search query params on /lifecycle-manager/v1/assets/hardware, plus page_size + cursor.
+    - Initiative status values: Approved, Completed, Declined, InProgress, New, OnHold, Proposed. Priority: High, Medium, Low, None.
+    Gotchas: Lifecycle Manager endpoints return 402 if the account lacks a paid Lifecycle Manager subscription. Rate limit is 50 requests / 5 seconds (HTTP 429 on excess). The deprecated GET /lifecycle-manager/v1/initiatives is scheduled for removal 2027-03-01; prefer GET /lifecycle-manager/v2/initiatives for listing. There is no /core/v1 endpoint to list initiatives — initiatives live only under /lifecycle-manager. Action items can be listed per initiative and attached to an initiative, but creating a brand-new action item is a ControlMap-product operation not covered here.
+    Hardware types (Core /assets/hardware type): WORKSTATION, SERVER, VIRTUAL, NETWORK, MOBILE, IMAGING - use filter[type] to separate workstations from servers.
+    Bulk migration into CloudRadial (devices, software, assessments, deliverable PDFs) belongs in the deterministic "ScalePad to CloudRadial Sync" workflow; agents use these tools for reads and judgment.
+  requiredSecretNames:
+    - ScalePad-ApiUrl
+    - ScalePad-ApiKey
+  invocationProfileJson: '{"baseUrlSecret":"ScalePad-ApiUrl","headers":{"x-api-key":"{ScalePad-ApiKey}","Accept":"application/json"}}'
+  skills:
+    - slug: inventory-client-assets
+      name: Inventory Client Assets
+      description: Use when the request is to inventory what a client has - hardware devices, SaaS subscriptions, and service contracts - or to look up a specific asset or contract. All steps are read-only.
+      instructions: |-
+        # Inventory Client Assets
+
+        These tools reach the ScalePad Core API at the `ScalePad-ApiUrl` base, authenticating with the `x-api-key` header (the `ScalePad-ApiKey` secret). All credentials come from the runner Key Vault - never ask the user for them or put them in tool input.
+
+        1. Resolve the client id with `scalepad_list_clients` (filter[name]=cont:<name>) before filtering any asset list by client. Do not invent ids.
+        2. For hardware, call `scalepad_list_hardware_assets` (filter[client.id]=eq:<id>, or filter by manufacturer/serial/type); read one device with `scalepad_get_hardware_asset`.
+        3. For software subscriptions, call `scalepad_list_saas_assets` (filter[client.id]=eq:<id>) to read product, term, and seat-pool usage.
+        4. For contracts, call `scalepad_list_contracts` (filter[client.id]=eq:<id>, optionally filter[type] / filter[status]) to read managed-services/block/3rd-party agreements and their term dates.
+        5. List tools page automatically (the runner follows next_cursor); pass page_size 200. Summarize the counts and notable items per category. All steps are read-only.
+      toolNames:
+        - scalepad_list_clients
+        - scalepad_list_hardware_assets
+        - scalepad_get_hardware_asset
+        - scalepad_list_saas_assets
+        - scalepad_list_contracts
+      references:
+        - https://developer.scalepad.com/reference/list-hardware-assets-1
+        - https://developer.scalepad.com/reference/list-contracts-1
+    - slug: manage-initiatives
+      name: Manage Initiatives and Recommendations
+      description: Use when the request is to review vCIO technology initiatives, their budgets/status/priority, or the insights and action items behind them - and optionally to attach an existing action item to an initiative. Reading is read-only; attaching an action item is mutating and gated by approval.
+      instructions: |-
+        # Manage Initiatives and Recommendations
+
+        These tools reach the ScalePad Lifecycle Manager API at the `ScalePad-ApiUrl` base, authenticating with the `x-api-key` header (the `ScalePad-ApiKey` secret). All credentials come from the runner Key Vault - never ask the user for them or put them in tool input. These endpoints require a paid Lifecycle Manager subscription (HTTP 402 if missing).
+
+        1. If a client is named, resolve its id with `scalepad_list_clients` first.
+        2. To see recommendations/risks, call `scalepad_list_insights` and read the insight categories (e.g. HardwareModernization, HighRisk), affected counts, and risk levels.
+        3. To review initiatives, call `scalepad_list_initiatives` (filter[client.id]=eq:<id>, optionally filter[status] / filter[priority]); read one in full with `scalepad_get_initiative` (its budget, schedule, status).
+        4. To see the action items aligned with an initiative, call `scalepad_list_initiative_action_items` with the initiative_id.
+        5. To link an existing action item to an initiative, call `scalepad_attach_action_item_to_initiative` with both ids. This is mutating and requires approval - confirm both ids exist (steps 3-4) before attaching; it links existing records, it does not create an action item.
+        6. Report the initiative id, status, and the action taken.
+      toolNames:
+        - scalepad_list_clients
+        - scalepad_list_insights
+        - scalepad_list_initiatives
+        - scalepad_get_initiative
+        - scalepad_list_initiative_action_items
+        - scalepad_attach_action_item_to_initiative
+      references:
+        - https://developer.scalepad.com/reference/apipublicv2initiativelist
+        - https://developer.scalepad.com/reference/apipublicv1insights
+    - slug: pull-lifecycle-insights
+      name: Pull Lifecycle Insights for a QBR
+      description: Use when preparing a QBR or vCIO review and you need the cross-portfolio lifecycle insights and hardware-dashboard roll-ups (risk, modernization, replacement-due, warranty-expiration) rather than a single client's asset list. All steps are read-only.
+      instructions: |-
+        # Pull Lifecycle Insights for a QBR
+
+        These tools reach the ScalePad Lifecycle Manager API at the `ScalePad-ApiUrl` base, authenticating with the `x-api-key` header (the `ScalePad-ApiKey` secret). All credentials come from the runner Key Vault - never ask the user for them or put them in tool input. These endpoints require a paid Lifecycle Manager subscription (HTTP 402 if missing).
+
+        1. Call `scalepad_list_insights` to get the flat list of lifecycle insights - each with insight_id, category (e.g. HardwareModernization, HighRisk), risk_level, affected_count, 30-day trend, and asset_scope. This is the recommendation backlog.
+        2. Call `scalepad_lm_hardware_dashboard` for the hardware roll-up: counts by device type, replacement-due / due-soon, and warranty-expiration / due-soon. Omit the filter for an account-wide view, or pass filter[client_id]=eq:<id> (resolve via `scalepad_list_clients`) for one client.
+        3. Cross-reference the highest-risk and highest-affected insights against the dashboard counts and present a prioritized lifecycle summary suitable for a QBR. All steps are read-only.
+      toolNames:
+        - scalepad_list_clients
+        - scalepad_list_insights
+        - scalepad_lm_hardware_dashboard
+      references:
+        - https://developer.scalepad.com/reference/apipublicv1insights
+        - https://developer.scalepad.com/reference/apipublicv1assetshardwaredashboardsummaryget
+    - slug: review-hardware-warranties
+      name: Review Hardware Lifecycle and Warranties
+      description: Use when the request is to assess a client's hardware refresh posture, warranty coverage, or end-of-life risk - e.g. which devices are out of warranty, aging out, or due for replacement. All steps are read-only.
+      instructions: |-
+        # Review Hardware Lifecycle and Warranties
+
+        These tools reach the ScalePad API at the `ScalePad-ApiUrl` base, authenticating with the `x-api-key` header (the `ScalePad-ApiKey` secret). All credentials come from the runner Key Vault - never ask the user for them or put them in tool input. The lifecycle-manager endpoints require a paid Lifecycle Manager subscription and return HTTP 402 if it is missing.
+
+        1. If the request names a client, resolve its id first with `scalepad_list_clients` (filter[name]=cont:<name>). Do not invent ids.
+        2. For a portfolio-level snapshot, call `scalepad_lm_hardware_dashboard` (optionally filter[client_id]=eq:<id>) to read replacement-due and warranty-expiration roll-ups.
+        3. For device-level lifecycle detail, call `scalepad_lm_list_hardware` (client_id=<id>, plus filter[warranty] / filter[age] to narrow) or `scalepad_lm_list_hardware_lifecycles` (filter[client_id]=eq:<id>) to read warranty-expiry and purchase dates per device.
+        4. Drill into one device with `scalepad_get_hardware_asset` when full configuration/serial detail is needed.
+        5. Summarize the at-risk devices (out of warranty, aging, replacement-due) with counts and the client they belong to. These steps are read-only.
+      toolNames:
+        - scalepad_list_clients
+        - scalepad_lm_hardware_dashboard
+        - scalepad_lm_list_hardware
+        - scalepad_lm_list_hardware_lifecycles
+        - scalepad_get_hardware_asset
+      references:
+        - https://developer.scalepad.com/reference/apipublicv1assetshardwarelist
+        - https://developer.scalepad.com/reference/apipublicv1assetshardwaredashboardsummaryget
+    - slug: inventory-installed-software
+      name: Inventory Installed Software
+      description: Use when the request is about what software is installed on a client's devices - per device, per product, or out-of-date versions. All steps are read-only.
+      instructions: |-
+        # Inventory Installed Software
+
+        1. Resolve the client id with `scalepad_list_clients`.
+        2. For everything installed, call `scalepad_lm_list_software_assets` with filter[client.id]=eq:<id> (page_size 200). Each record names the device (hardware_asset serial_number/name/type), the product, the publisher and the version.
+        3. For one product across devices, call `scalepad_lm_list_software_products` then `scalepad_lm_list_software_product_devices`.
+        4. Summarize by product and by device. Bulk copying into CloudRadial is done by the ScalePad to CloudRadial Sync workflow, not by this skill.
+      toolNames:
+        - scalepad_list_clients
+        - scalepad_lm_list_software_assets
+        - scalepad_lm_list_software_products
+        - scalepad_lm_list_software_product_devices
+      references:
+        - https://developer.scalepad.com/reference/apipublicv1assetssoftwarelist
+    - slug: review-assessments
+      name: Review Assessments
+      description: Use when the request is about a client's ScalePad assessments - scores, open findings, remediation. All steps are read-only.
+      instructions: |-
+        # Review Assessments
+
+        1. Resolve the client id with `scalepad_list_clients`.
+        2. Call `scalepad_list_assessments` (filter[client.id]=eq:<id>) and pick the assessment(s).
+        3. Call `scalepad_get_assessment` for the full question tree; the selected criterion on each question is its answer.
+        4. Call `scalepad_list_assessment_criterion_labels` to translate each criterion label_key into a score.
+        5. Report the score, the non-compliant questions and their remediation tips.
+      toolNames:
+        - scalepad_list_clients
+        - scalepad_list_assessments
+        - scalepad_get_assessment
+        - scalepad_list_assessment_criterion_labels
+      references:
+        - https://developer.scalepad.com/reference/apipublicv1assessmentsget
+  tools:
+    - name: scalepad_attach_action_item_to_initiative
+      description: Attach an existing action item to an initiative in the Lifecycle Manager API (POST /lifecycle-manager/v1/initiatives/{initiative_id}/action-items/{action_item_id}). Both ids must already exist; this only links them - it does not create the action item. Mutating - requires approval.
+      inputSchema: '{"type":"object","properties":{"initiative_id":{"type":"string","description":"Initiative id to attach the action item to (resolve it from scalepad_list_initiatives)."},"action_item_id":{"type":"string","description":"Existing action item id to attach to the initiative."}},"required":["initiative_id","action_item_id"]}'
+      binding: scalepad_attach_action_item_to_initiative
+      readOnly: false
+      requiresApproval: true
+      httpDescriptor: '{"method":"POST","path":"/lifecycle-manager/v1/initiatives/{initiative_id}/action-items/{action_item_id}","args":{"initiative_id":{"in":"path","name":"initiative_id"},"action_item_id":{"in":"path","name":"action_item_id"}}}'
+    - name: scalepad_get_client
+      description: Get a single client organization by id from the Core API (GET /core/v1/clients/{id}). Returns the client record enriched with contact and hardware-asset counts, primary domain, and address. Read-only.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"string","description":"Client id to retrieve (resolve it from scalepad_list_clients)."}},"required":["id"]}'
+      binding: scalepad_get_client
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/core/v1/clients/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: scalepad_get_hardware_asset
+      description: Get a single hardware asset by id from the Core API (GET /core/v1/assets/hardware/{id}). Returns full device detail including manufacturer, model, serial number, configuration, and software. Read-only.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"string","description":"Hardware asset id to retrieve (resolve it from scalepad_list_hardware_assets)."}},"required":["id"]}'
+      binding: scalepad_get_hardware_asset
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/core/v1/assets/hardware/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: scalepad_get_initiative
+      description: Get a single initiative by id from the Lifecycle Manager API (GET /lifecycle-manager/v1/initiatives/{id}). Returns full detail - budget with one-time and recurring line items, fiscal-quarter scheduling, priority, status, and asset count. Read-only. Requires a paid Lifecycle Manager subscription.
+      inputSchema: '{"type":"object","properties":{"id":{"type":"string","description":"Initiative id to retrieve (e.g. dhka7gwd; resolve it from scalepad_list_initiatives)."}},"required":["id"]}'
+      binding: scalepad_get_initiative
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/initiatives/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: scalepad_list_clients
+      description: List client organizations from the ScalePad Core API (GET /core/v1/clients). Use this first to resolve a client id by name before filtering assets, contracts, or initiatives by client. Read-only. Filter with bracketed query params (filter[name]=cont:Acme, filter[lifecycle]=eq:...), sort, and page_size/cursor. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[name]":{"type":"string","description":"Filter by client name, formatted op:value (e.g. cont:Acme, eq:Acme Corp). Operators: eq, in, cont."},"filter[lifecycle]":{"type":"string","description":"Filter by lifecycle status, formatted op:value (operators eq, in)."},"sort":{"type":"string","description":"Sort field, prefix + ascending or - descending (e.g. -record_updated_at, name)."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_clients
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/core/v1/clients","args":{"filter[name]":{"in":"query","name":"filter[name]"},"filter[lifecycle]":{"in":"query","name":"filter[lifecycle]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_list_contracts
+      description: List service contracts from the Core API (GET /core/v1/service/contracts). Review managed-services/block/3rd-party contracts with term dates, auto-renew, billing period, status, and parent/addendum links. Filter by client, type, or status. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted op:value (operators eq, in)."},"filter[type]":{"type":"string","description":"Filter by contract type, formatted op:value. Types: MANAGED_SERVICES, BLOCK, 3RD_PARTY, UNASSIGNED."},"filter[status]":{"type":"string","description":"Filter by status, formatted op:value. Statuses: SUSPENDED, EXPIRED, ACTIVE, DRAFT, SENT, SIGNED, NOT_EXECUTED, CANCELLED."},"sort":{"type":"string","description":"Sort field, prefix + ascending or - descending."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_contracts
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/core/v1/service/contracts","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[type]":{"in":"query","name":"filter[type]"},"filter[status]":{"in":"query","name":"filter[status]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_list_hardware_assets
+      description: List hardware assets from the Core API (GET /core/v1/assets/hardware). Inventory devices with manufacturer, model, serial number, type, location, and configuration (CPU/RAM/software). Each device has a type (WORKSTATION, SERVER, VIRTUAL, NETWORK, MOBILE, IMAGING), OS, CPU, RAM and antivirus status. Filter by client, manufacturer, serial number, or type with bracketed query params. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted op:value (e.g. eq:client_abc123). Operators eq, in."},"filter[client.name]":{"type":"string","description":"Filter by client name, formatted op:value (operators eq, in, cont)."},"filter[manufacturer.name]":{"type":"string","description":"Filter by manufacturer name, formatted op:value (operators eq, in, cont)."},"filter[serial_number]":{"type":"string","description":"Filter by serial number, formatted op:value."},"filter[type]":{"type":"string","description":"Filter by asset type, formatted op:value. Types: WORKSTATION, SERVER, VIRTUAL, NETWORK, MOBILE, IMAGING (e.g. eq:SERVER, in:WORKSTATION,VIRTUAL)."},"sort":{"type":"string","description":"Sort field, prefix + ascending or - descending."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_hardware_assets
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/core/v1/assets/hardware","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[client.name]":{"in":"query","name":"filter[client.name]"},"filter[manufacturer.name]":{"in":"query","name":"filter[manufacturer.name]"},"filter[serial_number]":{"in":"query","name":"filter[serial_number]"},"filter[type]":{"in":"query","name":"filter[type]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_list_initiative_action_items
+      description: List the action items aligned with an initiative from the Lifecycle Manager API (GET /lifecycle-manager/v1/initiatives/{initiative_id}/action-items). Returns the action_item_ids attached to that initiative. Read-only. Requires a paid Lifecycle Manager subscription.
+      inputSchema: '{"type":"object","properties":{"initiative_id":{"type":"string","description":"Initiative id whose action items to list (resolve it from scalepad_list_initiatives)."}},"required":["initiative_id"]}'
+      binding: scalepad_list_initiative_action_items
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/initiatives/{initiative_id}/action-items","args":{"initiative_id":{"in":"path","name":"initiative_id"}}}'
+    - name: scalepad_list_initiatives
+      description: List vCIO technology initiatives from the Lifecycle Manager API (GET /lifecycle-manager/v2/initiatives - the current v2 list). Each initiative carries budget (one-time + recurring), priority, status, scheduling, and related asset/task/goal/meeting counts. Filter by client, status, or priority. Read-only. Requires a paid Lifecycle Manager subscription. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted op:value (operators eq, in). Resolve the id from scalepad_list_clients."},"filter[status]":{"type":"string","description":"Filter by status, formatted op:value. Statuses: Approved, Completed, Declined, InProgress, New, OnHold, Proposed."},"filter[priority]":{"type":"string","description":"Filter by priority, formatted op:value. Priorities: High, Medium, Low, None."},"filter[scheduled]":{"type":"string","description":"Filter by scheduled status (boolean), formatted op:value."},"sort":{"type":"string","description":"Sort field, prefix + ascending or - descending."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_initiatives
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v2/initiatives","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[status]":{"in":"query","name":"filter[status]"},"filter[priority]":{"in":"query","name":"filter[priority]"},"filter[scheduled]":{"in":"query","name":"filter[scheduled]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_list_insights
+      description: List lifecycle insights from the Lifecycle Manager API (GET /lifecycle-manager/v1/insights). Returns a flat array of insight summaries - each with an insight_id, affected_count, risk_level, category (e.g. HardwareModernization, HighRisk), 30-day trend, asset_scope (Hardware/Software/Contact/DeviceBackup), and state. Use to surface risk and modernization recommendations for a QBR or vCIO review. Read-only. Requires a paid Lifecycle Manager subscription.
+      inputSchema: '{"type":"object","properties":{}}'
+      binding: scalepad_list_insights
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/insights"}'
+    - name: scalepad_list_saas_assets
+      description: List SaaS assets / subscriptions from the Core API (GET /core/v1/assets/saas). Inventory software subscriptions with product, client, licensing term, and seat-pool (capacity/utilized/active) data. Filter by client, product, or status. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted op:value (operators eq, in)."},"filter[product.name]":{"type":"string","description":"Filter by product name, formatted op:value (operators eq, in, cont)."},"filter[status]":{"type":"string","description":"Filter by lifecycle/subscription status, formatted op:value."},"sort":{"type":"string","description":"Sort field, prefix + ascending or - descending."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_saas_assets
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/core/v1/assets/saas","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[product.name]":{"in":"query","name":"filter[product.name]"},"filter[status]":{"in":"query","name":"filter[status]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_lm_hardware_dashboard
+      description: Get the hardware dashboard summary from the Lifecycle Manager API (GET /lifecycle-manager/v1/assets/hardware/dashboard). Returns roll-up metrics - asset counts by device type, replacement-due and due-soon counts, and warranty-expiration and due-soon counts - account-wide, or scoped to one client when client_id is supplied. Read-only. Requires a paid Lifecycle Manager subscription.
+      inputSchema: '{"type":"object","properties":{"filter[client_id]":{"type":"string","description":"Optional client filter, formatted eq:value (e.g. eq:client_abc123). Omit to calculate the dashboard for the whole account."}}}'
+      binding: scalepad_lm_hardware_dashboard
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assets/hardware/dashboard","args":{"filter[client_id]":{"in":"query","name":"filter[client_id]"}}}'
+    - name: scalepad_lm_list_hardware
+      description: List lifecycle-enriched hardware from the Lifecycle Manager API (GET /lifecycle-manager/v1/assets/hardware). Unlike the Core hardware list, this surfaces lifecycle/replacement attributes - asset age, warranty status, Windows 11 CPU compatibility, ScalePad warranty coverage, configured backup, and initiative count. Use for hardware-refresh and warranty-renewal planning. Read-only. Requires a paid Lifecycle Manager subscription. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"client_id":{"type":"string","description":"Filter to a single client by id (resolve it from scalepad_list_clients)."},"search":{"type":"string","description":"Free-text search across asset fields."},"filter[warranty]":{"type":"string","description":"Filter by warranty status, formatted op:value (operators eq, in)."},"filter[age]":{"type":"string","description":"Filter by asset age, formatted op:value (operators eq, gt, gte, in, lt, lte)."},"filter[manufacturer.name]":{"type":"string","description":"Filter by manufacturer name, formatted op:value (operators cont, eq, in)."},"sort":{"type":"string","description":"Sort field, prefix + ascending or - descending."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_lm_list_hardware
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assets/hardware","args":{"client_id":{"in":"query","name":"client_id"},"search":{"in":"query","name":"search"},"filter[warranty]":{"in":"query","name":"filter[warranty]"},"filter[age]":{"in":"query","name":"filter[age]"},"filter[manufacturer.name]":{"in":"query","name":"filter[manufacturer.name]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_lm_list_hardware_lifecycles
+      description: List active hardware lifecycle records from the Lifecycle Manager API (GET /lifecycle-manager/v1/assets/hardware/lifecycles). Returns device manufacturer, model, serial number, purchase date, and warranty-expiry metadata for lifecycle/warranty tracking. Read-only. Requires a paid Lifecycle Manager subscription. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client_id]":{"type":"string","description":"Filter by client id, formatted eq:value (e.g. eq:client_abc123). Resolve the id from scalepad_list_clients."},"filter[serial_number]":{"type":"string","description":"Filter by device serial number, formatted eq:value."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_lm_list_hardware_lifecycles
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assets/hardware/lifecycles","args":{"filter[client_id]":{"in":"query","name":"filter[client_id]"},"filter[serial_number]":{"in":"query","name":"filter[serial_number]"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_lm_list_software_assets
+      description: 'List installed software from the Lifecycle Manager API (GET /lifecycle-manager/v1/assets/software). One record per installed product per device: product (name, category, type, edition), publisher, version (display, build, status, is_latest) and the device it is on (hardware_asset id, name, serial_number, type). Use filter[client.id] for one client, filter[hardware_asset.id] for one device. Read-only. Requires a paid Lifecycle Manager subscription. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.'
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted eq:value."},"filter[hardware_asset.id]":{"type":"string","description":"Filter by device (hardware asset) id, formatted eq:value."},"filter[hardware_asset.type]":{"type":"string","description":"Filter by device type, formatted eq:value (WORKSTATION, SERVER, ...)."},"filter[product.category]":{"type":"string","description":"Filter by product category, formatted eq:value."},"filter[version.status]":{"type":"string","description":"Filter by version status, formatted eq:value."},"search":{"type":"string","description":"Free-text search."},"sort":{"type":"string","description":"Sort field, prefix + or -."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_lm_list_software_assets
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assets/software","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[hardware_asset.id]":{"in":"query","name":"filter[hardware_asset.id]"},"filter[hardware_asset.type]":{"in":"query","name":"filter[hardware_asset.type]"},"filter[product.category]":{"in":"query","name":"filter[product.category]"},"filter[version.status]":{"in":"query","name":"filter[version.status]"},"search":{"in":"query","name":"search"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_lm_list_software_products
+      description: List normalized software products with lifecycle summaries from the Lifecycle Manager API (GET /lifecycle-manager/v1/assets/software/products), for the account or one client. Use to see which products and versions a client runs before drilling into devices. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted eq:value."},"search":{"type":"string","description":"Free-text search."},"sort":{"type":"string","description":"Sort field, prefix + or -."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_lm_list_software_products
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assets/software/products","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"search":{"in":"query","name":"search"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_lm_list_software_product_devices
+      description: List the devices that have one software product installed (GET /lifecycle-manager/v1/assets/software/products/{software_product_id}/devices), with the installed versions per device. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"software_product_id":{"type":"string","description":"Software product id (from scalepad_lm_list_software_products)."},"filter[client.id]":{"type":"string","description":"Filter by client id, formatted eq:value."},"filter[hardware_asset.type]":{"type":"string","description":"Filter by device type, formatted eq:value."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}},"required":["software_product_id"]}'
+      binding: scalepad_lm_list_software_product_devices
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assets/software/products/{software_product_id}/devices","args":{"software_product_id":{"in":"path","name":"software_product_id"},"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[hardware_asset.type]":{"in":"query","name":"filter[hardware_asset.type]"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_list_assessments
+      description: List assessments from the Lifecycle Manager API (GET /lifecycle-manager/v1/assessments) with title, client, status (InProgress/Completed), overall score, question counts and evaluation date. Filter by client or status. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted eq:value."},"filter[status]":{"type":"string","description":"InProgress or Completed, formatted eq:value."},"search":{"type":"string","description":"Free-text search."},"sort":{"type":"string","description":"Sort field, prefix + or -."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_assessments
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assessments","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[status]":{"in":"query","name":"filter[status]"},"search":{"in":"query","name":"search"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+    - name: scalepad_get_assessment
+      description: 'Get one assessment in full from the Lifecycle Manager API (GET /lifecycle-manager/v1/assessments/{id}): categories, questions (title, description, remediation tips, scoring instructions), answer criteria with which one is selected, public and internal comments, linked initiatives, and scores. Read-only.'
+      inputSchema: '{"type":"object","properties":{"id":{"type":"string","description":"Assessment id (from scalepad_list_assessments)."}},"required":["id"]}'
+      binding: scalepad_get_assessment
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assessments/{id}","args":{"id":{"in":"path","name":"id"}}}'
+    - name: scalepad_list_assessment_criterion_labels
+      description: List assessment answer label types and their options (GET /lifecycle-manager/v1/assessments/criteria/labels) - use to translate a criterion label_key into a compliance score. Read-only.
+      inputSchema: '{"type":"object","properties":{}}'
+      binding: scalepad_list_assessment_criterion_labels
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/assessments/criteria/labels"}'
+    - name: scalepad_list_deliverables
+      description: List QBR / vCIO deliverables across the account (GET /lifecycle-manager/v1/deliverables) with name, status, client, linked meetings and dates. The PDF itself is downloaded by the ScalePad to CloudRadial Sync workflow (GET /lifecycle-manager/v1/deliverables/{id}/pdf), not by this tool. Read-only. The runner follows next_cursor automatically and returns every page - do not pass cursor yourself.
+      inputSchema: '{"type":"object","properties":{"filter[client.id]":{"type":"string","description":"Filter by client id, formatted eq:value."},"filter[status]":{"type":"string","description":"Filter by status, formatted eq:value."},"filter[name]":{"type":"string","description":"Filter by name, formatted op:value."},"sort":{"type":"string","description":"Sort field, prefix + or -."},"page_size":{"type":"integer","description":"Records per page (1-200). Use 200 to reduce calls."},"cursor":{"type":"string","description":"Leave empty - the runner pages automatically."}}}'
+      binding: scalepad_list_deliverables
+      readOnly: true
+      requiresApproval: false
+      httpDescriptor: '{"method":"GET","path":"/lifecycle-manager/v1/deliverables","args":{"filter[client.id]":{"in":"query","name":"filter[client.id]"},"filter[status]":{"in":"query","name":"filter[status]"},"filter[name]":{"in":"query","name":"filter[name]"},"sort":{"in":"query","name":"sort"},"page_size":{"in":"query","name":"page_size"},"cursor":{"in":"query","name":"cursor"}},"pagination":{"style":"cursor","itemsPath":"data","cursorPath":"next_cursor","cursorParam":"cursor","maxPages":500}}'
+  companyOnly: false

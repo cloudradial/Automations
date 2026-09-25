@@ -1,114 +1,162 @@
 # ScalePad Lifecycle Manager → CloudRadial — Migration & Alignment Map
 
-**Purpose.** One reference for aligning ScalePad Lifecycle Manager (the QBR-prep engine)
-with CloudRadial's native QBR surface. It serves two audiences:
+**Purpose.** One reference for moving ScalePad Lifecycle Manager (the QBR-prep engine) into CloudRadial's native QBR surface. It serves two audiences:
 
 1. **People** — the team map for what moves where, by which route, and what won't move.
-2. **The alignment agent** — drop this file into an AutomationAI **Knowledge** folder and
-   ground the *ScalePad → CloudRadial Alignment* agent on it. Every field-level decision the
-   agent makes should trace back to a row here.
+2. **The alignment agent** — upload this file to an AutomationAI **Knowledge** folder and ground the *ScalePad → CloudRadial Alignment* workflow's agent node on it. Every field-level decision the agent makes should trace back to a row here.
 
-Verified against the live CloudRadial v2 OpenAPI spec (`api.us.cloudradial.com/swagger/v2/swagger.json`)
-and support.cloudradial.com on 2026-09-18. Where a detail is unconfirmed it is marked **[verify]**.
+Verified against the CloudRadial v2 OpenAPI spec (`api.us.cloudradial.com/swagger/v2/swagger.json`) and the legacy v1 spec, the ScalePad API reference (`developer.scalepad.com`), and support.cloudradial.com — last checked **2026-09-25**. Anything unconfirmed is marked **[verify]**.
 
 ---
 
 ## 1. The three-layer mental model
 
-CloudRadial has three distinct layers, and only one of them is API-writable. Getting this
-right is the whole game:
+CloudRadial has three distinct layers, and only one of them is API-writable. Getting this right is the whole game:
 
 | Layer | API-reachable? | What lives here |
 |---|---|---|
-| **Data** | ✅ Full CRUD | Endpoints, endpoint applications, custom-properties, flexible assets, domains, certificates, services, Planner items, assessments (via upload), media, archive items |
-| **Evaluation** (Compliance Policies) | ❌ No API surface | Policies run server-side over the *data* layer. No `/policy` route exists. Policy **definitions** travel as content-package ZIPs; policy **results** (red/yellow/green) are read only via the Policy Review report, the Compliance > Policies dashboard, or the daily policy email |
+| **Data** | ✅ Full CRUD | Endpoints, endpoint applications, custom-properties, flexible assets, domains, certificates, services, Planner items, assessments (via Excel upload), media, archive items |
+| **Evaluation** (Compliance Policies) | ❌ No API surface | Policies run server-side over the *data* layer. No `/policy` route exists. Policy **definitions** travel as content-package ZIPs; policy **results** are read only via the Policy Review report, the Compliance > Policies dashboard, or the daily policy email |
 | **Presentation** | Mixed | Report Layouts (UI-defined), Report Archives (API + email + drag-drop), flexible-asset grids under Infrastructure |
 
 **Rule of thumb for every ScalePad field:**
-- Want it **scored / compliance-graded**? → write it to the **endpoint** field the built-in
-  policy check already reads. Nothing else is policy-evaluable.
+- Want it **scored / compliance-graded**? → write it to the **endpoint** field the built-in policy check already reads. Nothing else is policy-evaluable.
 - Want it **just displayed / documented**? → flexible asset or custom-property.
 - It's a **judgment call / roadmap**? → Planner item or Assessment.
 
 ---
 
-## 2. Section-by-section map
+## 2. Where the data comes from in ScalePad
 
-| ScalePad Lifecycle Manager section | CloudRadial home | API entity / route | Import route | Policy-evaluable? |
-|---|---|---|---|---|
-| Hardware EOL / warranty date | Endpoint `expirationDate` | `PATCH /v2/endpoint/{serialNumber}` (or `/id/{id}`) | API | ✅ **Warranty Coverage** policy |
-| Serial / model / manufacturer | Endpoint `serialNumber` / `model` / `manufacturer` | `PATCH /v2/endpoint/...` | API | Via age/lifecycle checks |
-| Age / lifecycle | Endpoint `cpu`, ship/manufacture date | `PATCH /v2/endpoint/...` | API | ⚠️ **Old Technology** (derived server-side from `cpu` name), **Past Endpoint Lifecycle** (ship date) |
-| Purchase date | Endpoint `manufacturedDate` (only when blank) | `PATCH /v2/endpoint/...` | API | ✅ Feeds device age (Past Endpoint Lifecycle, Endpoint LifeCycle Manager) |
-| Other per-asset extras (no native field) | Endpoint **custom-property** | `POST /v2/endpoint/{serialNumber}/custom-property` | API | ❌ Not policy-evaluable |
-| Installed software inventory | `endpointapplication` | `POST /v2/endpointapplication` | API | ✅ Application/Software policies |
-| Managed services / contracts | `service` + `serviceinstall`, or Planner items | `POST /v2/service`, `/v2/serviceinstall`, `/v2/product` | API | Partial |
-| Roadmap / initiatives | Planner items | `POST /v2/product` (`productType:2` + start/end = Timeline) | API + content ZIP (templates) | n/a |
-| Budget / forecast | Priced Planner items | `POST /v2/product` (`projectUnitPrice`, `monthlyUnitPrice`) | API | n/a (no multi-year chart) |
-| Maturity / risk assessment + recommendations | Assessment | `POST /v2/assessment/upload`, `/import-template` (Excel-backed) | Excel / API + content ZIP | Its own scoring model |
-| Recommendation → priced plan | Assessment **Estimate of Work** report → Planner | report → `product` | API | n/a |
-| Client health / ranking | Account Planner **scoring** (item weights) | `product` `scoring` field | API | n/a |
-| Documentation-style custom assets (esp. if in IT Glue) | **Flexible asset** | `/compatibility/*` (IT Glue-shaped) or `/v2/flexible-asset*` (native) | API / PowerShell script | ❌ Display only |
-| SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | API | ✅ Certificate / Domain Expiration policies |
-| Historical QBR PDFs | **Report Archive** | `POST /v2/archiveitem` | API / archive email / drag-drop | n/a |
+Everything below is reachable through the ScalePad API — no exports or files. Every list endpoint returns `{ data, total_count, next_cursor }` and is **cursor-paged** (`page_size` 1–200, then pass `cursor`). A reader that stops after the first page silently loses data — that's why earlier migrations landed only one device.
+
+| ScalePad data | Endpoint | Key fields |
+|---|---|---|
+| Hardware (workstations, servers, VMs) | `GET /core/v1/assets/hardware` (`filter[client.id]`, `filter[type]`) | `name`, `serial_number`, **`type`** (`WORKSTATION`, `SERVER`, `VIRTUAL`, `NETWORK`, `MOBILE`, `IMAGING`), `manufacturer.name`, `model.description`, `software.operating_system`, `configuration.cpu.name`, `configuration.ram_bytes`, `software.antivirus_info.status` |
+| Warranty and purchase dates | `GET /lifecycle-manager/v1/assets/hardware/lifecycles` (`filter[client_id]`) | `serial_number`, `purchase_date`, `warranty_expiry_date`, `manufacturer_expiry_date` |
+| Installed software (per device) | `GET /lifecycle-manager/v1/assets/software` (`filter[client.id]`, `filter[hardware_asset.id]`) | `hardware_asset.serial_number`, `product.name`, `product.category`, `publisher.name`, `version.display` |
+| Assessments | `GET /lifecycle-manager/v1/assessments`, `GET /lifecycle-manager/v1/assessments/{id}` | categories → questions → criteria (`is_selected` = the answer), comments, remediation tips, linked initiatives |
+| Answer labels | `GET /lifecycle-manager/v1/assessments/criteria/labels` | `label_key` → display label |
+| Initiatives (roadmap + budget) | `GET /lifecycle-manager/v2/initiatives`, `GET /lifecycle-manager/v1/initiatives/{id}` | `name`, `status`, `priority`, `fiscal_quarter`, `budget.line_items` / `recurring_line_items` (`cost_subunits`, `unit_count`, `frequency`), `budget.currency`, `executive_summary` |
+| Contracts | `GET /core/v1/service/contracts` | `name`, `type`, `status`, `term`, `total_price` |
+| QBR / vCIO deliverables | `GET /lifecycle-manager/v1/deliverables`, `GET /lifecycle-manager/v1/deliverables/{id}/pdf` | `name`, `created_at`; the PDF itself |
 
 ---
 
-## 3. Endpoint sync — the core write (field map)
+## 3. Section-by-section map
 
-Match each ScalePad asset to an endpoint **by serial**, then enrich. This is where ScalePad's
-EOL/warranty data becomes policy-driving CloudRadial data.
+| ScalePad data | CloudRadial home | API route | Policy-evaluable? |
+|---|---|---|---|
+| Warranty expiry | Endpoint `expirationDate` | `PATCH /v2/endpoint/id/{companyEndpointId}` | ✅ **Warranty Coverage** |
+| Purchase date | Endpoint `manufacturedDate` (only when blank) | same | ✅ Device age — Past Endpoint Lifecycle, Endpoint LifeCycle Manager |
+| Serial / model / manufacturer | Endpoint `serialNumber` / `model` / `manufacturer` | same | Via lifecycle checks |
+| **Servers** (`type` = `SERVER`) | Endpoint with `isServer = true`, `enclosure = 80` (Server) | `POST /v2/endpoint` or `PATCH` | ✅ Server policies; shows on the Servers tab |
+| Virtual machines (`type` = `VIRTUAL`) | Endpoint with `isVirtual = true`, `enclosure = 30` | same | ✅ |
+| Workstations (`type` = `WORKSTATION`) | Endpoint, `enclosure = 10` (Laptop) or `20` (Desktop) from the model | same | ✅ |
+| OS / CPU / RAM | Endpoint `os` / `cpu` / `memory` (bytes) | same | ✅ Current OS Version, Old Technology (from `cpu`), System Memory |
+| Antivirus running | Endpoint `isWindowsDefenderRunning` (on create, Windows only) | same | ✅ |
+| Other per-asset extras | Endpoint **custom-property** | `POST /v2/endpoint/{serialNumber}/custom-property` | ❌ |
+| Installed software | `endpointapplication` (one per product per device) | `POST /v2/endpointapplication` | ✅ Software Installed / Not |
+| Initiatives | Planner items, `productType = 1`, `scheduledQuarter` = Nth upcoming quarter (`-1` = completed) | `POST` / `PATCH /v2/product` | n/a |
+| Initiative budget | Priced Planner items — one-time → `projectUnitPrice`, recurring → `monthlyUnitPrice` | same | n/a |
+| Contracts | Planner items (or `service` + `serviceinstall`) | `/v2/product` | Partial |
+| Assessments | CloudRadial assessment | `POST /v2/assessment` then `POST /v2/assessment/upload` (Excel) | Its own scoring model |
+| Documentation assets (IT Glue) | **Flexible asset** | `/compatibility/*` (IT Glue-shaped) or `/v2/flexible-asset*` | ❌ Display only |
+| SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | ✅ Certificate / Domain Expiration |
+| QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item`, or email to the archive's inbound address | n/a |
 
-| ScalePad column | Endpoint field | Notes |
+---
+
+## 4. Endpoint sync — the core write (field map)
+
+Match each ScalePad hardware asset to a CloudRadial endpoint **by serial** (trimmed, case-insensitive). Enrich the ones that exist; create the ones that don't.
+
+| ScalePad | Endpoint field | Rule |
 |---|---|---|
-| Serial Number | `serialNumber` | **Match key.** Skip rows with no serial — never invent one |
-| Name | `name` (required), `machineName` | |
-| Manufacturer | `manufacturer` | Only if blank — never overwrite RMM values |
-| Model | `model` | Only if blank |
-| EOL / warranty | `expirationDate` | **The high-value write.** Drives Warranty Coverage policy |
-| Purchased | `manufacturedDate` | Only if blank — never overwrite a date the RMM or agent supplied. This is the date CloudRadial ages the device from, so the Endpoint LifeCycle Manager and the Past Endpoint Lifecycle policy work for ScalePad-sourced devices |
-| Age | — | Derived server-side; do not write |
+| `serial_number` | `serialNumber` | **Match key.** Skip rows with no serial — never invent one |
+| `name` | `name` (required), `machineName` | |
+| `type` | `isServer`, `isVirtual`, `enclosure` | `SERVER` → server, enclosure 80; `VIRTUAL` → VM, enclosure 30; `WORKSTATION` → laptop (10) or desktop (20) from the model name. `NETWORK`, `MOBILE`, `IMAGING` aren't endpoints — skip and report |
+| `manufacturer.name` | `manufacturer` | Only if blank |
+| `model.description` | `model` | Only if blank |
+| `software.operating_system` | `os`, and `platformType` on create | Only if blank. Platform: Windows 0, macOS 1, Linux 2 — from the OS text, else Apple → macOS, else Windows |
+| `configuration.cpu.name` | `cpu` | Only if blank |
+| `configuration.ram_bytes` | `memory` | Only if blank or 0 |
+| `warranty_expiry_date` | `expirationDate` | **The high-value write.** Fill when blank; when it differs, report it and only overwrite if the operator allows it |
+| `purchase_date` | `manufacturedDate` | Only if blank — CloudRadial ages the device from it |
+| — | `tagNumber` | `ScalePad` on devices created from ScalePad, so they can be found later |
 
 **Critical mechanics:**
-- Write `expirationDate` **directly** with `update_resource` / `PATCH`. Do **NOT** use
-  `endpoint_update_warranty` / `update-warranty` — that triggers an async *manufacturer*
-  lookup and ignores (can overwrite) the ScalePad date.
-- **Enrich, don't clobber.** Read the endpoint first; write only fields the portal is missing.
-- Endpoints are addressable three ways: `/v2/endpoint/{serialNumber}`,
-  `/v2/endpoint/id/{companyEndpointId}`, and `/v2/endpoint/{manufacturer}/{machineName}`.
-- Assets absent from the portal are unmanaged. Creating a placeholder endpoint requires
-  synthesizing `companyId`, `name`, `platformType`, `enclosure`,
-  `isWindowsDefenderRunning`, `lastOSUpdate`, `lastCheckIn` — **operator confirmation only**,
-  tag created rows (`Source = ScalePad`), and set check-in dates to the extract date.
+- Write `expirationDate` **directly**. Never use `update-warranty` — it triggers an asynchronous manufacturer lookup and can overwrite the ScalePad date.
+- **Enrich, don't clobber.** Read the endpoint first; write only fields the portal is missing. Never overwrite RMM-supplied values.
+- Creating an endpoint needs `companyId`, `name`, `platformType`, `enclosure`, `isWindowsDefenderRunning`, `lastCheckIn`, `lastOSUpdate`. Set both dates to the sync date for devices that come only from ScalePad.
+- Devices created from ScalePad have no RMM agent until one is deployed — they show ScalePad's data, not live telemetry.
 
 ---
 
-## 4. Flexible assets — the IT Glue bridge
+## 5. Installed software
 
-CloudRadial ships an **IT Glue-compatible** flexible-asset API (`/compatibility/*`, JSON:API
-shape: `type` / `attributes` / `relationships` / `traits`, kebab-case keys). Because Lifecycle
-Manager lives in the IT Glue ecosystem, this is the natural migration route for any ScalePad
-data that sits in IT Glue flexible assets.
+Each ScalePad software record names the device by serial, so software follows the devices: sync devices first, then write one `endpointapplication` per product per device.
 
-- **Existing tooling:** *Syncing IT Glue Flexible Assets to CloudRadial with PowerShell*
-  (support KB 49183488579860) — reads IT Glue asset-type definitions + data and recreates
-  them in CloudRadial via the compatible API, CSV-mapped org→company, `-WhatIf` dry run,
-  `-FlexibleAssetTypeFilter`, EU/AU base-URL support.
-- **Native alternative:** `/v2/flexible-asset`, `/v2/flexible-asset-type`,
-  `/v2/flexible-asset-field` for data not coming from IT Glue.
-- **Display only.** Flexible assets appear under Infrastructure (grid + detail, searchable).
-  A field can carry an `expiration` type that highlights expiring rows *within the asset view*,
-  but this does **not** feed the Compliance Policy engine. Never store something in a flexible
-  asset expecting a policy to grade it.
+| ScalePad | `endpointapplication` field |
+|---|---|
+| `hardware_asset.serial_number` | `endpointId` (the matched `companyEndpointId`) |
+| `product.name` | `name` |
+| `publisher.name` | `publisher` (required — `Unknown` when blank) |
+| `version.display` | `display`, and `major` / `minor` / `version` parsed from it |
+| `product.category` | `category` |
+
+Skip a product that's already on that endpoint (same name and publisher). Large clients can have thousands of records — cap the writes per run and resume on the next run.
 
 ---
 
-## 5. Policy layer — read this before touching policies
+## 6. Assessments — converting to CloudRadial's Excel import
+
+CloudRadial imports assessments only from Excel (support KB 360052746791, *Importing Assessments*). The file can be built in memory by the workflow — no storage needed.
+
+1. Create the assessment: `POST /v2/assessment` with `companyId`, `title`, `category`, `description` → `assessmentId`. (Not in the published v2 spec, but used by the Microsoft Security Assessment workflow.)
+2. Upload the questions: `POST /v2/assessment/upload`, multipart — part `data` = `{ name, assessmentId, type, companyId }` JSON, part `file` = the `.xlsx` (content type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`). **[verify]** the meaning of `type` (0 is used).
+
+| CloudRadial column | From ScalePad |
+|---|---|
+| **Category** (required) | Category title, prefixed `1.`, `2.` … (CloudRadial sorts categories alphabetically) |
+| **Question** (required) | Question title |
+| **Order** (required) | Position × 10 |
+| **Type** (required) | `List` |
+| **Responses** (required) | Answer labels with CloudRadial's scoring suffixes: none = Compliant, `+` = Partial, `=` = N/A, `*` = Missing, `-` = Not compliant |
+| **Answer** / **Text Answer** (required) | The selected criterion → +2 Compliant, +1 Partially Compliant, 0 N/A, −2 Not compliant; nothing selected → −1 Missing answer |
+| Explanation | Question description |
+| Evaluation | Scoring instructions |
+| Remediation / Remediation Summary | Remediation tips / their first sentence |
+| Notes / Partner Notes | Public comment / internal comment |
+| Reference | Linked initiative names |
+| Is Flagged | `Yes` when not compliant |
+
+**Scoring a ScalePad answer:** read the label from the criterion (or `/assessments/criteria/labels`). Yes / Satisfactory / Compliant → +2; Partial / Needs attention → +1; Not applicable → 0; Unanswered / Unknown → −1; No / At risk / Not compliant → −2. An MSP can override this per label.
+
+---
+
+## 7. Report Archive — QBR PDFs
+
+- The v2 `POST /v2/archiveitem` creates **text/HTML items only** — it has no attachment upload.
+- The legacy API lists a company's archives with their **`inboundAddress`** (`GET /api/beta/archive`), creates an archive (`POST /api/beta/archive`), and has an item route (`POST /api/beta/archive/{archiveId}/item`) that accepts files up to 128 MB **[verify the request body]**.
+- Fallback: email the PDF to the archive's inbound address (limit 20 MB via email). The workflow sends it through Postmark with the PDF attached.
+- Source: download each deliverable with `GET /lifecycle-manager/v1/deliverables/{id}/pdf`, in the same step that uploads it.
+
+---
+
+## 8. Flexible assets — the IT Glue bridge
+
+CloudRadial ships an **IT Glue-compatible** flexible-asset API (`/compatibility/*`, JSON:API shape, kebab-case keys) plus the native `/v2/flexible-asset`, `/v2/flexible-asset-type`, `/v2/flexible-asset-field`. Both are full API routes.
+
+- **Existing tooling:** *Syncing IT Glue Flexible Assets to CloudRadial with PowerShell* (support KB 49183488579860) — reads IT Glue asset types and data and recreates them via the compatible API, with a `-WhatIf` dry run.
+- **Display only.** Flexible assets appear under Infrastructure; an `expiration` field highlights rows *within the asset view* but does **not** feed the Compliance Policy engine.
+
+---
+
+## 9. Policy layer — read this before touching policies
 
 - There is **no policy API**. You cannot create, read, update, or score policies through v2.
-  (`policyPaths: []`, `opHits: []`; the only "policy" schema is `EndpointAuditPolicy`, which is
-  Windows audit telemetry on the endpoint, not the compliance engine.)
-- The **only lever** is writing the endpoint/infrastructure fields the built-in checks read:
+- The **only lever** is writing the endpoint and infrastructure fields the built-in checks read:
 
 | Policy check | Endpoint input to write |
 |---|---|
@@ -119,37 +167,39 @@ data that sits in IT Glue flexible assets.
 | System Memory | `memory` |
 | Managed by Intune | `isIntune` |
 | Old Technology | `cpu` (release date derived server-side) |
-| Past Endpoint Lifecycle | ship/manufacture date **[verify exact field, likely `manufacturedDate`]** |
-| Software Installed / Not | via `endpointapplication` records |
+| Past Endpoint Lifecycle | `manufacturedDate` **[verify]** |
+| Software Installed / Not | `endpointapplication` records |
 | Domain / Certificate Expiration | `domain.dateExpires` / `certificate.expirationDate` |
 
-- Policy **definitions** migrate as **content-package ZIPs** (Partner > Content > Import),
-  not via API. Sample packages: Endpoint, Server, Application, and Domain/License/User policies.
-- Policy **results** come back out via the Policy Review report module, the Compliance > Policies
-  dashboard (with By-Category roll-up), or the daily policy email forwarded to a Report Archive.
+- Policy **definitions** migrate as **content-package ZIPs** (Partner > Content > Import).
+- Policy **results** come out via the Policy Review report, the Compliance > Policies dashboard, or the daily policy email forwarded to a Report Archive.
 
 ---
 
-## 6. Guardrails (encode these in every automation)
+## 10. Runner storage and files
 
-1. Match endpoints by serial; **skip rows with no serial**.
-2. **Enrich, don't clobber** — read first, write only missing fields, never overwrite RMM data.
-3. Write `expirationDate` directly; never `update-warranty` for a ScalePad date.
-4. **Plan before apply** — produce a diff, require human approval before writing.
-5. Placeholder-endpoint creation is **operator-confirmed only**, tagged `Source = ScalePad`.
-6. Do **not** attempt to configure policies (no API) — only write policy-input fields, and
-   report which policies the writes will affect.
-7. Confirm portal **currency** before writing prices (ScalePad exports vary; £ often mis-extracts).
-8. Close every run with counts: matched, enriched, created, skipped (with reasons), unmapped.
+- Everything in this map is API-to-API. The runner downloads and uploads in the same step (the Function's temporary disk), so nothing needs to be stored.
+- The runner's own storage account is private runtime storage for the Function Apps — not a shared file area. Operator-supplied files (anything ScalePad has no API for) need an external location such as a blob with a SAS URL.
 
 ---
 
-## 7. Automation vehicles (AutomationAI)
+## 11. Guardrails (encode these in every automation)
 
-- **Workflow** — the deterministic writes (endpoint enrich, flexible-asset create,
-  `endpointapplication`, `archiveitem`, assessment upload). Testable, `plan`/`apply`, logged.
-  Extend the existing *ScalePad → CloudRadial Lifecycle Sync* workflow rather than starting over.
-- **Agent** — the judgment (mapping, cohorts, enrich-vs-create, the messy long tail). Grounded
-  on this document. See `scalepad-cloudradial-alignment-agent.yaml`.
-- **Playbook** — recurring, portfolio-wide orchestration: sync workflow → agent → human approval,
-  on a schedule, with a spend cap; learnings written back to Knowledge.
+1. **Follow every page** of every ScalePad list (`next_cursor` until empty).
+2. Match endpoints by serial; **skip rows with no serial**.
+3. **Enrich, don't clobber** — read first, write only missing fields, never overwrite RMM data.
+4. Write `expirationDate` directly; never `update-warranty` for a ScalePad date.
+5. **Plan before apply** — the first run is a plan with counts; writes happen only in apply.
+6. Tag devices created from ScalePad (`tagNumber = ScalePad`) and separate servers and VMs by ScalePad's `type`.
+7. Do **not** attempt to configure policies — only write policy-input fields, and report which policies the writes affect.
+8. Confirm the portal **currency** before relying on prices — CloudRadial stores the number only.
+9. Close every run with counts: matched, enriched, created, skipped (with reasons), errors.
+
+---
+
+## 12. Automation vehicles (AutomationAI)
+
+- **Workflow — *ScalePad to CloudRadial Sync*** (`automationai/scalepad-cloudradial-sync/`). The deterministic bulk transfer, in phases: devices → software → assessments → roadmap and budget → archive. Follows every page, `plan` / `apply`, counts per phase.
+- **Extension — `lifecycle-manager` 1.2.0** (`automationai/scalepad-lifecycle-manager-extension/`). Every list tool pages automatically; adds installed software, assessments and deliverables for agents.
+- **Agent — *ScalePad to CloudRadial Alignment*.** The judgment: matching clients, reviewing a plan, the long tail the workflow reports as skipped or unmatched. Grounded on this document. It doesn't bulk-write.
+- **Playbook** (future) — recurring, portfolio-wide: sync workflow (plan) → agent review → human approval → sync workflow (apply), with learnings written back to Knowledge.

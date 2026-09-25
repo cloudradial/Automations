@@ -28,11 +28,11 @@ CloudRadial has three distinct layers, and only one of them is API-writable. Get
 
 ## 2. Where the data comes from in ScalePad
 
-Everything below is reachable through the ScalePad API — no exports or files. Every list endpoint returns `{ data, total_count, next_cursor }` and is **cursor-paged** (`page_size` 1–200, then pass `cursor`). A reader that stops after the first page silently loses data — that's why earlier migrations landed only one device.
+Everything below is reachable through the ScalePad API — no exports or files. Every list endpoint returns `{ data, total_count, next_cursor }` and is **cursor-paged** (`page_size` up to 200 — **100 for installed software**, which also rejects `sort=name` — then pass `cursor`). A reader that stops after the first page silently loses data — that's why earlier migrations landed only one device.
 
 | ScalePad data | Endpoint | Key fields |
 |---|---|---|
-| Hardware (workstations, servers, VMs) | `GET /core/v1/assets/hardware` (`filter[client.id]`, `filter[type]`) | `name`, `serial_number`, **`type`** (`WORKSTATION`, `SERVER`, `VIRTUAL`, `NETWORK`, `MOBILE`, `IMAGING`), `manufacturer.name`, `model.description`, `software.operating_system`, `configuration.cpu.name`, `configuration.ram_bytes`, `software.antivirus_info.status` |
+| Hardware (workstations, servers, VMs, and network, mobile and imaging devices) | `GET /core/v1/assets/hardware` (`filter[client.id]`, `filter[type]`) | `name`, `serial_number`, **`type`** (`WORKSTATION`, `SERVER`, `VIRTUAL`, `NETWORK`, `MOBILE`, `IMAGING`), `manufacturer.name`, `model.description`, `software.operating_system`, `configuration.cpu.name`, `configuration.ram_bytes`, `software.antivirus_info.status` |
 | Warranty and purchase dates | `GET /lifecycle-manager/v1/assets/hardware/lifecycles` (`filter[client_id]`) | `serial_number`, `purchase_date`, `warranty_expiry_date`, `manufacturer_expiry_date` |
 | Installed software (per device) | `GET /lifecycle-manager/v1/assets/software` (`filter[client.id]`, `filter[hardware_asset.id]`) | `hardware_asset.serial_number`, `product.name`, `product.category`, `publisher.name`, `version.display` |
 | Assessments | `GET /lifecycle-manager/v1/assessments`, `GET /lifecycle-manager/v1/assessments/{id}` | categories → questions → criteria (`is_selected` = the answer), comments, remediation tips, linked initiatives |
@@ -61,7 +61,7 @@ Everything below is reachable through the ScalePad API — no exports or files. 
 | Initiative budget | Priced Planner items — one-time → `projectUnitPrice`, recurring → `monthlyUnitPrice` | same | n/a |
 | Contracts | Planner items (or `service` + `serviceinstall`) | `/v2/product` | Partial |
 | Assessments | CloudRadial assessment | `POST /v2/assessment` then `POST /v2/assessment/upload` (Excel) | Its own scoring model |
-| Documentation assets (IT Glue) | **Flexible asset** | `/compatibility/*` (IT Glue-shaped) or `/v2/flexible-asset*` | ❌ Display only |
+| Other hardware — `NETWORK`, `MOBILE`, `IMAGING`, and devices with no serial | **Flexible asset** — type *ScalePad Assets* | `POST /v2/flexible-asset-type` (with fields), `POST /v2/flexible-asset`, `PATCH /v2/flexible-asset/{id}` | ❌ Display only |
 | SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | ✅ Certificate / Domain Expiration |
 | QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item` | n/a |
 | Migration run report | **Report Archive** item (HTML) or **knowledge base article** | `POST /v2/archiveitem`, `POST /v2/article` | n/a |
@@ -74,9 +74,9 @@ Match each ScalePad hardware asset to a CloudRadial endpoint **by serial** (trim
 
 | ScalePad | Endpoint field | Rule |
 |---|---|---|
-| `serial_number` | `serialNumber` | **Match key.** Skip rows with no serial — never invent one |
+| `serial_number` | `serialNumber` | **Match key.** A device with no serial is never created as an endpoint and never given an invented serial — it goes to flexible assets (section 8) |
 | `name` | `name` (required), `machineName` | |
-| `type` | `isServer`, `isVirtual`, `enclosure` | `SERVER` → server, enclosure 80; `VIRTUAL` → VM, enclosure 30; `WORKSTATION` → laptop (10) or desktop (20) from the model name. `NETWORK`, `MOBILE`, `IMAGING` aren't endpoints — skip and report |
+| `type` | `isServer`, `isVirtual`, `enclosure` | `SERVER` → server, enclosure 80; `VIRTUAL` → VM, enclosure 30; `WORKSTATION` → laptop (10) or desktop (20) from the model name. `NETWORK`, `MOBILE`, `IMAGING` aren't endpoints — they go to flexible assets (section 8) |
 | `manufacturer.name` | `manufacturer` | Only if blank |
 | `model.description` | `model` | Only if blank |
 | `software.operating_system` | `os`, and `platformType` on create | Only if blank. Platform: Windows 0, macOS 1, Linux 2 — from the OS text, else Apple → macOS, else Windows |
@@ -146,12 +146,24 @@ CloudRadial imports assessments only from Excel (support KB 360052746791, *Impor
 
 ---
 
-## 8. Flexible assets — the IT Glue bridge
+## 8. Flexible assets — ScalePad hardware that isn't an endpoint
 
-CloudRadial ships an **IT Glue-compatible** flexible-asset API (`/compatibility/*`, JSON:API shape, kebab-case keys) plus the native `/v2/flexible-asset`, `/v2/flexible-asset-type`, `/v2/flexible-asset-field`. Both are full API routes.
+The source is **ScalePad**, not IT Glue. ScalePad hardware that doesn't belong in the endpoint list — types `NETWORK`, `MOBILE` and `IMAGING`, plus workstations, servers and VMs that have **no serial number** — becomes rows of one flexible asset type, **ScalePad Assets**, shown under Infrastructure.
 
-- **Existing tooling:** *Syncing IT Glue Flexible Assets to CloudRadial with PowerShell* (support KB 49183488579860) — reads IT Glue asset types and data and recreates them via the compatible API, with a `-WhatIf` dry run.
-- **Display only.** Flexible assets appear under Infrastructure; an `expiration` field highlights rows *within the asset view* but does **not** feed the Compliance Policy engine.
+| Field (trait key) | From ScalePad |
+|---|---|
+| Name (`name`, title) | `name` |
+| Type (`type`) | `type` — Network, Mobile, Imaging, or the device type for a no-serial device |
+| Manufacturer / Model | `manufacturer.name`, `model.description` |
+| Serial Number (`serial-number`) | `serial_number` (may be blank) |
+| Warranty Expires / Purchase Date (`Date`) | lifecycle `warranty_expiry_date`, `purchase_date` |
+| Location / Assigned User | `site.name` or `location_name`; `assigned_user_name` |
+| ScalePad ID (`scalepad-id`) | `id` — **the match key**, so re-runs update rather than duplicate |
+
+- **API (native v2, Basic auth):** create the type with its fields in one `POST /v2/flexible-asset-type` (`fields[]`: `name`, `kind` = Text / Textbox / Date / Number / Checkbox / Select / Tag / Upload / Percent / Header, `order`, `useForTitle`, `showInList`); add a missing field with `POST /v2/flexible-asset-field`. Rows: `POST /v2/flexible-asset` with `companyId`, `flexibleAssetTypeId` and a `traits` object keyed by each field's `nameKey` (the name in lowercase with hyphens). Reads: `/v2/odata/flexibleassettype`, `/flexibleassetfield`, `/flexibleasset` — values come back as the JSON string `traitsJson`.
+- **Updating a row:** `PATCH /v2/flexible-asset/{id}` replacing `/traitsJson` with the complete traits object as a JSON string (keys you leave out are removed). If that is refused, the IT Glue-shaped `PATCH /compatibility/flexible_assets/{id}` takes `traits` as an object.
+- **Vehicles:** the Sync workflow's `assets` phase does this in bulk. An agent fixing one row uses `cloudradial-v2-compliance` **0.2.1** (`cr_list_flexible_asset_type`, `cr_list_flexible_asset_field`, `cr_create_flexible_asset`, `cr_patch_flexible_asset` with `traitsJson`) — in 0.2.0 `cr_patch_flexible_asset` accepts only the id, so it can't change anything.
+- **Display only.** Flexible assets appear under Infrastructure; they don't feed the Compliance Policy engine. The warranty date is shown, not scored — only endpoint `expirationDate` drives Warranty Coverage.
 
 ---
 
@@ -188,7 +200,7 @@ CloudRadial ships an **IT Glue-compatible** flexible-asset API (`/compatibility/
 ## 11. Guardrails (encode these in every automation)
 
 1. **Follow every page** of every ScalePad list (`next_cursor` until empty).
-2. Match endpoints by serial; **skip rows with no serial**.
+2. Match endpoints by serial. A device with **no serial** never becomes an endpoint — keep it as a flexible asset (section 8).
 3. **Enrich, don't clobber** — read first, write only missing fields, never overwrite RMM data.
 4. Write `expirationDate` directly; never `update-warranty` for a ScalePad date.
 5. **Plan before apply** — the first run is a plan with counts; writes happen only in apply.
@@ -201,7 +213,8 @@ CloudRadial ships an **IT Glue-compatible** flexible-asset API (`/compatibility/
 
 ## 12. Automation vehicles (AutomationAI)
 
-- **Workflow — *ScalePad to CloudRadial Sync*** (`automationai/scalepad-cloudradial-sync/`). The deterministic bulk transfer, in phases: devices → software → assessments → roadmap and budget → archive. Follows every page, `plan` / `apply`, counts per phase.
+- **Workflow — *ScalePad to CloudRadial Sync*** (`automationai/scalepad-cloudradial-sync/`). The deterministic bulk transfer, in phases: devices → assets (other hardware to flexible assets) → software → assessments → roadmap and budget → archive. These six names are the only valid values for its `phases` input — initiatives and contracts are `roadmap`, deliverables are `archive`. Follows every page, `plan` / `apply`, counts per phase.
 - **Extension — `lifecycle-manager` 1.2.0** (`automationai/scalepad-lifecycle-manager-extension/`). Every list tool pages automatically; adds installed software, assessments and deliverables for agents.
+- **Extension — `cloudradial-v2-compliance` 0.2.1** (`automationai/cloudradial-v2-compliance-extension/`). Flexible-asset writes that actually carry data (patch with `traitsJson`, type with `fields`).
 - **Agent — *ScalePad to CloudRadial Alignment*.** The judgment: matching clients, reviewing a plan, the long tail the workflow reports as skipped or unmatched. Grounded on this document. It doesn't bulk-write.
 - **Playbook** (future) — recurring, portfolio-wide: sync workflow (plan) → agent review → human approval → sync workflow (apply), with learnings written back to Knowledge.

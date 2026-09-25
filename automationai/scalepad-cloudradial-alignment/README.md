@@ -10,7 +10,7 @@ Use it with [`lifecycle-manager` 1.2.0](../scalepad-lifecycle-manager-extension/
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.0). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
+| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.1). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
 | [`scalepad-cloudradial-alignment.yml`](scalepad-cloudradial-alignment.yml) | `automationsWorkflow` | **Command: align.** One agent node, `autoApprove: false` (you approve each write). Static goal — the agent reads `mode`/`phase`/company from its input bag. |
 | [`knowledge/scalepad-to-cloudradial-migration-map.md`](knowledge/scalepad-to-cloudradial-migration-map.md) | Knowledge | Section-by-section map (ScalePad → CloudRadial home → API/import route → policy-evaluable?), the endpoint field map, and the guardrails. Upload to Knowledge and ground the workflow's agent node on it. |
 
@@ -37,20 +37,22 @@ Every input is optional — the agent never stops to ask. Defaults are shown.
 | `companyId` | — | CloudRadial company to align. |
 | `scalePadClientName` | — | Or name the ScalePad client; it's matched through the crosswalk. |
 | `mode` | `plan` | `apply` writes approved changes, and only when a company is named — a portfolio-wide `apply` runs as `plan`. |
-| `phase` | `all` | Which phase to review: `warranty`, `software`, `assessments`, `archive`, `roadmap`, `flexible-assets`. All of them come from the APIs. |
+| `phase` | `all` | Which phase to review — the Sync's names: `devices`, `assets`, `software`, `assessments`, `roadmap`, `archive`. All of them come from the APIs. |
 | `createPlaceholders` | `false` | Kept for compatibility. Missing devices are created by the Sync workflow (`createMissingDevices`); the agent flags any that look wrong first. |
 | `maxCompanies` | `3` | With no company named, how many crosswalked clients to plan for. |
-| `flexibleAssetTypeFilter` | — | Limit flexible-asset sync to these type names. |
 
-Example first run: `{"mode":"plan","companyId":1,"phase":"warranty"}`
+Example first run: `{"mode":"plan","companyId":1,"phase":"devices"}`
 
-**What it hands to the Sync workflow.** For devices, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"`, the count, and `workflowInputs` — for example `{"companyId":9,"scalePadClientId":"…","mode":"apply","phases":"devices,software"}`. IT Glue flexible assets point to the IT Glue → CloudRadial sync script (support KB 49183488579860).
+**What it hands to the Sync workflow.** For devices, assets, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"`, the count, and `workflowInputs` — for example `{"companyId":9,"scalePadClientId":"…","mode":"apply","phases":"devices,software"}`. `phases` only ever uses the Sync's six names — initiatives and contracts are `roadmap`, deliverable PDFs are `archive`.
+
+**Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint — network, mobile and imaging devices — and devices with no serial number go to one flexible asset type, **ScalePad Assets**, through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools ([0.2.1](../cloudradial-v2-compliance-extension/) — 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
 
 ## Confirm in your tenant
 
 - **Extension slugs:** `lifecycle-manager` (ScalePad), `cloudradial-v2-companies`,
   `cloudradial-v2-endpoints`, `cloudradial-v2-services` — confirmed from the LifeCycle Manager
-  migration workflow.
+  migration workflow — and `cloudradial-v2-compliance` (flexible assets; import
+  [0.2.1](../cloudradial-v2-compliance-extension/)).
 - **ScalePad paging:** with the catalog `lifecycle-manager` 1.0.0 every list returns only its first page, so counts come out low. Import [1.2.0](../scalepad-lifecycle-manager-extension/) first.
 - **Company mapping:** confirm the client resolves to a real client company, **not
   `companyId 1`** (the partner's own record). Check `clientsMapped[].matchConfidence`; if it

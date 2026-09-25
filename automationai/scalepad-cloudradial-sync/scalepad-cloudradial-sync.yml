@@ -2,7 +2,7 @@
 # The webhook ships disabled; enable it in-portal only if something other than a manual run or Routine triggers it.
 automationsWorkflow: 1
 name: ScalePad to CloudRadial Sync
-description: 'Deterministic ScalePad Lifecycle Manager to CloudRadial transfer, in phases: devices (workstations, servers, VMs - enrich or create, warranty to expirationDate, purchase date to manufacturedDate), installed software (endpoint applications), assessments (Excel import built in memory), roadmap and budget (initiatives and contracts to Planner cards), and deliverable PDFs to the Report Archive, then writes a migration report into the portal (report archive or knowledge base article). Follows every ScalePad page. Defaults to plan mode - nothing is written until mode is apply. READ THE README BEFORE IMPORTING.'
+description: 'Deterministic ScalePad Lifecycle Manager to CloudRadial transfer, in phases: devices (workstations, servers, VMs - enrich or create, warranty to expirationDate, purchase date to manufacturedDate), assets (network, mobile and imaging hardware and devices without a serial to a flexible asset type), installed software (endpoint applications), assessments (Excel import built in memory), roadmap and budget (initiatives and contracts to Planner cards), and deliverable PDFs to the Report Archive, then writes a migration report into the portal (report archive or knowledge base article). Follows every ScalePad page. Defaults to plan mode - nothing is written until mode is apply. READ THE README BEFORE IMPORTING.'
 definition:
   schemaVersion: 1
   activities:
@@ -108,16 +108,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -171,7 +176,7 @@ definition:
           # =====================================================================
           # Step 1 - Resolve the client in ScalePad and CloudRadial, read options
           # =====================================================================
-          $allPhases = @('devices', 'software', 'assessments', 'roadmap', 'archive')
+          $allPhases = @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')
           $phasesIn = Get-P $ctx 'phases'
           $phases = @()
           if ($phasesIn -is [array]) { $phases = @($phasesIn | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }) }
@@ -185,6 +190,9 @@ definition:
               deviceTypes            = @(([string](Get-P $ctx 'deviceTypes' 'WORKSTATION,SERVER,VIRTUAL')).Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
               createMissingDevices   = -not ([string](Get-P $ctx 'createMissingDevices' 'true') -match '^(false|no|0)$')
               overwriteWarranty      = ([string](Get-P $ctx 'overwriteWarranty' 'false') -match '^(true|yes|1)$')
+              assetTypes             = @(([string](Get-P $ctx 'assetTypes' '')).Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
+              includeNoSerialDevices = -not ([string](Get-P $ctx 'includeNoSerialDevices' 'true') -match '^(false|no|0)$')
+              flexibleAssetTypeName  = [string](Get-P $ctx 'flexibleAssetTypeName' 'ScalePad Assets')
               maxSoftwareWrites      = [int](Get-P $ctx 'maxSoftwareWrites' 2000)
               assessmentStatus       = [string](Get-P $ctx 'assessmentStatus' 'Completed')
               labelScoreMap          = Get-P $ctx 'labelScoreMap'
@@ -344,16 +352,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -452,9 +465,9 @@ definition:
                   $type = ([string](Get-P $d 'type' '')).ToUpperInvariant()
                   $name = [string](Get-P $d 'name' '')
                   $serial = Normalize-Serial (Get-P $d 'serial_number')
-                  if ($type -notin $types) { $counts.skipped++; $null = $skipped.Add(@{ device = $name; serial = $serial; reason = "type $type is not synced (deviceTypes)" }); continue }
+                  if ($type -notin $types) { $counts.skipped++; $null = $skipped.Add(@{ device = $name; serial = $serial; reason = $(if ((Get-P $ctx 'phases' @()) -contains 'assets') { "type $type - kept as a flexible asset (assets phase)" } else { "type $type is not synced (deviceTypes)" }) }); continue }
                   $counts.inScope++
-                  if (-not $serial) { $counts.skipped++; $null = $skipped.Add(@{ device = $name; serial = ''; reason = 'no serial number' }); continue }
+                  if (-not $serial) { $counts.skipped++; $null = $skipped.Add(@{ device = $name; serial = ''; reason = $(if ((Get-P $ctx 'phases' @()) -contains 'assets' -and (Get-P $settings 'includeNoSerialDevices' $true)) { 'no serial number - kept as a flexible asset (assets phase)' } else { 'no serial number' }) }); continue }
 
                   $l = $lifeBySerial[$serial]
                   $mf = [string](Get-P $d 'manufacturer.name' (Get-P $l 'manufacturer' ''))
@@ -538,11 +551,346 @@ definition:
         retryCount: 0
         parameters: []
         aiExtensions: []
+    - id: node-assets
+      name: Other hardware to flexible assets
+      type: powershell-script
+      position:
+        x: 660
+        'y': 120
+      properties:
+        script: |
+          # =====================================================================
+          #  ScalePad to CloudRadial Sync - Other hardware to flexible assets
+          #  Deterministic, paged API-to-API transfer. mode "plan" (default) reads
+          #  and reports; mode "apply" writes. Every step is self-contained: the
+          #  shared helper block is repeated in each so a step can be read alone.
+          #  Secrets (runner Key Vault): ScalePad-ApiUrl, ScalePad-ApiKey,
+          #  CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          #  In apply mode the last step writes a migration report into the portal
+          #  (report archive, or a knowledge base article). See the README first.
+          # =====================================================================
+          # ---- shared helpers (identical in every step of this workflow) ----
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          function Get-Secret { param([string]$Name) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue }
+          function Get-P {
+              # Safe property read under StrictMode. Path like 'hardware_asset.serial_number'.
+              param($Obj, [string]$Path, $Default = $null)
+              $cur = $Obj
+              foreach ($part in $Path.Split('.')) {
+                  if ($null -eq $cur) { return $Default }
+                  if ($cur -is [System.Collections.IDictionary]) { if ($cur.Contains($part)) { $cur = $cur[$part] } else { return $Default } ; continue }
+                  $p = $cur.PSObject.Properties[$part]
+                  if (-not $p) { return $Default }
+                  $cur = $p.Value
+              }
+              if ($null -eq $cur) { return $Default }
+              return $cur
+          }
+          function Test-Blank { param($v) if ($v -is [datetime]) { return ($v.Year -le 1) }; return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -match '^0001-01-01') }
+          # PowerShell 7 turns ISO date strings in API responses into [datetime]; normalize both ways.
+          function ConvertTo-IsoDate { param($v) if (Test-Blank $v) { return $null }; if ($v -is [datetime]) { return $v.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }; $d = [datetime]::MinValue; if ([datetime]::TryParse([string]$v, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) { return $d.ToString('yyyy-MM-ddTHH:mm:ssZ') }; return [string]$v }
+          function Format-Day { param($v) $iso = ConvertTo-IsoDate $v; if (-not $iso) { return '' }; return $iso.Substring(0, [Math]::Min(10, $iso.Length)) }
+          function Normalize-Serial { param($s) if (Test-Blank $s) { return '' } ; return ([string]$s).Trim().ToUpperInvariant() }
+          function Normalize-Name { param($s) if (Test-Blank $s) { return '' } ; $t = ([string]$s).ToLowerInvariant() -replace '[^a-z0-9 ]', ' '; $t = ' ' + $t + ' '; foreach ($w in @('ltd','limited','inc','llc','plc','group','the','co','corp','corporation','company')) { $t = $t -replace " $w ", ' ' }; return ($t -replace '\s+', ' ').Trim() }
+
+          $warnings = New-Object System.Collections.ArrayList
+          function Warn { param([string]$m) $null = $warnings.Add($m) }
+
+          function ConvertTo-Dict {
+              param($o)
+              if ($null -eq $o) { return [ordered]@{} }
+              if ($o -is [System.Collections.IDictionary]) { return $o }
+              $h = [ordered]@{}
+              foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value }
+              return $h
+          }
+
+          # Context from the previous step (or the run inputs on the first step).
+          $nodeIn = Get-NodeInput
+          $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = $nodeIn }
+          $ctx = ConvertTo-Dict $ctx
+
+          $spBase = Get-Secret 'ScalePad-ApiUrl'
+          $spKey = Get-Secret 'ScalePad-ApiKey'
+          $crBase = Get-Secret 'CloudRadial-BaseUrl'
+          $crPub = Get-Secret 'CloudRadial-PublicKey'
+          $crPriv = Get-Secret 'CloudRadial-PrivateKey'
+          $missingSecrets = @()
+          foreach ($p in @(@{ n = 'ScalePad-ApiUrl'; v = $spBase }, @{ n = 'ScalePad-ApiKey'; v = $spKey }, @{ n = 'CloudRadial-BaseUrl'; v = $crBase }, @{ n = 'CloudRadial-PublicKey'; v = $crPub }, @{ n = 'CloudRadial-PrivateKey'; v = $crPriv })) { if (Test-Blank $p.v) { $missingSecrets += $p.n } }
+          if ($missingSecrets.Count -gt 0) {
+              $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missingSecrets -join ', ')"
+              Set-NodeOutput @{ status = 'error'; message = $m }
+              throw $m
+          }
+          $spBase = $spBase.TrimEnd('/')
+          $crBase = $crBase.TrimEnd('/')
+          $spHeaders = @{ 'x-api-key' = $spKey; Accept = 'application/json' }
+          $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
+          $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
+
+          function Invoke-WithRetry {
+              param([scriptblock]$Call, [string]$What)
+              for ($i = 1; $i -le 4; $i++) {
+                  try { return & $Call }
+                  catch {
+                      $code = $null
+                      try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+                      if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                      throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                  }
+              }
+          }
+          function Get-SpAll {
+              # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
+              $items = New-Object System.Collections.ArrayList
+              $cursor = $null
+              for ($page = 1; $page -le $MaxPages; $page++) {
+                  $q = @{} + $Query
+                  $q['page_size'] = $PageSize
+                  if ($cursor) { $q['cursor'] = $cursor }
+                  $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
+                  $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
+                  foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
+                  $cursor = Get-P $resp 'next_cursor'
+                  if (Test-Blank $cursor) { break }
+                  if ($page -eq $MaxPages) { Warn "ScalePad $Path stopped at $MaxPages pages." }
+              }
+              return $items.ToArray()
+          }
+          function Get-SpOne { param([string]$Path) Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri "$spBase$Path" -Headers $spHeaders } }
+          function Invoke-Cr {
+              param([string]$Method, [string]$Path, $Body, [string]$ContentType = 'application/json')
+              $uri = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
+              $args2 = @{ Method = $Method; Uri = $uri; Headers = $crHeaders }
+              if ($null -ne $Body) {
+                  $json = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 }
+                  if ($Method -eq 'PATCH' -and $json -notmatch '^\s*\[') { $json = "[$json]" }
+                  $args2.Body = $json
+                  $args2.ContentType = $(if ($Method -eq 'PATCH') { 'application/json-patch+json' } else { $ContentType })
+              }
+              return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
+          }
+          function Get-CrAll {
+              # Follows @odata.nextLink.
+              param([string]$Path)
+              $items = New-Object System.Collections.ArrayList
+              $next = $Path
+              $guard = 0
+              while ($next -and $guard -lt 500) {
+                  $guard++
+                  $resp = Invoke-Cr -Method GET -Path $next
+                  foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                  $next = Get-P $resp '@odata.nextLink'
+              }
+              return $items.ToArray()
+          }
+          function Get-CrArchive {
+              # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+              # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
+              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
+              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
+              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+              return $hit
+          }
+          function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+
+          $mode = [string](Get-P $ctx 'mode' 'plan')
+          if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
+          $apply = ($mode -eq 'apply')
+          # ---- end shared helpers ----
+          # =====================================================================
+          # Step 3 - Other ScalePad hardware to CloudRadial flexible assets
+          #   Network gear, mobiles, printers/imaging (any ScalePad type that isn't
+          #   synced as an endpoint) and in-scope devices with no serial number
+          #   become rows of one flexible asset type ("ScalePad Assets"), shown under
+          #   Infrastructure. Matched on the ScalePad asset id, so re-runs update
+          #   rather than duplicate. Native v2 routes: /v2/flexible-asset-type,
+          #   /v2/flexible-asset-field, /v2/flexible-asset (reads via /v2/odata).
+          # =====================================================================
+          $phase = 'assets'
+          $results = ConvertTo-Dict (Get-P $ctx 'results')
+          $settings = Get-P $ctx 'settings'
+          $companyId = [int](Get-P $ctx 'companyId')
+          $spClientId = [string](Get-P $ctx 'scalePadClientId')
+
+          # Field order = column order in the portal. nameKey is the trait key CloudRadial derives from the name.
+          $FieldDefs = @(
+              @{ name = 'Name'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $true; required = $true },
+              @{ name = 'Type'; kind = 'Text'; order = 2; showInList = $true },
+              @{ name = 'Manufacturer'; kind = 'Text'; order = 3; showInList = $true },
+              @{ name = 'Model'; kind = 'Text'; order = 4; showInList = $true },
+              @{ name = 'Serial Number'; kind = 'Text'; order = 5; showInList = $true },
+              @{ name = 'Warranty Expires'; kind = 'Date'; order = 6; showInList = $true },
+              @{ name = 'Purchase Date'; kind = 'Date'; order = 7 },
+              @{ name = 'Location'; kind = 'Text'; order = 8 },
+              @{ name = 'Assigned User'; kind = 'Text'; order = 9 },
+              @{ name = 'ScalePad ID'; kind = 'Text'; order = 10; hint = 'Used by the ScalePad to CloudRadial Sync to match this row. Do not edit.' }
+          )
+          function ConvertTo-NameKey { param([string]$n) return (($n.Trim().ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')) }
+          function ConvertFrom-Traits { param($a)
+              $raw = Get-P $a 'traitsJson'
+              if ($raw -is [string] -and -not [string]::IsNullOrWhiteSpace($raw)) { try { return ConvertTo-Dict ($raw | ConvertFrom-Json) } catch { return [ordered]@{} } }
+              return ConvertTo-Dict (Get-P $a 'traits')
+          }
+
+          $counts = [ordered]@{ scalePadAssets = 0; byType = [ordered]@{}; noSerialDevices = 0; typeCreated = $false; fieldsAdded = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; errors = 0 }
+          $planned = New-Object System.Collections.ArrayList
+
+          if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
+              $results[$phase] = [ordered]@{ ran = $false }
+          }
+          else {
+              $typeName = [string](Get-P $settings 'flexibleAssetTypeName' 'ScalePad Assets')
+              $deviceTypes = @(Get-P $settings 'deviceTypes' @('WORKSTATION', 'SERVER', 'VIRTUAL'))
+              $assetTypes = @(Get-P $settings 'assetTypes' @())
+              $includeNoSerial = [bool](Get-P $settings 'includeNoSerialDevices' $true)
+
+              $hw = @(Get-SpAll '/core/v1/assets/hardware' @{ 'filter[client.id]' = "eq:$spClientId" })
+              $life = @(Get-SpAll '/lifecycle-manager/v1/assets/hardware/lifecycles' @{ 'filter[client_id]' = "eq:$spClientId" })
+              $lifeBySerial = @{}
+              foreach ($l in $life) { $s = Normalize-Serial (Get-P $l 'serial_number'); if ($s) { $lifeBySerial[$s] = $l } }
+
+              $rows = New-Object System.Collections.ArrayList
+              foreach ($d in $hw) {
+                  $type = ([string](Get-P $d 'type' '')).ToUpperInvariant()
+                  $serial = Normalize-Serial (Get-P $d 'serial_number')
+                  $isDeviceType = $type -in $deviceTypes
+                  $take = if ($isDeviceType) { $includeNoSerial -and -not $serial } elseif ($assetTypes.Count -gt 0) { $type -in $assetTypes } else { $true }
+                  if (-not $take) { continue }
+                  if ($isDeviceType) { $counts.noSerialDevices++ }
+                  $l = if ($serial) { $lifeBySerial[$serial] } else { $null }
+                  $label = if ($type) { (Get-Culture).TextInfo.ToTitleCase($type.ToLowerInvariant()) } else { 'Unknown' }
+                  if (-not $counts.byType.Contains($label)) { $counts.byType[$label] = 0 }
+                  $counts.byType[$label]++
+                  $vals = [ordered]@{
+                      'Name'             = [string](Get-P $d 'name' $serial)
+                      'Type'             = $label
+                      'Manufacturer'     = [string](Get-P $d 'manufacturer.name' (Get-P $l 'manufacturer' ''))
+                      'Model'            = [string](Get-P $d 'model.description' (Get-P $d 'model.number' (Get-P $l 'model' '')))
+                      'Serial Number'    = [string](Get-P $d 'serial_number' '')
+                      'Warranty Expires' = Format-Day (Get-P $l 'warranty_expiry_date')
+                      'Purchase Date'    = Format-Day (Get-P $l 'purchase_date')
+                      'Location'         = [string](Get-P $d 'site.name' (Get-P $d 'location_name' ''))
+                      'Assigned User'    = [string](Get-P $d 'assigned_user_name' (Get-P $d 'assigned_user.name' ''))
+                      'ScalePad ID'      = [string](Get-P $d 'id')
+                  }
+                  if (Test-Blank $vals['Name']) { $vals['Name'] = "$label $($vals['ScalePad ID'])" }
+                  $null = $rows.Add($vals)
+              }
+              $counts.scalePadAssets = $rows.Count
+
+              # --- the flexible asset type and its fields ---
+              $esc = $typeName.Replace("'", "''")
+              $type = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1
+              $typeId = if ($type) { [int](Get-P $type 'id') } else { 0 }
+              if (-not $typeId -and $rows.Count -gt 0) {
+                  $null = $planned.Add(@{ action = 'create-type'; type = $typeName; fields = @($FieldDefs | ForEach-Object { $_.name }) })
+                  if ($apply) {
+                      $body = [ordered]@{ name = $typeName; description = 'Hardware from ScalePad Lifecycle Manager that is not an endpoint: network, mobile and imaging devices, and devices without a serial number. Kept current by the ScalePad to CloudRadial Sync.'; icon = 'router'; showInMenu = $true; fields = $FieldDefs }
+                      try {
+                          $resp = Invoke-Cr -Method POST -Path '/v2/flexible-asset-type' -Body $body
+                          $typeId = [int](Get-P $resp 'id' (Get-P $resp 'flexibleAssetTypeId' 0))
+                          if (-not $typeId) { $again = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1; if ($again) { $typeId = [int](Get-P $again 'id') } }
+                          if ($typeId) { $counts.typeCreated = $true } else { throw 'the type was created but its id could not be read back' }
+                      }
+                      catch { $counts.errors++; Warn "Could not create the '$typeName' flexible asset type: $($_.Exception.Message)" }
+                  }
+              }
+
+              $keyOf = @{}
+              foreach ($f in $FieldDefs) { $keyOf[$f.name] = ConvertTo-NameKey $f.name }
+              $existingAssets = @()
+              if ($typeId) {
+                  $fields = @(Get-CrAll "/v2/odata/flexibleassetfield?`$filter=flexibleAssetTypeId eq $typeId")
+                  $have = @{}
+                  foreach ($f in $fields) { $have[[string](Get-P $f 'name')] = [string](Get-P $f 'nameKey' (ConvertTo-NameKey (Get-P $f 'name'))) }
+                  foreach ($f in $FieldDefs) {
+                      if ($have.ContainsKey($f.name)) { $keyOf[$f.name] = $have[$f.name]; continue }
+                      if ($fields.Count -eq 0 -and $counts.typeCreated) { continue }   # created inline just now
+                      $null = $planned.Add(@{ action = 'add-field'; field = $f.name })
+                      if ($apply) {
+                          try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset-field' -Body ([ordered]@{ flexibleAssetTypeId = $typeId } + $f); $counts.fieldsAdded++ }
+                          catch { $counts.errors++; Warn "Could not add field '$($f.name)' to '$typeName': $($_.Exception.Message)" }
+                      }
+                  }
+                  $existingAssets = @(Get-CrAll "/v2/odata/flexibleasset?`$filter=companyId eq $companyId and flexibleAssetTypeId eq $typeId")
+              }
+              $idKey = $keyOf['ScalePad ID']; $serialKey = $keyOf['Serial Number']
+              $byId = @{}; $bySerial = @{}
+              foreach ($a in $existingAssets) {
+                  $t = ConvertFrom-Traits $a
+                  $sid = [string](Get-P $t $idKey ''); $sn = Normalize-Serial (Get-P $t $serialKey '')
+                  if ($sid) { $byId[$sid] = $a }
+                  if ($sn -and -not $bySerial.ContainsKey($sn)) { $bySerial[$sn] = $a }
+              }
+
+              foreach ($vals in $rows) {
+                  $traits = [ordered]@{}
+                  foreach ($k in $vals.Keys) { if (-not (Test-Blank $vals[$k])) { $traits[$keyOf[$k]] = [string]$vals[$k] } }
+                  $match = $byId[$vals['ScalePad ID']]
+                  if ($null -eq $match -and $vals['Serial Number']) { $match = $bySerial[(Normalize-Serial $vals['Serial Number'])] }
+                  if ($null -ne $match) {
+                      $cur = ConvertFrom-Traits $match
+                      $merged = [ordered]@{}; foreach ($k in $cur.Keys) { $merged[$k] = $cur[$k] }
+                      $changed = @()
+                      foreach ($k in $traits.Keys) { if ([string](Get-P $cur $k '') -ne $traits[$k]) { $merged[$k] = $traits[$k]; $changed += $k } }
+                      if ($changed.Count -eq 0) { $counts.unchanged++; continue }
+                      $counts.toUpdate++
+                      $assetId = [int](Get-P $match 'id')
+                      $null = $planned.Add(@{ action = 'update'; asset = $vals['Name']; flexibleAssetId = $assetId; fields = $changed })
+                      if ($apply) {
+                          try {
+                              $json = $merged | ConvertTo-Json -Depth 5 -Compress
+                              try { $null = Invoke-Cr -Method PATCH -Path "/v2/flexible-asset/$assetId" -Body @(@{ op = 'replace'; path = '/traitsJson'; value = $json }) }
+                              catch {
+                                  # Fallback: the IT Glue-compatible route takes traits as an object.
+                                  $b = @{ data = @{ type = 'flexible-assets'; id = $assetId; attributes = @{ traits = $merged } } } | ConvertTo-Json -Depth 8
+                                  $null = Invoke-WithRetry -What "CloudRadial PATCH /compatibility/flexible_assets/$assetId" -Call { Invoke-RestMethod -Method Patch -Uri "$crBase/compatibility/flexible_assets/$assetId" -Headers $crHeaders -Body $b -ContentType 'application/json' }
+                              }
+                              $counts.updated++
+                          }
+                          catch { $counts.errors++; Warn "Update failed for flexible asset $($vals['Name']): $($_.Exception.Message)" }
+                      }
+                      continue
+                  }
+                  $counts.toCreate++
+                  $null = $planned.Add(@{ action = 'create'; asset = $vals['Name']; type = $vals['Type']; serial = $vals['Serial Number'] })
+                  if ($apply -and $typeId) {
+                      try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset' -Body ([ordered]@{ companyId = $companyId; flexibleAssetTypeId = $typeId; traits = $traits }); $counts.created++ }
+                      catch { $counts.errors++; Warn "Create failed for flexible asset $($vals['Name']): $($_.Exception.Message)" }
+                  }
+              }
+              $results[$phase] = [ordered]@{
+                  ran = $true; counts = $counts; flexibleAssetType = $typeName; flexibleAssetTypeId = $typeId
+                  planned = @($planned | Select-Object -First 150); plannedTotal = $planned.Count
+              }
+          }
+
+          $ctx.results = $results
+          $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
+          $c = $counts
+          Set-NodeOutput @{ status = 'ok'; message = "Flexible assets: $($c.scalePadAssets) ScalePad assets that aren't endpoints ($($c.noSerialDevices) of them devices with no serial), $(if ($apply) { "$($c.created) created, $($c.updated) updated" } else { "$($c.toCreate) to create, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
+        timeoutSeconds: 600
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
     - id: node-software
       name: Installed software
       type: powershell-script
       position:
-        x: 660
+        x: 860
         'y': 120
       properties:
         script: |
@@ -632,16 +980,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -728,7 +1081,7 @@ definition:
                   $null = $existing.Add(('{0}|{1}|{2}' -f (Get-P $a 'endpointId'), ([string](Get-P $a 'name')).ToLowerInvariant(), ([string](Get-P $a 'publisher')).ToLowerInvariant()))
               }
 
-              $installs = @(Get-SpAll '/lifecycle-manager/v1/assets/software' @{ 'filter[client.id]' = "eq:$spClientId" })
+              $installs = @(Get-SpAll '/lifecycle-manager/v1/assets/software' @{ 'filter[client.id]' = "eq:$spClientId" } -PageSize 100)
               $counts.scalePadInstalls = $installs.Count
               $cap = [int](Get-P $settings 'maxSoftwareWrites' 2000)
               $devicesSeen = New-Object System.Collections.Generic.HashSet[string]
@@ -776,7 +1129,7 @@ definition:
       name: Assessments
       type: powershell-script
       position:
-        x: 860
+        x: 1060
         'y': 120
       properties:
         script: |
@@ -866,16 +1219,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -1118,7 +1476,7 @@ definition:
       name: Roadmap and budget
       type: powershell-script
       position:
-        x: 1060
+        x: 1260
         'y': 120
       properties:
         script: |
@@ -1208,16 +1566,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -1403,7 +1766,7 @@ definition:
       name: Deliverable PDFs to Report Archive
       type: powershell-script
       position:
-        x: 1260
+        x: 1460
         'y': 120
       properties:
         script: |
@@ -1493,16 +1856,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -1648,7 +2016,7 @@ definition:
       name: Migration report
       type: powershell-script
       position:
-        x: 1460
+        x: 1660
         'y': 120
       properties:
         script: |
@@ -1738,16 +2106,21 @@ definition:
           }
           function Get-SpAll {
               # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
-              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500)
+              # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+              param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
               for ($page = 1; $page -le $MaxPages; $page++) {
                   $q = @{} + $Query
-                  $q['page_size'] = 200
+                  $q['page_size'] = $PageSize
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
-                  $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders }
+                  try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                  catch {
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      throw
+                  }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
                   $cursor = Get-P $resp 'next_cursor'
                   if (Test-Blank $cursor) { break }
@@ -1833,6 +2206,14 @@ definition:
               foreach ($s in @(Get-P $results 'devices.skipped' @())) { $r = [string](Get-P $s 'reason'); if (-not $groups.ContainsKey($r)) { $groups[$r] = New-Object System.Collections.ArrayList }; $null = $groups[$r].Add([string](Get-P $s 'device')) }
               foreach ($k in $groups.Keys) { $null = $attention.Add("Devices skipped - $k ($($groups[$k].Count)): $((@($groups[$k]) | Select-Object -First 15) -join ', ')") }
           }
+          $fa = Get-P $results 'assets.counts'
+          if ($fa) {
+              $act = if ($apply) { "Created $(Get-P $fa 'created') and updated $(Get-P $fa 'updated')." } else { "Would create $(Get-P $fa 'toCreate') and update $(Get-P $fa 'toUpdate')." }
+              $byType = @((ConvertTo-Dict (Get-P $fa 'byType')).GetEnumerator() | ForEach-Object { "$($_.Value) $($_.Key)" }) -join ', '
+              $where = "the '$(Get-P $results 'assets.flexibleAssetType')' flexible asset type (Infrastructure)"
+              $null = $lines.Add("Other hardware: $(Get-P $fa 'scalePadAssets') ScalePad assets that aren't endpoints$(if ($byType) { " ($byType)" }), kept in $where. $act")
+              $null = $rows.Add(@('Other hardware (flexible assets)', "$(Get-P $fa 'scalePadAssets') assets$(if ($byType) { ": $byType" })", $act, "$(Get-P $fa 'unchanged') unchanged, $(Get-P $fa 'errors') errors"))
+          }
           $s = Get-P $results 'software.counts'
           if ($s) {
               $act = if ($apply) { "Created $(Get-P $s 'created')." } else { "Would create $(Get-P $s 'toCreate')." }
@@ -1863,7 +2244,7 @@ definition:
 
           $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })
           $errors = 0
-          foreach ($ph in @('devices', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
+          foreach ($ph in @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
 
           $null = $html.Append('<table border="1" cellpadding="6" cellspacing="0"><tr><th>Area</th><th>In ScalePad</th><th>Result</th><th>Notes</th></tr>')
           foreach ($row in $rows) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $row[0])</td><td>$(ConvertTo-HtmlText $row[1])</td><td>$(ConvertTo-HtmlText $row[2])</td><td>$(ConvertTo-HtmlText $row[3])</td></tr>") }
@@ -1919,7 +2300,7 @@ definition:
       name: End
       type: end
       position:
-        x: 1660
+        x: 1860
         'y': 120
   connections:
     - source: start
@@ -1929,6 +2310,9 @@ definition:
       target: node-devices
       sourceHandle: null
     - source: node-devices
+      target: node-assets
+      sourceHandle: null
+    - source: node-assets
       target: node-software
       sourceHandle: null
     - source: node-software

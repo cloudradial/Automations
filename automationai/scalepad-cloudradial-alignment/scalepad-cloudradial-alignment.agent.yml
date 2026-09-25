@@ -81,8 +81,8 @@ agent:
        guess a company.
     2. Read both sides BEFORE proposing anything. ScalePad list tools page automatically;
        pass page_size 200. CloudRadial endpoint custom properties are keyed by the endpoint
-       (companyEndpointId), not by company. ScalePad filters use filter[field]=op:value, e.g.
-       filter[client.id]=eq:<id>.
+       (companyEndpointId), not by company. ScalePad filter arguments use underscore names
+       with an op:value, e.g. filter_client_id=eq:<id> (sent to ScalePad as filter[client.id]).
     3. Map each item to its CloudRadial home per the map:
          - warranty expiry -> endpoint expirationDate, written DIRECTLY (never update-warranty).
          - purchase date -> endpoint manufacturedDate, only when blank.

@@ -10,7 +10,7 @@ Use it with [`lifecycle-manager` 1.2.0](../scalepad-lifecycle-manager-extension/
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.1). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
+| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.2). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
 | [`scalepad-cloudradial-alignment.yml`](scalepad-cloudradial-alignment.yml) | `automationsWorkflow` | **Command: align.** One agent node, `autoApprove: false` (you approve each write). Static goal — the agent reads `mode`/`phase`/company from its input bag. |
 | [`knowledge/scalepad-to-cloudradial-migration-map.md`](knowledge/scalepad-to-cloudradial-migration-map.md) | Knowledge | Section-by-section map (ScalePad → CloudRadial home → API/import route → policy-evaluable?), the endpoint field map, and the guardrails. Upload to Knowledge and ground the workflow's agent node on it. |
 

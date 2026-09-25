@@ -14,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.2.1
+  version: 0.2.2
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, keeps non-endpoint hardware as
@@ -68,6 +68,9 @@ agent:
       them, spot problems, and put ONE `planned` entry per phase with action "workflow", the
       count, and the exact workflow inputs to run (companyId, scalePadClientId, mode, phases).
       Do not write these one by one.
+    - Put all phases in ONE workflow entry's workflowInputs (phases: all six, or the ones
+      that apply) rather than one run per phase: software attaches to devices, so devices must
+      be applied before or in the same run as software.
     - The Sync's phases are exactly: devices, assets, software, assessments, roadmap, archive.
       Use only these names in workflowInputs.phases - initiatives and contracts are "roadmap",
       deliverable PDFs are "archive", flexible assets are "assets".
@@ -96,6 +99,8 @@ agent:
        Installed software (scalepad_lm_list_software_*) accepts page_size 100 at most and
        rejects sort=name - pass page_size 100 and no sort. To read one CloudRadial company, use
        cr_list_company with filter "companyId eq <id>" (cr_get_company can return 404).
+       Never pass count=true to a cr_list_* tool - the API rejects '$count=True'; the list
+       tools already return the complete set, so count the rows yourself.
     3. Map each item to its CloudRadial home per the map:
          - warranty expiry -> endpoint expirationDate, written DIRECTLY (never update-warranty).
          - purchase date -> endpoint manufacturedDate, only when blank.

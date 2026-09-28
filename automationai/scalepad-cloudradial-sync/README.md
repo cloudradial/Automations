@@ -20,6 +20,20 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
 | _report_ | — | In apply mode, a **migration report** in each company's portal: a knowledge base article (category *ScalePad Migration*), or with `reportTarget: archive` an item in its **ScalePad Migration** report archive. It lists what moved per area, what needs attention, and any warnings. |
 
+## What it doesn't move
+
+Some parts of ScalePad Lifecycle Manager have no CloudRadial API (or none this workflow uses yet). Every migration report lists them in a **Not migrated** table, so nothing is silently dropped:
+
+| ScalePad area | Why | What to do |
+|---|---|---|
+| Policies and standards | CloudRadial has no API for Compliance Policies. | Set up the equivalent checks under **Compliance > Policies**. The Sync already fills the endpoint fields those checks read (warranty expiry, purchase date, server type). |
+| Assessment templates | Only completed assessments (with answers) import. | Recreate templates under Compliance > Assessments, or import one with the Excel template. |
+| Meetings and QBR agendas | No meeting or agenda API. | The meeting PDFs are archived; recreate recurring QBRs in your calendar or PSA. |
+| Initiative action items and notes | No API for Planner card sub-tasks. | Add them to the card description, or track them in your PSA. |
+| Insights and recommendations | No CloudRadial equivalent. | Review in ScalePad before retiring it; turn keepers into Planner cards. |
+| SaaS and cloud subscriptions | Not moved by this workflow yet. | Record as a flexible asset type or Planner items. |
+| Report and deliverable templates, branding | Neither API exposes templates. | Rebuild in CloudRadial Report Layouts. |
+
 Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved — the result is visible in the portal itself.
 
 ## Install / run

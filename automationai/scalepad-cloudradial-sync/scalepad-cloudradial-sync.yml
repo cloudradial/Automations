@@ -2732,6 +2732,18 @@ definition:
                           return
                       }
 
+
+                      # ---- Areas of ScalePad Lifecycle Manager this API-to-API sync does not move ----
+                      # CloudRadial has no API for these (or none this workflow uses yet), so the report says so plainly.
+                      $NotMigrated = @(
+                          [ordered]@{ area = 'Policies and standards'; why = "CloudRadial has no API for Compliance Policies, so ScalePad's lifecycle, warranty and replacement policies can't be recreated automatically."; action = "Set up the equivalent checks in CloudRadial under Compliance > Policies. The Sync already fills the endpoint fields those checks read (warranty expiry, purchase date, server type)." }
+                          [ordered]@{ area = 'Assessment templates'; why = 'Only completed assessments (with answers) are imported. Blank templates and scoring rules have no import route.'; action = 'Recreate templates under Compliance > Assessments, or export one from ScalePad and import it with the Excel template.' }
+                          [ordered]@{ area = 'Meetings and QBR agendas'; why = 'CloudRadial has no meeting or agenda API.'; action = 'The meeting PDFs (deliverables) are archived; recreate recurring QBR meetings in your calendar or PSA.' }
+                          [ordered]@{ area = 'Initiative action items and notes'; why = 'Planner cards carry the initiative, budget and quarter, but CloudRadial has no API for card sub-tasks.'; action = "Add action items to the Planner card's description, or track them in your PSA." }
+                          [ordered]@{ area = 'Insights and recommendations'; why = "ScalePad's calculated insights have no CloudRadial equivalent to write to."; action = 'Review them in ScalePad before retiring it; turn the ones you want to keep into Planner cards.' }
+                          [ordered]@{ area = 'SaaS and cloud subscriptions'; why = 'Not moved by this workflow yet.'; action = 'Record them as a flexible asset type or Planner items if you track them.' }
+                          [ordered]@{ area = 'Report and deliverable templates, branding'; why = 'Templates are not exposed by either API; only finished PDFs are.'; action = 'Rebuild layouts in CloudRadial Report Layouts.' }
+                      )
                       $lines = New-Object System.Collections.ArrayList
                       $html = New-Object System.Text.StringBuilder
                       $null = $lines.Add("ScalePad client '$spName' to CloudRadial company '$companyName' ($companyId), $mode mode.")
@@ -2798,6 +2810,9 @@ definition:
                       $null = $html.Append('</table>')
                       if ($attention.Count -gt 0) { $null = $html.Append('<h3>Needs attention</h3><ul>'); foreach ($x in $attention) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
                       if ($allWarnings.Count -gt 0) { $null = $html.Append('<h3>Warnings</h3><ul>'); foreach ($x in @($allWarnings | Select-Object -First 40)) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
+                      $null = $html.Append('<h3>Not migrated - no CloudRadial API for these areas</h3><table border="1" cellpadding="6" cellspacing="0"><tr><th>ScalePad area</th><th>Why</th><th>What to do</th></tr>')
+                      foreach ($n in $NotMigrated) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $n.area)</td><td>$(ConvertTo-HtmlText $n.why)</td><td>$(ConvertTo-HtmlText $n.action)</td></tr>") }
+                      $null = $html.Append('</table>')
                       $null = $html.Append('<p><i>Written by the AutomationAI workflow "ScalePad to CloudRadial Sync". Devices created from ScalePad are tagged ScalePad.</i></p>')
 
                       # ---- write the report into the portal ----
@@ -2835,12 +2850,13 @@ definition:
                           summary        = ($lines -join ' ')
                           reportLocation = $reportLocation
                           reportHtml     = $html.ToString()
+                          notMigrated    = @($NotMigrated)
                           results        = $results
                           warnings       = $allWarnings
                           message        = ($lines -join ' ')
                       }
                   }
-                  $null = $ReportCompanies.Add([ordered]@{ companyId = $it.ctx.companyId; companyName = $it.ctx.companyName; status = $global:ReportLast.status; summary = $global:ReportLast.summary; reportLocation = $global:ReportLast.reportLocation; warnings = $global:ReportLast.warnings })
+                  $null = $ReportCompanies.Add([ordered]@{ companyId = $it.ctx.companyId; companyName = $it.ctx.companyName; status = $global:ReportLast.status; summary = $global:ReportLast.summary; reportLocation = $global:ReportLast.reportLocation; warnings = $global:ReportLast.warnings; notMigrated = $global:ReportLast.notMigrated })
               }
               catch { $null = $ReportCompanies.Add([ordered]@{ companyId = $it.ctx.companyId; companyName = $it.ctx.companyName; status = 'report_failed'; summary = "Report failed: $($_.Exception.Message)" }) }
           }
@@ -2861,6 +2877,7 @@ definition:
               summary = $msg
               companies = @($ReportCompanies)
               unmatchedScalePadClients = $unmatched
+              notMigrated = @(@($ReportCompanies | Select-Object -First 1 | ForEach-Object { $_.notMigrated }) | Where-Object { $_ })
           }
         timeoutSeconds: 600
         retryCount: 0

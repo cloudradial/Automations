@@ -3093,6 +3093,7 @@ definition:
                       $null = $html.Append("<h2>ScalePad migration - $(ConvertTo-HtmlText $companyName)</h2><p>Run on $runDay in <b>$(if ($apply) { 'apply' } else { 'plan (preview)' })</b> mode, from ScalePad client <b>$(ConvertTo-HtmlText $spName)</b>.</p>")
                       $rows = New-Object System.Collections.ArrayList
                       $attention = New-Object System.Collections.ArrayList
+                      $notes = New-Object System.Collections.ArrayList
 
                       $cu = Get-P $results 'cleanup.counts'
                       if ($cu) {
@@ -3122,6 +3123,8 @@ definition:
                       if ($sa) {
                           $act = if ($apply) { "Created $(Get-P $sa 'created') and updated $(Get-P $sa 'updated')." } else { "Would create $(Get-P $sa 'toCreate') and update $(Get-P $sa 'toUpdate')." }
                           $null = $lines.Add("SaaS: $(Get-P $sa 'scalePadAssets') ScalePad SaaS subscriptions, kept in the '$(Get-P $results 'saas.flexibleAssetType')' flexible asset type. $act")
+                          $saasType = [string](Get-P $results 'saas.flexibleAssetType' 'SaaS')
+                          $null = $notes.Add("SaaS subscriptions are under Infrastructure > $saasType (a flexible asset type), not under Software > SaaS. That tab lists SaaS CloudRadial discovers itself and has no API to write to, so ScalePad's subscriptions - with licences, assigned seats and renewal dates - are kept in the $saasType flexible asset instead.")
                           $null = $rows.Add(@('SaaS subscriptions (flexible assets)', "$(Get-P $sa 'scalePadAssets') subscriptions", $act, "$(Get-P $sa 'unchanged') unchanged, $(Get-P $sa 'errors') errors"))
                       }
                       $s = Get-P $results 'software.counts'
@@ -3157,6 +3160,7 @@ definition:
                       $null = $html.Append('<table border="1" cellpadding="6" cellspacing="0"><tr><th>Area</th><th>In ScalePad</th><th>Result</th><th>Notes</th></tr>')
                       foreach ($row in $rows) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $row[0])</td><td>$(ConvertTo-HtmlText $row[1])</td><td>$(ConvertTo-HtmlText $row[2])</td><td>$(ConvertTo-HtmlText $row[3])</td></tr>") }
                       $null = $html.Append('</table>')
+                      if ($notes.Count -gt 0) { $null = $html.Append('<h3>Where to find it</h3><ul>'); foreach ($x in $notes) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
                       if ($attention.Count -gt 0) { $null = $html.Append('<h3>Needs attention</h3><ul>'); foreach ($x in $attention) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
                       if ($allWarnings.Count -gt 0) { $null = $html.Append('<h3>Warnings</h3><ul>'); foreach ($x in @($allWarnings | Select-Object -First 40)) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
                       $null = $html.Append('<h3>Not migrated - no CloudRadial API for these areas</h3><table border="1" cellpadding="6" cellspacing="0"><tr><th>ScalePad area</th><th>Why</th><th>What to do</th></tr>')
@@ -3200,6 +3204,7 @@ definition:
                           reportLocation = $reportLocation
                           reportHtml     = $html.ToString()
                           notMigrated    = @($NotMigrated)
+                          notes          = @($notes)
                           results        = $results
                           warnings       = $allWarnings
                           message        = ($lines -join ' ')

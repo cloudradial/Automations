@@ -246,7 +246,8 @@ definition:
           if (Test-Blank $spClientId) {
               $lookupName = if (-not (Test-Blank $spClientName)) { $spClientName } else { $crCompanyName }
               if (Test-Blank $lookupName) { throw "CloudRadial company $crCompanyId has no name to match on. Send scalePadClientId." }
-              $cands = @(Get-SpAll '/core/v1/clients' @{ 'filter[name]' = "cont:$lookupName" })
+              # ScalePad rejects filter[name]=cont: on /clients (HTTP 400), so read the list and match here.
+              $cands = @(Get-SpAll '/core/v1/clients')
               $target = Normalize-Name $lookupName
               $hit = @($cands | Where-Object { (Normalize-Name (Get-P $_ 'name')) -eq $target })
               if ($hit.Count -eq 1) { $spClientId = [string](Get-P $hit[0] 'id'); $spClientName = [string](Get-P $hit[0] 'name') }

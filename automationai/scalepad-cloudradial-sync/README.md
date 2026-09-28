@@ -17,7 +17,7 @@ A deterministic **workflow** that moves a client's ScalePad Lifecycle Manager da
 | `software` | Installed software per device | One endpoint application per product per device (name, publisher, version). |
 | `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
 | `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>` — updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
-| `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. Any PDF the upload route rejects is listed in the migration report for a manual upload. |
+| `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
 | _report_ | — | In apply mode, a **migration report** written into the portal: an HTML item in the company's **ScalePad Migration** report archive (Compliance > Reports), or a knowledge base article if the archive can't be written. It lists what moved per area, what needs attention, and any warnings. |
 
 Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved — the result is visible in the portal itself.
@@ -65,7 +65,7 @@ All optional except naming the client (either side works).
 - **Flexible asset updates.** New rows use `POST /v2/flexible-asset` (the route the KnowBe4 sync already uses). Changed rows are sent as `PATCH /v2/flexible-asset/{id}` replacing `traitsJson`, falling back to `PATCH /compatibility/flexible_assets/{id}` with `traits`. After the first apply run that updates a row, check it in the portal.
 - **ScalePad software paging.** The installed-software list accepts `page_size` 100 at most (the other lists take 200); the step asks for 100. Any list that rejects 200 is retried at 100 automatically.
 
-- **Archive upload route.** `POST /api/beta/archive/{id}/item` is documented without a request body. The workflow sends a multipart PDF; if it's rejected, the report lists the PDFs to upload by hand. The migration report itself doesn't depend on this route — it's written with the documented `POST /v2/archiveitem` (HTML), or as an article.
+- **Archive upload route.** `POST /api/beta/archive/{id}/item` takes the PDF as multipart/form-data. The create call doesn't always return the new archive's id, so the step looks the archive up again by name before uploading (a first live run uploaded to archive 0 and failed with "Sequence contains no elements").
 - **Assessment import `type`.** The upload's `data` part sends `type: 0`. If the import lands as a template instead of an assessment, change it in the assessments step.
 - **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).

@@ -164,12 +164,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -439,12 +453,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -747,12 +775,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -1097,12 +1139,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -1352,12 +1408,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -1714,12 +1784,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -2024,12 +2108,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -2113,15 +2211,11 @@ definition:
                       try {
                           $null = Invoke-WithRetry -What "ScalePad PDF $dname" -Call { Invoke-WebRequest -Method Get -Uri "$spBase/lifecycle-manager/v1/deliverables/$(Get-P $d 'id')/pdf" -Headers @{ 'x-api-key' = $spKey; Accept = 'application/pdf' } -OutFile $file }
                           $fileName = (($subject -replace '[\\/:*?"<>|]', '-') + '.pdf')
-                          $done = $false
-                          try { $null = Send-ArchiveUpload -ArchiveId $archiveId -FilePath $file -FileName $fileName; $counts.uploaded++; $item.method = 'api'; $done = $true }
-                          catch { $item.apiError = $_.Exception.Message }
-                          if (-not $done) {
-                              $counts.needsManual++; $item.method = 'manual'
-                              Warn "'$subject' needs a manual upload to the '$archiveName' archive: the archive upload route rejected it ($($item.apiError))."
-                          }
+                          if ($archiveId -le 0) { throw "the '$archiveName' archive has no id, so nothing was uploaded" }
+                          $null = Send-ArchiveUpload -ArchiveId $archiveId -FilePath $file -FileName $fileName
+                          $counts.uploaded++; $item.method = 'api'
                       }
-                      catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Archive '$subject' failed: $($_.Exception.Message)" }
+                      catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Couldn't upload '$subject' to the '$archiveName' archive: $($_.Exception.Message). Re-run to retry - uploaded PDFs are skipped." }
                       finally { if (Test-Path $file) { Remove-Item $file -Force -ErrorAction SilentlyContinue } }
                   }
                   $null = $items.Add($item)
@@ -2133,7 +2227,7 @@ definition:
           $ctx.results = $results
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
-          Set-NodeOutput @{ status = 'ok'; message = "Archive: $($c.deliverables) deliverables, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.uploaded) uploaded, $($c.needsManual) need manual upload" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
+          Set-NodeOutput @{ status = 'ok'; message = "Archive: $($c.deliverables) deliverables, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.uploaded) uploaded" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
           }
           catch {
               $stepErr = $_.Exception.Message
@@ -2298,12 +2392,26 @@ definition:
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+              # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+              # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-              $list = @(Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId")
-              if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] 'value')) { $list = @(Get-P $list[0] 'value' @()) }
-              $hit = @($list | Where-Object { [int](Get-P $_ 'companyId' 0) -eq $CompanyId -and ([string](Get-P $_ 'name')) -eq $Name }) | Select-Object -First 1
-              if ($null -eq $hit -and $Create) { $hit = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-              return $hit
+              function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              function Find-Archive {
+                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                  $list = @($raw)
+                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+              }
+              $hit = Find-Archive
+              if ($null -eq $hit -and $Create) {
+                  $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category })
+                  $id = Get-ArchiveId $resp
+                  $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+              }
+              if ($null -eq $hit) { return $null }
+              $id = Get-ArchiveId $hit
+              if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+              return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 
@@ -2382,10 +2490,8 @@ definition:
           $ar = Get-P $results 'archive.counts'
           if ($ar) {
               $act = if ($apply) { "Uploaded $(Get-P $ar 'uploaded')." } else { "Would archive $(Get-P $ar 'toArchive')." }
-              $null = $lines.Add("Report archive: $(Get-P $ar 'deliverables') ScalePad deliverables, $(Get-P $ar 'alreadyArchived') already archived. $act $(if ($apply) { "$(Get-P $ar 'needsManual') need a manual upload." })")
-              $null = $rows.Add(@('Deliverable PDFs', "$(Get-P $ar 'deliverables') in ScalePad", $act, "$(Get-P $ar 'alreadyArchived') already archived, $(Get-P $ar 'needsManual') need manual upload, $(Get-P $ar 'errors') errors"))
-              $manual = @(@(Get-P $results 'archive.items' @()) | Where-Object { (Get-P $_ 'method') -eq 'manual' } | ForEach-Object { Get-P $_ 'deliverable' })
-              if ($manual.Count -gt 0) { $null = $attention.Add("Upload these PDFs to the '$(Get-P $results 'archive.archiveName')' archive by hand (download them from ScalePad): $($manual -join ', ')") }
+              $null = $lines.Add("Report archive: $(Get-P $ar 'deliverables') ScalePad deliverables, $(Get-P $ar 'alreadyArchived') already archived. $act ")
+              $null = $rows.Add(@('Deliverable PDFs', "$(Get-P $ar 'deliverables') in ScalePad", $act, "$(Get-P $ar 'alreadyArchived') already archived, $(Get-P $ar 'errors') errors"))
           }
 
           $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })

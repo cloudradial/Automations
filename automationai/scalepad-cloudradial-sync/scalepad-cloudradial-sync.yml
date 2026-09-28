@@ -158,16 +158,36 @@ definition:
               return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
           }
           function Get-CrAll {
-              # Follows @odata.nextLink.
-              param([string]$Path)
+              # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+              # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+              # A nextLink, when one is returned, is still followed.
+              param([string]$Path, [int]$PageSize = 100)
               $items = New-Object System.Collections.ArrayList
-              $next = $Path
-              $guard = 0
-              while ($next -and $guard -lt 500) {
-                  $guard++
-                  $resp = Invoke-Cr -Method GET -Path $next
+              if ($Path -match '[?&]\$(top|skip)=') {
+                  # Caller asked for a specific slice - honour it as-is.
+                  $resp = Invoke-Cr -Method GET -Path $Path
                   foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                  return $items.ToArray()
+              }
+              $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+              $skip = 0; $prevFirst = $null
+              for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                  $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                  $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                  if ($rows.Count -eq 0) { break }
+                  $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                  if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                  $prevFirst = $first
+                  foreach ($v in $rows) { $null = $items.Add($v) }
                   $next = Get-P $resp '@odata.nextLink'
+                  if ($next) {
+                      # The server offered its own paging - follow it for the rest.
+                      $guard = 0
+                      while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                      break
+                  }
+                  if ($rows.Count -lt $PageSize) { break }
+                  $skip += $rows.Count
               }
               return $items.ToArray()
           }
@@ -522,16 +542,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -789,16 +829,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -1140,16 +1200,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -1522,16 +1602,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -1895,16 +1995,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -2226,16 +2346,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -2632,16 +2772,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -2974,16 +3134,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -3274,16 +3454,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -3576,16 +3776,36 @@ definition:
                       return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                   }
                   function Get-CrAll {
-                      # Follows @odata.nextLink.
-                      param([string]$Path)
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
                       $items = New-Object System.Collections.ArrayList
-                      $next = $Path
-                      $guard = 0
-                      while ($next -and $guard -lt 500) {
-                          $guard++
-                          $resp = Invoke-Cr -Method GET -Path $next
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
                           foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
                           $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
                       }
                       return $items.ToArray()
                   }
@@ -3918,16 +4138,36 @@ definition:
                           return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
                       }
                       function Get-CrAll {
-                          # Follows @odata.nextLink.
-                          param([string]$Path)
+                          # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                          # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                          # A nextLink, when one is returned, is still followed.
+                          param([string]$Path, [int]$PageSize = 100)
                           $items = New-Object System.Collections.ArrayList
-                          $next = $Path
-                          $guard = 0
-                          while ($next -and $guard -lt 500) {
-                              $guard++
-                              $resp = Invoke-Cr -Method GET -Path $next
+                          if ($Path -match '[?&]\$(top|skip)=') {
+                              # Caller asked for a specific slice - honour it as-is.
+                              $resp = Invoke-Cr -Method GET -Path $Path
                               foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                              return $items.ToArray()
+                          }
+                          $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                          $skip = 0; $prevFirst = $null
+                          for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                              $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                              $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                              if ($rows.Count -eq 0) { break }
+                              $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                              if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                              $prevFirst = $first
+                              foreach ($v in $rows) { $null = $items.Add($v) }
                               $next = Get-P $resp '@odata.nextLink'
+                              if ($next) {
+                                  # The server offered its own paging - follow it for the rest.
+                                  $guard = 0
+                                  while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                                  break
+                              }
+                              if ($rows.Count -lt $PageSize) { break }
+                              $skip += $rows.Count
                           }
                           return $items.ToArray()
                       }

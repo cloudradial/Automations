@@ -212,6 +212,7 @@ definition:
               assetTypes             = @(([string](Get-P $ctx 'assetTypes' '')).Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
               includeNoSerialDevices = -not ([string](Get-P $ctx 'includeNoSerialDevices' 'true') -match '^(false|no|0)$')
               flexibleAssetTypeName  = [string](Get-P $ctx 'flexibleAssetTypeName' 'ScalePad Assets')
+              skipDevicesWithSoftware = -not ([string](Get-P $ctx 'skipDevicesWithSoftware' 'true') -match '^(false|no|0)$')
               maxSoftwareWrites      = [int](Get-P $ctx 'maxSoftwareWrites' 2000)
               assessmentStatus       = [string](Get-P $ctx 'assessmentStatus' 'Completed')
               labelScoreMap          = Get-P $ctx 'labelScoreMap'
@@ -1208,27 +1209,33 @@ definition:
                           $s = Normalize-Serial (Get-P $e 'serialNumber'); if ($s) { $epBySerial[$s] = [int](Get-P $e 'companyEndpointId') }
                       }
 
-                      $existing = New-Object System.Collections.Generic.HashSet[string]
-                      foreach ($a in @(Get-CrAll "/v2/odata/endpointapplication?`$filter=companyId eq $companyId&`$select=endpointId,name,publisher")) {
-                          $null = $existing.Add(('{0}|{1}|{2}' -f (Get-P $a 'endpointId'), ([string](Get-P $a 'name')).ToLowerInvariant(), ([string](Get-P $a 'publisher')).ToLowerInvariant()))
+                      # What each endpoint already has. The RMM names software differently from ScalePad
+                      # ("Google Chrome / Google LLC" vs "Google Chrome / Google") and re-syncs its list, so:
+                      #  - a device that already has software in CloudRadial is left alone (skipDevicesWithSoftware), and
+                      #  - otherwise matching is by endpoint + normalized product name, ignoring publisher and version.
+                      function Get-AppKey { param([string]$n)
+                          $t = $n.ToLowerInvariant() -replace '\(.*?\)', ' ' -replace '\b(x64|x86|64-bit|32-bit|en-us|en-gb)\b', ' ' -replace '\b\d+(\.\d+)+\b', ' ' -replace '[^a-z0-9]+', ' '
+                          return ($t -replace '\s+', ' ').Trim()
                       }
+                      $appsByEp = @{}
+                      function Add-ExistingApp { param($eid, $name) if (-not $appsByEp.ContainsKey([int]$eid)) { $appsByEp[[int]$eid] = New-Object System.Collections.Generic.HashSet[string] }; $k = Get-AppKey ([string]$name); if ($k) { $null = $appsByEp[[int]$eid].Add($k) } }
+                      try { foreach ($a in @(Get-CrAll "/v2/odata/endpointapplication?`$filter=companyId eq $companyId&`$select=endpointId,name")) { Add-ExistingApp (Get-P $a 'endpointId' 0) (Get-P $a 'name') } }
+                      catch { Warn "Couldn't read existing software by company; reading per device. $($_.Exception.Message)" }
 
                       $installs = @(Get-SpAll '/lifecycle-manager/v1/assets/software' @{ 'filter[client.id]' = "eq:$spClientId" } -PageSize 100)
-                      # Duplicate guard: if the company-wide read found nothing, read each device this run will touch.
-                      # (A live re-run created all 401 KMCO records again, so the company-level filter can't be trusted alone.)
-                      if ($existing.Count -eq 0) {
-                          $touch = @($installs | ForEach-Object { Normalize-Serial (Get-P $_ 'hardware_asset.serial_number') } | Where-Object { $_ -and $epBySerial.ContainsKey($_) } | Sort-Object -Unique)
-                          $found = 0
-                          foreach ($sn in $touch) {
-                              $eid = $epBySerial[$sn]
-                              try {
-                                  foreach ($a in @(Get-CrAll "/v2/odata/endpointapplication?`$filter=endpointId eq $eid&`$select=endpointId,name,publisher")) {
-                                      $null = $existing.Add(('{0}|{1}|{2}' -f $eid, ([string](Get-P $a 'name')).ToLowerInvariant(), ([string](Get-P $a 'publisher')).ToLowerInvariant())); $found++
-                                  }
-                              } catch { Warn "Couldn't read existing software for endpoint $eid ($sn): $($_.Exception.Message)" }
-                          }
-                          if ($found -gt 0) { Warn "Existing software was found per device ($found records) but not by company - duplicates were avoided." }
+                      # The company-wide read has come back empty on a portal that had software, so confirm per device.
+                      $touch = @($installs | ForEach-Object { Normalize-Serial (Get-P $_ 'hardware_asset.serial_number') } | Where-Object { $_ -and $epBySerial.ContainsKey($_) } | Sort-Object -Unique)
+                      foreach ($sn in $touch) {
+                          $eid = $epBySerial[$sn]
+                          if ($appsByEp.ContainsKey([int]$eid)) { continue }
+                          try { foreach ($a in @(Get-CrAll "/v2/odata/endpointapplication?`$filter=endpointId eq $eid&`$select=endpointId,name")) { Add-ExistingApp $eid (Get-P $a 'name') } }
+                          catch { Warn "Couldn't read existing software for endpoint $eid ($sn): $($_.Exception.Message)" }
                       }
+                      $skipWithSoftware = -not ([string](Get-P $settings 'skipDevicesWithSoftware' 'true') -match '^(false|no|0)$')
+                      $hadSoftware = @{}
+                      foreach ($k in $appsByEp.Keys) { if ($appsByEp[$k].Count -gt 0) { $hadSoftware[[int]$k] = $true } }
+                      $skippedDevices = New-Object System.Collections.Generic.HashSet[string]
+
                       $counts.scalePadInstalls = $installs.Count
                       $cap = [int](Get-P $settings 'maxSoftwareWrites' 2000)
                       $devicesSeen = New-Object System.Collections.Generic.HashSet[string]
@@ -1237,20 +1244,22 @@ definition:
                       foreach ($i in $installs) {
                           $serial = Normalize-Serial (Get-P $i 'hardware_asset.serial_number')
                           if (-not $serial -or -not $epBySerial.ContainsKey($serial)) { $counts.noDevice++; $null = $noDevice.Add([string](Get-P $i 'hardware_asset.name' $serial)); continue }
-                          $epId = $epBySerial[$serial]
+                          $epId = [int]$epBySerial[$serial]
                           $null = $devicesSeen.Add($serial)
                           $name = [string](Get-P $i 'product.name' '')
                           if (Test-Blank $name) { continue }
+                          if ($skipWithSoftware -and $hadSoftware.ContainsKey($epId)) { $counts.alreadyPresent++; $null = $skippedDevices.Add($serial); continue }
+                          $key = Get-AppKey $name
+                          if (-not $appsByEp.ContainsKey($epId)) { $appsByEp[$epId] = New-Object System.Collections.Generic.HashSet[string] }
+                          if ($appsByEp[$epId].Contains($key)) { $counts.alreadyPresent++; continue }
+                          $null = $appsByEp[$epId].Add($key)
                           $publisher = [string](Get-P $i 'publisher.name' '')
                           if (Test-Blank $publisher) { $publisher = 'Unknown' }
-                          $key = '{0}|{1}|{2}' -f $epId, $name.ToLowerInvariant(), $publisher.ToLowerInvariant()
-                          if ($existing.Contains($key)) { $counts.alreadyPresent++; continue }
-                          $null = $existing.Add($key)
                           $counts.toCreate++
                           if ($writeCount -ge $cap) { $counts.overCap++; continue }
                           $display = [string](Get-P $i 'version.display' '')
                           $v = Split-Version $display
-                          $body = [ordered]@{ companyId = $companyId; endpointId = $epId; name = $name; publisher = $publisher; display = $display; major = $v[0]; minor = $v[1]; version = $v[2]; category = [string](Get-P $i 'product.category' '') }
+                          $body = [ordered]@{ companyId = $companyId; endpointId = $epId; name = $name; publisher = $publisher; display = $display; major = $v[0]; minor = $v[1]; version = $v[2]; category = [string](Get-P $i 'product.category' ''); comments = 'Added by ScalePad to CloudRadial Sync' }
                           if ($sample.Count -lt 25) { $null = $sample.Add(@{ device = [string](Get-P $i 'hardware_asset.name'); product = $name; publisher = $publisher; version = $display }) }
                           if ($apply) {
                               try { $null = Invoke-Cr -Method POST -Path '/v2/endpointapplication' -Body $body; $counts.created++ }
@@ -1258,6 +1267,8 @@ definition:
                           }
                           $writeCount++
                       }
+                      $counts.devicesSkippedHaveSoftware = $skippedDevices.Count
+                      if ($skippedDevices.Count -gt 0) { Warn "$($skippedDevices.Count) device(s) already have software in CloudRadial (usually from the RMM), so ScalePad's list wasn't added to them. Set skipDevicesWithSoftware to false to add missing items anyway." }
                       $counts.devicesWithSoftware = $devicesSeen.Count
                       $counts.scalePadDevices = @($installs | ForEach-Object { Normalize-Serial (Get-P $_ 'hardware_asset.serial_number') } | Where-Object { $_ } | Sort-Object -Unique).Count
                       if ($counts.overCap -gt 0) { Warn "$($counts.overCap) software records were left for the next run (maxSoftwareWrites = $cap). Re-run to continue; existing records are skipped." }
@@ -1268,7 +1279,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Software: $($c.scalePadInstalls) installs in ScalePad, $($c.alreadyPresent) already in CloudRadial, $(if ($apply) { "$($c.created) created" } else { "$($c.toCreate) to create" }), $($c.noDevice) on devices not in CloudRadial, $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Software: $($c.scalePadInstalls) installs in ScalePad, $($c.alreadyPresent) already in CloudRadial$(if ($c.devicesSkippedHaveSoftware) { " ($($c.devicesSkippedHaveSoftware) devices already have software)" }), $(if ($apply) { "$($c.created) created" } else { "$($c.toCreate) to create" }), $($c.noDevice) on devices not in CloudRadial, $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message

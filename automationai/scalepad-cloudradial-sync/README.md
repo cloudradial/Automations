@@ -30,7 +30,7 @@ Every phase is idempotent: re-running updates or skips what's already there. No 
    - **First run — leave Trigger input empty.** Nothing is synced; the output lists every ScalePad client that matches a CloudRadial company and the exact input to use next.
    - **Plan:** `{"companyId": 9}` — counts per phase and the first 150 planned device changes. Nothing is written (plan is the default).
    - **Apply:** `{"companyId": 9, "mode": "apply"}` — writes, then puts a migration report in the portal.
-4. **Apply.** Re-run with `"mode": "apply"`. Run the devices phase before software (the default order does this), so software can attach to devices created in the same run. The run output's `reportLocation` says where the migration report was written.
+4. **Check the result.** The run output's `reportLocation` says where the migration report was written. Keep all phases in one run — software attaches to devices created in the same run.
 5. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled — enable it only if something else triggers the sync.
 
 ## Run inputs

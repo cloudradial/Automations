@@ -160,6 +160,21 @@ definition:
               }
               return $items.ToArray()
           }
+          function Get-CrBetaAll {
+              # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+              param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+              $all = New-Object System.Collections.ArrayList
+              $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+              for ($p = 0; $p -lt $MaxPages; $p++) {
+                  $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                  $rows = @($raw)
+                  foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                  $rows = @($rows | Where-Object { $null -ne $_ })
+                  foreach ($r in $rows) { $null = $all.Add($r) }
+                  if ($rows.Count -lt $Take) { break }
+              }
+              return $all.ToArray()
+          }
           function Get-CrArchive {
               # Finds a company report archive by name (legacy /api/beta/archive, which also returns
               # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -169,10 +184,8 @@ definition:
               function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
               $script:ArchiveSeen = @()
               function Find-Archive {
-                  foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                      $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                      $list = @($raw)
-                      foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                  foreach ($path in @('/api/beta/archive')) {
+                      $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                       $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                       $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                       $hit = @($list | Where-Object {
@@ -497,6 +510,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -506,10 +534,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -740,6 +766,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -749,10 +790,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -1067,6 +1106,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -1076,10 +1130,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -1425,6 +1477,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -1434,10 +1501,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -1774,6 +1839,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -1783,10 +1863,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -2081,6 +2159,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -2090,10 +2183,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -2458,6 +2549,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -2467,10 +2573,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -2776,6 +2880,21 @@ definition:
                       }
                       return $items.ToArray()
                   }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
                   function Get-CrArchive {
                       # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                       # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -2785,10 +2904,8 @@ definition:
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                       $script:ArchiveSeen = @()
                       function Find-Archive {
-                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                               $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                               $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                               $hit = @($list | Where-Object {
@@ -2866,8 +2983,8 @@ definition:
                       $archivedSubjects = New-Object System.Collections.Generic.HashSet[string]
                       if ($archiveId -gt 0) {
                           try {
-                              $existingItems = Invoke-Cr -Method GET -Path "/api/beta/archive/$archiveId/item"
-                              foreach ($it in @($existingItems) + @(Get-P $existingItems 'value' @())) { $s = [string](Get-P $it 'subject' (Get-P $it 'name' '')); if ($s) { $null = $archivedSubjects.Add($s.ToLowerInvariant()) } }
+                              $existingItems = @(Get-CrBetaAll "/api/beta/archive/$archiveId/item")
+                              foreach ($it in $existingItems) { $s = [string](Get-P $it 'subject' (Get-P $it 'name' '')); if ($s) { $null = $archivedSubjects.Add($s.ToLowerInvariant()) } }
                           } catch { Warn "Could not list existing archive items; duplicates are possible. $($_.Exception.Message)" }
                       }
 
@@ -3125,6 +3242,21 @@ definition:
                           }
                           return $items.ToArray()
                       }
+                      function Get-CrBetaAll {
+                          # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                          param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                          $all = New-Object System.Collections.ArrayList
+                          $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                          for ($p = 0; $p -lt $MaxPages; $p++) {
+                              $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                              $rows = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                              $rows = @($rows | Where-Object { $null -ne $_ })
+                              foreach ($r in $rows) { $null = $all.Add($r) }
+                              if ($rows.Count -lt $Take) { break }
+                          }
+                          return $all.ToArray()
+                      }
                       function Get-CrArchive {
                           # Finds a company report archive by name (legacy /api/beta/archive, which also returns
                           # its inboundAddress); creates it when -Create is set. Returns $null when absent.
@@ -3134,10 +3266,8 @@ definition:
                           function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
                           $script:ArchiveSeen = @()
                           function Find-Archive {
-                              foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
-                                  $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-                                  $list = @($raw)
-                                  foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              foreach ($path in @('/api/beta/archive')) {
+                                  $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
                                   $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
                                   $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
                                   $hit = @($list | Where-Object {

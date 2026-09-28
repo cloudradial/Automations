@@ -195,12 +195,14 @@ definition:
           # =====================================================================
           # Step 1 - Resolve the client in ScalePad and CloudRadial, read options
           # =====================================================================
-          $allPhases = @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')
+          $defaultPhases = @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')
+          $allPhases = @('cleanup') + $defaultPhases
           $phasesIn = Get-P $ctx 'phases'
           $phases = @()
           if ($phasesIn -is [array]) { $phases = @($phasesIn | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }) }
           elseif (-not (Test-Blank $phasesIn)) { $phases = @(([string]$phasesIn).Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() }) }
-          if ($phases.Count -eq 0 -or $phases -contains 'all') { $phases = $allPhases }
+          if ($phases.Count -eq 0 -or $phases -contains 'all') { $phases = $defaultPhases }
+          if ([string](Get-P $ctx 'cleanupDuplicateSoftware' 'false') -match '^(true|yes|1)$') { $phases = @('cleanup') }
           $unknown = @($phases | Where-Object { $_ -notin $allPhases })
           if ($unknown.Count -gt 0) { Warn "Ignored unknown phase(s): $($unknown -join ', '). Valid: $($allPhases -join ', ')." }
           $phases = @($phases | Where-Object { $_ -in $allPhases })
@@ -212,6 +214,7 @@ definition:
               assetTypes             = @(([string](Get-P $ctx 'assetTypes' '')).Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
               includeNoSerialDevices = -not ([string](Get-P $ctx 'includeNoSerialDevices' 'true') -match '^(false|no|0)$')
               flexibleAssetTypeName  = [string](Get-P $ctx 'flexibleAssetTypeName' 'ScalePad Assets')
+              confirmCleanup         = ([string](Get-P $ctx 'confirmCleanup' 'false') -match '^(true|yes|1)$')
               skipDevicesWithSoftware = -not ([string](Get-P $ctx 'skipDevicesWithSoftware' 'true') -match '^(false|no|0)$')
               maxSoftwareWrites      = [int](Get-P $ctx 'maxSoftwareWrites' 2000)
               assessmentStatus       = [string](Get-P $ctx 'assessmentStatus' 'Completed')
@@ -351,6 +354,238 @@ definition:
           function Get-SyncInput { [pscustomobject]@{ ctx = $global:SyncCtx } }
           function Set-SyncOutput { param($o) $global:SyncLast = $o }
           $SyncPhases = [ordered]@{
+              'cleanup' = {
+                  # ---------------- Clean up duplicate software (opt-in) ----------------
+                  # ---- shared helpers (identical in every step of this workflow) ----
+                  $ErrorActionPreference = 'Stop'
+                  Set-StrictMode -Version Latest
+
+                  function Get-Secret { param([string]$Name) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue }
+                  function Get-P {
+                      # Safe property read under StrictMode. Path like 'hardware_asset.serial_number'.
+                      param($Obj, [string]$Path, $Default = $null)
+                      $cur = $Obj
+                      foreach ($part in $Path.Split('.')) {
+                          if ($null -eq $cur) { return $Default }
+                          if ($cur -is [System.Collections.IDictionary]) { if ($cur.Contains($part)) { $cur = $cur[$part] } else { return $Default } ; continue }
+                          $p = $cur.PSObject.Properties[$part]
+                          if (-not $p) { return $Default }
+                          $cur = $p.Value
+                      }
+                      if ($null -eq $cur) { return $Default }
+                      return $cur
+                  }
+                  function Test-Blank { param($v) if ($v -is [datetime]) { return ($v.Year -le 1) }; return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -match '^0001-01-01') }
+                  # PowerShell 7 turns ISO date strings in API responses into [datetime]; normalize both ways.
+                  function ConvertTo-IsoDate { param($v) if (Test-Blank $v) { return $null }; if ($v -is [datetime]) { return $v.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }; $d = [datetime]::MinValue; if ([datetime]::TryParse([string]$v, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) { return $d.ToString('yyyy-MM-ddTHH:mm:ssZ') }; return [string]$v }
+                  function Format-Day { param($v) $iso = ConvertTo-IsoDate $v; if (-not $iso) { return '' }; return $iso.Substring(0, [Math]::Min(10, $iso.Length)) }
+                  function Normalize-Serial { param($s) if (Test-Blank $s) { return '' } ; return ([string]$s).Trim().ToUpperInvariant() }
+                  function Normalize-Name { param($s) if (Test-Blank $s) { return '' } ; $t = ([string]$s).ToLowerInvariant() -replace '[^a-z0-9 ]', ' '; $t = ' ' + $t + ' '; foreach ($w in @('ltd','limited','inc','llc','plc','group','the','co','corp','corporation','company')) { $t = $t -replace " $w ", ' ' }; return ($t -replace '\s+', ' ').Trim() }
+
+                  $warnings = New-Object System.Collections.ArrayList
+                  function Warn { param([string]$m) $null = $warnings.Add($m) }
+
+                  function ConvertTo-Dict {
+                      param($o)
+                      if ($null -eq $o) { return [ordered]@{} }
+                      if ($o -is [System.Collections.IDictionary]) { return $o }
+                      $h = [ordered]@{}
+                      foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value }
+                      return $h
+                  }
+
+                  # Context from the previous step (or the run inputs on the first step).
+                  # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
+                  $nodeIn = Get-SyncInput
+                  if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
+                  $ctx = Get-P $nodeIn 'ctx'
+                  if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+                  if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
+                  if ($null -eq $ctx) { $ctx = $nodeIn }
+                  $ctx = ConvertTo-Dict $ctx
+
+                  $spBase = Get-Secret 'ScalePad-ApiUrl'
+                  $spKey = Get-Secret 'ScalePad-ApiKey'
+                  $crBase = Get-Secret 'CloudRadial-BaseUrl'
+                  $crPub = Get-Secret 'CloudRadial-PublicKey'
+                  $crPriv = Get-Secret 'CloudRadial-PrivateKey'
+                  $missingSecrets = @()
+                  foreach ($p in @(@{ n = 'ScalePad-ApiUrl'; v = $spBase }, @{ n = 'ScalePad-ApiKey'; v = $spKey }, @{ n = 'CloudRadial-BaseUrl'; v = $crBase }, @{ n = 'CloudRadial-PublicKey'; v = $crPub }, @{ n = 'CloudRadial-PrivateKey'; v = $crPriv })) { if (Test-Blank $p.v) { $missingSecrets += $p.n } }
+                  if ($missingSecrets.Count -gt 0) {
+                      $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missingSecrets -join ', ')"
+                      Set-SyncOutput @{ status = 'error'; message = $m }
+                      throw $m
+                  }
+                  $spBase = $spBase.TrimEnd('/')
+                  $crBase = $crBase.TrimEnd('/')
+                  $spHeaders = @{ 'x-api-key' = $spKey; Accept = 'application/json' }
+                  $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
+                  $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
+
+                  function Invoke-WithRetry {
+                      param([scriptblock]$Call, [string]$What)
+                      for ($i = 1; $i -le 4; $i++) {
+                          try { return & $Call }
+                          catch {
+                              $code = $null
+                              try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                          }
+                      }
+                  }
+                  function Get-SpAll {
+                      # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
+                      # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+                      param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
+                      $items = New-Object System.Collections.ArrayList
+                      $cursor = $null
+                      for ($page = 1; $page -le $MaxPages; $page++) {
+                          $q = @{} + $Query
+                          $q['page_size'] = $PageSize
+                          if ($cursor) { $q['cursor'] = $cursor }
+                          $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
+                          $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
+                          try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                          catch {
+                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              throw
+                          }
+                          foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
+                          $cursor = Get-P $resp 'next_cursor'
+                          if (Test-Blank $cursor) { break }
+                          if ($page -eq $MaxPages) { Warn "ScalePad $Path stopped at $MaxPages pages." }
+                      }
+                      return $items.ToArray()
+                  }
+                  function Get-SpOne { param([string]$Path) Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri "$spBase$Path" -Headers $spHeaders } }
+                  function Invoke-Cr {
+                      param([string]$Method, [string]$Path, $Body, [string]$ContentType = 'application/json')
+                      $uri = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
+                      $args2 = @{ Method = $Method; Uri = $uri; Headers = $crHeaders }
+                      if ($null -ne $Body) {
+                          $json = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 }
+                          if ($Method -eq 'PATCH' -and $json -notmatch '^\s*\[') { $json = "[$json]" }
+                          $args2.Body = $json
+                          $args2.ContentType = $(if ($Method -eq 'PATCH') { 'application/json-patch+json' } else { $ContentType })
+                      }
+                      return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
+                  }
+                  function Get-CrAll {
+                      # Follows @odata.nextLink.
+                      param([string]$Path)
+                      $items = New-Object System.Collections.ArrayList
+                      $next = $Path
+                      $guard = 0
+                      while ($next -and $guard -lt 500) {
+                          $guard++
+                          $resp = Invoke-Cr -Method GET -Path $next
+                          foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          $next = Get-P $resp '@odata.nextLink'
+                      }
+                      return $items.ToArray()
+                  }
+                  function Get-CrArchive {
+                      # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+                      # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+                      # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+                      # id is read from any known shape and, failing that, the archive is looked up again by name.
+                      param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+                      function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      function Find-Archive {
+                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                          $list = @($raw)
+                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                      }
+                      $hit = Find-Archive
+                      if ($null -eq $hit -and $Create) {
+                          # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
+                          try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          $id = Get-ArchiveId $resp
+                          $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+                      }
+                      if ($null -eq $hit) { return $null }
+                      $id = Get-ArchiveId $hit
+                      if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+                      return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
+                  }
+                  function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+
+                  $mode = [string](Get-P $ctx 'mode' 'plan')
+                  if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
+                  $apply = ($mode -eq 'apply')
+                  # ---- end shared helpers ----
+                  try {
+                  # =====================================================================
+                  # Clean-up (opt-in) - remove duplicate software records the Sync wrote
+                  #   Runs only when the run input has "cleanupDuplicateSoftware": true.
+                  #   Looks only at records the Sync wrote (ScalePad's all-caps categories, or
+                  #   the "Added by ScalePad to CloudRadial Sync" comment) - RMM software is never
+                  #   touched. For each device + product + publisher + version it keeps the oldest
+                  #   record and deletes the extra copies. Deletes happen only with
+                  #   "mode": "apply" AND "confirmCleanup": true; otherwise it lists them.
+                  # =====================================================================
+                  $phase = 'cleanup'
+                  $results = ConvertTo-Dict (Get-P $ctx 'results')
+                  $settings = Get-P $ctx 'settings'
+                  $companyId = [int](Get-P $ctx 'companyId')
+                  $confirmed = [bool](Get-P $settings 'confirmCleanup' $false)
+                  $doDelete = $apply -and $confirmed
+                  $SyncTag = 'Added by ScalePad to CloudRadial Sync'
+                  $counts = [ordered]@{ records = 0; syncRecords = 0; duplicateGroups = 0; toDelete = 0; deleted = 0; errors = 0 }
+                  $sample = New-Object System.Collections.ArrayList
+
+                  if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
+                      $results[$phase] = [ordered]@{ ran = $false }
+                  }
+                  else {
+                      $fields = 'endpointApplicationId,endpointId,name,publisher,display,category,comments,dateCreated'
+                      $apps = @(Get-CrAll "/v2/odata/endpointapplication?`$filter=companyId eq $companyId&`$select=$fields")
+                      if ($apps.Count -eq 0) {
+                          # The company-level read has come back empty on a portal that had software - read per device.
+                          foreach ($e in @(Get-CrAll "/v2/odata/endpoint?`$filter=companyId eq $companyId&`$select=companyEndpointId")) {
+                              $eid = [int](Get-P $e 'companyEndpointId')
+                              try { $apps += @(Get-CrAll "/v2/odata/endpointapplication?`$filter=endpointId eq $eid&`$select=$fields") } catch { Warn "Couldn't read software for endpoint $($eid): $($_.Exception.Message)" }
+                          }
+                      }
+                      $counts.records = $apps.Count
+                      $mine = @($apps | Where-Object { ([string](Get-P $_ 'category' '')) -cmatch '^[A-Z]+$' -or ([string](Get-P $_ 'comments' '')) -eq $SyncTag })
+                      $counts.syncRecords = $mine.Count
+                      $groups = @($mine | Group-Object { '{0}|{1}|{2}|{3}' -f (Get-P $_ 'endpointId'), ([string](Get-P $_ 'name')).ToLowerInvariant(), ([string](Get-P $_ 'publisher')).ToLowerInvariant(), ([string](Get-P $_ 'display')) } | Where-Object { $_.Count -gt 1 })
+                      $counts.duplicateGroups = $groups.Count
+                      foreach ($g in $groups) {
+                          $ordered = @($g.Group | Sort-Object { [int](Get-P $_ 'endpointApplicationId') })
+                          foreach ($extra in @($ordered | Select-Object -Skip 1)) {
+                              $id = [int](Get-P $extra 'endpointApplicationId')
+                              $counts.toDelete++
+                              if ($sample.Count -lt 25) { $null = $sample.Add([ordered]@{ endpointApplicationId = $id; endpointId = Get-P $extra 'endpointId'; name = Get-P $extra 'name'; version = Get-P $extra 'display'; keep = [int](Get-P $ordered[0] 'endpointApplicationId') }) }
+                              if ($doDelete) {
+                                  try { $null = Invoke-Cr -Method DELETE -Path "/v2/endpointapplication/$id"; $counts.deleted++ }
+                                  catch { $counts.errors++; if ($counts.errors -le 10) { Warn "Couldn't delete software record $($id): $($_.Exception.Message)" } }
+                              }
+                          }
+                      }
+                      if ($counts.toDelete -gt 0 -and -not $doDelete) { Warn "$($counts.toDelete) duplicate software records found. Nothing was deleted - run with ""mode"": ""apply"" and ""confirmCleanup"": true to remove them." }
+                      $results[$phase] = [ordered]@{ ran = $true; counts = $counts; deleted = $doDelete; sample = @($sample) }
+                  }
+
+                  $ctx.results = $results
+                  $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
+                  $c = $counts
+                  Set-SyncOutput @{ status = 'ok'; message = "Clean-up: $($c.records) software records, $($c.syncRecords) written by the Sync, $($c.duplicateGroups) duplicated. $(if ($doDelete) { "$($c.deleted) duplicate copies deleted" } else { "$($c.toDelete) duplicate copies would be deleted (nothing deleted)" }), $($c.errors) errors."; ctx = $ctx }
+                  }
+                  catch {
+                      $stepErr = $_.Exception.Message
+                      $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'cleanup' })
+                      $res = ConvertTo-Dict (Get-P $ctx 'results')
+                      $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+                      $ctx.results = $res
+                      $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+                      Set-SyncOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+                  }
+              }
               'devices' = {
                   # ---------------- Devices (workstations, servers, VMs) ----------------
                   # ---- shared helpers (identical in every step of this workflow) ----
@@ -2504,6 +2739,13 @@ definition:
                       $rows = New-Object System.Collections.ArrayList
                       $attention = New-Object System.Collections.ArrayList
 
+                      $cu = Get-P $results 'cleanup.counts'
+                      if ($cu) {
+                          $del = [bool](Get-P $results 'cleanup.deleted' $false)
+                          $act = if ($del) { "Deleted $(Get-P $cu 'deleted') duplicate copies." } else { "Would delete $(Get-P $cu 'toDelete') duplicate copies (nothing deleted)." }
+                          $null = $lines.Add("Clean-up: $(Get-P $cu 'syncRecords') software records written by the Sync, $(Get-P $cu 'duplicateGroups') duplicated. $act")
+                          $null = $rows.Add(@('Duplicate software clean-up', "$(Get-P $cu 'syncRecords') Sync-written records of $(Get-P $cu 'records')", $act, "$(Get-P $cu 'errors') errors"))
+                      }
                       $d = Get-P $results 'devices.counts'
                       if ($d) {
                           $act = if ($apply) { "Enriched $(Get-P $d 'enriched') and created $(Get-P $d 'created')." } else { "Would enrich $(Get-P $d 'toEnrich') and create $(Get-P $d 'toCreate')." }
@@ -2549,7 +2791,7 @@ definition:
 
                       $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })
                       $errors = 0
-                      foreach ($ph in @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
+                      foreach ($ph in @('cleanup', 'devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
 
                       $null = $html.Append('<table border="1" cellpadding="6" cellspacing="0"><tr><th>Area</th><th>In ScalePad</th><th>Result</th><th>Notes</th></tr>')
                       foreach ($row in $rows) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $row[0])</td><td>$(ConvertTo-HtmlText $row[1])</td><td>$(ConvertTo-HtmlText $row[2])</td><td>$(ConvertTo-HtmlText $row[3])</td></tr>") }

@@ -29,8 +29,9 @@ Every phase is idempotent: re-running updates or skips what's already there. No 
 3. **Run it** — click **Run** and leave **Trigger input** empty. Every ScalePad client whose name matches a CloudRadial company is migrated; clients with no match are listed in the output. Nothing needs wiring.
    - **Preview first:** `{"mode": "plan"}` — counts per company and phase, nothing written.
    - **One company:** `{"companyId": 9}` · **a few:** `{"companyIds": [9, 12]}` · **pair a client whose names differ:** `{"companyId": 9, "scalePadClientId": "<ScalePad id>"}`.
-4. **Check the result.** The report step lists each company and where its migration report was written.
-5. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled — enable it only if something else triggers the sync.
+4. **Clean up duplicate software (only if needed).** An early version could write a company's ScalePad software twice. `{"companyId": 20, "cleanupDuplicateSoftware": true}` lists the extra copies; `{"companyId": 20, "cleanupDuplicateSoftware": true, "mode": "apply", "confirmCleanup": true}` deletes them. It only looks at records the Sync wrote (ScalePad's all-caps categories or the Sync's comment), keeps the oldest copy of each device + product + version, and never touches RMM software.
+5. **Check the result.** The report step lists each company and where its migration report was written.
+6. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled — enable it only if something else triggers the sync.
 
 ## Run inputs
 
@@ -50,6 +51,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `includeNoSerialDevices` | `true` | Keep workstations, servers and VMs that have no serial as flexible assets (they are never created as endpoints). |
 | `flexibleAssetTypeName` | `ScalePad Assets` | Flexible asset type for the `assets` phase — created if missing. |
 | `skipDevicesWithSoftware` | `true` | `false` = also add ScalePad software to devices that already have a software list, skipping only products they already have. |
+| `cleanupDuplicateSoftware` / `confirmCleanup` | `false` | Run only the duplicate-software clean-up; deletes only with `mode: apply` **and** `confirmCleanup: true`. |
 | `maxSoftwareWrites` | `2000` | Software records per run; the rest are picked up next run. |
 | `assessmentStatus` | `Completed` | `all` to include in-progress assessments. |
 | `labelScoreMap` | — | JSON overriding answer scoring, e.g. `{"needs_attention": 1}`. |

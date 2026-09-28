@@ -14,6 +14,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 |---|---|---|
 | `devices` | Core hardware (workstations, servers, VMs) + lifecycle records | Endpoints matched by serial. Existing ones get their blanks filled: warranty → `expirationDate`, purchase date → `manufacturedDate`, model, manufacturer, OS, CPU, RAM. Missing ones are created — servers as `isServer` / enclosure Server, VMs as `isVirtual`, tagged `ScalePad`. A device ScalePad calls a workstation but that runs **Windows Server** is treated as a server, and an existing endpoint with a Windows Server OS that isn't marked as a server is corrected. Network, mobile and imaging devices, and devices with no serial, go to the `assets` phase instead. |
 | `assets` | Other hardware: types `NETWORK`, `MOBILE`, `IMAGING`, plus workstations, servers and VMs with no serial number | Rows of one flexible asset type, **ScalePad Assets** (Infrastructure), created with its fields if missing: name, type, manufacturer, model, serial, warranty and purchase dates, location, assigned user and the ScalePad id. Matched on the ScalePad id, so re-runs update the row. |
+| `saas` | SaaS subscriptions (Microsoft 365, Google Workspace, ...) | CloudRadial's software records always belong to a device and its API has no SaaS or licence route, so each subscription becomes a row of a flexible asset type named **SaaS**: product, vendor, SKU, category, status, licences and assigned seats, term start, renewal date, auto-renew, billing, provider, tenant domain and the ScalePad id (the match key, so re-runs update). |
 | `software` | Installed software per device | One endpoint application per product per device (name, publisher, version), tagged *Added by ScalePad to CloudRadial Sync* in its comments. Devices that already have software in CloudRadial (usually from the RMM, which keeps its own list current) are left alone; otherwise a product is skipped when the device already has one with the same name, ignoring publisher and version. |
 | `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
 | `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>` — updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
@@ -31,7 +32,6 @@ Some parts of ScalePad Lifecycle Manager have no CloudRadial API (or none this w
 | Meetings and QBR agendas | No meeting or agenda API. | The meeting PDFs are archived; recreate recurring QBRs in your calendar or PSA. |
 | Initiative action items and notes | No API for Planner card sub-tasks. | Add them to the card description, or track them in your PSA. |
 | Insights and recommendations | No CloudRadial equivalent. | Review in ScalePad before retiring it; turn keepers into Planner cards. |
-| SaaS and cloud subscriptions | Not moved by this workflow yet. | Record as a flexible asset type or Planner items. |
 | Report and deliverable templates, branding | Neither API exposes templates. | Rebuild in CloudRadial Report Layouts. |
 
 Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved — the result is visible in the portal itself.
@@ -57,7 +57,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `maxCompanies` | — | Cap the number of companies per run. |
 | `scalePadClientId` / `scalePadClientName` | — | Limit to one ScalePad client. With `companyId`, pairs a client whose name differs from the CloudRadial company. |
 | `mode` | `apply` | `plan` previews without writing. |
-| `phases` | all | Comma list: `devices,assets,software,assessments,roadmap,archive`. Other names are ignored with a warning — initiatives and contracts are `roadmap`, deliverables are `archive`. |
+| `phases` | all | Comma list: `devices,assets,saas,software,assessments,roadmap,archive`. Other names are ignored with a warning — initiatives and contracts are `roadmap`, deliverables are `archive`. |
 | `deviceTypes` | `WORKSTATION,SERVER,VIRTUAL` | ScalePad types to sync as endpoints. |
 | `createMissingDevices` | `true` | `false` = only enrich devices CloudRadial already has. |
 | `overwriteWarranty` | `false` | `true` = replace a CloudRadial warranty date that differs from ScalePad's. Otherwise differences are reported. |
@@ -66,6 +66,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `flexibleAssetTypeName` | `ScalePad Assets` | Flexible asset type for the `assets` phase — created if missing. |
 | `skipDevicesWithSoftware` | `true` | `false` = also add ScalePad software to devices that already have a software list, skipping only products they already have. |
 | `cleanupDuplicateSoftware` / `confirmCleanup` | `false` | Run only the duplicate-software clean-up; deletes only with `mode: apply` **and** `confirmCleanup: true`. |
+| `saasTypeName` | `SaaS` | Flexible asset type for the `saas` phase - created if missing. |
 | `maxSoftwareWrites` | `2000` | Software records per run; the rest are picked up next run. |
 | `assessmentStatus` | `Completed` | `all` to include in-progress assessments. |
 | `labelScoreMap` | — | JSON overriding answer scoring, e.g. `{"needs_attention": 1}`. |

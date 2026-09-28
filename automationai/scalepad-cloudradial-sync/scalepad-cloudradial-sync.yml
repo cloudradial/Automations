@@ -195,7 +195,7 @@ definition:
           # =====================================================================
           # Step 1 - Resolve the client in ScalePad and CloudRadial, read options
           # =====================================================================
-          $defaultPhases = @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')
+          $defaultPhases = @('devices', 'assets', 'saas', 'software', 'assessments', 'roadmap', 'archive')
           $allPhases = @('cleanup') + $defaultPhases
           $phasesIn = Get-P $ctx 'phases'
           $phases = @()
@@ -213,6 +213,7 @@ definition:
               overwriteWarranty      = ([string](Get-P $ctx 'overwriteWarranty' 'false') -match '^(true|yes|1)$')
               assetTypes             = @(([string](Get-P $ctx 'assetTypes' '')).Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
               includeNoSerialDevices = -not ([string](Get-P $ctx 'includeNoSerialDevices' 'true') -match '^(false|no|0)$')
+              saasTypeName           = [string](Get-P $ctx 'saasTypeName' 'SaaS')
               flexibleAssetTypeName  = [string](Get-P $ctx 'flexibleAssetTypeName' 'ScalePad Assets')
               confirmCleanup         = ([string](Get-P $ctx 'confirmCleanup' 'false') -match '^(true|yes|1)$')
               skipDevicesWithSoftware = -not ([string](Get-P $ctx 'skipDevicesWithSoftware' 'true') -match '^(false|no|0)$')
@@ -1242,6 +1243,344 @@ definition:
                   catch {
                       $stepErr = $_.Exception.Message
                       $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'assets' })
+                      $res = ConvertTo-Dict (Get-P $ctx 'results')
+                      $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+                      $ctx.results = $res
+                      $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+                      Set-SyncOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+                  }
+              }
+              'saas' = {
+                  # ---------------- SaaS subscriptions to flexible assets ----------------
+                  # ---- shared helpers (identical in every step of this workflow) ----
+                  $ErrorActionPreference = 'Stop'
+                  Set-StrictMode -Version Latest
+
+                  function Get-Secret { param([string]$Name) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue }
+                  function Get-P {
+                      # Safe property read under StrictMode. Path like 'hardware_asset.serial_number'.
+                      param($Obj, [string]$Path, $Default = $null)
+                      $cur = $Obj
+                      foreach ($part in $Path.Split('.')) {
+                          if ($null -eq $cur) { return $Default }
+                          if ($cur -is [System.Collections.IDictionary]) { if ($cur.Contains($part)) { $cur = $cur[$part] } else { return $Default } ; continue }
+                          $p = $cur.PSObject.Properties[$part]
+                          if (-not $p) { return $Default }
+                          $cur = $p.Value
+                      }
+                      if ($null -eq $cur) { return $Default }
+                      return $cur
+                  }
+                  function Test-Blank { param($v) if ($v -is [datetime]) { return ($v.Year -le 1) }; return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -match '^0001-01-01') }
+                  # PowerShell 7 turns ISO date strings in API responses into [datetime]; normalize both ways.
+                  function ConvertTo-IsoDate { param($v) if (Test-Blank $v) { return $null }; if ($v -is [datetime]) { return $v.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }; $d = [datetime]::MinValue; if ([datetime]::TryParse([string]$v, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) { return $d.ToString('yyyy-MM-ddTHH:mm:ssZ') }; return [string]$v }
+                  function Format-Day { param($v) $iso = ConvertTo-IsoDate $v; if (-not $iso) { return '' }; return $iso.Substring(0, [Math]::Min(10, $iso.Length)) }
+                  function Normalize-Serial { param($s) if (Test-Blank $s) { return '' } ; return ([string]$s).Trim().ToUpperInvariant() }
+                  function Normalize-Name { param($s) if (Test-Blank $s) { return '' } ; $t = ([string]$s).ToLowerInvariant() -replace '[^a-z0-9 ]', ' '; $t = ' ' + $t + ' '; foreach ($w in @('ltd','limited','inc','llc','plc','group','the','co','corp','corporation','company')) { $t = $t -replace " $w ", ' ' }; return ($t -replace '\s+', ' ').Trim() }
+
+                  $warnings = New-Object System.Collections.ArrayList
+                  function Warn { param([string]$m) $null = $warnings.Add($m) }
+
+                  function ConvertTo-Dict {
+                      param($o)
+                      if ($null -eq $o) { return [ordered]@{} }
+                      if ($o -is [System.Collections.IDictionary]) { return $o }
+                      $h = [ordered]@{}
+                      foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value }
+                      return $h
+                  }
+
+                  # Context from the previous step (or the run inputs on the first step).
+                  # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
+                  $nodeIn = Get-SyncInput
+                  if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
+                  $ctx = Get-P $nodeIn 'ctx'
+                  if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+                  if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
+                  if ($null -eq $ctx) { $ctx = $nodeIn }
+                  $ctx = ConvertTo-Dict $ctx
+
+                  $spBase = Get-Secret 'ScalePad-ApiUrl'
+                  $spKey = Get-Secret 'ScalePad-ApiKey'
+                  $crBase = Get-Secret 'CloudRadial-BaseUrl'
+                  $crPub = Get-Secret 'CloudRadial-PublicKey'
+                  $crPriv = Get-Secret 'CloudRadial-PrivateKey'
+                  $missingSecrets = @()
+                  foreach ($p in @(@{ n = 'ScalePad-ApiUrl'; v = $spBase }, @{ n = 'ScalePad-ApiKey'; v = $spKey }, @{ n = 'CloudRadial-BaseUrl'; v = $crBase }, @{ n = 'CloudRadial-PublicKey'; v = $crPub }, @{ n = 'CloudRadial-PrivateKey'; v = $crPriv })) { if (Test-Blank $p.v) { $missingSecrets += $p.n } }
+                  if ($missingSecrets.Count -gt 0) {
+                      $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missingSecrets -join ', ')"
+                      Set-SyncOutput @{ status = 'error'; message = $m }
+                      throw $m
+                  }
+                  $spBase = $spBase.TrimEnd('/')
+                  $crBase = $crBase.TrimEnd('/')
+                  $spHeaders = @{ 'x-api-key' = $spKey; Accept = 'application/json' }
+                  $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
+                  $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
+
+                  function Invoke-WithRetry {
+                      param([scriptblock]$Call, [string]$What)
+                      for ($i = 1; $i -le 4; $i++) {
+                          try { return & $Call }
+                          catch {
+                              $code = $null
+                              try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                          }
+                      }
+                  }
+                  function Get-SpAll {
+                      # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
+                      # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+                      param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
+                      $items = New-Object System.Collections.ArrayList
+                      $cursor = $null
+                      for ($page = 1; $page -le $MaxPages; $page++) {
+                          $q = @{} + $Query
+                          $q['page_size'] = $PageSize
+                          if ($cursor) { $q['cursor'] = $cursor }
+                          $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
+                          $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
+                          try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                          catch {
+                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              throw
+                          }
+                          foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
+                          $cursor = Get-P $resp 'next_cursor'
+                          if (Test-Blank $cursor) { break }
+                          if ($page -eq $MaxPages) { Warn "ScalePad $Path stopped at $MaxPages pages." }
+                      }
+                      return $items.ToArray()
+                  }
+                  function Get-SpOne { param([string]$Path) Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri "$spBase$Path" -Headers $spHeaders } }
+                  function Invoke-Cr {
+                      param([string]$Method, [string]$Path, $Body, [string]$ContentType = 'application/json')
+                      $uri = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
+                      $args2 = @{ Method = $Method; Uri = $uri; Headers = $crHeaders }
+                      if ($null -ne $Body) {
+                          $json = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 }
+                          if ($Method -eq 'PATCH' -and $json -notmatch '^\s*\[') { $json = "[$json]" }
+                          $args2.Body = $json
+                          $args2.ContentType = $(if ($Method -eq 'PATCH') { 'application/json-patch+json' } else { $ContentType })
+                      }
+                      return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
+                  }
+                  function Get-CrAll {
+                      # Follows @odata.nextLink.
+                      param([string]$Path)
+                      $items = New-Object System.Collections.ArrayList
+                      $next = $Path
+                      $guard = 0
+                      while ($next -and $guard -lt 500) {
+                          $guard++
+                          $resp = Invoke-Cr -Method GET -Path $next
+                          foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          $next = Get-P $resp '@odata.nextLink'
+                      }
+                      return $items.ToArray()
+                  }
+                  function Get-CrArchive {
+                      # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+                      # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+                      # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+                      # id is read from any known shape and, failing that, the archive is looked up again by name.
+                      param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+                      function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      function Find-Archive {
+                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
+                          $list = @($raw)
+                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                      }
+                      $hit = Find-Archive
+                      if ($null -eq $hit -and $Create) {
+                          # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
+                          try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          $id = Get-ArchiveId $resp
+                          $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+                      }
+                      if ($null -eq $hit) { return $null }
+                      $id = Get-ArchiveId $hit
+                      if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+                      return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
+                  }
+                  function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+
+                  $mode = [string](Get-P $ctx 'mode' 'plan')
+                  if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
+                  $apply = ($mode -eq 'apply')
+                  # ---- end shared helpers ----
+                  try {
+                  # =====================================================================
+                  # SaaS subscriptions -> CloudRadial flexible asset type "SaaS"
+                  #   CloudRadial's software records (endpointapplication) always belong to a
+                  #   device, and its API has no SaaS or licence route, so ScalePad SaaS assets
+                  #   (Microsoft 365, Google Workspace, ... with seats and terms) become rows of
+                  #   a flexible asset type named "SaaS". Matched on the ScalePad SaaS id, so
+                  #   re-runs update rather than duplicate.
+                  # =====================================================================
+                  $phase = 'saas'
+                  $results = ConvertTo-Dict (Get-P $ctx 'results')
+                  $settings = Get-P $ctx 'settings'
+                  $companyId = [int](Get-P $ctx 'companyId')
+                  $spClientId = [string](Get-P $ctx 'scalePadClientId')
+
+                  # Field order = column order in the portal. nameKey is the trait key CloudRadial derives from the name.
+                  $FieldDefs = @(
+                      @{ name = 'Name'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $true; required = $true },
+                      @{ name = 'Vendor'; kind = 'Text'; order = 2; showInList = $true },
+                      @{ name = 'SKU'; kind = 'Text'; order = 3 },
+                      @{ name = 'Category'; kind = 'Text'; order = 4 },
+                      @{ name = 'Status'; kind = 'Text'; order = 5; showInList = $true },
+                      @{ name = 'Licenses'; kind = 'Number'; order = 6; showInList = $true },
+                      @{ name = 'Assigned'; kind = 'Number'; order = 7; showInList = $true },
+                      @{ name = 'Renewal Date'; kind = 'Date'; order = 8; showInList = $true },
+                      @{ name = 'Term Start'; kind = 'Date'; order = 9 },
+                      @{ name = 'Auto Renew'; kind = 'Text'; order = 10 },
+                      @{ name = 'Billing'; kind = 'Text'; order = 11 },
+                      @{ name = 'Provider'; kind = 'Text'; order = 12 },
+                      @{ name = 'Tenant Domain'; kind = 'Text'; order = 13 },
+                      @{ name = 'ScalePad ID'; kind = 'Text'; order = 14; hint = 'Used by the ScalePad to CloudRadial Sync to match this row. Do not edit.' }
+                  )
+                  function ConvertTo-NameKey { param([string]$n) return (($n.Trim().ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')) }
+                  function ConvertFrom-Traits { param($a)
+                      $raw = Get-P $a 'traitsJson'
+                      if ($raw -is [string] -and -not [string]::IsNullOrWhiteSpace($raw)) { try { return ConvertTo-Dict ($raw | ConvertFrom-Json) } catch { return [ordered]@{} } }
+                      return ConvertTo-Dict (Get-P $a 'traits')
+                  }
+
+                  $counts = [ordered]@{ scalePadAssets = 0; typeCreated = $false; fieldsAdded = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; errors = 0 }
+                  $planned = New-Object System.Collections.ArrayList
+
+                  if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
+                      $results[$phase] = [ordered]@{ ran = $false }
+                  }
+                  else {
+                      $typeName = [string](Get-P $settings 'saasTypeName' 'SaaS')
+                      $saas = @(Get-SpAll '/core/v1/assets/saas' @{ 'filter[client.id]' = "eq:$spClientId" })
+                      $rows = New-Object System.Collections.ArrayList
+                      foreach ($a in $saas) {
+                          $sub = @(Get-P $a 'subscriptions' @()) | Select-Object -First 1
+                          $auto = Get-P $a 'term.is_auto_renewed' (Get-P $sub 'term.is_auto_renewed')
+                          $vals = [ordered]@{
+                              'Name'          = [string](Get-P $a 'product.name' (Get-P $sub 'friendly_name' ''))
+                              'Vendor'        = [string](Get-P $a 'product.manufacturer.name' '')
+                              'SKU'           = [string](Get-P $a 'product.manufacturer_sku.name' '')
+                              'Category'      = [string](Get-P $a 'product.category' '')
+                              'Status'        = [string](Get-P $a 'status' '')
+                              'Licenses'      = [string](Get-P $a 'pool.capacity' (Get-P $sub 'license_count' ''))
+                              'Assigned'      = [string](Get-P $a 'pool.utilized' '')
+                              'Renewal Date'  = Format-Day (Get-P $a 'term.ends_at' (Get-P $sub 'term.ends_at'))
+                              'Term Start'    = Format-Day (Get-P $a 'term.starts_at' (Get-P $sub 'term.starts_at'))
+                              'Auto Renew'    = $(if ($null -eq $auto) { '' } elseif ($auto -eq $true) { 'Yes' } else { 'No' })
+                              'Billing'       = [string](Get-P $sub 'billing_cycle_name' '')
+                              'Provider'      = [string](Get-P $sub 'provider_name' '')
+                              'Tenant Domain' = [string](Get-P $a 'tenant_domain' '')
+                              'ScalePad ID'   = [string](Get-P $a 'id')
+                          }
+                          if (Test-Blank $vals['Name']) { $vals['Name'] = "SaaS $($vals['ScalePad ID'])" }
+                          $null = $rows.Add($vals)
+                      }
+                      $counts.scalePadAssets = $rows.Count
+
+                      # --- the flexible asset type and its fields ---
+                      $esc = $typeName.Replace("'", "''")
+                      $type = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1
+                      $typeId = if ($type) { [int](Get-P $type 'id') } else { 0 }
+                      if (-not $typeId -and $rows.Count -gt 0) {
+                          $null = $planned.Add(@{ action = 'create-type'; type = $typeName; fields = @($FieldDefs | ForEach-Object { $_.name }) })
+                          if ($apply) {
+                              $body = [ordered]@{ name = $typeName; description = 'SaaS subscriptions from ScalePad (product, vendor, seats, term). Kept current by the ScalePad to CloudRadial Sync.'; icon = 'cloud'; showInMenu = $true; fields = $FieldDefs }
+                              try {
+                                  $resp = Invoke-Cr -Method POST -Path '/v2/flexible-asset-type' -Body $body
+                                  $typeId = [int](Get-P $resp 'id' (Get-P $resp 'flexibleAssetTypeId' 0))
+                                  if (-not $typeId) { $again = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1; if ($again) { $typeId = [int](Get-P $again 'id') } }
+                                  if ($typeId) { $counts.typeCreated = $true } else { throw 'the type was created but its id could not be read back' }
+                              }
+                              catch { $counts.errors++; Warn "Could not create the '$typeName' flexible asset type: $($_.Exception.Message)" }
+                          }
+                      }
+
+                      $keyOf = @{}
+                      foreach ($f in $FieldDefs) { $keyOf[$f.name] = ConvertTo-NameKey $f.name }
+                      $existingAssets = @()
+                      if ($typeId) {
+                          $fields = @(Get-CrAll "/v2/odata/flexibleassetfield?`$filter=flexibleAssetTypeId eq $typeId")
+                          $have = @{}
+                          foreach ($f in $fields) { $have[[string](Get-P $f 'name')] = [string](Get-P $f 'nameKey' (ConvertTo-NameKey (Get-P $f 'name'))) }
+                          foreach ($f in $FieldDefs) {
+                              if ($have.ContainsKey($f.name)) { $keyOf[$f.name] = $have[$f.name]; continue }
+                              if ($fields.Count -eq 0 -and $counts.typeCreated) { continue }   # created inline just now
+                              $null = $planned.Add(@{ action = 'add-field'; field = $f.name })
+                              if ($apply) {
+                                  try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset-field' -Body ([ordered]@{ flexibleAssetTypeId = $typeId } + $f); $counts.fieldsAdded++ }
+                                  catch { $counts.errors++; Warn "Could not add field '$($f.name)' to '$typeName': $($_.Exception.Message)" }
+                              }
+                          }
+                          $existingAssets = @(Get-CrAll "/v2/odata/flexibleasset?`$filter=companyId eq $companyId and flexibleAssetTypeId eq $typeId")
+                      }
+                      $idKey = $keyOf['ScalePad ID']; $serialKey = 'no-serial-field'
+                      $byId = @{}; $bySerial = @{}
+                      foreach ($a in $existingAssets) {
+                          $t = ConvertFrom-Traits $a
+                          $sid = [string](Get-P $t $idKey ''); $sn = Normalize-Serial (Get-P $t $serialKey '')
+                          if ($sid) { $byId[$sid] = $a }
+                          if ($sn -and -not $bySerial.ContainsKey($sn)) { $bySerial[$sn] = $a }
+                      }
+
+                      foreach ($vals in $rows) {
+                          $traits = [ordered]@{}
+                          foreach ($k in $vals.Keys) { if (-not (Test-Blank $vals[$k])) { $traits[$keyOf[$k]] = [string]$vals[$k] } }
+                          $match = $byId[$vals['ScalePad ID']]
+                          if ($null -eq $match -and $vals['Serial Number']) { $match = $bySerial[(Normalize-Serial $vals['Serial Number'])] }
+                          if ($null -ne $match) {
+                              $cur = ConvertFrom-Traits $match
+                              $merged = [ordered]@{}; foreach ($k in $cur.Keys) { $merged[$k] = $cur[$k] }
+                              $changed = @()
+                              foreach ($k in $traits.Keys) { if ([string](Get-P $cur $k '') -ne $traits[$k]) { $merged[$k] = $traits[$k]; $changed += $k } }
+                              if ($changed.Count -eq 0) { $counts.unchanged++; continue }
+                              $counts.toUpdate++
+                              $assetId = [int](Get-P $match 'id')
+                              $null = $planned.Add(@{ action = 'update'; asset = $vals['Name']; flexibleAssetId = $assetId; fields = $changed })
+                              if ($apply) {
+                                  try {
+                                      $json = $merged | ConvertTo-Json -Depth 5 -Compress
+                                      try { $null = Invoke-Cr -Method PATCH -Path "/v2/flexible-asset/$assetId" -Body @(@{ op = 'replace'; path = '/traitsJson'; value = $json }) }
+                                      catch {
+                                          # Fallback: the IT Glue-compatible route takes traits as an object.
+                                          $b = @{ data = @{ type = 'flexible-assets'; id = $assetId; attributes = @{ traits = $merged } } } | ConvertTo-Json -Depth 8
+                                          $null = Invoke-WithRetry -What "CloudRadial PATCH /compatibility/flexible_assets/$assetId" -Call { Invoke-RestMethod -Method Patch -Uri "$crBase/compatibility/flexible_assets/$assetId" -Headers $crHeaders -Body $b -ContentType 'application/json' }
+                                      }
+                                      $counts.updated++
+                                  }
+                                  catch { $counts.errors++; Warn "Update failed for flexible asset $($vals['Name']): $($_.Exception.Message)" }
+                              }
+                              continue
+                          }
+                          $counts.toCreate++
+                          $null = $planned.Add(@{ action = 'create'; asset = $vals['Name']; type = $vals['Type']; serial = $vals['Serial Number'] })
+                          if ($apply -and $typeId) {
+                              try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset' -Body ([ordered]@{ companyId = $companyId; flexibleAssetTypeId = $typeId; traits = $traits }); $counts.created++ }
+                              catch { $counts.errors++; Warn "Create failed for flexible asset $($vals['Name']): $($_.Exception.Message)" }
+                          }
+                      }
+                      $results[$phase] = [ordered]@{
+                          ran = $true; counts = $counts; flexibleAssetType = $typeName; flexibleAssetTypeId = $typeId
+                          planned = @($planned | Select-Object -First 150); plannedTotal = $planned.Count
+                      }
+                  }
+
+                  $ctx.results = $results
+                  $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
+                  $c = $counts
+                  Set-SyncOutput @{ status = 'ok'; message = "SaaS: $($c.scalePadAssets) ScalePad SaaS subscriptions, $(if ($apply) { "$($c.created) created, $($c.updated) updated" } else { "$($c.toCreate) to create, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
+                  }
+                  catch {
+                      $stepErr = $_.Exception.Message
+                      $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'saas' })
                       $res = ConvertTo-Dict (Get-P $ctx 'results')
                       $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
                       $ctx.results = $res
@@ -2480,6 +2819,7 @@ definition:
               }
           }
           foreach ($SyncPhase in $SyncPhases.Keys) {
+              if (@($global:SyncCtx.phases) -notcontains $SyncPhase) { continue }   # only the phases this run asked for
               $global:SyncLast = $null
               try { & $SyncPhases[$SyncPhase] }
               catch { $null = $global:SyncLog.Add("$SyncPhase failed: $($_.Exception.Message)"); continue }
@@ -2745,7 +3085,6 @@ definition:
                           [ordered]@{ area = 'Meetings and QBR agendas'; why = 'CloudRadial has no meeting or agenda API.'; action = 'The meeting PDFs (deliverables) are archived; recreate recurring QBR meetings in your calendar or PSA.' }
                           [ordered]@{ area = 'Initiative action items and notes'; why = 'Planner cards carry the initiative, budget and quarter, but CloudRadial has no API for card sub-tasks.'; action = "Add action items to the Planner card's description, or track them in your PSA." }
                           [ordered]@{ area = 'Insights and recommendations'; why = "ScalePad's calculated insights have no CloudRadial equivalent to write to."; action = 'Review them in ScalePad before retiring it; turn the ones you want to keep into Planner cards.' }
-                          [ordered]@{ area = 'SaaS and cloud subscriptions'; why = 'Not moved by this workflow yet.'; action = 'Record them as a flexible asset type or Planner items if you track them.' }
                           [ordered]@{ area = 'Report and deliverable templates, branding'; why = 'Templates are not exposed by either API; only finished PDFs are.'; action = 'Rebuild layouts in CloudRadial Report Layouts.' }
                       )
                       $lines = New-Object System.Collections.ArrayList
@@ -2779,6 +3118,12 @@ definition:
                           $null = $lines.Add("Other hardware: $(Get-P $fa 'scalePadAssets') ScalePad assets that aren't endpoints$(if ($byType) { " ($byType)" }), kept in $where. $act")
                           $null = $rows.Add(@('Other hardware (flexible assets)', "$(Get-P $fa 'scalePadAssets') assets$(if ($byType) { ": $byType" })", $act, "$(Get-P $fa 'unchanged') unchanged, $(Get-P $fa 'errors') errors"))
                       }
+                      $sa = Get-P $results 'saas.counts'
+                      if ($sa) {
+                          $act = if ($apply) { "Created $(Get-P $sa 'created') and updated $(Get-P $sa 'updated')." } else { "Would create $(Get-P $sa 'toCreate') and update $(Get-P $sa 'toUpdate')." }
+                          $null = $lines.Add("SaaS: $(Get-P $sa 'scalePadAssets') ScalePad SaaS subscriptions, kept in the '$(Get-P $results 'saas.flexibleAssetType')' flexible asset type. $act")
+                          $null = $rows.Add(@('SaaS subscriptions (flexible assets)', "$(Get-P $sa 'scalePadAssets') subscriptions", $act, "$(Get-P $sa 'unchanged') unchanged, $(Get-P $sa 'errors') errors"))
+                      }
                       $s = Get-P $results 'software.counts'
                       if ($s) {
                           $act = if ($apply) { "Created $(Get-P $s 'created')." } else { "Would create $(Get-P $s 'toCreate')." }
@@ -2807,7 +3152,7 @@ definition:
 
                       $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })
                       $errors = 0
-                      foreach ($ph in @('cleanup', 'devices', 'assets', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
+                      foreach ($ph in @('cleanup', 'devices', 'assets', 'saas', 'software', 'assessments', 'roadmap', 'archive')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
 
                       $null = $html.Append('<table border="1" cellpadding="6" cellspacing="0"><tr><th>Area</th><th>In ScalePad</th><th>Result</th><th>Notes</th></tr>')
                       foreach ($row in $rows) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $row[0])</td><td>$(ConvertTo-HtmlText $row[1])</td><td>$(ConvertTo-HtmlText $row[2])</td><td>$(ConvertTo-HtmlText $row[3])</td></tr>") }

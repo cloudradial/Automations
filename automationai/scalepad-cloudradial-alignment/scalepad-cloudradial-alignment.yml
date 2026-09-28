@@ -11,11 +11,50 @@ definition:
         y: 80
       properties:
         webhookEnabled: false
+    - id: node-inputs
+      name: Run inputs
+      type: powershell-script
+      position:
+        x: 210
+        y: 100
+      properties:
+        # Pre-wired: receives the run input and hands complete, defaulted inputs to the agent.
+        script: |
+          # === NODE: Run inputs ===
+          # Reads the run input (Run dialog, Routine or webhook body) and fills in every default, so the
+          # agent's inputs are always bound and nobody has to wire anything after import. Change a run
+          # by sending any of these fields; leave them out to get the defaults.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+
+          $companyId = 0; [int]::TryParse([string](Get-Prop $in 'companyId'), [ref]$companyId) | Out-Null
+          $mode = ([string](Get-Prop $in 'mode')).Trim().ToLowerInvariant(); if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
+          $phase = ([string](Get-Prop $in 'phase')).Trim().ToLowerInvariant(); if ($phase -notin @('devices', 'assets', 'software', 'assessments', 'roadmap', 'archive', 'all')) { $phase = 'all' }
+          $maxCompanies = 3; if (-not [int]::TryParse([string](Get-Prop $in 'maxCompanies'), [ref]$maxCompanies) -or $maxCompanies -lt 1) { $maxCompanies = 3 }
+          $createPlaceholders = ([string](Get-Prop $in 'createPlaceholders')) -match '^(true|yes|1)$'
+          $name = [string](Get-Prop $in 'scalePadClientName'); if ([string]::IsNullOrWhiteSpace($name)) { $name = '' }
+
+          Set-NodeOutput ([ordered]@{
+              companyId = $companyId; scalePadClientName = $name; mode = $mode; phase = $phase
+              createPlaceholders = $createPlaceholders; maxCompanies = $maxCompanies
+              message = "Run inputs: $(if ($companyId -gt 0) { "companyId $companyId" } elseif ($name) { "ScalePad client '$name'" } else { "no company named (the agent crosswalks up to $maxCompanies clients)" }), mode $mode, phase $phase."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters:
+          - name: trigger
+            expression: '{{ nodes.trigger.output }}'
+        aiExtensions: []
+        testInput: |-
+          {"companyId": 9, "mode": "plan", "phase": "all"}
     - id: node-1
       name: Alignment Agent
       type: agent
       position:
-        x: 320
+        x: 420
         y: 100
       properties:
         # Runs the imported saved agent. Its systemPrompt carries the full procedure and
@@ -48,10 +87,13 @@ definition:
           - cloudradial-v2-companies
           - cloudradial-v2-endpoints
           - cloudradial-v2-services
+          - cloudradial-v2-compliance
         timeoutSeconds: 1800
         # false = mutating tool calls pause for approval in the Inbox (the plan/apply gate).
         # Set true only once you trust an unattended apply run.
         autoApprove: false
+        # Pre-bound to the Run inputs step - nothing to map after import.
+        inputBindingsJson: '{"companyId":"{{ nodes.node-inputs.output.companyId }}","scalePadClientName":"{{ nodes.node-inputs.output.scalePadClientName }}","mode":"{{ nodes.node-inputs.output.mode }}","phase":"{{ nodes.node-inputs.output.phase }}","createPlaceholders":"{{ nodes.node-inputs.output.createPlaceholders }}","maxCompanies":"{{ nodes.node-inputs.output.maxCompanies }}"}'
         inputSchema: |
           {"type":"object","properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Optional - omit to resolve from scalePadClientName, or to let the agent crosswalk ScalePad clients itself (up to maxCompanies)."},"scalePadClientName":{"type":"string","description":"Optional. Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"default":"plan","description":"plan = describe changes, no writes (default); apply = write approved changes only, and only for a named company."},"phase":{"type":"string","enum":["devices","assets","software","assessments","roadmap","archive","all"],"default":"all","description":"Which phase to review - the same names as the ScalePad to CloudRadial Sync. Defaults to all."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."},"maxCompanies":{"type":"integer","default":3,"description":"When no company is named, how many crosswalked clients to plan for."}}}
         outputSchema: |
@@ -60,10 +102,13 @@ definition:
       name: End
       type: end
       position:
-        x: 560
+        x: 660
         y: 80
   connections:
     - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
       target: node-1
       sourceHandle: null
     - source: node-1

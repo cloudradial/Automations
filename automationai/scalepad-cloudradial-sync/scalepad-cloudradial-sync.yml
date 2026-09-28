@@ -71,8 +71,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -212,6 +216,26 @@ definition:
           $crCompanyId = [string](Get-P $ctx 'companyId' '')
           $crCompanyName = ''
 
+          if ((Test-Blank $crCompanyId) -or [string]$crCompanyId -eq '0') { $crCompanyId = '' }
+          if ((Test-Blank $crCompanyId) -and (Test-Blank $spClientId) -and (Test-Blank $spClientName)) {
+              # Nothing named: list which ScalePad clients match a CloudRadial company, write nothing,
+              # and tell the operator what to run next. Every later step skips (no phases).
+              $spClients = @(Get-SpAll '/core/v1/clients')
+              $crCos = @(Get-CrAll "/v2/odata/company?`$select=companyId,name")
+              $byName = @{}
+              foreach ($c in $crCos) { $k = Normalize-Name (Get-P $c 'name'); if ($k) { if (-not $byName.ContainsKey($k)) { $byName[$k] = @() }; $byName[$k] += $c } }
+              $pairs = New-Object System.Collections.ArrayList
+              $unmatched = New-Object System.Collections.ArrayList
+              foreach ($s in $spClients) {
+                  $hits = @($byName[(Normalize-Name (Get-P $s 'name'))])
+                  if ($hits.Count -eq 1 -and $null -ne $hits[0]) { $null = $pairs.Add([ordered]@{ scalePadClient = [string](Get-P $s 'name'); scalePadClientId = [string](Get-P $s 'id'); companyId = [int](Get-P $hits[0] 'companyId'); companyName = [string](Get-P $hits[0] 'name') }) }
+                  else { $null = $unmatched.Add([string](Get-P $s 'name')) }
+              }
+              $example = if ($pairs.Count -gt 0) { '{"companyId": ' + $pairs[0].companyId + ', "mode": "plan"}' } else { '{"companyId": <CloudRadial id>, "scalePadClientId": "<ScalePad id>", "mode": "plan"}' }
+              $msg = "No company named, so nothing was synced. $($pairs.Count) ScalePad clients match a CloudRadial company by name$(if ($unmatched.Count) { "; $($unmatched.Count) don't" }). Run again with one of them, e.g. $example."
+              Set-NodeOutput @{ status = 'ok'; message = $msg; ctx = [ordered]@{ mode = 'plan'; phases = @(); settings = [ordered]@{}; discovery = [ordered]@{ matched = @($pairs | Select-Object -First 300); unmatched = @($unmatched | Select-Object -First 300); nextRun = $example; message = $msg }; results = [ordered]@{}; warnings = @($warnings) } }
+              return
+          }
           if (-not (Test-Blank $crCompanyId)) {
               $co = @(Get-CrAll "/v2/odata/company?`$filter=companyId eq $([int]$crCompanyId)&`$select=companyId,name,psaIdentifier") | Select-Object -First 1
               if ($null -eq $co) { throw "CloudRadial company $crCompanyId was not found." }
@@ -220,7 +244,7 @@ definition:
 
           if (Test-Blank $spClientId) {
               $lookupName = if (-not (Test-Blank $spClientName)) { $spClientName } else { $crCompanyName }
-              if (Test-Blank $lookupName) { throw 'Name the client: send companyId (CloudRadial), scalePadClientId, or scalePadClientName.' }
+              if (Test-Blank $lookupName) { throw "CloudRadial company $crCompanyId has no name to match on. Send scalePadClientId." }
               $cands = @(Get-SpAll '/core/v1/clients' @{ 'filter[name]' = "cont:$lookupName" })
               $target = Normalize-Name $lookupName
               $hit = @($cands | Where-Object { (Normalize-Name (Get-P $_ 'name')) -eq $target })
@@ -256,8 +280,15 @@ definition:
           }
         timeoutSeconds: 300
         retryCount: 0
-        parameters: []
+        parameters:
+          - name: trigger
+            expression: '{{ nodes.trigger.output }}'
         aiExtensions: []
+        testInput: |-
+          {
+            "companyId": 0,
+            "mode": "plan"
+          }
     - id: node-devices
       name: Devices (workstations, servers, VMs)
       type: powershell-script
@@ -315,8 +346,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -608,8 +643,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -943,8 +982,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -1182,8 +1225,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -1529,8 +1576,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -1819,8 +1870,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -2069,8 +2124,12 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
+          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
+          if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
+          if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+          if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
           if ($null -eq $ctx) { $ctx = $nodeIn }
           $ctx = ConvertTo-Dict $ctx
 
@@ -2189,6 +2248,12 @@ definition:
           $spName = [string](Get-P $ctx 'scalePadClientName')
           $runDay = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
           function ConvertTo-HtmlText { param($s) [System.Net.WebUtility]::HtmlEncode([string]$s) }
+
+          $discovery = Get-P $ctx 'discovery'
+          if ($null -ne $discovery) {
+              Set-NodeOutput @{ status = 'ok'; mode = 'plan'; summary = [string](Get-P $discovery 'message'); message = [string](Get-P $discovery 'message'); matchedClients = @(Get-P $discovery 'matched' @()); unmatchedClients = @(Get-P $discovery 'unmatched' @()); nextRun = [string](Get-P $discovery 'nextRun'); reportLocation = 'run output only'; results = [ordered]@{}; warnings = @(Get-P $ctx 'warnings' @()) }
+              return
+          }
 
           $lines = New-Object System.Collections.ArrayList
           $html = New-Object System.Text.StringBuilder

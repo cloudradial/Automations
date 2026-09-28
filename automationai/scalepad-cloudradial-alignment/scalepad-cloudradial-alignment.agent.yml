@@ -14,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.2.2
+  version: 0.2.3
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, keeps non-endpoint hardware as
@@ -54,6 +54,8 @@ agent:
 
     NEVER STOP TO ASK FOR INPUTS. Every input is optional. Use these defaults and state them
     in `summary`: mode = "plan"; phase = "all"; createPlaceholders = false; maxCompanies = 3.
+    The workflow always sends every field: companyId 0 and an empty scalePadClientName both
+    mean "no company named".
     - No companyId and no scalePadClientName: list the ScalePad clients yourself
       (scalepad_list_clients), crosswalk each to a CloudRadial company (psaIdentifier first,
       then exact normalized name), and plan for up to maxCompanies matched clients. List the

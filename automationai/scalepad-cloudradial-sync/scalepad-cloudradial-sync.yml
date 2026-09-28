@@ -206,10 +206,10 @@ definition:
               includeContracts       = -not ([string](Get-P $ctx 'includeContracts' 'true') -match '^(false|no|0)$')
               archiveName            = [string](Get-P $ctx 'archiveName' 'ScalePad QBR History')
               deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 20)
-              reportTarget           = ([string](Get-P $ctx 'reportTarget' 'archive')).ToLowerInvariant()
+              reportTarget           = ([string](Get-P $ctx 'reportTarget' 'article')).ToLowerInvariant()
               reportArchiveName      = [string](Get-P $ctx 'reportArchiveName' 'ScalePad Migration')
           }
-          if ($settings.reportTarget -notin @('archive', 'article', 'none')) { Warn "reportTarget '$($settings.reportTarget)' isn't archive, article or none; using archive."; $settings.reportTarget = 'archive' }
+          if ($settings.reportTarget -notin @('archive', 'article', 'none')) { Warn "reportTarget '$($settings.reportTarget)' isn't article, archive or none; using article."; $settings.reportTarget = 'article' }
 
           # --- ScalePad client ---
           $spClientId = [string](Get-P $ctx 'scalePadClientId' '')
@@ -1119,7 +1119,7 @@ definition:
           $settings = Get-P $ctx 'settings'
           $companyId = [int](Get-P $ctx 'companyId')
           $spClientId = [string](Get-P $ctx 'scalePadClientId')
-          $counts = [ordered]@{ scalePadInstalls = 0; devicesWithSoftware = 0; alreadyPresent = 0; toCreate = 0; created = 0; noDevice = 0; overCap = 0; errors = 0 }
+          $counts = [ordered]@{ scalePadInstalls = 0; devicesWithSoftware = 0; scalePadDevices = 0; alreadyPresent = 0; toCreate = 0; created = 0; noDevice = 0; overCap = 0; errors = 0 }
           $noDevice = New-Object System.Collections.Generic.HashSet[string]
 
           function Split-Version { param([string]$v)
@@ -1178,6 +1178,7 @@ definition:
                   $writeCount++
               }
               $counts.devicesWithSoftware = $devicesSeen.Count
+              $counts.scalePadDevices = @($installs | ForEach-Object { Normalize-Serial (Get-P $_ 'hardware_asset.serial_number') } | Where-Object { $_ } | Sort-Object -Unique).Count
               if ($counts.overCap -gt 0) { Warn "$($counts.overCap) software records were left for the next run (maxSoftwareWrites = $cap). Re-run to continue; existing records are skipped." }
               if ($noDevice.Count -gt 0 -and -not $apply) { Warn "Software for $($noDevice.Count) device(s) has no CloudRadial endpoint yet. In plan mode, devices the devices step would create aren't counted; run apply (devices then software) to include them." }
               $results[$phase] = [ordered]@{ ran = $true; counts = $counts; sample = @($sample); devicesWithoutEndpoint = @($noDevice | Select-Object -First 50) }
@@ -2314,9 +2315,9 @@ definition:
           # Step 7 - Migration report
           #   Builds a plain-language summary and, in apply mode, writes it into the
           #   CloudRadial portal so the result is visible there:
-          #     reportTarget = archive (default) -> an HTML item in the company's
+          #     reportTarget = article (default) -> a knowledge base article (POST /v2/article)
+          #     reportTarget = archive           -> an HTML item in the company's
           #                    "ScalePad Migration" report archive (POST /v2/archiveitem)
-          #     reportTarget = article           -> a knowledge base article (POST /v2/article)
           #     reportTarget = none              -> run output only
           #   If the archive can't be written, it falls back to an article.
           #   Plan mode writes nothing - the report is returned in the run output.
@@ -2363,7 +2364,7 @@ definition:
           if ($s) {
               $act = if ($apply) { "Created $(Get-P $s 'created')." } else { "Would create $(Get-P $s 'toCreate')." }
               $null = $lines.Add("Software: $(Get-P $s 'scalePadInstalls') installed items in ScalePad, $(Get-P $s 'alreadyPresent') already in CloudRadial. $act $(Get-P $s 'noDevice') are on devices not in CloudRadial.")
-              $null = $rows.Add(@('Installed software', "$(Get-P $s 'scalePadInstalls') installs on $(Get-P $s 'devicesWithSoftware') devices", $act, "$(Get-P $s 'noDevice') on devices not in CloudRadial, $(Get-P $s 'errors') errors"))
+              $null = $rows.Add(@('Installed software', "$(Get-P $s 'scalePadInstalls') installs on $(Get-P $s 'scalePadDevices' (Get-P $s 'devicesWithSoftware')) devices", $act, "$(Get-P $s 'noDevice') on devices not in CloudRadial, $(Get-P $s 'errors') errors"))
               if ([int](Get-P $s 'overCap' 0) -gt 0) { $null = $attention.Add("Software: $(Get-P $s 'overCap') records left for the next run (maxSoftwareWrites).") }
           }
           $a = Get-P $results 'assessments.counts'
@@ -2400,7 +2401,7 @@ definition:
 
           # ---- write the report into the portal ----
           $reportLocation = 'run output only'
-          $target = [string](Get-P $settings 'reportTarget' 'archive')
+          $target = [string](Get-P $settings 'reportTarget' 'article')
           $subject = "ScalePad migration - $runDay"
           if ($apply -and $target -ne 'none') {
               $written = $false

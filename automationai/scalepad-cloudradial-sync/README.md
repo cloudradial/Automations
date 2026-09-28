@@ -57,7 +57,7 @@ All optional except naming the client (either side works).
 | `includeInactiveContracts` | `false` | Cancelled and expired ScalePad contracts are skipped and listed in the warnings; `true` adds them too. |
 | `archiveName` | `ScalePad QBR History` | Report archive for deliverable PDFs. |
 | `deliverableLimit` | `20` | Newest deliverables per run. |
-| `reportTarget` | `archive` | Where the apply-mode migration report goes: `archive`, `article` (knowledge base), or `none` (run output only). Falls back from archive to article automatically. |
+| `reportTarget` | `article` | Where the apply-mode migration report goes: `article` (knowledge base, the default), `archive` (report archive), or `none` (run output only). Archive falls back to article automatically. |
 | `reportArchiveName` | `ScalePad Migration` | Report archive for the migration report. |
 
 ## Confirm in your tenant

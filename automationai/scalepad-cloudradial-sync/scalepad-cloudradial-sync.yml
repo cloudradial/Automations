@@ -71,7 +71,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -281,9 +281,7 @@ definition:
           }
         timeoutSeconds: 300
         retryCount: 0
-        parameters:
-          - name: trigger
-            expression: '{{ nodes.trigger.output }}'
+        parameters: []
         aiExtensions: []
         testInput: |-
           {
@@ -347,7 +345,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -644,7 +642,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -983,7 +981,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -1226,7 +1224,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -1577,7 +1575,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -1876,7 +1874,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'
@@ -2134,7 +2132,7 @@ definition:
           }
 
           # Context from the previous step (or the run inputs on the first step).
-          # First step: the run input, bound as the "trigger" parameter. Later steps: the previous step's ctx.
+          # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
           $nodeIn = Get-NodeInput
           if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
           $ctx = Get-P $nodeIn 'ctx'

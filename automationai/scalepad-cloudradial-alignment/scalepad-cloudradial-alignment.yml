@@ -44,9 +44,8 @@ definition:
           })
         timeoutSeconds: 60
         retryCount: 0
-        parameters:
-          - name: trigger
-            expression: '{{ nodes.trigger.output }}'
+        # No binding: this step receives the run's Trigger input (empty is fine - defaults apply).
+        parameters: []
         aiExtensions: []
         testInput: |-
           {"companyId": 9, "mode": "plan", "phase": "all"}

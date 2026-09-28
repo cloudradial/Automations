@@ -1,5 +1,7 @@
 # ScalePad → CloudRadial Alignment
 
+> **Optional.** A migration only needs the [ScalePad to CloudRadial Sync](../scalepad-cloudradial-sync/) workflow. Use this agent when the data is messy — unclear client matches, devices typed wrong, conflicting warranty dates — and you want a reviewed plan before applying.
+
 The **judgment** half of a ScalePad Lifecycle Manager → CloudRadial migration: an **agent** that matches clients, reads both sides and returns a plan, plus a thin **workflow** that runs it with a goal. Grounded on a migration map so its field-level decisions are traceable.
 
 The **bulk** half — devices, servers, installed software, assessments, roadmap and budget, deliverable PDFs — is the deterministic [ScalePad to CloudRadial Sync](../scalepad-cloudradial-sync/) workflow, which follows every ScalePad page. The agent tells you what the sync will move and what needs a human; it makes at most 10 corrections itself.
@@ -30,7 +32,7 @@ Use it with [`lifecycle-manager` 1.2.0](../scalepad-lifecycle-manager-extension/
 
 ## Run inputs
 
-Nothing to wire after import. The workflow's **Run inputs** step reads whatever you send when you start a run (the Run dialog, a Routine, or a webhook body), fills in every default, and is already bound to the agent's inputs. To change a run, send any of these fields as JSON — for example `{"companyId": 9, "mode": "plan"}` — and leave the rest out. An empty run plans for up to three crosswalked clients.
+Nothing to wire after import. The workflow's **Run inputs** step reads the **Trigger input** box of the Run dialog (or a Routine's input) — leaving it empty is fine, fills in every default, and is already bound to the agent's inputs. To change a run, send any of these fields as JSON — for example `{"companyId": 9, "mode": "plan"}` — and leave the rest out. An empty run plans for up to three crosswalked clients.
 
 Every input is optional — the agent never stops to ask. Defaults are shown.
 

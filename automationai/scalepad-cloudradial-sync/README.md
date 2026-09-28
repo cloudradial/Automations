@@ -1,6 +1,6 @@
 # ScalePad to CloudRadial Sync
 
-A deterministic **workflow** that moves a client's ScalePad Lifecycle Manager data into CloudRadial — API to API, following every ScalePad page, with nothing stored in between. It's the bulk half of a ScalePad migration; the [ScalePad to CloudRadial Alignment](../scalepad-cloudradial-alignment/) agent handles the judgment calls.
+A deterministic **workflow** that moves a client's ScalePad Lifecycle Manager data into CloudRadial — API to API, following every ScalePad page, with nothing stored in between. **This is the only workflow a partner needs to migrate a client.** The [ScalePad to CloudRadial Alignment](../scalepad-cloudradial-alignment/) agent is an optional review for messy data — skip it unless you want a second opinion before applying.
 
 ## Pieces
 
@@ -26,7 +26,10 @@ Every phase is idempotent: re-running updates or skips what's already there. No 
 
 1. **Workflows → Import** `scalepad-cloudradial-sync.yml`, publish, and deploy to your runner.
 2. **Runner Key Vault secrets:** `ScalePad-ApiUrl` (e.g. `https://api.scalepad.com`), `ScalePad-ApiKey`, `CloudRadial-BaseUrl` (e.g. `https://api.us.cloudradial.com`), `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`. That's all. The first step fails with a message listing anything missing.
-3. **Plan first.** Run with `{"companyId": <CloudRadial id>, "mode": "plan"}` — paste it as the run input in the Run dialog (or a Routine). Nothing needs wiring: the first step already receives the run input. Not sure of the id? Run with no input at all: nothing is synced, and the output lists every ScalePad client that matches a CloudRadial company, with the exact input to run next. Nothing is written; the summary gives counts per phase and the first 150 planned device changes.
+3. **Run it.** Open the workflow, click **Run**, pick your deployment, and type the input into the **Trigger input** box. Nothing needs wiring.
+   - **First run — leave Trigger input empty.** Nothing is synced; the output lists every ScalePad client that matches a CloudRadial company and the exact input to use next.
+   - **Plan:** `{"companyId": 9}` — counts per phase and the first 150 planned device changes. Nothing is written (plan is the default).
+   - **Apply:** `{"companyId": 9, "mode": "apply"}` — writes, then puts a migration report in the portal.
 4. **Apply.** Re-run with `"mode": "apply"`. Run the devices phase before software (the default order does this), so software can attach to devices created in the same run. The run output's `reportLocation` says where the migration report was written.
 5. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled — enable it only if something else triggers the sync.
 

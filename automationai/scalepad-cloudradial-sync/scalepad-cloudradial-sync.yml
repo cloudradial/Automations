@@ -124,7 +124,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -399,7 +399,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -452,6 +452,7 @@ definition:
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
+          try {
           # =====================================================================
           # Step 2 - Devices: workstations, servers and VMs (enrich or create)
           # =====================================================================
@@ -582,6 +583,16 @@ definition:
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
           Set-NodeOutput @{ status = 'ok'; message = "Devices: $($c.inScope) in scope, $($c.matched) matched, $(if ($apply) { "$($c.enriched) enriched, $($c.created) created" } else { "$($c.toEnrich) to enrich, $($c.toCreate) to create" }), $($c.skipped) skipped, $($c.errors) errors."; ctx = $ctx }
+          }
+          catch {
+              $stepErr = $_.Exception.Message
+              $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'node-devices' })
+              $res = ConvertTo-Dict (Get-P $ctx 'results')
+              $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+              $ctx.results = $res
+              $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+              Set-NodeOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+          }
         timeoutSeconds: 900
         retryCount: 0
         parameters: []
@@ -696,7 +707,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -749,6 +760,7 @@ definition:
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
+          try {
           # =====================================================================
           # Step 3 - Other ScalePad hardware to CloudRadial flexible assets
           #   Network gear, mobiles, printers/imaging (any ScalePad type that isn't
@@ -921,6 +933,16 @@ definition:
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
           Set-NodeOutput @{ status = 'ok'; message = "Flexible assets: $($c.scalePadAssets) ScalePad assets that aren't endpoints ($($c.noSerialDevices) of them devices with no serial), $(if ($apply) { "$($c.created) created, $($c.updated) updated" } else { "$($c.toCreate) to create, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
+          }
+          catch {
+              $stepErr = $_.Exception.Message
+              $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'node-assets' })
+              $res = ConvertTo-Dict (Get-P $ctx 'results')
+              $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+              $ctx.results = $res
+              $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+              Set-NodeOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+          }
         timeoutSeconds: 600
         retryCount: 0
         parameters: []
@@ -1035,7 +1057,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1088,6 +1110,7 @@ definition:
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
+          try {
           # =====================================================================
           # Step 3 - Installed software -> CloudRadial endpoint applications
           # =====================================================================
@@ -1164,6 +1187,16 @@ definition:
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
           Set-NodeOutput @{ status = 'ok'; message = "Software: $($c.scalePadInstalls) installs in ScalePad, $($c.alreadyPresent) already in CloudRadial, $(if ($apply) { "$($c.created) created" } else { "$($c.toCreate) to create" }), $($c.noDevice) on devices not in CloudRadial, $($c.errors) errors."; ctx = $ctx }
+          }
+          catch {
+              $stepErr = $_.Exception.Message
+              $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'node-software' })
+              $res = ConvertTo-Dict (Get-P $ctx 'results')
+              $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+              $ctx.results = $res
+              $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+              Set-NodeOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+          }
         timeoutSeconds: 900
         retryCount: 0
         parameters: []
@@ -1278,7 +1311,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1331,6 +1364,7 @@ definition:
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
+          try {
           # =====================================================================
           # Step 4 - Assessments -> CloudRadial assessment (Excel import format)
           #   Columns follow support KB 360052746791 "Importing Assessments".
@@ -1515,6 +1549,16 @@ definition:
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
           Set-NodeOutput @{ status = 'ok'; message = "Assessments: $($c.scalePadAssessments) in ScalePad, $($c.alreadyInCloudRadial) already in CloudRadial, $(if ($apply) { "$($c.imported) imported" } else { "$($c.toImport) to import" }) ($($c.questions) questions), $($c.errors) errors."; ctx = $ctx }
+          }
+          catch {
+              $stepErr = $_.Exception.Message
+              $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'node-assessments' })
+              $res = ConvertTo-Dict (Get-P $ctx 'results')
+              $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+              $ctx.results = $res
+              $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+              Set-NodeOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+          }
         timeoutSeconds: 600
         retryCount: 0
         parameters: []
@@ -1629,7 +1673,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1682,6 +1726,7 @@ definition:
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
+          try {
           # =====================================================================
           # Step 5 - Roadmap and budget: initiatives + contracts -> Planner cards
           #   Subjects match the earlier migration ("ScalePad Initiative - <name>",
@@ -1814,6 +1859,16 @@ definition:
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
           Set-NodeOutput @{ status = 'ok'; message = "Roadmap: $($c.initiatives) initiatives and $($c.contracts) contracts; $(if ($apply) { "$($c.created) cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" }), $($c.errors) errors."; ctx = $ctx }
+          }
+          catch {
+              $stepErr = $_.Exception.Message
+              $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'node-roadmap' })
+              $res = ConvertTo-Dict (Get-P $ctx 'results')
+              $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+              $ctx.results = $res
+              $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+              Set-NodeOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+          }
         timeoutSeconds: 600
         retryCount: 0
         parameters: []
@@ -1928,7 +1983,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1981,6 +2036,7 @@ definition:
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
           $apply = ($mode -eq 'apply')
           # ---- end shared helpers ----
+          try {
           # =====================================================================
           # Step 6 - Deliverable PDFs -> CloudRadial Report Archive
           #   1. Download the PDF from ScalePad to the run's temp folder.
@@ -2032,11 +2088,16 @@ definition:
                   } catch { Warn "Could not list existing archive items; duplicates are possible. $($_.Exception.Message)" }
               }
 
-              try { $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' @{ 'filter[client.id]' = "eq:$spClientId"; sort = '-created_at' }) }
-              catch {
-                  if ("$_" -notmatch 'HTTP 400') { throw }
-                  $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' @{ 'filter[client.id]' = "eq:$spClientId" } | Sort-Object { ConvertTo-IsoDate (Get-P $_ 'created_at') } -Descending)
+              # ScalePad has answered this list with 400/422 depending on sort and page size, so fall back
+              # step by step, and never let a failed read stop the migration report.
+              $deliverables = @()
+              $readOk = $false
+              foreach ($try in @(@{ q = @{ 'filter[client.id]' = "eq:$spClientId"; sort = '-created_at' }; ps = 100 }, @{ q = @{ 'filter[client.id]' = "eq:$spClientId" }; ps = 100 }, @{ q = @{ 'filter[client.id]' = "eq:$spClientId" }; ps = 25 })) {
+                  try { $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' $try.q -PageSize $try.ps); $readOk = $true; break }
+                  catch { $lastErr = "$_" }
               }
+              if (-not $readOk) { $counts.errors++; Warn "Could not read ScalePad deliverables, so no PDFs were archived: $lastErr" }
+              $deliverables = @($deliverables | Sort-Object { ConvertTo-IsoDate (Get-P $_ 'created_at') } -Descending)
               $counts.deliverables = $deliverables.Count
               $limit = [int](Get-P $settings 'deliverableLimit' 20)
               foreach ($d in @($deliverables | Select-Object -First $limit)) {
@@ -2072,6 +2133,16 @@ definition:
           $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
           $c = $counts
           Set-NodeOutput @{ status = 'ok'; message = "Archive: $($c.deliverables) deliverables, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.uploaded) uploaded, $($c.needsManual) need manual upload" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
+          }
+          catch {
+              $stepErr = $_.Exception.Message
+              $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'node-archive' })
+              $res = ConvertTo-Dict (Get-P $ctx 'results')
+              $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+              $ctx.results = $res
+              $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+              Set-NodeOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+          }
         timeoutSeconds: 900
         retryCount: 0
         parameters: []
@@ -2186,7 +2257,7 @@ definition:
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 400') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }

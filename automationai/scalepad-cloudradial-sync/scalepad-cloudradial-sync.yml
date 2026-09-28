@@ -518,7 +518,9 @@ definition:
                       return 20
                   }
 
-                  $counts = [ordered]@{ scalePadDevices = 0; inScope = 0; matched = 0; toEnrich = 0; toCreate = 0; enriched = 0; created = 0; unchanged = 0; skipped = 0; errors = 0 }
+                  # ScalePad sometimes types a server as WORKSTATION; a Windows Server OS makes it a server here.
+                  $ServerOsPattern = '(?i)windows\s*server|hyper-v\s*server'
+                  $counts = [ordered]@{ scalePadDevices = 0; inScope = 0; serversByOs = 0; matched = 0; toEnrich = 0; toCreate = 0; enriched = 0; created = 0; unchanged = 0; skipped = 0; errors = 0 }
                   $planned = New-Object System.Collections.ArrayList
                   $skipped = New-Object System.Collections.ArrayList
 
@@ -532,7 +534,7 @@ definition:
                       foreach ($l in $life) { $s = Normalize-Serial (Get-P $l 'serial_number'); if ($s) { $lifeBySerial[$s] = $l } }
                       $counts.scalePadDevices = $hw.Count
 
-                      $crEps = @(Get-CrAll "/v2/odata/endpoint?`$filter=companyId eq $companyId&`$select=companyEndpointId,serialNumber,name,manufacturer,model,expirationDate,manufacturedDate,os,cpu,memory,isServer,enclosure")
+                      $crEps = @(Get-CrAll "/v2/odata/endpoint?`$filter=companyId eq $companyId&`$select=companyEndpointId,serialNumber,name,manufacturer,model,expirationDate,manufacturedDate,os,cpu,memory,isServer,isVirtual,enclosure")
                       $crBySerial = @{}
                       foreach ($e in $crEps) { $s = Normalize-Serial (Get-P $e 'serialNumber'); if ($s -and -not $crBySerial.ContainsKey($s)) { $crBySerial[$s] = $e } }
 
@@ -555,8 +557,12 @@ definition:
                           $warranty = ConvertTo-IsoDate (Get-P $l 'warranty_expiry_date')
                           $purchase = ConvertTo-IsoDate (Get-P $l 'purchase_date')
                           $av = [string](Get-P $d 'software.antivirus_info.status' '')
-
                           $existing = $crBySerial[$serial]
+                          $serverOs = ($os -match $ServerOsPattern) -or ([string](Get-P $existing 'os' '') -match $ServerOsPattern)
+                          $isServer = ($type -eq 'SERVER') -or $serverOs
+                          $encType = if ($serverOs -and $type -ne 'VIRTUAL') { 'SERVER' } else { $type }
+                          if ($serverOs -and $type -ne 'SERVER') { $counts.serversByOs++ }
+
                           if ($null -ne $existing) {
                               $counts.matched++
                               $epId = [int](Get-P $existing 'companyEndpointId')
@@ -576,6 +582,9 @@ definition:
                               if ((Test-Blank (Get-P $existing 'os')) -and $os) { $fields.os = $os }
                               if ((Test-Blank (Get-P $existing 'cpu')) -and $cpu) { $fields.cpu = $cpu }
                               if (((Test-Blank (Get-P $existing 'memory')) -or [double](Get-P $existing 'memory' 0) -eq 0) -and $ram) { $fields.memory = [int64]$ram }
+                              # Server typing is corrected, not just filled: a desktop record running Windows Server is a server.
+                              if ($isServer -and (Get-P $existing 'isServer' $false) -ne $true) { $fields.isServer = $true }
+                              if ($isServer -and $encType -eq 'SERVER' -and (Get-P $existing 'isVirtual' $false) -ne $true -and [int](Get-P $existing 'enclosure' 0) -ne 80) { $fields.enclosure = 80 }
                               if ($fields.Count -eq 0) { $counts.unchanged++; continue }
                               $counts.toEnrich++
                               $null = $planned.Add(@{ action = 'enrich'; device = $name; serial = $serial; companyEndpointId = $epId; fields = $fields })
@@ -590,8 +599,8 @@ definition:
                           $body = [ordered]@{
                               companyId = $companyId; name = $(if ($name) { $name } else { $serial }); machineName = $name
                               serialNumber = [string](Get-P $d 'serial_number'); manufacturer = $mf; model = $model
-                              platformType = (Get-Platform $os $mf); enclosure = (Get-Enclosure $type $model)
-                              isServer = ($type -eq 'SERVER'); isVirtual = ($type -eq 'VIRTUAL')
+                              platformType = (Get-Platform $os $mf); enclosure = (Get-Enclosure $encType $model)
+                              isServer = $isServer; isVirtual = ($type -eq 'VIRTUAL')
                               os = $os; cpu = $cpu; tagNumber = 'ScalePad'
                               isWindowsDefenderRunning = ($av -eq 'RUNNING' -and $os -match '(?i)windows')
                               lastCheckIn = $today; lastOSUpdate = $today
@@ -601,7 +610,7 @@ definition:
                           if (-not (Test-Blank $warranty)) { $body.expirationDate = $warranty }
                           if (-not (Test-Blank $purchase)) { $body.manufacturedDate = $purchase }
                           $counts.toCreate++
-                          $null = $planned.Add(@{ action = 'create'; device = $name; serial = $serial; type = $type; enclosure = $body.enclosure; platformType = $body.platformType })
+                          $null = $planned.Add(@{ action = 'create'; device = $name; serial = $serial; type = $(if ($encType -ne $type) { "$type (server by OS)" } else { $type }); enclosure = $body.enclosure; platformType = $body.platformType })
                           if ($apply) {
                               try {
                                   $resp = Invoke-Cr -Method POST -Path '/v2/endpoint' -Body $body
@@ -623,7 +632,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Devices: $($c.inScope) in scope, $($c.matched) matched, $(if ($apply) { "$($c.enriched) enriched, $($c.created) created" } else { "$($c.toEnrich) to enrich, $($c.toCreate) to create" }), $($c.skipped) skipped, $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Devices: $($c.inScope) in scope, $($c.matched) matched, $(if ($apply) { "$($c.enriched) enriched, $($c.created) created" } else { "$($c.toEnrich) to enrich, $($c.toCreate) to create" }), $($c.skipped) skipped, $($c.errors) errors.$(if ($c.serversByOs) { " $($c.serversByOs) typed as servers from a Windows Server OS." })"; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message

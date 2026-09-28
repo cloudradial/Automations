@@ -27,7 +27,7 @@ Some parts of ScalePad Lifecycle Manager have no CloudRadial API (or none this w
 
 | ScalePad area | Why | What to do |
 |---|---|---|
-| Policies and standards | CloudRadial has no API for Compliance Policies. | Set up the equivalent checks under **Compliance > Policies**. The Sync already fills the endpoint fields those checks read (warranty expiry, purchase date, server type). |
+| Policies and standards | CloudRadial's API has no route for Compliance Policies; the only policy data it exposes is each endpoint's Windows audit-policy settings (`EndpointAuditPolicy`, reported by the agent). | Set up the equivalent checks under **Compliance > Policies**. The Sync already fills the endpoint fields those checks read (warranty expiry, purchase date, server type). |
 | Assessment templates | Only completed assessments (with answers) import. | Recreate templates under Compliance > Assessments, or import one with the Excel template. |
 | Meetings and QBR agendas | No meeting or agenda API. | The meeting PDFs are archived; recreate recurring QBRs in your calendar or PSA. |
 | Initiative action items and notes | No API for Planner card sub-tasks. | Add them to the card description, or track them in your PSA. |

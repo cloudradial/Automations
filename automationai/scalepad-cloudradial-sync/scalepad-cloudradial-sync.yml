@@ -115,15 +115,26 @@ definition:
               param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
               $items = New-Object System.Collections.ArrayList
               $cursor = $null
+              # Variants tried in order when the first page is refused: smaller page, filter without the
+              # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+              $variant = 0
+              $noPageSize = $false
+              $baseQuery = @{} + $Query
               for ($page = 1; $page -le $MaxPages; $page++) {
-                  $q = @{} + $Query
-                  $q['page_size'] = $PageSize
+                  $q = @{} + $baseQuery
+                  if (-not $noPageSize) { $q['page_size'] = $PageSize }
                   if ($cursor) { $q['cursor'] = $cursor }
                   $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                   $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                   try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                   catch {
-                      if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                      if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                          $variant++
+                          if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                          if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                          if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                          if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                      }
                       throw
                   }
                   foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -468,15 +479,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -724,15 +746,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1064,15 +1097,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1435,15 +1479,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -1797,15 +1852,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -2117,15 +2183,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -2344,7 +2421,12 @@ definition:
                       }
 
                       $crTitles = New-Object System.Collections.Generic.HashSet[string]
-                      foreach ($a in @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId&`$select=assessmentId,title")) { $null = $crTitles.Add(([string](Get-P $a 'title')).ToLowerInvariant()) }
+                      $crAssess = $null
+                      foreach ($path in @("/v2/odata/assessment?`$filter=companyId eq $companyId&`$select=assessmentId,title", "/v2/odata/assessment?`$filter=companyId eq $companyId", '/v2/odata/assessment')) {
+                          try { $crAssess = @(Get-CrAll $path | Where-Object { [int](Get-P $_ 'companyId' $companyId) -eq $companyId }); break } catch { $lastAssessErr = $_.Exception.Message }
+                      }
+                      if ($null -eq $crAssess) { Warn "Couldn't list CloudRadial assessments to check for ones already imported ($lastAssessErr) - assessments were not imported this run to avoid duplicates."; $crAssess = @(); $assessReadFailed = $true } else { $assessReadFailed = $false }
+                      foreach ($a in $crAssess) { $null = $crTitles.Add(([string](Get-P $a 'title' (Get-P $a 'name' ''))).ToLowerInvariant()) }
 
                       $scoreUse = @{}
                       foreach ($s in $list) {
@@ -2387,7 +2469,7 @@ definition:
                           if ($rows.Count -eq 0) { $null = $items.Add(@{ title = $title; action = 'skip'; reason = 'no questions' }); continue }
                           $counts.toImport++
                           $item = [ordered]@{ title = $title; action = 'import'; questions = $rows.Count; scalePadScore = Get-P $s 'overall_score' }
-                          if ($apply) {
+                          if ($apply -and -not $assessReadFailed) {
                               try {
                                   $desc = "Imported from ScalePad Lifecycle Manager. $([string](Get-P $full 'description' ''))".Trim()
                                   $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId = $companyId; title = $title; category = 'ScalePad'; description = $desc })
@@ -2507,15 +2589,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -2838,15 +2931,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -2968,8 +3072,7 @@ definition:
                       foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
 
                       # The insights list takes only a client filter (no paging parameters).
-                      $resp = Get-SpOne "/lifecycle-manager/v1/insights?filter%5Bclient.id%5D=eq%3A$spClientId"
-                      $insights = @(Get-P $resp 'data' @())
+                      $insights = @(Get-SpAll '/lifecycle-manager/v1/insights' @{ 'filter[client.id]' = "eq:$spClientId" } -MaxPages 1)
                       $counts.insights = $insights.Count
                       $maxDevices = [int](Get-P $settings 'insightDeviceLimit' 25)
 
@@ -3128,15 +3231,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -3419,15 +3533,26 @@ definition:
                       param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                       $items = New-Object System.Collections.ArrayList
                       $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
                       for ($page = 1; $page -le $MaxPages; $page++) {
-                          $q = @{} + $Query
-                          $q['page_size'] = $PageSize
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
                           if ($cursor) { $q['cursor'] = $cursor }
                           $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                           $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                           try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                           catch {
-                              if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
                               throw
                           }
                           foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
@@ -3750,15 +3875,26 @@ definition:
                           param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
                           $items = New-Object System.Collections.ArrayList
                           $cursor = $null
+                          # Variants tried in order when the first page is refused: smaller page, filter without the
+                          # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                          $variant = 0
+                          $noPageSize = $false
+                          $baseQuery = @{} + $Query
                           for ($page = 1; $page -le $MaxPages; $page++) {
-                              $q = @{} + $Query
-                              $q['page_size'] = $PageSize
+                              $q = @{} + $baseQuery
+                              if (-not $noPageSize) { $q['page_size'] = $PageSize }
                               if ($cursor) { $q['cursor'] = $cursor }
                               $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
                               $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
                               try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
                               catch {
-                                  if ($page -eq 1 -and $PageSize -gt 100 -and "$_" -match 'HTTP 4(00|22)') { $PageSize = 100; $page = 0; continue }
+                                  if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                      $variant++
+                                      if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                      if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                      if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                      if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                                  }
                                   throw
                               }
                               foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }

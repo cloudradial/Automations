@@ -1273,7 +1273,22 @@ definition:
                       $counts.scalePadDevices = @($installs | ForEach-Object { Normalize-Serial (Get-P $_ 'hardware_asset.serial_number') } | Where-Object { $_ } | Sort-Object -Unique).Count
                       if ($counts.overCap -gt 0) { Warn "$($counts.overCap) software records were left for the next run (maxSoftwareWrites = $cap). Re-run to continue; existing records are skipped." }
                       if ($noDevice.Count -gt 0 -and -not $apply) { Warn "Software for $($noDevice.Count) device(s) has no CloudRadial endpoint yet. In plan mode, devices the devices step would create aren't counted; run apply (devices then software) to include them." }
-                      $results[$phase] = [ordered]@{ ran = $true; counts = $counts; sample = @($sample); devicesWithoutEndpoint = @($noDevice | Select-Object -First 50) }
+                      # --- Diagnostics: how CloudRadial answers the existing-software reads (for troubleshooting duplicates) ---
+                      $diag = [ordered]@{ companyReadApps = 0; endpointsWithApps = $appsByEp.Keys.Count }
+                      foreach ($k in $appsByEp.Keys) { $diag.companyReadApps += $appsByEp[$k].Count }
+                      function Get-Probe { param([string]$label, [string]$path)
+                          try { $r = Invoke-Cr -Method GET -Path $path; $v = @(Get-P $r 'value' @()); return [ordered]@{ query = $label; rows = $v.Count; first = $(if ($v.Count) { ($v[0] | ConvertTo-Json -Depth 3 -Compress) } else { '' }) } }
+                          catch { return [ordered]@{ query = $label; error = $_.Exception.Message } }
+                      }
+                      $probeEp = if ($touch.Count) { [int]$epBySerial[$touch[0]] } else { 0 }
+                      $diag.probeEndpoint = [ordered]@{ serial = $(if ($touch.Count) { $touch[0] } else { '' }); companyEndpointId = $probeEp }
+                      $diag.probes = @(
+                          (Get-Probe 'company, top 1, all fields' "/v2/odata/endpointapplication?`$filter=companyId eq $companyId&`$top=1"),
+                          (Get-Probe 'no filter, top 1' "/v2/odata/endpointapplication?`$top=1"),
+                          (Get-Probe 'endpointId = companyEndpointId' "/v2/odata/endpointapplication?`$filter=endpointId eq $probeEp&`$top=3"),
+                          (Get-Probe 'endpoint by id, all fields' "/v2/odata/endpoint?`$filter=companyEndpointId eq $probeEp&`$top=1")
+                      )
+                      $results[$phase] = [ordered]@{ ran = $true; counts = $counts; diagnostics = $diag; sample = @($sample); devicesWithoutEndpoint = @($noDevice | Select-Object -First 50) }
                   }
 
                   $ctx.results = $results

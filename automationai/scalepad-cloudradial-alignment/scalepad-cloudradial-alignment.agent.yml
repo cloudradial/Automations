@@ -14,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.2.3
+  version: 0.2.4
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, keeps non-endpoint hardware as
@@ -67,15 +67,14 @@ agent:
     does the bulk transfer. Everything below is reachable by API, so none of it is "unmapped":
     - Devices (workstations, servers, VMs - separated by ScalePad's type), other hardware,
       installed software, assessments, initiatives and contracts, and deliverable PDFs: count
-      them, spot problems, and put ONE `planned` entry per phase with action "workflow", the
-      count, and the exact workflow inputs to run (companyId, scalePadClientId, mode, phases).
-      Do not write these one by one.
-    - Put all phases in ONE workflow entry's workflowInputs (phases: all six, or the ones
-      that apply) rather than one run per phase: software attaches to devices, so devices must
-      be applied before or in the same run as software.
+      them, spot problems, and put one `planned` entry per phase with action "workflow" and
+      the count (no workflowInputs on these). Do not write these one by one.
+    - Then fill `syncRun` with the ONE Sync run to start next: companyId, scalePadClientId,
+      mode "plan", phases "all" (or a comma list of the phases that have work). Never split it
+      into one run per phase - software attaches to devices, so they run together.
     - The Sync's phases are exactly: devices, assets, software, assessments, roadmap, archive.
-      Use only these names in workflowInputs.phases - initiatives and contracts are "roadmap",
-      deliverable PDFs are "archive", flexible assets are "assets".
+      Initiatives and contracts are "roadmap", deliverable PDFs are "archive", flexible assets
+      are "assets". The Sync skips cancelled and expired contracts - count only active ones.
     - Flexible assets come from ScalePad, not IT Glue. ScalePad hardware that isn't an
       endpoint (types NETWORK, MOBILE, IMAGING) and in-scope devices with no serial number go
       to one CloudRadial flexible asset type, "ScalePad Assets" (Infrastructure), matched on the
@@ -98,8 +97,10 @@ agent:
        pass page_size 200. CloudRadial endpoint custom properties are keyed by the endpoint
        (companyEndpointId), not by company. ScalePad filter arguments use underscore names
        with an op:value, e.g. filter_client_id=eq:<id> (sent to ScalePad as filter[client.id]).
-       Installed software (scalepad_lm_list_software_*) accepts page_size 100 at most and
-       rejects sort=name - pass page_size 100 and no sort. To read one CloudRadial company, use
+       Installed software (scalepad_lm_list_software_*) accepts page_size 100 at most.
+       NEVER pass a sort argument to any ScalePad tool - it rejects most sort fields and the
+       whole read fails; order results yourself if you need to. Count deliverables with
+       scalepad_list_deliverables (filter_client_id) for the archive phase. To read one CloudRadial company, use
        cr_list_company with filter "companyId eq <id>" (cr_get_company can return 404).
        Never pass count=true to a cr_list_* tool - the API rejects '$count=True'; the list
        tools already return the complete set, so count the rows yourself.
@@ -145,6 +146,6 @@ agent:
   inputSchema: |
     {"type":"object","properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Optional - omit to resolve from scalePadClientName, or to let the agent crosswalk ScalePad clients itself (up to maxCompanies)."},"scalePadClientName":{"type":"string","description":"Optional. Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"default":"plan","description":"plan = describe changes, no writes (default); apply = write approved changes only, and only for a named company."},"phase":{"type":"string","enum":["devices","assets","software","assessments","roadmap","archive","all"],"default":"all","description":"Which phase to review - the same names as the ScalePad to CloudRadial Sync. Defaults to all."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."},"maxCompanies":{"type":"integer","default":3,"description":"When no company is named, how many crosswalked clients to plan for."}}}
   outputSchema: |
-    {"type":"object","properties":{"summary":{"type":"string"},"clientsMapped":{"type":"array","items":{"type":"object","properties":{"scalepadClient":{"type":"string"},"cloudradialCompanyId":{"type":"integer"},"matchConfidence":{"type":"string"}}}},"unresolvedClients":{"type":"array","items":{"type":"string"}},"matched":{"type":"integer"},"enriched":{"type":"integer"},"created":{"type":"integer"},"skipped":{"type":"integer"},"planned":{"type":"array","items":{"type":"object","properties":{"target":{"type":"string"},"action":{"type":"string","enum":["workflow","enrich","create","upload","archive","skip"]},"fields":{"type":"object"},"policyImpact":{"type":"string"},"reason":{"type":"string"},"count":{"type":"integer","description":"Items covered by this entry (grouped skips, or a workflow phase)."},"examples":{"type":"array","items":{"type":"string"},"description":"Up to 20 example serials or names."},"workflowInputs":{"type":"object","description":"For action workflow: the ScalePad to CloudRadial Sync inputs to run (companyId, scalePadClientId, mode, phases). phases uses only: devices, assets, software, assessments, roadmap, archive."}}}},"unmapped":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"reason":{"type":"string"}}}},"policySpecification":{"type":"array","items":{"type":"object","properties":{"proposedPolicy":{"type":"string"},"input":{"type":"string"},"note":{"type":"string"}}}},"currencyNote":{"type":"string"},"warnings":{"type":"array","items":{"type":"string"}}}}
+    {"type":"object","properties":{"summary":{"type":"string"},"clientsMapped":{"type":"array","items":{"type":"object","properties":{"scalepadClient":{"type":"string"},"cloudradialCompanyId":{"type":"integer"},"matchConfidence":{"type":"string"}}}},"unresolvedClients":{"type":"array","items":{"type":"string"}},"matched":{"type":"integer"},"enriched":{"type":"integer"},"created":{"type":"integer"},"skipped":{"type":"integer"},"syncRun":{"type":"object","description":"The ONE ScalePad to CloudRadial Sync run to start next - paste as its run input.","properties":{"companyId":{"type":"integer"},"scalePadClientId":{"type":"string"},"mode":{"type":"string","enum":["plan","apply"]},"phases":{"type":"string","description":"Comma list of devices, assets, software, assessments, roadmap, archive - or all."}}},"planned":{"type":"array","items":{"type":"object","properties":{"target":{"type":"string"},"action":{"type":"string","enum":["workflow","enrich","create","upload","archive","skip"]},"fields":{"type":"object"},"policyImpact":{"type":"string"},"reason":{"type":"string"},"count":{"type":"integer","description":"Items covered by this entry (grouped skips, or a workflow phase)."},"examples":{"type":"array","items":{"type":"string"},"description":"Up to 20 example serials or names."},"workflowInputs":{"type":"object","description":"For action workflow: the ScalePad to CloudRadial Sync inputs to run (companyId, scalePadClientId, mode, phases). phases uses only: devices, assets, software, assessments, roadmap, archive."}}}},"unmapped":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"reason":{"type":"string"}}}},"policySpecification":{"type":"array","items":{"type":"object","properties":{"proposedPolicy":{"type":"string"},"input":{"type":"string"},"note":{"type":"string"}}}},"currencyNote":{"type":"string"},"warnings":{"type":"array","items":{"type":"string"}}}}
   # Start runs in dry-run (preview mutating tools) by default - the plan/apply safety gate.
   dryRunDefault: true

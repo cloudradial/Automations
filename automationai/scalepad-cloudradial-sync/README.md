@@ -51,6 +51,7 @@ All optional except naming the client (either side works).
 | `labelScoreMap` | — | JSON overriding answer scoring, e.g. `{"needs_attention": 1}`. |
 | `roadmapCategory` / `roadmapCategoryId` | `Efficiency` / `7` | Planner category for new cards — must exist in your portal. |
 | `includeContracts` | `true` | Add contract cards alongside initiatives. |
+| `includeInactiveContracts` | `false` | Cancelled and expired ScalePad contracts are skipped and listed in the warnings; `true` adds them too. |
 | `archiveName` | `ScalePad QBR History` | Report archive for deliverable PDFs. |
 | `deliverableLimit` | `20` | Newest deliverables per run. |
 | `reportTarget` | `archive` | Where the apply-mode migration report goes: `archive`, `article` (knowledge base), or `none` (run output only). Falls back from archive to article automatically. |

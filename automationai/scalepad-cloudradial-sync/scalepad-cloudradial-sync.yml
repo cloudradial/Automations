@@ -202,6 +202,7 @@ definition:
               labelScoreMap          = Get-P $ctx 'labelScoreMap'
               roadmapCategory        = [string](Get-P $ctx 'roadmapCategory' 'Efficiency')
               roadmapCategoryId      = [int](Get-P $ctx 'roadmapCategoryId' 7)
+              includeInactiveContracts = ([string](Get-P $ctx 'includeInactiveContracts' 'false') -match '^(true|yes|1)$')
               includeContracts       = -not ([string](Get-P $ctx 'includeContracts' 'true') -match '^(false|no|0)$')
               archiveName            = [string](Get-P $ctx 'archiveName' 'ScalePad QBR History')
               deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 20)
@@ -1782,6 +1783,11 @@ definition:
               # --- Contracts ---
               if (Get-P $settings 'includeContracts' $true) {
                   $contracts = @(Get-SpAll '/core/v1/service/contracts' @{ 'filter[client.id]' = "eq:$spClientId" })
+                  $inactive = @($contracts | Where-Object { ([string](Get-P $_ 'status' '')).ToUpperInvariant() -in @('CANCELLED', 'CANCELED', 'EXPIRED', 'TERMINATED', 'INACTIVE') })
+                  if ($inactive.Count -gt 0 -and -not (Get-P $settings 'includeInactiveContracts' $false)) {
+                      Warn "Skipped $($inactive.Count) cancelled or expired ScalePad contract(s): $((@($inactive | ForEach-Object { Get-P $_ 'name' }) | Select-Object -First 10) -join ', '). Set includeInactiveContracts to add them."
+                      $contracts = @($contracts | Where-Object { $_ -notin $inactive })
+                  }
                   $counts.contracts = $contracts.Count
                   foreach ($k in $contracts) {
                       $name = [string](Get-P $k 'name' 'Contract')
@@ -2027,7 +2033,11 @@ definition:
                   } catch { Warn "Could not list existing archive items; duplicates are possible. $($_.Exception.Message)" }
               }
 
-              $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' @{ 'filter[client.id]' = "eq:$spClientId"; sort = '-created_at' })
+              try { $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' @{ 'filter[client.id]' = "eq:$spClientId"; sort = '-created_at' }) }
+              catch {
+                  if ("$_" -notmatch 'HTTP 400') { throw }
+                  $deliverables = @(Get-SpAll '/lifecycle-manager/v1/deliverables' @{ 'filter[client.id]' = "eq:$spClientId" } | Sort-Object { ConvertTo-IsoDate (Get-P $_ 'created_at') } -Descending)
+              }
               $counts.deliverables = $deliverables.Count
               $limit = [int](Get-P $settings 'deliverableLimit' 20)
               foreach ($d in @($deliverables | Select-Object -First $limit)) {

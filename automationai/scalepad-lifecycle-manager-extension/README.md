@@ -19,6 +19,8 @@ An update to the catalog **`lifecycle-manager`** extension (1.0.0) that fixes pa
   - `scalepad_list_deliverables` — QBR / vCIO deliverables.
 - **Hardware type documented** on `scalepad_list_hardware_assets`: `WORKSTATION`, `SERVER`, `VIRTUAL`, `NETWORK`, `MOBILE`, `IMAGING` — filter with `filter_type` (e.g. `eq:SERVER`) to separate workstations from servers.
 - **New skills:** *Inventory Installed Software*, *Review Assessments*.
+- **No `sort` argument.** ScalePad rejects most sort fields (`serial_number`, `asset_name`, `status`, `name` all failed in testing) and one bad sort fails the whole read, so 1.2.0 doesn't expose it. Agents read the full set and order it themselves.
+- **Installed software pages at 100.** The software tools say so; ScalePad rejects a larger `page_size`.
 
 ## Install
 

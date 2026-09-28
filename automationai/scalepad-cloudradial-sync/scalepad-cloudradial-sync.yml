@@ -167,17 +167,28 @@ definition:
               # id is read from any known shape and, failing that, the archive is looked up again by name.
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
               function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+              $script:ArchiveSeen = @()
               function Find-Archive {
-                  $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                  $list = @($raw)
-                  foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                  return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                  foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                      $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                      $list = @($raw)
+                      foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                      $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                      $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                      $hit = @($list | Where-Object {
+                          $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                          $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                          $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                      }) | Select-Object -First 1
+                      if ($null -ne $hit) { return $hit }
+                  }
+                  return $null
               }
               $hit = Find-Archive
               if ($null -eq $hit -and $Create) {
                   # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                   try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                  catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                  catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                   $id = Get-ArchiveId $resp
                   $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
               }
@@ -493,17 +504,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -725,17 +747,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -1041,17 +1074,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -1388,17 +1432,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -1726,17 +1781,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -2022,17 +2088,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -2164,6 +2241,13 @@ definition:
                       if (-not (Test-Blank $status) -and $status -ne 'all') { $q['filter[status]'] = "eq:$status" }
                       $list = @(Get-SpAll '/lifecycle-manager/v1/assessments' $q)
                       $counts.scalePadAssessments = $list.Count
+                      if ($list.Count -eq 0) {
+                          try {
+                              $probe = Invoke-WithRetry -What 'ScalePad GET /lifecycle-manager/v1/assessments (all clients)' -Call { Invoke-RestMethod -Method Get -Uri "$spBase/lifecycle-manager/v1/assessments?page_size=25" -Headers $spHeaders }
+                              $sampleClients = @(@(Get-P $probe 'data' @()) | ForEach-Object { "$(Get-P $_ 'client.name' (Get-P $_ 'client_name' '?')) ($(Get-P $_ 'client.id' (Get-P $_ 'client_id' '?')), $(Get-P $_ 'status' ''))" } | Select-Object -Unique -First 10)
+                              Warn "ScalePad returned no assessments for client $spClientId. Across all clients it has $(Get-P $probe 'total_count' @(Get-P $probe 'data' @()).Count) assessment(s)$(if ($sampleClients.Count) { ', e.g. ' + ($sampleClients -join '; ') })."
+                          } catch { Warn "ScalePad returned no assessments for client $spClientId, and the all-clients check failed: $($_.Exception.Message)" }
+                      }
 
                       $crTitles = New-Object System.Collections.Generic.HashSet[string]
                       foreach ($a in @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId&`$select=assessmentId,title")) { $null = $crTitles.Add(([string](Get-P $a 'title')).ToLowerInvariant()) }
@@ -2381,17 +2465,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -2688,17 +2783,28 @@ definition:
                       # id is read from any known shape and, failing that, the archive is looked up again by name.
                       param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                       function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
                       function Find-Archive {
-                          $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                          $list = @($raw)
-                          foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                          return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                          foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                              $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $list = @($raw)
+                              foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
                       }
                       $hit = Find-Archive
                       if ($null -eq $hit -and $Create) {
                           # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                           try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                           $id = Get-ArchiveId $resp
                           $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                       }
@@ -3026,17 +3132,28 @@ definition:
                           # id is read from any known shape and, failing that, the archive is looked up again by name.
                           param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
                           function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                          $script:ArchiveSeen = @()
                           function Find-Archive {
-                              $raw = Invoke-Cr -Method GET -Path "/api/beta/archive?companyId=$CompanyId"
-                              $list = @($raw)
-                              foreach ($k in @('value', 'data', 'items')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
-                              return @($list | Where-Object { $_ -and ([string](Get-P $_ 'name')).Trim() -eq $Name -and ([int](Get-P $_ 'companyId' $CompanyId)) -eq $CompanyId }) | Select-Object -First 1
+                              foreach ($path in @("/api/beta/archive?companyId=$CompanyId", '/api/beta/archive')) {
+                                  $raw = $null; try { $raw = Invoke-Cr -Method GET -Path $path } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                                  $list = @($raw)
+                                  foreach ($k in @('value', 'data', 'items', 'archives')) { if ($list.Count -eq 1 -and $null -ne (Get-P $list[0] $k)) { $list = @(Get-P $list[0] $k @()) } }
+                                  $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                                  $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                                  $hit = @($list | Where-Object {
+                                      $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                      $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                      $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                                  }) | Select-Object -First 1
+                                  if ($null -ne $hit) { return $hit }
+                              }
+                              return $null
                           }
                           $hit = Find-Archive
                           if ($null -eq $hit -and $Create) {
                               # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
                               try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-                              catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" } }
+                              catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
                               $id = Get-ArchiveId $resp
                               $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
                           }

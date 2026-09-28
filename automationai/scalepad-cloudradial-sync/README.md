@@ -1,12 +1,12 @@
 # ScalePad to CloudRadial Sync
 
-A deterministic **workflow** that moves a client's ScalePad Lifecycle Manager data into CloudRadial — API to API, following every ScalePad page, with nothing stored in between. **This is the only workflow a partner needs to migrate a client.** The [ScalePad to CloudRadial Alignment](../scalepad-cloudradial-alignment/) agent is an optional review for messy data — skip it unless you want a second opinion before applying.
+A deterministic **workflow** that moves ScalePad Lifecycle Manager data into CloudRadial for **every ScalePad client that matches a CloudRadial company by name** — no input needed — API to API, following every ScalePad page, with nothing stored in between. **This is the only workflow a partner needs to migrate a client.** The [ScalePad to CloudRadial Alignment](../scalepad-cloudradial-alignment/) agent is an optional review for messy data — skip it unless you want a second opinion before applying.
 
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-sync.yml`](scalepad-cloudradial-sync.yml) | `automationsWorkflow` | Eight PowerShell steps: resolve the client → devices → other hardware to flexible assets → installed software → assessments → roadmap and budget → deliverable PDFs → migration report. Each step is self-contained (the shared helper block is repeated in each). |
+| [`scalepad-cloudradial-sync.yml`](scalepad-cloudradial-sync.yml) | `automationsWorkflow` | Three steps: **Match companies by name** → **Migrate each company** (a For Each that runs every phase below for one company, in order) → **Migration report** (one report per company, written into its portal, plus a roll-up in the run output). |
 
 ## What it moves
 
@@ -18,7 +18,7 @@ A deterministic **workflow** that moves a client's ScalePad Lifecycle Manager da
 | `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
 | `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>` — updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
-| _report_ | — | In apply mode, a **migration report** written into the portal: an HTML item in the company's **ScalePad Migration** report archive (Compliance > Reports), or a knowledge base article if the archive can't be written. It lists what moved per area, what needs attention, and any warnings. |
+| _report_ | — | In apply mode, a **migration report** in each company's portal: a knowledge base article (category *ScalePad Migration*), or with `reportTarget: archive` an item in its **ScalePad Migration** report archive. It lists what moved per area, what needs attention, and any warnings. |
 
 Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved — the result is visible in the portal itself.
 
@@ -26,22 +26,22 @@ Every phase is idempotent: re-running updates or skips what's already there. No 
 
 1. **Workflows → Import** `scalepad-cloudradial-sync.yml`, publish, and deploy to your runner.
 2. **Runner Key Vault secrets:** `ScalePad-ApiUrl` (e.g. `https://api.scalepad.com`), `ScalePad-ApiKey`, `CloudRadial-BaseUrl` (e.g. `https://api.us.cloudradial.com`), `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`. That's all. The first step fails with a message listing anything missing.
-3. **Run it.** Open the workflow, click **Run**, pick your deployment, and type the input into the **Trigger input** box. Nothing needs wiring.
-   - **First run — leave Trigger input empty.** Nothing is synced; the output lists every ScalePad client that matches a CloudRadial company and the exact input to use next.
-   - **Plan:** `{"companyId": 9}` — counts per phase and the first 150 planned device changes. Nothing is written (plan is the default).
-   - **Apply:** `{"companyId": 9, "mode": "apply"}` — writes, then puts a migration report in the portal.
-4. **Check the result.** The run output's `reportLocation` says where the migration report was written. Keep all phases in one run — software attaches to devices created in the same run.
+3. **Run it** — click **Run** and leave **Trigger input** empty. Every ScalePad client whose name matches a CloudRadial company is migrated; clients with no match are listed in the output. Nothing needs wiring.
+   - **Preview first:** `{"mode": "plan"}` — counts per company and phase, nothing written.
+   - **One company:** `{"companyId": 9}` · **a few:** `{"companyIds": [9, 12]}` · **pair a client whose names differ:** `{"companyId": 9, "scalePadClientId": "<ScalePad id>"}`.
+4. **Check the result.** The report step lists each company and where its migration report was written.
 5. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled — enable it only if something else triggers the sync.
 
 ## Run inputs
 
-All optional except naming the client (either side works).
+All optional. With none, every name-matched company is migrated in apply mode.
 
 | Input | Default | Notes |
 |---|---|---|
-| `companyId` | — | CloudRadial company id. If only ScalePad is named, the company is matched by exact name. Leave everything out for a discovery run that lists the matched clients. |
-| `scalePadClientId` / `scalePadClientName` | — | If only CloudRadial is named, the ScalePad client is matched by exact name. |
-| `mode` | `plan` | `apply` writes. |
+| `companyId` / `companyIds` | all matched | Limit to one CloudRadial company or a list. |
+| `maxCompanies` | — | Cap the number of companies per run. |
+| `scalePadClientId` / `scalePadClientName` | — | Limit to one ScalePad client. With `companyId`, pairs a client whose name differs from the CloudRadial company. |
+| `mode` | `apply` | `plan` previews without writing. |
 | `phases` | all | Comma list: `devices,assets,software,assessments,roadmap,archive`. Other names are ignored with a warning — initiatives and contracts are `roadmap`, deliverables are `archive`. |
 | `deviceTypes` | `WORKSTATION,SERVER,VIRTUAL` | ScalePad types to sync as endpoints. |
 | `createMissingDevices` | `true` | `false` = only enrich devices CloudRadial already has. |

@@ -20,6 +20,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>` — updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
 | `insights` | Lifecycle Manager insights (High-risk, Warranty coverage, Hardware and Software modernization, Windows 11, Backup, Security, custom) | Each insight with affected assets becomes a **Proposed** Planner card `ScalePad Insight - <title>`: priority from the risk level, description, affected count, 30-day trend and, for hardware insights, the affected devices (up to 25). Re-runs refresh the text only, keeping any status or priority you set. Every insight, including clear ones, is listed in the report. |
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
+| `followup` | Open action items, meetings (upcoming + last 12 months), goals, assessment templates | Nothing is written - these areas have no CloudRadial API. They become the report's **Manual follow-up checklist**, together with anything from the run that needs a person (failed writes, warranty conflicts, skipped cancelled contracts). Action items are listed under the Planner card of their initiative. |
 | _report_ | — | In apply mode, a **migration report** in each company's portal: a knowledge base article (category *ScalePad Migration*), or with `reportTarget: archive` an item in its **ScalePad Migration** report archive. It lists what moved per area, what needs attention, and any warnings. |
 
 ## What it doesn't move
@@ -31,6 +32,7 @@ Some parts of ScalePad Lifecycle Manager have no CloudRadial API (or none this w
 | Policies and standards | CloudRadial's API has no route for Compliance Policies; the only policy data it exposes is each endpoint's Windows audit-policy settings (`EndpointAuditPolicy`, reported by the agent). | Set up the equivalent checks under **Compliance > Policies**. The Sync already fills the endpoint fields those checks read (warranty expiry, purchase date, server type). |
 | Assessment templates | Only completed assessments (with answers) import. | Recreate templates under Compliance > Assessments, or import one with the Excel template. |
 | Meetings and QBR agendas | No meeting or agenda API. | The meeting PDFs are archived; recreate recurring QBRs in your calendar or PSA. |
+| Goals | No API for client goals or outcomes. | Record them on a Planner card or in QBR notes - the checklist lists them. |
 | Initiative action items and notes | No API for Planner card sub-tasks. | Add them to the card description, or track them in your PSA. |
 | Report and deliverable templates, branding | Neither API exposes templates. | Rebuild in CloudRadial Report Layouts. |
 
@@ -57,7 +59,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `maxCompanies` | — | Cap the number of companies per run. |
 | `scalePadClientId` / `scalePadClientName` | — | Limit to one ScalePad client. With `companyId`, pairs a client whose name differs from the CloudRadial company. |
 | `mode` | `apply` | `plan` previews without writing. |
-| `phases` | all | Comma list: `devices,assets,saas,software,assessments,roadmap,insights,archive`. Other names are ignored with a warning — initiatives and contracts are `roadmap`, deliverables are `archive`. |
+| `phases` | all | Comma list: `devices,assets,saas,software,assessments,roadmap,insights,archive,followup`. Other names are ignored with a warning — initiatives and contracts are `roadmap`, deliverables are `archive`. |
 | `deviceTypes` | `WORKSTATION,SERVER,VIRTUAL` | ScalePad types to sync as endpoints. |
 | `createMissingDevices` | `true` | `false` = only enrich devices CloudRadial already has. |
 | `overwriteWarranty` | `false` | `true` = replace a CloudRadial warranty date that differs from ScalePad's. Otherwise differences are reported. |

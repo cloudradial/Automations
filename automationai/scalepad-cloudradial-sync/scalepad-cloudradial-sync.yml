@@ -1084,7 +1084,7 @@ definition:
 
                   # Field order = column order in the portal. nameKey is the trait key CloudRadial derives from the name.
                   $FieldDefs = @(
-                      @{ name = 'Name'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $true; required = $true },
+                      @{ name = 'Name'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $false; required = $true },   # shown as the NAME column already
                       @{ name = 'Type'; kind = 'Text'; order = 2; showInList = $true },
                       @{ name = 'Manufacturer'; kind = 'Text'; order = 3; showInList = $true },
                       @{ name = 'Model'; kind = 'Text'; order = 4; showInList = $true },
@@ -1430,7 +1430,7 @@ definition:
 
                   # Field order = column order in the portal. nameKey is the trait key CloudRadial derives from the name.
                   $FieldDefs = @(
-                      @{ name = 'Name'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $true; required = $true },
+                      @{ name = 'Name'; kind = 'Text'; order = 1; useForTitle = $true; showInList = $false; required = $true },   # shown as the NAME column already
                       @{ name = 'Vendor'; kind = 'Text'; order = 2; showInList = $true },
                       @{ name = 'SKU'; kind = 'Text'; order = 3 },
                       @{ name = 'Category'; kind = 'Text'; order = 4 },
@@ -1468,7 +1468,7 @@ definition:
                           $vals = [ordered]@{
                               'Name'          = [string](Get-P $a 'product.name' (Get-P $sub 'friendly_name' ''))
                               'Vendor'        = [string](Get-P $a 'product.manufacturer.name' '')
-                              'SKU'           = [string](Get-P $a 'product.manufacturer_sku.name' '')
+                              'SKU'           = $(if (([string](Get-P $a 'product.manufacturer_sku.name' '')) -ne ([string](Get-P $a 'product.name' ''))) { [string](Get-P $a 'product.manufacturer_sku.name' '') } else { '' })
                               'Category'      = [string](Get-P $a 'product.category' '')
                               'Status'        = [string](Get-P $a 'status' '')
                               'Licenses'      = [string](Get-P $a 'pool.capacity' (Get-P $sub 'license_count' ''))

@@ -12,6 +12,39 @@ definition:
     properties:
       webhookEnabled: false
   # ---------------------------------------------------------------------------
+  # Run inputs - reads who gets the audit from the run input (Run dialog or Routine).
+  # ---------------------------------------------------------------------------
+  - id: node-inputs
+    name: Run inputs
+    type: powershell-script
+    position:
+      x: 260
+      y: 120
+    properties:
+      script: |-
+        # Run input: {"toEmail": "team@yourmsp.com"} - one address, a comma list, or a JSON list.
+        $ErrorActionPreference = 'Stop'
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        $in = Get-NodeInput
+        $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+        if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+
+        $raw = Get-Prop $in 'toEmail'
+        $to = @(@($raw) | ForEach-Object { ([string]$_) -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' } | Select-Object -Unique)
+        if ($to.Count -eq 0) {
+            $m = 'No recipients: set toEmail in the run input (the Run dialog Trigger input, or the Routine input), e.g. {"toEmail": "team@yourmsp.com"}.'
+            Set-NodeOutput @{ status = 'error'; message = $m }
+            throw $m
+        }
+        Set-NodeOutput ([ordered]@{ toEmail = $to; message = "Audit goes to $($to -join ', ')." })
+      timeoutSeconds: 60
+      retryCount: 0
+      # No binding: this step receives the run input.
+      parameters: []
+      aiExtensions: []
+      testInput: |-
+        {"toEmail": "team@yourmsp.com"}
+  # ---------------------------------------------------------------------------
   # Agent node - runs the CloudRadial UCP Assistant (import cloudradial-ucp/ first)
   # toward a read-only audit goal.
   # ---------------------------------------------------------------------------
@@ -19,7 +52,7 @@ definition:
     name: Fleet Audit
     type: agent
     position:
-      x: 320
+      x: 420
       y: 120
     properties:
       agentSlug: cloudradial-ucp-assistant
@@ -37,19 +70,15 @@ definition:
       autoApprove: false
   # ---------------------------------------------------------------------------
   # Message node - turns the audit into the email Deliver Result sends.
-  # Set the recipients here.
   # ---------------------------------------------------------------------------
   - id: node-message
     name: Build Email
     type: powershell-script
     position:
-      x: 540
+      x: 600
       y: 120
     properties:
       script: |-
-        # ---- set your recipients ----
-        $recipients = @('team@yourmsp.com')
-
         # The Agent node's output (its 'answer' field) arrives as this node's input.
         $agent = Get-NodeInput
         $answer = if ($agent -and $agent.answer) { [string]$agent.answer } else { 'The audit returned no output.' }
@@ -60,8 +89,7 @@ definition:
             channel = 'email'
             subject = $subject
             body    = "<html><body><h2>Weekly Fleet Audit</h2><pre style='font-family:Segoe UI,Arial,sans-serif;white-space:pre-wrap'>$safe</pre></body></html>"
-            toEmail = @($recipients)
-            message = "Audit email ready for $($recipients -join ', ')."
+            message = 'Audit email ready.'
         })
       timeoutSeconds: 60
       retryCount: 0
@@ -75,7 +103,7 @@ definition:
     name: Send Audit
     type: agent
     position:
-      x: 760
+      x: 780
       y: 120
     properties:
       agentSlug: deliver-result
@@ -89,8 +117,8 @@ definition:
       # true = the send goes out unattended. Deliver Result itself ships in dry run
       # (dryRunDefault: true) until you re-import it live - see its README.
       autoApprove: true
-      # Pre-bound to the Build Email step - nothing to map after import.
-      inputBindingsJson: '{"channel":"{{ nodes.node-message.output.channel }}","subject":"{{ nodes.node-message.output.subject }}","body":"{{ nodes.node-message.output.body }}","toEmail":"{{ nodes.node-message.output.toEmail }}"}'
+      # Pre-bound: recipients from Run inputs, subject and body from Build Email.
+      inputBindingsJson: '{"channel":"{{ nodes.node-message.output.channel }}","subject":"{{ nodes.node-message.output.subject }}","body":"{{ nodes.node-message.output.body }}","toEmail":"{{ nodes.node-inputs.output.toEmail }}"}'
   - id: end
     name: End
     type: end
@@ -99,6 +127,9 @@ definition:
       y: 120
   connections:
   - source: start
+    target: node-inputs
+    sourceHandle: null
+  - source: node-inputs
     target: node-agent
     sourceHandle: null
   - source: node-agent

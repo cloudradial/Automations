@@ -250,7 +250,7 @@ definition:
           # =====================================================================
           # Step 1 - Resolve the client in ScalePad and CloudRadial, read options
           # =====================================================================
-          $defaultPhases = @('devices', 'assets', 'saas', 'software', 'assessments', 'roadmap', 'insights', 'archive', 'followup')
+          $defaultPhases = @('devices', 'assets', 'saas', 'software', 'assessments', 'roadmap', 'insights', 'archive', 'meetings', 'followup')
           $allPhases = @('cleanup') + $defaultPhases
           $phasesIn = Get-P $ctx 'phases'
           $phases = @()
@@ -282,6 +282,8 @@ definition:
               insightDeviceLimit     = [int](Get-P $ctx 'insightDeviceLimit' 25)
               insightCategory        = [string](Get-P $ctx 'insightCategory' (Get-P $ctx 'roadmapCategory' 'Efficiency'))
               insightCategoryId      = [int](Get-P $ctx 'insightCategoryId' (Get-P $ctx 'roadmapCategoryId' 7))
+              meetingArchiveName     = [string](Get-P $ctx 'meetingArchiveName' 'ScalePad Meeting Notes')
+              meetingLimit           = [int](Get-P $ctx 'meetingLimit' 50)
               archiveName            = [string](Get-P $ctx 'archiveName' 'ScalePad QBR History')
               deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 20)
               reportTarget           = ([string](Get-P $ctx 'reportTarget' 'article')).ToLowerInvariant()
@@ -3590,8 +3592,12 @@ definition:
                       $archivedSubjects = New-Object System.Collections.Generic.HashSet[string]
                       if ($archiveId -gt 0) {
                           try {
-                              $existingItems = @(Get-CrBetaAll "/api/beta/archive/$archiveId/item")
-                              foreach ($it in $existingItems) { $s = [string](Get-P $it 'subject' (Get-P $it 'name' '')); if ($s) { $null = $archivedSubjects.Add($s.ToLowerInvariant()) } }
+                              # Documented archive-item list first (paged), then the legacy one; compare names without .pdf.
+                              # (The legacy list alone did not return usable names, so a re-run uploaded the same PDF again.)
+                              $existingItems = @()
+                              try { $existingItems = @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archiveId&`$select=companyReportItemId,subject") } catch { }
+                              try { $existingItems += @(Get-CrBetaAll "/api/beta/archive/$archiveId/item") } catch { }
+                              foreach ($it in $existingItems) { foreach ($k in @('subject', 'name', 'fileName', 'filename', 'title', 'originalName')) { $nm = [string](Get-P $it $k ''); if ($nm) { $null = $archivedSubjects.Add(($nm -replace '(?i)\.pdf$', '').Trim().ToLowerInvariant()) } } }
                           } catch { Warn "Could not list existing archive items; duplicates are possible. $($_.Exception.Message)" }
                       }
 
@@ -3611,7 +3617,8 @@ definition:
                           $dname = [string](Get-P $d 'name' 'Deliverable')
                           $created = Format-Day (Get-P $d 'created_at')
                           $subject = "ScalePad - $dname$(if ($created) { " ($created)" })"
-                          if ($archivedSubjects.Contains($subject.ToLowerInvariant()) -or $archivedSubjects.Contains(($subject + '.pdf').ToLowerInvariant())) { $counts.alreadyArchived++; continue }
+                          $safeName = (($subject -replace '[\\/:*?"<>|]', '-')).ToLowerInvariant()
+                          if ($archivedSubjects.Contains($subject.ToLowerInvariant()) -or $archivedSubjects.Contains($safeName)) { $counts.alreadyArchived++; continue }
                           $counts.toArchive++
                           $item = [ordered]@{ deliverable = $dname; subject = $subject; action = 'archive' }
                           if ($apply) {
@@ -3640,6 +3647,377 @@ definition:
                   catch {
                       $stepErr = $_.Exception.Message
                       $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'archive' })
+                      $res = ConvertTo-Dict (Get-P $ctx 'results')
+                      $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
+                      $ctx.results = $res
+                      $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) + @("The $ph step failed and was skipped: $stepErr"))
+                      Set-SyncOutput @{ status = 'ok'; message = "The $ph step failed and was skipped: $stepErr"; ctx = $ctx }
+                  }
+              }
+              'meetings' = {
+                  # ---------------- Meeting notes to Report Archive ----------------
+                  # ---- shared helpers (identical in every step of this workflow) ----
+                  $ErrorActionPreference = 'Stop'
+                  Set-StrictMode -Version Latest
+
+                  function Get-Secret { param([string]$Name) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue }
+                  function Get-P {
+                      # Safe property read under StrictMode. Path like 'hardware_asset.serial_number'.
+                      param($Obj, [string]$Path, $Default = $null)
+                      $cur = $Obj
+                      foreach ($part in $Path.Split('.')) {
+                          if ($null -eq $cur) { return $Default }
+                          if ($cur -is [System.Collections.IDictionary]) { if ($cur.Contains($part)) { $cur = $cur[$part] } else { return $Default } ; continue }
+                          $p = $cur.PSObject.Properties[$part]
+                          if (-not $p) { return $Default }
+                          $cur = $p.Value
+                      }
+                      if ($null -eq $cur) { return $Default }
+                      return $cur
+                  }
+                  function Test-Blank { param($v) if ($v -is [datetime]) { return ($v.Year -le 1) }; return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -match '^0001-01-01') }
+                  # PowerShell 7 turns ISO date strings in API responses into [datetime]; normalize both ways.
+                  function ConvertTo-IsoDate { param($v) if (Test-Blank $v) { return $null }; if ($v -is [datetime]) { return $v.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }; $d = [datetime]::MinValue; if ([datetime]::TryParse([string]$v, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) { return $d.ToString('yyyy-MM-ddTHH:mm:ssZ') }; return [string]$v }
+                  function Format-Day { param($v) $iso = ConvertTo-IsoDate $v; if (-not $iso) { return '' }; return $iso.Substring(0, [Math]::Min(10, $iso.Length)) }
+                  function Normalize-Serial { param($s) if (Test-Blank $s) { return '' } ; return ([string]$s).Trim().ToUpperInvariant() }
+                  function Normalize-Name { param($s) if (Test-Blank $s) { return '' } ; $t = ([string]$s).ToLowerInvariant() -replace '[^a-z0-9 ]', ' '; $t = ' ' + $t + ' '; foreach ($w in @('ltd','limited','inc','llc','plc','group','the','co','corp','corporation','company')) { $t = $t -replace " $w ", ' ' }; return ($t -replace '\s+', ' ').Trim() }
+
+                  $warnings = New-Object System.Collections.ArrayList
+                  function Warn { param([string]$m) $null = $warnings.Add($m) }
+
+                  function ConvertTo-Dict {
+                      param($o)
+                      if ($null -eq $o) { return [ordered]@{} }
+                      if ($o -is [System.Collections.IDictionary]) { return $o }
+                      $h = [ordered]@{}
+                      foreach ($p in $o.PSObject.Properties) { $h[$p.Name] = $p.Value }
+                      return $h
+                  }
+
+                  # Context from the previous step (or the run inputs on the first step).
+                  # First step: the run's Trigger input (may be empty). Later steps: the previous step's ctx.
+                  $nodeIn = Get-SyncInput
+                  if ($nodeIn -is [string] -and $nodeIn.Trim().StartsWith('{')) { $nodeIn = $nodeIn | ConvertFrom-Json }
+                  $ctx = Get-P $nodeIn 'ctx'
+                  if ($null -eq $ctx) { $ctx = Get-P $nodeIn 'trigger' }
+                  if ($ctx -is [string]) { $ctx = $(if ($ctx.Trim().StartsWith('{')) { $ctx | ConvertFrom-Json } else { $null }) }
+                  if ($null -eq $ctx) { $ctx = $nodeIn }
+                  $ctx = ConvertTo-Dict $ctx
+
+                  $spBase = Get-Secret 'ScalePad-ApiUrl'
+                  $spKey = Get-Secret 'ScalePad-ApiKey'
+                  $crBase = Get-Secret 'CloudRadial-BaseUrl'
+                  $crPub = Get-Secret 'CloudRadial-PublicKey'
+                  $crPriv = Get-Secret 'CloudRadial-PrivateKey'
+                  $missingSecrets = @()
+                  foreach ($p in @(@{ n = 'ScalePad-ApiUrl'; v = $spBase }, @{ n = 'ScalePad-ApiKey'; v = $spKey }, @{ n = 'CloudRadial-BaseUrl'; v = $crBase }, @{ n = 'CloudRadial-PublicKey'; v = $crPub }, @{ n = 'CloudRadial-PrivateKey'; v = $crPriv })) { if (Test-Blank $p.v) { $missingSecrets += $p.n } }
+                  if ($missingSecrets.Count -gt 0) {
+                      $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missingSecrets -join ', ')"
+                      Set-SyncOutput @{ status = 'error'; message = $m }
+                      throw $m
+                  }
+                  $spBase = $spBase.TrimEnd('/')
+                  $crBase = $crBase.TrimEnd('/')
+                  $spHeaders = @{ 'x-api-key' = $spKey; Accept = 'application/json' }
+                  $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
+                  $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
+
+                  function Invoke-WithRetry {
+                      param([scriptblock]$Call, [string]$What)
+                      for ($i = 1; $i -le 4; $i++) {
+                          try { return & $Call }
+                          catch {
+                              $code = $null
+                              try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                          }
+                      }
+                  }
+                  function Get-SpAll {
+                      # Follows ScalePad next_cursor until the set is complete. Query values are passed raw (filter[x]=eq:y).
+                      # Most lists take page_size 200; some (installed software) cap at 100, so a 400 on the first page retries at 100.
+                      param([string]$Path, [hashtable]$Query = @{}, [int]$MaxPages = 500, [int]$PageSize = 200)
+                      $items = New-Object System.Collections.ArrayList
+                      $cursor = $null
+                      # Variants tried in order when the first page is refused: smaller page, filter without the
+                      # "eq:" operator, client_id instead of filter[client.id], then no page_size at all.
+                      $variant = 0
+                      $noPageSize = $false
+                      $baseQuery = @{} + $Query
+                      for ($page = 1; $page -le $MaxPages; $page++) {
+                          $q = @{} + $baseQuery
+                          if (-not $noPageSize) { $q['page_size'] = $PageSize }
+                          if ($cursor) { $q['cursor'] = $cursor }
+                          $qs = ($q.GetEnumerator() | ForEach-Object { [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value) }) -join '&'
+                          $uri = "$spBase$Path" + $(if ($qs) { "?$qs" } else { '' })
+                          try { $resp = Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri $uri -Headers $spHeaders } }
+                          catch {
+                              if ($page -eq 1 -and "$_" -match 'HTTP 4(00|22)') {
+                                  $variant++
+                                  if ($variant -eq 1 -and $PageSize -gt 100) { $PageSize = 100; $page = 0; continue }
+                                  if ($variant -le 2 -and @($baseQuery.Values | Where-Object { "$_" -match '^eq:' }).Count) { $variant = 2; foreach ($k in @($baseQuery.Keys)) { $baseQuery[$k] = ([string]$baseQuery[$k]) -replace '^eq:', '' }; $page = 0; continue }
+                                  if ($variant -le 3 -and $baseQuery.ContainsKey('filter[client.id]')) { $variant = 3; $baseQuery['client_id'] = ([string]$baseQuery['filter[client.id]']) -replace '^eq:', ''; $baseQuery.Remove('filter[client.id]'); $page = 0; continue }
+                                  if (-not $noPageSize) { $variant = 4; $noPageSize = $true; $page = 0; continue }
+                              }
+                              throw
+                          }
+                          foreach ($d in @(Get-P $resp 'data' @())) { if ($null -ne $d) { $null = $items.Add($d) } }
+                          $cursor = Get-P $resp 'next_cursor'
+                          if (Test-Blank $cursor) { break }
+                          if ($page -eq $MaxPages) { Warn "ScalePad $Path stopped at $MaxPages pages." }
+                      }
+                      return $items.ToArray()
+                  }
+                  function Get-SpOne { param([string]$Path) Invoke-WithRetry -What "ScalePad GET $Path" -Call { Invoke-RestMethod -Method Get -Uri "$spBase$Path" -Headers $spHeaders } }
+                  function Invoke-Cr {
+                      param([string]$Method, [string]$Path, $Body, [string]$ContentType = 'application/json')
+                      $uri = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
+                      $args2 = @{ Method = $Method; Uri = $uri; Headers = $crHeaders }
+                      if ($null -ne $Body) {
+                          $json = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 }
+                          if ($Method -eq 'PATCH' -and $json -notmatch '^\s*\[') { $json = "[$json]" }
+                          $args2.Body = $json
+                          $args2.ContentType = $(if ($Method -eq 'PATCH') { 'application/json-patch+json' } else { $ContentType })
+                      }
+                      return Invoke-WithRetry -What "CloudRadial $Method $Path" -Call { Invoke-RestMethod @args2 }
+                  }
+                  function Get-CrAll {
+                      # CloudRadial's OData lists stop at a server page (200 rows seen live) without an
+                      # @odata.nextLink, so page explicitly with $top/$skip until a short or empty page.
+                      # A nextLink, when one is returned, is still followed.
+                      param([string]$Path, [int]$PageSize = 100)
+                      $items = New-Object System.Collections.ArrayList
+                      if ($Path -match '[?&]\$(top|skip)=') {
+                          # Caller asked for a specific slice - honour it as-is.
+                          $resp = Invoke-Cr -Method GET -Path $Path
+                          foreach ($v in @(Get-P $resp 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }
+                          return $items.ToArray()
+                      }
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      $skip = 0; $prevFirst = $null
+                      for ($pageNo = 0; $pageNo -lt 2000; $pageNo++) {
+                          $resp = Invoke-Cr -Method GET -Path "$Path$($sep)`$top=$PageSize&`$skip=$skip"
+                          $rows = @(@(Get-P $resp 'value' @()) | Where-Object { $null -ne $_ })
+                          if ($rows.Count -eq 0) { break }
+                          $first = $rows[0] | ConvertTo-Json -Depth 3 -Compress
+                          if ($skip -gt 0 -and $first -eq $prevFirst) { break }   # server ignored $skip - stop rather than repeat
+                          $prevFirst = $first
+                          foreach ($v in $rows) { $null = $items.Add($v) }
+                          $next = Get-P $resp '@odata.nextLink'
+                          if ($next) {
+                              # The server offered its own paging - follow it for the rest.
+                              $guard = 0
+                              while ($next -and $guard -lt 2000) { $guard++; $r2 = Invoke-Cr -Method GET -Path $next; foreach ($v in @(Get-P $r2 'value' @())) { if ($null -ne $v) { $null = $items.Add($v) } }; $next = Get-P $r2 '@odata.nextLink' }
+                              break
+                          }
+                          if ($rows.Count -lt $PageSize) { break }
+                          $skip += $rows.Count
+                      }
+                      return $items.ToArray()
+                  }
+                  function Get-CrBetaAll {
+                      # /api/beta/* lists page with Skip/Take and return 10 rows by default.
+                      param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+                      $all = New-Object System.Collections.ArrayList
+                      $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+                      for ($p = 0; $p -lt $MaxPages; $p++) {
+                          $raw = Invoke-Cr -Method GET -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                          $rows = @($raw)
+                          foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-P $rows[0] $k)) { $rows = @(Get-P $rows[0] $k @()) } }
+                          $rows = @($rows | Where-Object { $null -ne $_ })
+                          foreach ($r in $rows) { $null = $all.Add($r) }
+                          if ($rows.Count -lt $Take) { break }
+                      }
+                      return $all.ToArray()
+                  }
+                  function Get-CrArchive {
+                      # Finds a company report archive by name (legacy /api/beta/archive, which also returns
+                      # its inboundAddress); creates it when -Create is set. Returns $null when absent.
+                      # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
+                      # id is read from any known shape and, failing that, the archive is looked up again by name.
+                      param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
+                      function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+                      $script:ArchiveSeen = @()
+                      function Find-Archive {
+                          foreach ($path in @('/api/beta/archive')) {
+                              $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
+                              $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+                              $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
+                              $hit = @($list | Where-Object {
+                                  $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                                  $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                                  $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                              }) | Select-Object -First 1
+                              if ($null -ne $hit) { return $hit }
+                          }
+                          return $null
+                      }
+                      $hit = Find-Archive
+                      if ($null -eq $hit -and $Create) {
+                          # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
+                          try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                          catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
+                          $id = Get-ArchiveId $resp
+                          $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+                      }
+                      if ($null -eq $hit) { return $null }
+                      $id = Get-ArchiveId $hit
+                      if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
+                      return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
+                  }
+                  function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+
+                  $mode = [string](Get-P $ctx 'mode' 'plan')
+                  if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
+                  $apply = ($mode -eq 'apply')
+                  # ---- end shared helpers ----
+                  try {
+                  # =====================================================================
+                  # Meeting notes -> Report Archive
+                  #   Each ScalePad meeting (newest first, up to meetingLimit) becomes an HTML
+                  #   item in the company's "ScalePad Meeting Notes" report archive: title,
+                  #   type, date, attendees, the meeting's notes/agenda (converted from
+                  #   ScalePad's rich-text JSON) and the action items raised in it.
+                  #   Items are matched on their subject, so re-runs don't write them twice.
+                  # =====================================================================
+                  $phase = 'meetings'
+                  $results = ConvertTo-Dict (Get-P $ctx 'results')
+                  $settings = Get-P $ctx 'settings'
+                  $companyId = [int](Get-P $ctx 'companyId')
+                  $spClientId = [string](Get-P $ctx 'scalePadClientId')
+                  $counts = [ordered]@{ meetings = 0; alreadyArchived = 0; toArchive = 0; archived = 0; errors = 0 }
+                  $items = New-Object System.Collections.ArrayList
+                  function ConvertTo-Html { param($s) return [System.Net.WebUtility]::HtmlEncode([string]$s) }
+
+                  # ProseMirror JSON (ScalePad's rich text) -> HTML.
+                  function ConvertFrom-ProseMirror {
+                      param($node)
+                      if ($null -eq $node) { return '' }
+                      if ($node -is [string]) { if ($node.Trim().StartsWith('{')) { try { $node = $node | ConvertFrom-Json } catch { return "<p>$(ConvertTo-Html $node)</p>" } } else { return "<p>$(ConvertTo-Html $node)</p>" } }
+                      $kids = (@(Get-P $node 'content' @()) | ForEach-Object { ConvertFrom-ProseMirror $_ }) -join ''
+                      switch ([string](Get-P $node 'type' '')) {
+                          'doc'         { return $kids }
+                          'paragraph'   { return "<p>$kids</p>" }
+                          'heading'     { $l = [Math]::Min(6, [Math]::Max(3, [int](Get-P $node 'attrs.level' 3) + 2)); return "<h$l>$kids</h$l>" }
+                          'bulletList'  { return "<ul>$kids</ul>" }
+                          'orderedList' { return "<ol>$kids</ol>" }
+                          'listItem'    { return "<li>$kids</li>" }
+                          'taskList'    { return "<ul>$kids</ul>" }
+                          'taskItem'    { return "<li>$(if (Get-P $node 'attrs.checked' $false) { '&#9745;' } else { '&#9744;' }) $kids</li>" }
+                          'blockquote'  { return "<blockquote>$kids</blockquote>" }
+                          'codeBlock'   { return "<pre>$kids</pre>" }
+                          'hardBreak'   { return '<br>' }
+                          'horizontalRule' { return '<hr>' }
+                          'text' {
+                              $t = ConvertTo-Html (Get-P $node 'text' '')
+                              foreach ($m in @(Get-P $node 'marks' @())) {
+                                  switch ([string](Get-P $m 'type' '')) {
+                                      'bold' { $t = "<b>$t</b>" } 'strong' { $t = "<b>$t</b>" } 'italic' { $t = "<i>$t</i>" } 'em' { $t = "<i>$t</i>" }
+                                      'underline' { $t = "<u>$t</u>" } 'strike' { $t = "<s>$t</s>" } 'code' { $t = "<code>$t</code>" }
+                                      'link' { $h = [string](Get-P $m 'attrs.href' ''); if ($h -match '^https?://') { $t = "<a href=""$(ConvertTo-Html $h)"">$t</a>" } }
+                                  }
+                              }
+                              return $t
+                          }
+                          default { return $kids }
+                      }
+                  }
+                  function Get-PersonName { param($p)
+                      $n = [string](Get-P $p 'name' (Get-P $p 'full_name' (Get-P $p 'display_name' '')))
+                      if (-not $n) { $n = ((@((Get-P $p 'first_name' ''), (Get-P $p 'last_name' '')) | Where-Object { $_ }) -join ' ') }
+                      if (-not $n) { $n = [string](Get-P $p 'email' '') }
+                      return $n
+                  }
+
+                  if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
+                      $results[$phase] = [ordered]@{ ran = $false }
+                  }
+                  else {
+                      $archiveName = [string](Get-P $settings 'meetingArchiveName' 'ScalePad Meeting Notes')
+                      $limit = [int](Get-P $settings 'meetingLimit' 50)
+                      $list = @(Get-SpAll '/lifecycle-manager/v1/meetings' @{ 'filter[client.id]' = "eq:$spClientId" } -PageSize 100 |
+                          Sort-Object { ConvertTo-IsoDate (Get-P $_ 'starts_at') } -Descending)
+                      $counts.meetings = $list.Count
+
+                      # Action items raised in each meeting.
+                      $actionsByMeeting = @{}
+                      try {
+                          foreach ($a in @(Get-SpAll '/lifecycle-manager/v1/action-items' @{ 'filter[client.id]' = "eq:$spClientId" } -PageSize 100)) {
+                              foreach ($ml in @(Get-P $a 'meeting_links' @())) {
+                                  $mid = [string](Get-P $ml 'meeting_id' '')
+                                  if (-not $mid) { continue }
+                                  if (-not $actionsByMeeting.ContainsKey($mid)) { $actionsByMeeting[$mid] = New-Object System.Collections.ArrayList }
+                                  $null = $actionsByMeeting[$mid].Add($a)
+                              }
+                          }
+                      } catch { Warn "Couldn't read ScalePad action items for the meeting notes: $($_.Exception.Message)" }
+
+                      $archive = $null; $archiveId = 0
+                      if ($list.Count -gt 0) {
+                          try { $archive = Get-CrArchive -CompanyId $companyId -Name $archiveName -Create:$apply -Category 'ScalePad'; $archiveId = [int](Get-P $archive 'id' 0) }
+                          catch { $counts.errors++; Warn "Couldn't create or find the '$archiveName' report archive: $($_.Exception.Message)" }
+                          if (-not $archive -and -not $apply) { Warn "Archive '$archiveName' doesn't exist yet; apply will create it." }
+                      }
+                      $done = New-Object System.Collections.Generic.HashSet[string]
+                      if ($archiveId -gt 0) {
+                          try { foreach ($it in @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archiveId&`$select=companyReportItemId,subject")) { $null = $done.Add(([string](Get-P $it 'subject' '')).ToLowerInvariant()) } }
+                          catch {
+                              try { foreach ($it in @(Get-CrBetaAll "/api/beta/archive/$archiveId/item")) { $null = $done.Add(([string](Get-P $it 'subject' (Get-P $it 'name' ''))).ToLowerInvariant()) } }
+                              catch { Warn "Couldn't list the '$archiveName' archive; meeting notes already there may be written again. $($_.Exception.Message)" }
+                          }
+                      }
+
+                      foreach ($m in @($list | Select-Object -First $limit)) {
+                          $mid = [string](Get-P $m 'id' '')
+                          $title = [string](Get-P $m 'title' 'Meeting')
+                          $day = Format-Day (Get-P $m 'starts_at')
+                          $subject = "Meeting - $title$(if ($day) { " ($day)" })"
+                          if ($subject.Length -gt 250) { $subject = $subject.Substring(0, 250) }
+                          if ($done.Contains($subject.ToLowerInvariant())) { $counts.alreadyArchived++; continue }
+                          $counts.toArchive++
+                          $null = $items.Add([ordered]@{ meeting = $title; date = $day; subject = $subject })
+                          if (-not $apply) { continue }
+                          if ($archiveId -le 0) { $counts.errors++; continue }
+                          try {
+                              $detail = $null; try { $detail = Get-P (Get-SpOne "/lifecycle-manager/v1/meetings/$mid") 'meeting' } catch { }
+                              $src = if ($null -ne $detail) { $detail } else { $m }
+                              $typ = [string](Get-P $src 'meeting_type.name' (Get-P $src 'type' ''))
+                              $people = @(@(Get-P $src 'contact_attendees' @()) + @(Get-P $src 'external_attendees' @()) | ForEach-Object { Get-PersonName $_ } | Where-Object { $_ })
+                              $rawNotes = Get-P $src 'agenda_json' ''
+                              $notes = if (Test-Blank $rawNotes) { '' } else { ConvertFrom-ProseMirror $rawNotes }
+                              if (($notes -replace '<[^>]+>', '').Trim() -eq '') { $notes = '' }
+                              $html = New-Object System.Text.StringBuilder
+                              $null = $html.Append("<h2>$(ConvertTo-Html $title)</h2><p>")
+                              if ($typ) { $null = $html.Append("<b>Type:</b> $(ConvertTo-Html $typ)<br>") }
+                              if ($day) { $null = $html.Append("<b>Date:</b> $(ConvertTo-Html $day)<br>") }
+                              $null = $html.Append("<b>Status:</b> $(if (Get-P $src 'is_complete' $false) { 'Completed' } else { 'Scheduled' })</p>")
+                              if ($people.Count) { $null = $html.Append('<h3>Attendees</h3><ul>' + ((@($people | ForEach-Object { "<li>$(ConvertTo-Html $_)</li>" })) -join '') + '</ul>') }
+                              $null = $html.Append('<h3>Notes and agenda</h3>' + $(if ($notes) { $notes } else { '<p><i>No notes were recorded in ScalePad.</i></p>' }))
+                              $acts = @($(if ($actionsByMeeting.ContainsKey($mid)) { $actionsByMeeting[$mid] }) | Where-Object { $null -ne $_ })
+                              if ($acts.Count) {
+                                  $null = $html.Append('<h3>Action items</h3><ul>')
+                                  foreach ($a in $acts) { $null = $html.Append("<li>$(if (Get-P $a 'is_completed' $false) { '&#9745;' } else { '&#9744;' }) $(ConvertTo-Html (Get-P $a 'title' ''))$(if (Format-Day (Get-P $a 'due_at')) { ' (due ' + (Format-Day (Get-P $a 'due_at')) + ')' })</li>") }
+                                  $null = $html.Append('</ul>')
+                              }
+                              $null = $html.Append('<p><i>From ScalePad Lifecycle Manager, via the ScalePad to CloudRadial Sync.</i></p>')
+                              $null = Invoke-Cr -Method POST -Path '/v2/archiveitem' -Body ([ordered]@{ companyId = $companyId; archiveId = $archiveId; subject = $subject; text = $html.ToString(); isHtml = $true; isError = $false })
+                              $counts.archived++
+                          }
+                          catch { $counts.errors++; Warn "Couldn't archive meeting '$title': $($_.Exception.Message)" }
+                      }
+                      if ($list.Count -gt $limit) { Warn "Only the newest $limit of $($list.Count) meetings were archived (meetingLimit)." }
+                      $results[$phase] = [ordered]@{ ran = $true; counts = $counts; archiveName = $archiveName; archiveId = $archiveId; items = @($items | Select-Object -First 100) }
+                  }
+
+                  $ctx.results = $results
+                  $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
+                  $c = $counts
+                  Set-SyncOutput @{ status = 'ok'; message = "Meeting notes: $($c.meetings) meetings in ScalePad, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.archived) archived" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
+                  }
+                  catch {
+                      $stepErr = $_.Exception.Message
+                      $ph = $(if (Get-Variable -Name phase -ErrorAction SilentlyContinue) { [string]$phase } else { 'meetings' })
                       $res = ConvertTo-Dict (Get-P $ctx 'results')
                       $res[$ph] = [ordered]@{ ran = $true; failed = $true; error = $stepErr; counts = [ordered]@{ errors = 1 } }
                       $ctx.results = $res
@@ -4258,7 +4636,7 @@ definition:
                       $NotMigrated = @(
                           [ordered]@{ area = 'Policies and standards'; why = "CloudRadial's API has no route for Compliance Policies. The only policy data it exposes is each endpoint's Windows audit-policy settings (EndpointAuditPolicy), reported by the agent - so ScalePad's lifecycle, warranty and replacement policies can't be recreated automatically."; action = "Set up the equivalent checks in CloudRadial under Compliance > Policies. The Sync already fills the endpoint fields those checks read (warranty expiry, purchase date, server type)." }
                           [ordered]@{ area = 'Assessment templates'; why = 'Only completed assessments (with answers) are imported. Blank templates and scoring rules have no import route.'; action = 'Recreate templates under Compliance > Assessments, or export one from ScalePad and import it with the Excel template.' }
-                          [ordered]@{ area = 'Meetings and QBR agendas'; why = 'CloudRadial has no meeting or agenda API.'; action = 'The meeting PDFs (deliverables) are archived; recreate recurring QBR meetings in your calendar or PSA.' }
+                          [ordered]@{ area = 'Meeting scheduling'; why = 'CloudRadial has no meeting or calendar API. The notes, attendees and action items of each meeting are archived in the ScalePad Meeting Notes report archive.'; action = 'Recreate upcoming and recurring meetings in your calendar or PSA - the checklist lists them.' }
                           [ordered]@{ area = 'Goals'; why = 'CloudRadial has no API for client goals or outcomes.'; action = "Record them on a Planner card or in the client's QBR notes - the checklist lists this client's goals." }
                           [ordered]@{ area = 'Initiative action items and notes'; why = 'Planner cards carry the initiative, budget and quarter, but CloudRadial has no API for card sub-tasks.'; action = "Add action items to the Planner card's description, or track them in your PSA." }
                           [ordered]@{ area = 'Report and deliverable templates, branding'; why = 'Templates are not exposed by either API; only finished PDFs are.'; action = 'Rebuild layouts in CloudRadial Report Layouts.' }
@@ -4328,6 +4706,13 @@ definition:
                           $null = $lines.Add("Insights: $(Get-P $ins 'insights') in ScalePad, $(Get-P $ins 'active') with affected assets. $act")
                           $null = $rows.Add(@('Insights and recommendations', "$(Get-P $ins 'insights') insights, $(Get-P $ins 'active') with affected assets", $act, "$(Get-P $ins 'errors') errors"))
                       }
+                      $mn = Get-P $results 'meetings.counts'
+                      if ($mn) {
+                          $act = if ($apply) { "Archived $(Get-P $mn 'archived')." } else { "Would archive $(Get-P $mn 'toArchive')." }
+                          $null = $lines.Add("Meeting notes: $(Get-P $mn 'meetings') meetings in ScalePad, $(Get-P $mn 'alreadyArchived') already archived. $act")
+                          $null = $rows.Add(@('Meeting notes', "$(Get-P $mn 'meetings') meetings", $act, "$(Get-P $mn 'alreadyArchived') already archived, $(Get-P $mn 'errors') errors"))
+                          $null = $notes.Add("Meeting notes (agenda, attendees and action items for each ScalePad meeting) are in the '$(Get-P $results 'meetings.archiveName' 'ScalePad Meeting Notes')' report archive under Compliance > Reports.")
+                      }
                       $ar = Get-P $results 'archive.counts'
                       if ($ar) {
                           $act = if ($apply) { "Uploaded $(Get-P $ar 'uploaded')." } else { "Would archive $(Get-P $ar 'toArchive')." }
@@ -4337,7 +4722,7 @@ definition:
 
                       $allWarnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings) | Where-Object { $_ })
                       $errors = 0
-                      foreach ($ph in @('cleanup', 'devices', 'assets', 'saas', 'software', 'assessments', 'roadmap', 'insights', 'archive', 'followup')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
+                      foreach ($ph in @('cleanup', 'devices', 'assets', 'saas', 'software', 'assessments', 'roadmap', 'insights', 'archive', 'meetings', 'followup')) { $errors += [int](Get-P $results "$ph.counts.errors" 0) }
 
                       $null = $html.Append('<table border="1" cellpadding="6" cellspacing="0"><tr><th>Area</th><th>In ScalePad</th><th>Result</th><th>Notes</th></tr>')
                       foreach ($row in $rows) { $null = $html.Append("<tr><td>$(ConvertTo-HtmlText $row[0])</td><td>$(ConvertTo-HtmlText $row[1])</td><td>$(ConvertTo-HtmlText $row[2])</td><td>$(ConvertTo-HtmlText $row[3])</td></tr>") }
@@ -4357,7 +4742,7 @@ definition:
                               }
                               foreach ($m in @(Get-P $fu 'meetings' @())) {
                                   $when = [string](Get-P $m 'starts' ''); $typ = [string](Get-P $m 'type' '')
-                                  if (Get-P $m 'complete' $false) { Add-Check 'Meetings' "Past meeting '$(Get-P $m 'title')'$(if ($when) { " ($when)" }) - its PDFs are archived; recreate it if it recurs." }
+                                  if (Get-P $m 'complete' $false) { continue }   # its notes are in the meeting-notes archive
                                   else { Add-Check 'Meetings' "Recreate '$(Get-P $m 'title')'$(if ($typ) { " ($typ)" })$(if ($when) { " on $when" }) in your calendar or PSA." }
                               }
                               foreach ($g in @(Get-P $fu 'goals' @())) {
@@ -4399,6 +4784,7 @@ definition:
                       # ---- write the report into the portal ----
                       $reportLocation = 'run output only'
                       $target = [string](Get-P $settings 'reportTarget' 'article')
+                      if ((@(Get-P $ctx 'phases' @()) -join ',') -eq 'cleanup') { $target = 'none' }   # clean-up runs report in the run output only
                       $subject = "ScalePad migration - $runDay"
                       if ($apply -and $target -ne 'none') {
                           $written = $false

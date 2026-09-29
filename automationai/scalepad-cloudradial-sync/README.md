@@ -22,7 +22,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
 | `meetings` | Meetings (newest first, up to `meetingLimit`, default 50) | One HTML item per meeting in the company's **ScalePad Meeting Notes** report archive (Compliance > Reports): title, type, date, attendees, the notes/agenda converted from ScalePad's rich text, and the action items raised in it. Re-runs skip meetings already archived. |
 | `followup` | Open action items, meetings (upcoming + last 12 months), goals, assessment templates | Nothing is written - these areas have no CloudRadial API. They become the report's **Manual follow-up checklist**, together with anything from the run that needs a person (failed writes, warranty conflicts, skipped cancelled contracts). Action items are listed under the Planner card of their initiative. |
-| _report_ | — | In apply mode, a **migration report** in each company's portal: a knowledge base article (category *ScalePad Migration*), or with `reportTarget: archive` an item in its **ScalePad Migration** report archive. It lists what moved per area, what needs attention, and any warnings. |
+| _report_ | — | In apply mode, a **migration report** in each company's **ScalePad Migration** report archive (Compliance > Reports - admins only), one item updated each run; `reportTarget: article` writes a knowledge base article instead. It lists what moved per area, what needs attention, and any warnings. |
 
 ## What it doesn't move
 
@@ -49,7 +49,7 @@ The Sync is built to run again - by hand or as a daily/weekly **Routine** - with
 | Insight cards | Text refreshed; a card is **closed as Completed when its insight clears**, and reopened as Proposed if it comes back |
 | Assessments, PDFs | New ones added; existing ones skipped |
 | Meeting notes | New meetings added; an archived meeting is **refreshed when its notes, attendees or action items change** |
-| Migration report | **One "ScalePad sync report" article per company, updated each run** (`reportArticleTitle` renames it) |
+| Migration report | **One "ScalePad sync report" item per company in the admin-only ScalePad Migration archive, updated each run** (`reportArticleTitle` renames it) |
 
 Nothing is deleted in CloudRadial when it disappears from ScalePad.
 
@@ -96,7 +96,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `meetingArchiveName` / `meetingLimit` | `ScalePad Meeting Notes` / `50` | Report archive for meeting notes; newest meetings per run. |
 | `archiveName` | `ScalePad QBR History` | Report archive for deliverable PDFs. |
 | `deliverableLimit` | `20` | Newest deliverables per run. |
-| `reportTarget` | `article` | Where the apply-mode migration report goes: `article` (knowledge base, the default), `archive` (report archive), or `none` (run output only). Archive falls back to article automatically. |
+| `reportTarget` | `archive` | Where the migration report goes: `archive` (default - one **ScalePad sync report** item in the **ScalePad Migration** report archive, **admins only** by security role, updated each run), `article` (knowledge base - visible to portal users, so only on request), or `none` (run output only). If the archive can't be written the report stays in the run output; it never falls back to the knowledge base. |
 | `reportArchiveName` | `ScalePad Migration` | Report archive for the migration report. |
 
 ## Confirm in your tenant

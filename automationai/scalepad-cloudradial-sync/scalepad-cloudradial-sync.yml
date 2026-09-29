@@ -286,10 +286,10 @@ definition:
               meetingLimit           = [int](Get-P $ctx 'meetingLimit' 0)   # 0 = every meeting (full migration)
               archiveName            = [string](Get-P $ctx 'archiveName' 'ScalePad QBR History')
               deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 0)   # 0 = every deliverable (full migration)
-              reportTarget           = ([string](Get-P $ctx 'reportTarget' 'article')).ToLowerInvariant()
+              reportTarget           = ([string](Get-P $ctx 'reportTarget' 'archive')).ToLowerInvariant()   # archive = admin-only (security roles)
               reportArchiveName      = [string](Get-P $ctx 'reportArchiveName' 'ScalePad Migration')
           }
-          if ($settings.reportTarget -notin @('archive', 'article', 'none')) { Warn "reportTarget '$($settings.reportTarget)' isn't article, archive or none; using article."; $settings.reportTarget = 'article' }
+          if ($settings.reportTarget -notin @('archive', 'article', 'none')) { Warn "reportTarget '$($settings.reportTarget)' isn't archive, article or none; using archive."; $settings.reportTarget = 'archive' }
 
 
           # --- Mode: a run with no input migrates. "plan" previews without writing. ---
@@ -4653,8 +4653,11 @@ definition:
                       # Step 7 - Migration report
                       #   Builds a plain-language summary and, in apply mode, writes it into the
                       #   CloudRadial portal so the result is visible there:
-                      #     reportTarget = article (default) -> a knowledge base article (POST /v2/article)
-                      #     reportTarget = archive           -> an HTML item in the company's
+                      #     reportTarget = archive (default) -> one "ScalePad sync report" item in the company's
+                      #                    "ScalePad Migration" report archive, updated each run. Report archives
+                      #                    are limited by security role (admins only), which is why this is the default.
+                      #     reportTarget = article           -> a knowledge base article (visible to portal users)
+                      #     reportTarget = archive           -> (legacy wording) an HTML item in the company's
                       #                    "ScalePad Migration" report archive (POST /v2/archiveitem)
                       #     reportTarget = none              -> run output only
                       #   If the archive can't be written, it falls back to an article.
@@ -4831,7 +4834,7 @@ definition:
 
                       # ---- write the report into the portal ----
                       $reportLocation = 'run output only'
-                      $target = [string](Get-P $settings 'reportTarget' 'article')
+                      $target = [string](Get-P $settings 'reportTarget' 'archive')
                       if ((@(Get-P $ctx 'phases' @()) -join ',') -eq 'cleanup') { $target = 'none' }   # clean-up runs report in the run output only
                       $subject = "ScalePad migration - $runDay"
                       $articleSubject = [string](Get-P $settings 'reportArticleTitle' 'ScalePad sync report')
@@ -4843,17 +4846,29 @@ definition:
                                   $arch = Get-CrArchive -CompanyId $companyId -Name $archName -Create -Category 'ScalePad'
                                   $archId = [int](Get-P $arch 'id' 0)
                                   if ($archId -le 0) { throw 'no archive id returned' }
-                                  $null = Invoke-Cr -Method POST -Path '/v2/archiveitem' -Body ([ordered]@{ companyId = $companyId; archiveId = $archId; subject = $subject; text = $html.ToString(); isHtml = $true; isError = ($errors -gt 0) })
-                                  $reportLocation = "Report archive '$archName' (Compliance > Reports), item '$subject'"
+                                  $itemBody = [ordered]@{ companyId = $companyId; archiveId = $archId; subject = $articleSubject; text = $html.ToString(); isHtml = $true; isError = ($errors -gt 0) }
+                                  $escS = $articleSubject.Replace("'", "''")
+                                  $prev = @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archId and subject eq '$escS'&`$select=companyReportItemId,subject") | Where-Object { ([string](Get-P $_ 'subject' '')) -eq $articleSubject } | Select-Object -First 1
+                                  if ($null -ne $prev -and [int](Get-P $prev 'companyReportItemId' 0) -gt 0) {
+                                      $null = Invoke-Cr -Method PUT -Path "/v2/archiveitem/$archId/$([int](Get-P $prev 'companyReportItemId'))" -Body $itemBody
+                                      $reportLocation = "Report archive '$archName' (Compliance > Reports, admins only), item '$articleSubject', updated $runDay"
+                                  } else {
+                                      $null = Invoke-Cr -Method POST -Path '/v2/archiveitem' -Body $itemBody
+                                      $reportLocation = "Report archive '$archName' (Compliance > Reports, admins only), item '$articleSubject'"
+                                  }
                                   $written = $true
                               }
-                              catch { Warn "Couldn't write the report to the archive ($($_.Exception.Message)); writing it as a knowledge base article instead." }
+                              catch {
+                                  # Deliberately no knowledge-base fallback: articles can be visible to the client's users.
+                                  Warn "Couldn't write the report to the '$archName' report archive ($($_.Exception.Message)). It's in the run output only - it was not written to the knowledge base, which client users can see."
+                                  $written = $true
+                              }
                           }
-                          if (-not $written) {
+                          if (-not $written -and $target -eq 'article') {
                               try {
                                   # One article per company, refreshed each run (a scheduled sync doesn't pile up articles).
                                   $esc = $articleSubject.Replace("'", "''")
-                                  $art = @(Get-CrAll "/v2/odata/article?`$filter=companyId eq $companyId and subject eq '$esc'&`$select=articleId,subject") | Select-Object -First 1
+                                  $art = @(Get-CrAll "/v2/odata/article?`$filter=companyId eq $companyId and subject eq '$esc'&`$select=articleId,subject") | Where-Object { ([string](Get-P $_ 'subject' '')) -eq $articleSubject } | Select-Object -First 1
                                   $artBody = [ordered]@{ companyId = $companyId; subject = $articleSubject; category = 'ScalePad Migration'; datePublished = (ConvertTo-IsoDate (Get-Date)); body = $html.ToString(); author = 'AutomationAI' }
                                   if ($null -ne $art -and [int](Get-P $art 'articleId' 0) -gt 0) {
                                       $null = Invoke-Cr -Method PUT -Path "/v2/article/$([int](Get-P $art 'articleId'))" -Body $artBody

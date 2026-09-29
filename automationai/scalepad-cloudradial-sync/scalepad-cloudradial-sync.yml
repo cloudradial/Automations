@@ -2114,8 +2114,10 @@ definition:
                       $epBySerial = @{}
                       $prior = Get-P $results 'devices.serialMap'
                       if ($null -ne $prior) { foreach ($p in (ConvertTo-Dict $prior).GetEnumerator()) { $epBySerial[[string]$p.Key] = [int]$p.Value } }
-                      foreach ($e in @(Get-CrAll "/v2/odata/endpoint?`$filter=companyId eq $companyId&`$select=companyEndpointId,serialNumber")) {
+                      $syncCreated = @{}   # endpoints the Sync itself created (tagNumber ScalePad) - no RMM keeps their list
+                      foreach ($e in @(Get-CrAll "/v2/odata/endpoint?`$filter=companyId eq $companyId&`$select=companyEndpointId,serialNumber,tagNumber")) {
                           $s = Normalize-Serial (Get-P $e 'serialNumber'); if ($s) { $epBySerial[$s] = [int](Get-P $e 'companyEndpointId') }
+                          if ([string](Get-P $e 'tagNumber' '') -eq 'ScalePad') { $syncCreated[[int](Get-P $e 'companyEndpointId')] = $true }
                       }
 
                       # What each endpoint already has. The RMM names software differently from ScalePad
@@ -2133,13 +2135,20 @@ definition:
 
                       $installs = @(Get-SpAll '/lifecycle-manager/v1/assets/software' @{ 'filter[client.id]' = "eq:$spClientId" } -PageSize 100)
                       # The company-wide read has come back empty on a portal that had software, so confirm per device.
+                      $unreadable = 0
                       $touch = @($installs | ForEach-Object { Normalize-Serial (Get-P $_ 'hardware_asset.serial_number') } | Where-Object { $_ -and $epBySerial.ContainsKey($_) } | Sort-Object -Unique)
                       foreach ($sn in $touch) {
                           $eid = $epBySerial[$sn]
                           if ($appsByEp.ContainsKey([int]$eid)) { continue }
                           try { foreach ($a in @(Get-CrAll "/v2/odata/endpointapplication?`$filter=endpointId eq $eid&`$select=endpointId,name")) { Add-ExistingApp $eid (Get-P $a 'name') } }
-                          catch { Warn "Couldn't read existing software for endpoint $eid ($sn): $($_.Exception.Message)" }
+                          catch {
+                              # Unknown is not empty: skip this device this run rather than risk writing a second copy.
+                              Add-ExistingApp $eid '__unreadable__'
+                              $unreadable++
+                              if ($unreadable -le 5) { Warn "Couldn't read existing software for endpoint $eid ($sn), so its software was left alone this run: $($_.Exception.Message)" }
+                          }
                       }
+                      if ($unreadable -gt 5) { Warn "$unreadable devices' software couldn't be read and was left alone this run." }
                       $skipWithSoftware = -not ([string](Get-P $settings 'skipDevicesWithSoftware' 'true') -match '^(false|no|0)$')
                       $hadSoftware = @{}
                       foreach ($k in $appsByEp.Keys) { if ($appsByEp[$k].Count -gt 0) { $hadSoftware[[int]$k] = $true } }
@@ -2157,7 +2166,8 @@ definition:
                           $null = $devicesSeen.Add($serial)
                           $name = [string](Get-P $i 'product.name' '')
                           if (Test-Blank $name) { continue }
-                          if ($skipWithSoftware -and $hadSoftware.ContainsKey($epId)) { $counts.alreadyPresent++; $null = $skippedDevices.Add($serial); continue }
+                          $isUnreadable = $appsByEp.ContainsKey($epId) -and $appsByEp[$epId].Contains('unreadable')
+                          if ($isUnreadable -or ($skipWithSoftware -and $hadSoftware.ContainsKey($epId) -and -not $syncCreated.ContainsKey($epId))) { $counts.alreadyPresent++; $null = $skippedDevices.Add($serial); continue }
                           $key = Get-AppKey $name
                           if (-not $appsByEp.ContainsKey($epId)) { $appsByEp[$epId] = New-Object System.Collections.Generic.HashSet[string] }
                           if ($appsByEp[$epId].Contains($key)) { $counts.alreadyPresent++; continue }
@@ -2557,7 +2567,7 @@ definition:
                       if ($list.Count -eq 0) {
                           try {
                               $probe = Invoke-WithRetry -What 'ScalePad GET /lifecycle-manager/v1/assessments (all clients)' -Call { Invoke-RestMethod -Method Get -Uri "$spBase/lifecycle-manager/v1/assessments?page_size=25" -Headers $spHeaders }
-                              $sampleClients = @(@(Get-P $probe 'data' @()) | ForEach-Object { "$(Get-P $_ 'client.name' (Get-P $_ 'client_name' '?')) ($(Get-P $_ 'client.id' (Get-P $_ 'client_id' '?')), $(Get-P $_ 'status' ''))" } | Select-Object -Unique -First 10)
+                              $sampleClients = @(@(Get-P $probe 'data' @()) | ForEach-Object { "$(Get-P $_ 'client.label' (Get-P $_ 'client.name' (Get-P $_ 'client_name' 'client'))) ($(Get-P $_ 'client.id' (Get-P $_ 'client_id' '?')), $(Get-P $_ 'status' ''))" } | Select-Object -Unique -First 10)
                               Warn "ScalePad returned no assessments for client $spClientId. Across all clients it has $(Get-P $probe 'total_count' @(Get-P $probe 'data' @()).Count) assessment(s)$(if ($sampleClients.Count) { ', e.g. ' + ($sampleClients -join '; ') })."
                           } catch { Warn "ScalePad returned no assessments for client $spClientId, and the all-clients check failed: $($_.Exception.Message)" }
                       }
@@ -2900,7 +2910,9 @@ definition:
                           $counts.toUpdate++
                           $null = $items.Add(@{ kind = $Kind; subject = $Subject; action = 'update'; productId = Get-P $existing 'productId' })
                           if ($apply) {
-                              try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $Fields); $counts.updated++ }
+                              # Keep whatever status and priority the partner has set since the card was created.
+                              $upd = @{}; foreach ($k in $Fields.Keys) { if ($k -notin @('status', 'priority')) { $upd[$k] = $Fields[$k] } }
+                              try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $upd); $counts.updated++ }
                               catch { $counts.errors++; Warn "Update failed for '$Subject': $($_.Exception.Message)" }
                           }
                           return
@@ -3240,7 +3252,7 @@ definition:
                   $settings = Get-P $ctx 'settings'
                   $companyId = [int](Get-P $ctx 'companyId')
                   $spClientId = [string](Get-P $ctx 'scalePadClientId')
-                  $counts = [ordered]@{ insights = 0; active = 0; toCreate = 0; toUpdate = 0; created = 0; updated = 0; errors = 0 }
+                  $counts = [ordered]@{ insights = 0; active = 0; toCreate = 0; toUpdate = 0; created = 0; updated = 0; closed = 0; reopened = 0; errors = 0 }
                   $items = New-Object System.Collections.ArrayList
                   $table = New-Object System.Collections.ArrayList
                   $PriorityMap = @{ high = 1; medium = 0; low = -1 }
@@ -3251,7 +3263,8 @@ definition:
                   }
                   else {
                       $cards = @{}
-                      foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject,status")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      function Test-CardCompleted { param($card) $st = [string](Get-P $card 'status' ''); return ($st -eq '40' -or $st -match '(?i)^completed$') }
 
                       # The insights list takes only a client filter (no paging parameters).
                       $insights = @(Get-SpAll '/lifecycle-manager/v1/insights' @{ 'filter[client.id]' = "eq:$spClientId" } -MaxPages 1)
@@ -3266,7 +3279,19 @@ definition:
                           $state = [string](Get-P $i 'state' '')
                           $cat = [string](Get-P $i 'category_label' (Get-P $i 'category' ''))
                           $null = $table.Add([ordered]@{ insight = $title; category = $cat; risk = $risk; affected = $affected; trend = $trend; state = $state })
-                          if ($affected -le 0 -or $state -in @('prerequisite', 'initial')) { continue }
+                          if ($affected -le 0 -or $state -in @('prerequisite', 'initial')) {
+                              # Cleared: close its card if one is still open.
+                              $open = $cards[("ScalePad Insight - $title").ToLowerInvariant()]
+                              if ($affected -le 0 -and $null -ne $open -and -not (Test-CardCompleted $open)) {
+                                  $counts.closed++
+                                  $null = $items.Add(@{ subject = "ScalePad Insight - $title"; action = 'complete' })
+                                  if ($apply) {
+                                      try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $open 'productId')" -Body (New-PatchOps @{ status = 40; summary = "Resolved - 0 affected as of $(Format-Day (Get-Date))." }) }
+                                      catch { $counts.errors++; Warn "Couldn't close the card for '$title': $($_.Exception.Message)" }
+                                  }
+                              }
+                              continue
+                          }
                           $counts.active++
 
                           # Affected devices, for hardware insights.
@@ -3293,7 +3318,9 @@ definition:
                               $null = $items.Add(@{ subject = $subject; action = 'update'; affected = $affected })
                               if ($apply) {
                                   # Text only: keep whatever status/priority the partner has set since.
-                                  try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps @{ summary = $summary; body = $body }); $counts.updated++ }
+                                  $fix = @{ summary = $summary; body = $body }
+                                  if (Test-CardCompleted $existing) { $fix.status = 0; $counts.reopened++ }   # the insight is back - reopen as Proposed
+                                  try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $fix); $counts.updated++ }
                                   catch { $counts.errors++; Warn "Update failed for '$subject': $($_.Exception.Message)" }
                               }
                               continue
@@ -3315,7 +3342,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Insights: $($c.insights) in ScalePad, $($c.active) with affected assets; $(if ($apply) { "$($c.created) Planner cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" }), $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Insights: $($c.insights) in ScalePad, $($c.active) with affected assets; $(if ($apply) { "$($c.created) Planner cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" })$(if ($c.closed) { ", $($c.closed) closed as resolved" })$(if ($c.reopened) { ", $($c.reopened) reopened" }), $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message
@@ -3886,7 +3913,7 @@ definition:
                   $settings = Get-P $ctx 'settings'
                   $companyId = [int](Get-P $ctx 'companyId')
                   $spClientId = [string](Get-P $ctx 'scalePadClientId')
-                  $counts = [ordered]@{ meetings = 0; alreadyArchived = 0; toArchive = 0; archived = 0; errors = 0 }
+                  $counts = [ordered]@{ meetings = 0; alreadyArchived = 0; toArchive = 0; archived = 0; toUpdate = 0; updated = 0; errors = 0 }
                   $items = New-Object System.Collections.ArrayList
                   function ConvertTo-Html { param($s) return [System.Net.WebUtility]::HtmlEncode([string]$s) }
 
@@ -3959,14 +3986,16 @@ definition:
                           catch { $counts.errors++; Warn "Couldn't create or find the '$archiveName' report archive: $($_.Exception.Message)" }
                           if (-not $archive -and -not $apply) { Warn "Archive '$archiveName' doesn't exist yet; apply will create it." }
                       }
-                      $done = New-Object System.Collections.Generic.HashSet[string]
+                      # What is already in the archive: subject -> item id + text, so changed notes can be refreshed.
+                      $done = @{}
                       if ($archiveId -gt 0) {
-                          try { foreach ($it in @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archiveId&`$select=companyReportItemId,subject")) { $null = $done.Add(([string](Get-P $it 'subject' '')).ToLowerInvariant()) } }
+                          try { foreach ($it in @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archiveId&`$select=companyReportItemId,subject,text")) { $done[([string](Get-P $it 'subject' '')).ToLowerInvariant()] = @{ id = [int](Get-P $it 'companyReportItemId' 0); text = [string](Get-P $it 'text' '') } } }
                           catch {
-                              try { foreach ($it in @(Get-CrBetaAll "/api/beta/archive/$archiveId/item")) { $null = $done.Add(([string](Get-P $it 'subject' (Get-P $it 'name' ''))).ToLowerInvariant()) } }
+                              try { foreach ($it in @(Get-CrBetaAll "/api/beta/archive/$archiveId/item")) { $done[([string](Get-P $it 'subject' (Get-P $it 'name' ''))).ToLowerInvariant()] = @{ id = [int](Get-P $it 'id' 0); text = '' } } }
                               catch { Warn "Couldn't list the '$archiveName' archive; meeting notes already there may be written again. $($_.Exception.Message)" }
                           }
                       }
+                      function Get-Comparable { param([string]$h) return (($h -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant()) }
 
                       foreach ($m in @($list | Select-Object -First $limit)) {
                           $mid = [string](Get-P $m 'id' '')
@@ -3974,11 +4003,7 @@ definition:
                           $day = Format-Day (Get-P $m 'starts_at')
                           $subject = "Meeting - $title$(if ($day) { " ($day)" })"
                           if ($subject.Length -gt 250) { $subject = $subject.Substring(0, 250) }
-                          if ($done.Contains($subject.ToLowerInvariant())) { $counts.alreadyArchived++; continue }
-                          $counts.toArchive++
-                          $null = $items.Add([ordered]@{ meeting = $title; date = $day; subject = $subject })
-                          if (-not $apply) { continue }
-                          if ($archiveId -le 0) { $counts.errors++; continue }
+                          $existing = $done[$subject.ToLowerInvariant()]
                           try {
                               $detail = $null; try { $detail = Get-P (Get-SpOne "/lifecycle-manager/v1/meetings/$mid") 'meeting' } catch { }
                               $src = if ($null -ne $detail) { $detail } else { $m }
@@ -4001,7 +4026,22 @@ definition:
                                   $null = $html.Append('</ul>')
                               }
                               $null = $html.Append('<p><i>From ScalePad Lifecycle Manager, via the ScalePad to CloudRadial Sync.</i></p>')
-                              $null = Invoke-Cr -Method POST -Path '/v2/archiveitem' -Body ([ordered]@{ companyId = $companyId; archiveId = $archiveId; subject = $subject; text = $html.ToString(); isHtml = $true; isError = $false })
+                              $text = $html.ToString()
+                              $body = [ordered]@{ companyId = $companyId; archiveId = $archiveId; subject = $subject; text = $text; isHtml = $true; isError = $false }
+
+                              if ($null -ne $existing) {
+                                  # Already archived: refresh it only when the notes, attendees, status or action items changed.
+                                  if (-not $existing.text -or (Get-Comparable $existing.text) -eq (Get-Comparable $text)) { $counts.alreadyArchived++; continue }
+                                  $counts.toUpdate++
+                                  $null = $items.Add([ordered]@{ meeting = $title; date = $day; subject = $subject; action = 'refresh' })
+                                  if ($apply -and $existing.id -gt 0) { $null = Invoke-Cr -Method PUT -Path "/v2/archiveitem/$archiveId/$($existing.id)" -Body $body; $counts.updated++ }
+                                  continue
+                              }
+                              $counts.toArchive++
+                              $null = $items.Add([ordered]@{ meeting = $title; date = $day; subject = $subject; action = 'archive' })
+                              if (-not $apply) { continue }
+                              if ($archiveId -le 0) { $counts.errors++; continue }
+                              $null = Invoke-Cr -Method POST -Path '/v2/archiveitem' -Body $body
                               $counts.archived++
                           }
                           catch { $counts.errors++; Warn "Couldn't archive meeting '$title': $($_.Exception.Message)" }
@@ -4013,7 +4053,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Meeting notes: $($c.meetings) meetings in ScalePad, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.archived) archived" } else { "$($c.toArchive) to archive" }), $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Meeting notes: $($c.meetings) meetings in ScalePad, $($c.alreadyArchived) already archived, $(if ($apply) { "$($c.archived) archived, $($c.updated) refreshed" } else { "$($c.toArchive) to archive, $($c.toUpdate) to refresh" }), $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message
@@ -4702,13 +4742,13 @@ definition:
                       }
                       $ins = Get-P $results 'insights.counts'
                       if ($ins) {
-                          $act = if ($apply) { "Created $(Get-P $ins 'created') Planner cards and updated $(Get-P $ins 'updated')." } else { "Would create $(Get-P $ins 'toCreate') Planner cards and update $(Get-P $ins 'toUpdate')." }
+                          $act = if ($apply) { "Created $(Get-P $ins 'created') Planner cards, updated $(Get-P $ins 'updated'), closed $(Get-P $ins 'closed' 0) resolved." } else { "Would create $(Get-P $ins 'toCreate') Planner cards and update $(Get-P $ins 'toUpdate')." }
                           $null = $lines.Add("Insights: $(Get-P $ins 'insights') in ScalePad, $(Get-P $ins 'active') with affected assets. $act")
                           $null = $rows.Add(@('Insights and recommendations', "$(Get-P $ins 'insights') insights, $(Get-P $ins 'active') with affected assets", $act, "$(Get-P $ins 'errors') errors"))
                       }
                       $mn = Get-P $results 'meetings.counts'
                       if ($mn) {
-                          $act = if ($apply) { "Archived $(Get-P $mn 'archived')." } else { "Would archive $(Get-P $mn 'toArchive')." }
+                          $act = if ($apply) { "Archived $(Get-P $mn 'archived'), refreshed $(Get-P $mn 'updated' 0)." } else { "Would archive $(Get-P $mn 'toArchive') and refresh $(Get-P $mn 'toUpdate' 0)." }
                           $null = $lines.Add("Meeting notes: $(Get-P $mn 'meetings') meetings in ScalePad, $(Get-P $mn 'alreadyArchived') already archived. $act")
                           $null = $rows.Add(@('Meeting notes', "$(Get-P $mn 'meetings') meetings", $act, "$(Get-P $mn 'alreadyArchived') already archived, $(Get-P $mn 'errors') errors"))
                           $null = $notes.Add("Meeting notes (agenda, attendees and action items for each ScalePad meeting) are in the '$(Get-P $results 'meetings.archiveName' 'ScalePad Meeting Notes')' report archive under Compliance > Reports.")
@@ -4786,6 +4826,7 @@ definition:
                       $target = [string](Get-P $settings 'reportTarget' 'article')
                       if ((@(Get-P $ctx 'phases' @()) -join ',') -eq 'cleanup') { $target = 'none' }   # clean-up runs report in the run output only
                       $subject = "ScalePad migration - $runDay"
+                      $articleSubject = [string](Get-P $settings 'reportArticleTitle' 'ScalePad sync report')
                       if ($apply -and $target -ne 'none') {
                           $written = $false
                           if ($target -eq 'archive') {
@@ -4802,8 +4843,17 @@ definition:
                           }
                           if (-not $written) {
                               try {
-                                  $null = Invoke-Cr -Method POST -Path '/v2/article' -Body ([ordered]@{ companyId = $companyId; subject = $subject; category = 'ScalePad Migration'; datePublished = (ConvertTo-IsoDate (Get-Date)); body = $html.ToString(); author = 'AutomationAI' })
-                                  $reportLocation = "Knowledge base article '$subject' (category ScalePad Migration)"
+                                  # One article per company, refreshed each run (a scheduled sync doesn't pile up articles).
+                                  $esc = $articleSubject.Replace("'", "''")
+                                  $art = @(Get-CrAll "/v2/odata/article?`$filter=companyId eq $companyId and subject eq '$esc'&`$select=articleId,subject") | Select-Object -First 1
+                                  $artBody = [ordered]@{ companyId = $companyId; subject = $articleSubject; category = 'ScalePad Migration'; datePublished = (ConvertTo-IsoDate (Get-Date)); body = $html.ToString(); author = 'AutomationAI' }
+                                  if ($null -ne $art -and [int](Get-P $art 'articleId' 0) -gt 0) {
+                                      $null = Invoke-Cr -Method PUT -Path "/v2/article/$([int](Get-P $art 'articleId'))" -Body $artBody
+                                      $reportLocation = "Knowledge base article '$articleSubject' (category ScalePad Migration), updated $runDay"
+                                  } else {
+                                      $null = Invoke-Cr -Method POST -Path '/v2/article' -Body $artBody
+                                      $reportLocation = "Knowledge base article '$articleSubject' (category ScalePad Migration)"
+                                  }
                               }
                               catch { Warn "Couldn't write the report to the portal: $($_.Exception.Message). It's in the run output." }
                           }

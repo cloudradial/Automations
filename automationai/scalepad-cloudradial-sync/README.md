@@ -37,6 +37,22 @@ Some parts of ScalePad Lifecycle Manager have no CloudRadial API (or none this w
 | Initiative action items and notes | No API for Planner card sub-tasks. | Add them to the card description, or track them in your PSA. |
 | Report and deliverable templates, branding | Neither API exposes templates. | Rebuild in CloudRadial Report Layouts. |
 
+## Re-runs and schedules
+
+The Sync is built to run again - by hand or as a daily/weekly **Routine** - without duplicating anything or undoing a partner's changes:
+
+| Area | On a re-run |
+|---|---|
+| Devices, other hardware, SaaS | Matched (serial / ScalePad id); blanks filled and changed values updated; new ones created |
+| Software | Devices that already have software from an RMM are left alone; devices the Sync created get any new ScalePad installs; a device whose software can't be read is skipped |
+| Roadmap cards | Budget, pricing and quarter kept current; **status and priority are set only when a card is created** |
+| Insight cards | Text refreshed; a card is **closed as Completed when its insight clears**, and reopened as Proposed if it comes back |
+| Assessments, PDFs | New ones added; existing ones skipped |
+| Meeting notes | New meetings added; an archived meeting is **refreshed when its notes, attendees or action items change** |
+| Migration report | **One "ScalePad sync report" article per company, updated each run** (`reportArticleTitle` renames it) |
+
+Nothing is deleted in CloudRadial when it disappears from ScalePad.
+
 Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved — the result is visible in the portal itself.
 
 ## Install / run

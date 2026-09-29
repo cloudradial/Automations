@@ -283,9 +283,9 @@ definition:
               insightCategory        = [string](Get-P $ctx 'insightCategory' (Get-P $ctx 'roadmapCategory' 'Efficiency'))
               insightCategoryId      = [int](Get-P $ctx 'insightCategoryId' (Get-P $ctx 'roadmapCategoryId' 7))
               meetingArchiveName     = [string](Get-P $ctx 'meetingArchiveName' 'ScalePad Meeting Notes')
-              meetingLimit           = [int](Get-P $ctx 'meetingLimit' 50)
+              meetingLimit           = [int](Get-P $ctx 'meetingLimit' 0)   # 0 = every meeting (full migration)
               archiveName            = [string](Get-P $ctx 'archiveName' 'ScalePad QBR History')
-              deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 20)
+              deliverableLimit       = [int](Get-P $ctx 'deliverableLimit' 0)   # 0 = every deliverable (full migration)
               reportTarget           = ([string](Get-P $ctx 'reportTarget' 'article')).ToLowerInvariant()
               reportArchiveName      = [string](Get-P $ctx 'reportArchiveName' 'ScalePad Migration')
           }
@@ -2564,12 +2564,14 @@ definition:
                       if (-not (Test-Blank $status) -and $status -ne 'all') { $q['filter[status]'] = "eq:$status" }
                       $list = @(Get-SpAll '/lifecycle-manager/v1/assessments' $q)
                       $counts.scalePadAssessments = $list.Count
+                      $assessDiag = $null
                       if ($list.Count -eq 0) {
                           try {
                               $probe = Invoke-WithRetry -What 'ScalePad GET /lifecycle-manager/v1/assessments (all clients)' -Call { Invoke-RestMethod -Method Get -Uri "$spBase/lifecycle-manager/v1/assessments?page_size=25" -Headers $spHeaders }
                               $sampleClients = @(@(Get-P $probe 'data' @()) | ForEach-Object { "$(Get-P $_ 'client.label' (Get-P $_ 'client.name' (Get-P $_ 'client_name' 'client'))) ($(Get-P $_ 'client.id' (Get-P $_ 'client_id' '?')), $(Get-P $_ 'status' ''))" } | Select-Object -Unique -First 10)
-                              Warn "ScalePad returned no assessments for client $spClientId. Across all clients it has $(Get-P $probe 'total_count' @(Get-P $probe 'data' @()).Count) assessment(s)$(if ($sampleClients.Count) { ', e.g. ' + ($sampleClients -join '; ') })."
-                          } catch { Warn "ScalePad returned no assessments for client $spClientId, and the all-clients check failed: $($_.Exception.Message)" }
+                              # Run output only - this lists other clients, so it must not reach this client's portal.
+                              $assessDiag = "ScalePad returned no assessments for client $spClientId. Across all clients it has $(Get-P $probe 'total_count' @(Get-P $probe 'data' @()).Count) assessment(s)$(if ($sampleClients.Count) { ', e.g. ' + ($sampleClients -join '; ') })."
+                          } catch { $assessDiag = "ScalePad returned no assessments for client $spClientId, and the all-clients check failed: $($_.Exception.Message)" }
                       }
 
                       $crTitles = New-Object System.Collections.Generic.HashSet[string]
@@ -2637,7 +2639,7 @@ definition:
                           }
                           $null = $items.Add($item)
                       }
-                      $results[$phase] = [ordered]@{ ran = $true; counts = $counts; items = @($items); answerScoring = $scoreUse }
+                      $results[$phase] = [ordered]@{ ran = $true; diagnostic = $assessDiag; counts = $counts; items = @($items); answerScoring = $scoreUse }
                   }
 
                   $ctx.results = $results
@@ -3639,7 +3641,8 @@ definition:
                       if (-not $readOk) { $counts.errors++; Warn "Could not read ScalePad deliverables, so no PDFs were archived: $lastErr" }
                       $deliverables = @($deliverables | Sort-Object { ConvertTo-IsoDate (Get-P $_ 'created_at') } -Descending)
                       $counts.deliverables = $deliverables.Count
-                      $limit = [int](Get-P $settings 'deliverableLimit' 20)
+                      $limit = [int](Get-P $settings 'deliverableLimit' 0)
+                      if ($limit -le 0) { $limit = [int]::MaxValue }   # default: every deliverable
                       foreach ($d in @($deliverables | Select-Object -First $limit)) {
                           $dname = [string](Get-P $d 'name' 'Deliverable')
                           $created = Format-Day (Get-P $d 'created_at')
@@ -3662,7 +3665,7 @@ definition:
                           }
                           $null = $items.Add($item)
                       }
-                      if ($deliverables.Count -gt $limit) { Warn "Only the newest $limit of $($deliverables.Count) deliverables were processed (deliverableLimit)." }
+                      if ($limit -lt [int]::MaxValue -and $deliverables.Count -gt $limit) { Warn "Only the newest $limit of $($deliverables.Count) deliverables were processed (deliverableLimit)." }
                       $results[$phase] = [ordered]@{ ran = $true; counts = $counts; archiveName = $archiveName; archiveId = $archiveId; items = @($items) }
                   }
 
@@ -3902,7 +3905,7 @@ definition:
                   try {
                   # =====================================================================
                   # Meeting notes -> Report Archive
-                  #   Each ScalePad meeting (newest first, up to meetingLimit) becomes an HTML
+                  #   Every ScalePad meeting - completed and upcoming - becomes an HTML
                   #   item in the company's "ScalePad Meeting Notes" report archive: title,
                   #   type, date, attendees, the meeting's notes/agenda (converted from
                   #   ScalePad's rich-text JSON) and the action items raised in it.
@@ -3962,7 +3965,8 @@ definition:
                   }
                   else {
                       $archiveName = [string](Get-P $settings 'meetingArchiveName' 'ScalePad Meeting Notes')
-                      $limit = [int](Get-P $settings 'meetingLimit' 50)
+                      $limit = [int](Get-P $settings 'meetingLimit' 0)
+                      if ($limit -le 0) { $limit = [int]::MaxValue }   # default: every meeting, completed or not
                       $list = @(Get-SpAll '/lifecycle-manager/v1/meetings' @{ 'filter[client.id]' = "eq:$spClientId" } -PageSize 100 |
                           Sort-Object { ConvertTo-IsoDate (Get-P $_ 'starts_at') } -Descending)
                       $counts.meetings = $list.Count
@@ -4046,7 +4050,7 @@ definition:
                           }
                           catch { $counts.errors++; Warn "Couldn't archive meeting '$title': $($_.Exception.Message)" }
                       }
-                      if ($list.Count -gt $limit) { Warn "Only the newest $limit of $($list.Count) meetings were archived (meetingLimit)." }
+                      if ($limit -lt [int]::MaxValue -and $list.Count -gt $limit) { Warn "Only the newest $limit of $($list.Count) meetings were archived (meetingLimit)." }
                       $results[$phase] = [ordered]@{ ran = $true; counts = $counts; archiveName = $archiveName; archiveId = $archiveId; items = @($items | Select-Object -First 100) }
                   }
 
@@ -4783,6 +4787,7 @@ definition:
                               foreach ($m in @(Get-P $fu 'meetings' @())) {
                                   $when = [string](Get-P $m 'starts' ''); $typ = [string](Get-P $m 'type' '')
                                   if (Get-P $m 'complete' $false) { continue }   # its notes are in the meeting-notes archive
+                                  if ($when -and $when -lt $runDay) { continue }  # already happened - notes archived; nothing to recreate
                                   else { Add-Check 'Meetings' "Recreate '$(Get-P $m 'title')'$(if ($typ) { " ($typ)" })$(if ($when) { " on $when" }) in your calendar or PSA." }
                               }
                               foreach ($g in @(Get-P $fu 'goals' @())) {
@@ -4810,8 +4815,11 @@ definition:
                       $insTable = @(Get-P $results 'insights.table' @())
                       if ($insTable.Count -gt 0) {
                           $null = $html.Append('<h3>ScalePad insights</h3><table border="1" cellpadding="6" cellspacing="0"><tr><th>Insight</th><th>Category</th><th>Risk</th><th>Affected</th><th>30-day change</th></tr>')
-                          foreach ($t in @($insTable | Sort-Object { -[int](Get-P $_ 'affected' 0) })) { $tr = Get-P $t 'trend'; $null = $html.Append("<tr><td>$(ConvertTo-HtmlText (Get-P $t 'insight'))</td><td>$(ConvertTo-HtmlText (Get-P $t 'category'))</td><td>$(ConvertTo-HtmlText (Get-P $t 'risk'))</td><td>$(Get-P $t 'affected' 0)</td><td>$(if ($null -ne $tr) { $tr })</td></tr>") }
-                          $null = $html.Append('</table><p>Insights with affected assets are Proposed Planner cards ("ScalePad Insight - ...").</p>')
+                          $clear = @($insTable | Where-Object { [int](Get-P $_ 'affected' 0) -le 0 } | ForEach-Object { [string](Get-P $_ 'insight') })
+                          foreach ($t in @($insTable | Where-Object { [int](Get-P $_ 'affected' 0) -gt 0 } | Sort-Object { -[int](Get-P $_ 'affected' 0) })) { $tr = Get-P $t 'trend'; $null = $html.Append("<tr><td>$(ConvertTo-HtmlText (Get-P $t 'insight'))</td><td>$(ConvertTo-HtmlText (Get-P $t 'category'))</td><td>$(ConvertTo-HtmlText (Get-P $t 'risk'))</td><td>$(Get-P $t 'affected' 0)</td><td>$(if ($null -ne $tr) { $tr })</td></tr>") }
+                          $null = $html.Append('</table>')
+                          if ($clear.Count) { $null = $html.Append("<p><b>All clear ($($clear.Count)):</b> $(ConvertTo-HtmlText ($clear -join '; ')).</p>") }
+                          $null = $html.Append('<p>Insights with affected assets are Planner cards ("ScalePad Insight - ..."); a card is closed when its insight clears.</p>')
                       }
                       if ($notes.Count -gt 0) { $null = $html.Append('<h3>Where to find it</h3><ul>'); foreach ($x in $notes) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }
                       if ($attention.Count -gt 0) { $null = $html.Append('<h3>Needs attention</h3><ul>'); foreach ($x in $attention) { $null = $html.Append("<li>$(ConvertTo-HtmlText $x)</li>") }; $null = $html.Append('</ul>') }

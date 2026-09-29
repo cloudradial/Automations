@@ -6,7 +6,7 @@ A CloudRadial **AutomationAI agent** that produces a read-only portal briefing �
 
 **Download the agent:** [`portal-lookup.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/portal-lookup/portal-lookup.agent.yml)
 
-In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-portal-lookup`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies`, `cloudradial-v2-users`, `cloudradial-v2-endpoints`. Run it, optionally passing a `companyName` (or `cloudradialCompanyId`); with none it gives a portal-wide snapshot.
+In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-portal-lookup`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies` (which also carries the user tools), `cloudradial-v2-endpoints`. Run it, optionally passing a `companyName` (or `cloudradialCompanyId`); with none it gives a portal-wide snapshot.
 
 ## Settings
 

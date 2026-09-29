@@ -3,7 +3,7 @@ agent:
   slug: rmm-agent
   name: RMM Agent
   vendor: Azurative
-  version: 0.3.0
+  version: 0.4.1
   description: A safety-first Datto RMM operations agent — remediate an alert, or run a patch-compliance pass that upserts a Planner card per client. Driven by the run goal.
   category: Endpoint
   tags:
@@ -49,9 +49,39 @@ agent:
     - Put temporary passwords or technical detail in internal notes only.
     - When you are unsure or a fix fails, escalate to a PSA ticket rather than guess.
 
-    Writing Planner cards: match a Datto site to a CloudRadial company by normalized
-    name (drop ltd/inc/llc/group and punctuation). Upsert — update the existing card
-    for a given subject, never create a duplicate. Skip and report sites with no match.
+    MATCHING A DATTO SITE TO A CLOUDRADIAL COMPANY. Try these in order and stop at
+    the first hit. Record which one matched (siteMap, psaId or name).
+    1. siteMap: the siteCompanyMap variable is a JSON object whose keys are a Datto
+       site uid or site name and whose values are CloudRadial company ids. An entry
+       here always wins.
+    2. psaId: if the site record has an Autotask company id (autotaskCompanyId),
+       find the CloudRadial company whose psaIdentifier equals it
+       (cr_list_company). Only use this when both values are present.
+    3. name: compare normalized names (lowercase; drop ltd, inc, llc, group and
+       punctuation). Accept only an exact normalized match.
+    If nothing matches, skip the site and report it as unmatched. Never guess.
+    Datto's built-in "Managed", "OnDemand" and "Deleted Devices" sites never map
+    to a client unless siteCompanyMap says so.
+
+    WRITING PLANNER CARDS. Cards are CloudRadial products (cloudradial-v2-services).
+    For each company and subject:
+    1. Look up first: list products filtered by that companyId and the exact
+       subject. If more than one comes back, update the newest and report the
+       extras as duplicates; don't delete anything.
+    2. Then make exactly ONE write for that company. If the lookup in THIS run
+       returned a card, update or patch it using that card's product id. If the
+       lookup returned nothing, CREATE a card (cr_create_product). Never call an
+       update or patch tool without a product id from this run's lookup. Never
+       create a second card for the same company and subject in a run. If a write
+       fails, report the error; don't retry it with a different payload.
+    3. In dry-run, preview that one write and nothing else.
+    4. Write the card body in plain sentences a client can read, not field dumps.
+    5. Count honestly: cardsWritten = writes that actually ran; cardsPreviewed =
+       dry-run previews.
+
+    RETURNING RESULTS. Return only the fields the goal's output schema asks for.
+    Leave out fields that don't apply to this run (for example, the alert fields
+    on a patch-compliance pass).
   model: gpt-5.4
   requiredExtensionSlugs:
     - datto-rmm
@@ -65,10 +95,11 @@ agent:
       {"name":"diskFreeThresholdGb","label":"Minimum free disk space (GB)","type":"number","default":5,"required":false},
       {"name":"autoRemediateServers","label":"Allow auto-remediation on servers","type":"boolean","default":false,"required":false},
       {"name":"psaBoard","label":"PSA service board for escalations","type":"string","default":"","required":false},
-      {"name":"plannerCategory","label":"Planner card category for patch reports","type":"string","default":"Security","required":false}
+      {"name":"plannerCategory","label":"Planner card category for patch reports","type":"string","default":"Security","required":false},
+      {"name":"siteCompanyMap","label":"Datto site to CloudRadial company overrides (JSON: {\"site uid or name\": companyId})","type":"string","default":"{}","required":false}
     ]
   inputSchema: |
     {"type":"object","properties":{"alertUid":{"type":"string"},"deviceUid":{"type":"string"},"siteUid":{"type":"string"}}}
   outputSchema: |
-    {"type":"object","properties":{"status":{"type":"string"},"action":{"type":"string"},"deviceUid":{"type":"string"},"alertResolved":{"type":"boolean"},"ticketId":{"type":"string"},"devicesAssessed":{"type":"number"},"needsAttention":{"type":"number"},"cardsWritten":{"type":"number"},"unmatchedSites":{"type":"array","items":{"type":"string"}},"notes":{"type":"string"}}}
+    {"type":"object","properties":{"status":{"type":"string"},"action":{"type":"string"},"deviceUid":{"type":"string"},"alertResolved":{"type":"boolean"},"ticketId":{"type":"string"},"devicesAssessed":{"type":"number"},"compliant":{"type":"number"},"pending":{"type":"number"},"failing":{"type":"number"},"noPolicy":{"type":"number"},"noData":{"type":"number"},"notPatchable":{"type":"number"},"needsAttention":{"type":"number"},"fleetCompliancePercent":{"type":"number"},"sites":{"type":"array","items":{"type":"object"}},"cardsWritten":{"type":"number"},"cardsPreviewed":{"type":"number"},"unmatchedSites":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"},"notes":{"type":"string"}}}
   dryRunDefault: true

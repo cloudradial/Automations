@@ -1,0 +1,910 @@
+automationsWorkflow: 1
+name: Split Request - Service + Quote
+description: "Takes one intake - a CloudRadial form submission or a ticket being
+  triaged in ServiceAI - and splits it into two linked PSA tickets: a service /
+  provisioning ticket for the work, and a quote request for anything that has to
+  be bought. A classifier agent grounded on your Knowledge (service ticket
+  standards, quote request standards, standard catalog) writes both tickets to
+  your format; an editable form-profile table decides the split
+  deterministically for structured forms. If nothing needs purchasing, only the
+  service ticket is created. Supersedes the new-user-plus-new-PC version. READ
+  THE README BEFORE IMPORTING - you must publish and deploy to a runner, enable
+  the webhook (exports ship with it OFF), add Key Vault secrets, upload the
+  paired classifier agent, upload the Knowledge documents and turn on grounding
+  for the Classify node, and map the form profiles to your own question IDs."
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-classify
+      name: Classify the request
+      type: agent
+      position:
+        x: 241.93548387096774
+        y: -34.83870967741936
+      properties:
+        goal: "Read the support request in your input and separate what has to be bought
+          from what has to be done, using the MSP's Quote Request Standards
+          (what counts as a purchase) and Standard Catalog (standard
+          workstations, peripherals, software and licences). Then write the
+          service ticket to the Service Ticket Standards (summary format,
+          description layout, priority, type and subtype) and, only if
+          something has to be bought, the quote request to the Quote Request
+          Standards (summary format, description layout, required
+          information). Return quoteItems, serviceItems, serviceTicket,
+          quoteTicket, missingInfo, standardsApplied, standardsSource,
+          confidence, multipleRequests and a one-sentence reason. Copy the
+          payload object from your input into your output unchanged - the next
+          node needs it to resolve the company and reference the source ticket.
+          An empty quoteItems list is a correct answer for a request that needs
+          nothing purchased. This is read-only: create nothing and change
+          nothing."
+        model: ""
+        allowedExtensions: []
+        timeoutSeconds: 300
+        autoApprove: true
+        agentSlug: split-request-classifier
+        inputSchema: |
+          {"type":"object","properties":{"subject":{"type":"string","description":"Ticket subject or form name."},"body":{"type":"string","description":"The ticket body, request text, or form answers as prose."},"formName":{"type":"string","description":"The CloudRadial form name, when the intake is a form."},"payload":{"type":"object","description":"The original intake envelope. Copy this through to the output unchanged."}},"required":["body"]}
+        outputSchema: |
+          {"type":"object","properties":{"quoteItems":{"type":"array","items":{"type":"string"},"description":"Things that have to be bought. Empty when nothing does."},"serviceItems":{"type":"array","items":{"type":"string"},"description":"Work that has to be done."},"serviceTicket":{"type":"object","properties":{"summary":{"type":"string"},"description":{"type":"string"},"priority":{"type":"string"},"type":{"type":"string"},"subtype":{"type":"string"}},"required":["summary","description"],"description":"The service ticket, written to the MSP's standards."},"quoteTicket":{"type":["object","null"],"properties":{"summary":{"type":"string"},"description":{"type":"string"},"lineItems":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"quantity":{"type":["number","null"]},"catalogItem":{"type":"string"},"notes":{"type":"string"}}}}},"description":"The quote request, or null when nothing needs buying."},"missingInfo":{"type":"array","items":{"type":"string"},"description":"Information the standards require that the request did not give."},"standardsApplied":{"type":"array","items":{"type":"string"},"description":"Each standard used, as 'document - heading: rule'."},"standardsSource":{"type":"string","enum":["knowledge","mixed","default"]},"confidence":{"type":"number","description":"0 to 1. Below the workflow threshold the run is flagged for a human."},"multipleRequests":{"type":"boolean","description":"True when the intake holds unrelated jobs."},"reason":{"type":"string","description":"One sentence, written into the internal note."},"payload":{"type":"object","description":"The original intake, copied through unchanged."}},"required":["quoteItems","serviceItems","serviceTicket","confidence","payload"]}
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 760
+        y: 120
+    - id: node-2
+      name: Split into service + quote tickets
+      type: powershell-script
+      position:
+        x: 510.32258064516134
+        y: -38.064516129032235
+      properties:
+        script: |-
+          # =====================================================================
+          #  Split Request - Service + Quote   (multi-form)
+          #
+          #  Takes one intake - a CloudRadial form submission or a ticket being
+          #  triaged in ServiceAI - and splits it into two linked PSA tickets:
+          #    1. a service / provisioning ticket for the work
+          #    2. a quote request for anything that has to be bought
+          #  If nothing needs buying, only the service ticket is created.
+          #
+          #  ---------------------------------------------------------------
+          #  SETUP - do these before your first run (full notes in the README)
+          #  ---------------------------------------------------------------
+          #  1. Key Vault secrets on your runner:
+          #       CW-ApiUrl  CW-CompanyID  CW-PublicKey  CW-PrivateKey  CW-ClientId
+          #       CW-ServiceBoard   board for the service ticket
+          #       CW-SalesBoard     board for the quote ticket
+          #       PSA-SplitStatus   optional, status set on the source ticket
+          #       CloudRadial-BaseUrl / -PublicKey / -PrivateKey
+          #                         optional, only to map a CloudRadial companyId
+          #  2. Edit $FormProfiles below so Fields = the question IDs used on
+          #     YOUR forms. Nothing else in the script needs editing.
+          #     On the stock Add a New User form the Equipment questions ship
+          #     with EMPTY Field IDs, so give the PC question a Field ID of
+          #     deviceType or no hardware detail reaches the quote ticket.
+          #  3. Publish and deploy to the runner that holds the CW-* secrets,
+          #     then enable the webhook (Properties > Webhook > Enable).
+          #     Exports ship with the webhook OFF.
+          #  4. Upload split-request-classifier.agent.yml (Agents > Custom), then
+          #     upload the three documents in knowledge/ to a Knowledge folder
+          #     and turn on "Ground on knowledge" for the Classify node. Without
+          #     them the tickets use the built-in templates in this script.
+          #  5. Run it once against a test company before you publish the form.
+          # =====================================================================
+
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $nodeInput = Get-NodeInput
+
+          $warnings = New-Object System.Collections.ArrayList
+          function Warn { param([string]$m) $null = $warnings.Add($m) }
+          function Secret { param($n) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue }
+
+          # =====================================================================
+          # 1. FORM PROFILES - the only part most partners need to edit
+          #
+          #    Match        keywords looked for in the form name / ticket subject
+          #                 (lower case, substring match)
+          #    UsePersonName  build the ticket title from firstName + lastName
+          #    QuoteItems   answers that mean "something has to be bought"
+          #    ServiceItems answers that describe the work to be done
+          #    QuoteFallbackToBody  if no QuoteItems field matched but the form
+          #                 itself is a purchase request, quote the whole body
+          #
+          #    Fields are tried in order. A field can be a form question Id or a
+          #    flat property name on the webhook payload.
+          # =====================================================================
+          $FormProfiles = @(
+              @{
+                  Name                = 'New User Onboarding'
+                  Match               = @('new user', 'onboarding', 'new hire', 'new employee', 'new starter', 'new staff', 'add user')
+                  UsePersonName       = $true
+                  QuoteFallbackToBody = $false
+                  ServiceSummary      = 'New User Provisioning - {subject}'
+                  QuoteSummary        = 'New User Hardware / Licence Quote - {subject}'
+                  SubjectFields       = @('userName', 'newUserName', 'displayName', 'fullName', 'email', 'newUserEmail', 'userEmail')
+                  QuoteItems          = @(
+                      @{ Label = 'Workstation / laptop';    Fields = @('deviceType', 'hardware', 'equipment', 'newPc', 'pc', 'device', 'laptop', 'computer', 'workstation') },
+                      @{ Label = 'Monitors / peripherals';  Fields = @('monitors', 'peripherals', 'accessories', 'dock', 'docking', 'headset', 'keyboard', 'mouse') },
+                      @{ Label = 'Phone';                   Fields = @('phone', 'mobile', 'handset', 'deskPhone', 'cellPhone', 'mobilePhone') },
+                      @{ Label = 'Software / licences';     Fields = @('softwareLicenses', 'software', 'licenses', 'licences', 'additionalSoftware', 'apps', 'm365License', 'licenseType', 'licenceType') }
+                  )
+                  ServiceItems        = @(
+                      @{ Label = 'Start date';              Fields = @('startDate', 'start_date', 'dateNeeded', 'startDateTime', 'requiredBy') },
+                      @{ Label = 'Job title';               Fields = @('jobTitle', 'title', 'role', 'position') },
+                      @{ Label = 'Department';              Fields = @('department', 'dept', 'team', 'division') },
+                      @{ Label = 'Manager';                 Fields = @('manager', 'supervisor', 'reportsTo') },
+                      @{ Label = 'Mirror access from';      Fields = @('copyAccessFrom', 'mirrorUser', 'sameAs', 'permissionsLike', 'copyFrom') },
+                      @{ Label = 'Groups / access';         Fields = @('companyFileAccess', 'groups', 'securityGroups', 'distributionLists', 'sharedMailboxes', 'mailboxes') },
+                      @{ Label = 'Location';                Fields = @('location', 'office', 'site', 'branch') }
+                  )
+              },
+              @{
+                  Name                = 'Hardware / Software Request'
+                  Match               = @('hardware', 'software request', 'new hardware', 'equipment request', 'purchase', 'procure', 'order', 'buy', 'replacement', 'new laptop', 'new pc', 'new monitor')
+                  UsePersonName       = $false
+                  QuoteFallbackToBody = $true
+                  ServiceSummary      = 'Deploy / configure - {subject}'
+                  QuoteSummary        = 'Hardware / Software Quote - {subject}'
+                  SubjectFields       = @('itemRequested', 'item', 'product', 'hardware', 'software', 'equipment', 'description')
+                  QuoteItems          = @(
+                      @{ Label = 'Item requested';          Fields = @('itemRequested', 'item', 'product', 'hardware', 'equipment', 'deviceType', 'model') },
+                      @{ Label = 'Software / licences';     Fields = @('software', 'licenses', 'licences', 'application', 'apps', 'licenseCount', 'licenceCount') },
+                      @{ Label = 'Quantity';                Fields = @('quantity', 'qty', 'units', 'count') },
+                      @{ Label = 'Preferred supplier';      Fields = @('supplier', 'vendor', 'preferredVendor') },
+                      @{ Label = 'Budget / approval';       Fields = @('budget', 'approvedBy', 'costCentre', 'costCenter', 'approval') }
+                  )
+                  ServiceItems        = @(
+                      @{ Label = 'For user';                Fields = @('forUser', 'assignTo', 'endUser', 'userName', 'email') },
+                      @{ Label = 'Needed by';               Fields = @('requiredBy', 'dateNeeded', 'needBy', 'dueDate') },
+                      @{ Label = 'Install / config notes';  Fields = @('installNotes', 'configuration', 'setupNotes', 'notes') },
+                      @{ Label = 'Location';                Fields = @('location', 'office', 'site', 'deliverTo') }
+                  )
+              },
+              @{
+                  Name                = 'Mobile Device Request'
+                  Match               = @('mobile', 'cell phone', 'cellphone', 'smartphone', 'iphone', 'android', 'tablet', 'ipad', 'sim')
+                  UsePersonName       = $false
+                  QuoteFallbackToBody = $true
+                  ServiceSummary      = 'Mobile device enrolment - {subject}'
+                  QuoteSummary        = 'Mobile Device Quote - {subject}'
+                  SubjectFields       = @('forUser', 'userName', 'email', 'deviceType', 'model')
+                  QuoteItems          = @(
+                      @{ Label = 'Device';                  Fields = @('deviceType', 'model', 'device', 'phone', 'handset', 'tablet') },
+                      @{ Label = 'Plan / tariff';           Fields = @('plan', 'tariff', 'dataPlan', 'carrier', 'network') },
+                      @{ Label = 'Accessories';             Fields = @('accessories', 'case', 'charger') }
+                  )
+                  ServiceItems        = @(
+                      @{ Label = 'For user';                Fields = @('forUser', 'userName', 'email', 'assignTo') },
+                      @{ Label = 'Enrolment / MDM';         Fields = @('mdm', 'intune', 'enrolment', 'enrollment', 'notes') },
+                      @{ Label = 'Number to port';          Fields = @('portNumber', 'existingNumber', 'phoneNumber') }
+                  )
+              },
+              @{
+                  # Never produces a quote. Listed so offboarding forms do not get
+                  # dragged into the Hardware profile by the word "laptop".
+                  Name                = 'Offboarding / Termination'
+                  Match               = @('offboard', 'off-board', 'termination', 'terminate', 'leaver', 'departing', 'exit', 'remove user', 'disable user')
+                  UsePersonName       = $true
+                  QuoteFallbackToBody = $false
+                  ServiceSummary      = 'User Offboarding - {subject}'
+                  QuoteSummary        = ''
+                  SubjectFields       = @('userName', 'displayName', 'fullName', 'email', 'userEmail')
+                  QuoteItems          = @()
+                  ServiceItems        = @(
+                      @{ Label = 'Last day';                Fields = @('lastDay', 'terminationDate', 'endDate', 'effectiveDate') },
+                      @{ Label = 'Forward mail to';         Fields = @('forwardTo', 'mailForward', 'delegateTo') },
+                      @{ Label = 'Data retention';          Fields = @('dataRetention', 'retainData', 'archive') },
+                      @{ Label = 'Equipment return';        Fields = @('equipmentReturn', 'returnHardware', 'collectDevice') },
+                      @{ Label = 'Notes';                   Fields = @('notes', 'description', 'details') }
+                  )
+              },
+              @{
+                  Name                = 'Access / Permissions Request'
+                  Match               = @('access request', 'permission', 'permissions', 'add to group', 'shared mailbox', 'folder access', 'vpn access')
+                  UsePersonName       = $false
+                  QuoteFallbackToBody = $false
+                  ServiceSummary      = 'Access request - {subject}'
+                  QuoteSummary        = 'Licence Quote - {subject}'
+                  SubjectFields       = @('forUser', 'userName', 'email', 'resource', 'system')
+                  QuoteItems          = @(
+                      @{ Label = 'Additional licence';      Fields = @('licenseRequired', 'licenceRequired', 'newLicense', 'newLicence', 'licenseType') }
+                  )
+                  ServiceItems        = @(
+                      @{ Label = 'For user';                Fields = @('forUser', 'userName', 'email', 'assignTo') },
+                      @{ Label = 'Resource / system';       Fields = @('resource', 'system', 'application', 'folder', 'mailbox', 'group') },
+                      @{ Label = 'Access level';            Fields = @('accessLevel', 'permission', 'rights', 'readWrite') },
+                      @{ Label = 'Approved by';             Fields = @('approvedBy', 'manager', 'authorisedBy', 'authorizedBy') }
+                  )
+              }
+          )
+
+          # Used when nothing above matches - a free-text ServiceAI ticket, or a
+          # form you have not profiled yet.
+          $DefaultProfile = @{
+              Name                = 'Unprofiled request'
+              Match               = @()
+              UsePersonName       = $false
+              QuoteFallbackToBody = $false
+              ServiceSummary      = 'Service request - {subject}'
+              QuoteSummary        = 'Quote request - {subject}'
+              SubjectFields       = @('subject', 'summary', 'title', 'userName', 'email')
+              QuoteItems          = @(
+                  @{ Label = 'Hardware';                Fields = @('hardware', 'deviceType', 'equipment', 'device', 'model', 'item') },
+                  @{ Label = 'Software / licences';     Fields = @('software', 'licenses', 'licences', 'licenseType') },
+                  @{ Label = 'Purchase / budget';       Fields = @('purchase', 'quote', 'budget', 'cost', 'supplier', 'vendor') }
+              )
+              ServiceItems        = @(
+                  @{ Label = 'Details';                 Fields = @('description', 'details', 'notes', 'requestDetails', 'body') }
+              )
+          }
+
+          # How sure the classifier agent has to be before its answer is trusted
+          # without a human. Below this, the tickets are still created but the run
+          # sets reviewRequired. Override per run with minAiConfidence.
+          $MinAiConfidence = 0.6
+
+          # Answers that mean "nothing to buy". Add your own form's wording here.
+          $NegativeAnswers = @('', 'no', 'none', 'n/a', 'na', 'nil', 'not required', 'not needed', 'no thanks',
+              'existing', 'reuse', 're-use', 'already have', 'have one', 'use existing', 'n', 'false', '0', '-')
+
+          # =====================================================================
+          # 2. PAYLOAD READERS
+          # =====================================================================
+          function Get-QuestionList {
+              $out = @()
+              if ($null -eq $nodeInput) { return $out }
+              $src = $nodeInput
+              $pl = $nodeInput.PSObject.Properties['payload']
+              if ($pl -and $pl.Value -and -not $nodeInput.PSObject.Properties['Ticket']) { $src = $pl.Value }
+              $tp = $src.PSObject.Properties['Ticket']
+              if (-not $tp -or -not $tp.Value) { return $out }
+              $qp = $tp.Value.PSObject.Properties['Questions']
+              if (-not $qp -or -not $qp.Value) { return $out }
+              foreach ($q in @($qp.Value)) {
+                  if ($null -eq $q) { continue }
+                  $qid = ''; $qtext = ''; $ans = ''
+                  $p = $q.PSObject.Properties['Id']; if ($p) { $qid = [string]$p.Value }
+                  $p = $q.PSObject.Properties['Question']; if ($p) { $qtext = [string]$p.Value }
+                  if ([string]::IsNullOrWhiteSpace($qtext)) { $p = $q.PSObject.Properties['Text']; if ($p) { $qtext = [string]$p.Value } }
+                  $p = $q.PSObject.Properties['Answer']; if ($p) { $ans = [string]$p.Value }
+                  if ([string]::IsNullOrWhiteSpace($ans)) { $p = $q.PSObject.Properties['Value']; if ($p) { $ans = [string]$p.Value } }
+                  $out += [pscustomobject]@{ Id = $qid; Question = $qtext; Answer = $ans }
+              }
+              return $out
+          }
+          $Questions = @(Get-QuestionList)
+
+          # Reads a value from a flat {key:value} webhook body or from the
+          # CloudRadial {Ticket:{Questions:[{Id,Question,Answer}]}} shape.
+          # Question Ids are matched exactly, then question text exactly, then
+          # question text as a substring.
+          function Get-Answer {
+              param([string[]]$Names)
+              if ($null -eq $nodeInput) { return '' }
+              foreach ($n in $Names) {
+                  $p = $nodeInput.PSObject.Properties[$n]
+                  if ($p -and -not [string]::IsNullOrWhiteSpace([string]$p.Value)) { return [string]$p.Value }
+              }
+              # When an agent node runs ahead of this one, its output becomes this
+              # node's input, so the original intake is only reachable if the agent
+              # echoed it under 'payload'. Look there too.
+              $pl = $nodeInput.PSObject.Properties['payload']
+              if ($pl -and $pl.Value) {
+                  foreach ($n in $Names) {
+                      $p = $pl.Value.PSObject.Properties[$n]
+                      if ($p -and -not [string]::IsNullOrWhiteSpace([string]$p.Value)) { return [string]$p.Value }
+                  }
+              }
+              foreach ($n in $Names) {
+                  foreach ($q in $Questions) {
+                      if ($q.Id -eq $n -and -not [string]::IsNullOrWhiteSpace($q.Answer)) { return $q.Answer }
+                  }
+              }
+              foreach ($n in $Names) {
+                  foreach ($q in $Questions) {
+                      if ($q.Question -eq $n -and -not [string]::IsNullOrWhiteSpace($q.Answer)) { return $q.Answer }
+                  }
+              }
+              foreach ($n in $Names) {
+                  foreach ($q in $Questions) {
+                      if (-not [string]::IsNullOrWhiteSpace($q.Question) -and -not [string]::IsNullOrWhiteSpace($q.Answer)) {
+                          if ($q.Question.ToLowerInvariant().Contains($n.ToLowerInvariant())) { return $q.Answer }
+                      }
+                  }
+              }
+              return ''
+          }
+
+          function Test-Positive {
+              param([string]$v)
+              if ([string]::IsNullOrWhiteSpace($v)) { return $false }
+              $t = $v.Trim().ToLowerInvariant()
+              foreach ($n in $NegativeAnswers) { if ($t -eq $n) { return $false } }
+              return $true
+          }
+
+          function Get-ProfileKey {
+              param($Table, [string]$Key, $Fallback)
+              if ($Table.ContainsKey($Key) -and $null -ne $Table[$Key]) { return $Table[$Key] }
+              return $Fallback
+          }
+
+          # =====================================================================
+          # 3. NORMALISE THE INTAKE
+          # =====================================================================
+          $formName      = Get-Answer @('formName', 'FormName', 'form', 'templateName', 'ticketType', 'requestType')
+          $sourceSubject = Get-Answer @('subject', 'Subject', 'summary', 'Summary', 'title', 'shortDescription')
+          $sourceBody    = Get-Answer @('description', 'details', 'notes', 'requestDetails', 'initialDescription', 'body', 'ticketBody')
+          $requester     = Get-Answer @('requestedBy', 'submittedByEmail', 'submitterEmail', 'contactEmail', 'UserEmail', 'userEmail', 'email')
+          $sourceKind    = Get-Answer @('source', 'sourceSystem', 'trigger', 'origin')
+          if ([string]::IsNullOrWhiteSpace($sourceKind)) {
+              if ($Questions.Count -gt 0) { $sourceKind = 'cloudradial-form' } else { $sourceKind = 'unknown' }
+          }
+
+          # Ticket already open in the PSA that this intake came from.
+          $sourceTicketId = Get-Answer @('psaTicketId', 'sourceTicketId', 'externalTicketId')
+          if ([string]::IsNullOrWhiteSpace($sourceTicketId)) { $sourceTicketId = Get-Answer @('ticketId', 'TicketId', 'ticketNumber') }
+
+          $primaryText = (($formName + ' ' + $sourceSubject)).Trim().ToLowerInvariant()
+          $bodyText    = ([string]$sourceBody).ToLowerInvariant()
+
+          $fp = $null
+          $matchedOn = 'nothing matched'
+          foreach ($candidate in $FormProfiles) {
+              foreach ($k in $candidate.Match) {
+                  if ($primaryText.Contains($k)) { $fp = $candidate; $matchedOn = 'form name / subject'; break }
+              }
+              if ($fp) { break }
+          }
+          if (-not $fp -and -not [string]::IsNullOrWhiteSpace($bodyText)) {
+              foreach ($candidate in $FormProfiles) {
+                  foreach ($k in $candidate.Match) {
+                      if ($bodyText.Contains($k)) { $fp = $candidate; $matchedOn = 'ticket body'; break }
+                  }
+                  if ($fp) { break }
+              }
+          }
+
+          # =====================================================================
+          # 4. BUILD THE TWO SIDES OF THE SPLIT
+          # =====================================================================
+          $quoteLines   = @()
+          $serviceLines = @()
+          $reviewRequired = $false
+          $aiConfidence = $null
+          $aiMultiple = $false
+          $aiReason = ''
+
+          if ($fp) {
+              foreach ($qi in $fp.QuoteItems) {
+                  $v = Get-Answer $qi.Fields
+                  if (Test-Positive $v) { $quoteLines += ("- " + $qi.Label + ": " + $v) }
+              }
+              foreach ($si in $fp.ServiceItems) {
+                  $v = Get-Answer $si.Fields
+                  if (-not [string]::IsNullOrWhiteSpace($v)) { $serviceLines += ("- " + $si.Label + ": " + $v) }
+              }
+              if ($quoteLines.Count -eq 0 -and (Get-ProfileKey $fp 'QuoteFallbackToBody' $false) -eq $true) {
+                  if (-not [string]::IsNullOrWhiteSpace($sourceBody)) { $quoteLines += ("- Requested: " + $sourceBody) }
+                  elseif (-not [string]::IsNullOrWhiteSpace($sourceSubject)) { $quoteLines += ("- Requested: " + $sourceSubject) }
+              }
+          }
+
+          # The profile table only works on structured answers. A free-text
+          # ServiceAI ticket can match a profile by keyword and still yield
+          # nothing, so anything that comes out empty falls through to the AI
+          # classifier rather than quietly losing the quote side.
+          $structured = ($quoteLines.Count -gt 0 -or $serviceLines.Count -gt 0)
+          if (-not $structured) {
+              if (-not $fp) { $fp = $DefaultProfile }
+
+              # Optional AI fallback. Wire an AI Agent node ahead of this one and
+              # map its output to aiClassification. Expected JSON:
+              #   { "quoteItems": ["16GB laptop"], "serviceItems": ["AD account"] }
+              # Two shapes are accepted. An agent node wired directly ahead of this
+              # one hands its structured output straight in, so quoteItems sits at
+              # the top level. Anything else passes the classification as a JSON
+              # string in aiClassification.
+              $ai = $null
+              if ($nodeInput -and $nodeInput.PSObject.Properties['quoteItems']) { $ai = $nodeInput }
+              $aiJson = ''
+              if ($null -eq $ai) { $aiJson = Get-Answer @('aiClassification', 'classification', 'aiResult', 'agentOutput') }
+              if ($null -ne $ai -or -not [string]::IsNullOrWhiteSpace($aiJson)) {
+                  try {
+                      if ($null -eq $ai) { $ai = $aiJson | ConvertFrom-Json }
+                      $qp2 = $ai.PSObject.Properties['quoteItems']
+                      if ($qp2 -and $qp2.Value) {
+                          foreach ($x in @($qp2.Value)) { if (-not [string]::IsNullOrWhiteSpace([string]$x)) { $quoteLines += ("- " + [string]$x) } }
+                      }
+                      $sp2 = $ai.PSObject.Properties['serviceItems']
+                      if ($sp2 -and $sp2.Value) {
+                          foreach ($x in @($sp2.Value)) { if (-not [string]::IsNullOrWhiteSpace([string]$x)) { $serviceLines += ("- " + [string]$x) } }
+                      }
+                      $cp2 = $ai.PSObject.Properties['confidence']
+                      if ($cp2 -and $null -ne $cp2.Value) {
+                          try { $aiConfidence = [double]$cp2.Value } catch { Warn 'Classifier returned a confidence value that is not a number; it was ignored.' }
+                      }
+                      $mp2 = $ai.PSObject.Properties['multipleRequests']
+                      if ($mp2 -and $null -ne $mp2.Value) {
+                          $mpText = ([string]$mp2.Value).Trim().ToLowerInvariant()
+                          if ($mpText -eq 'true' -or $mpText -eq '1' -or $mpText -eq 'yes') { $aiMultiple = $true }
+                      }
+                      $rp2 = $ai.PSObject.Properties['reason']
+                      if ($rp2 -and $null -ne $rp2.Value) { $aiReason = [string]$rp2.Value }
+                      if ($quoteLines.Count -gt 0 -or $serviceLines.Count -gt 0) { $matchedOn = 'AI classification' }
+                  }
+                  catch {
+                      Warn ("aiClassification was not valid JSON and was ignored: " + $_.Exception.Message)
+                  }
+              }
+
+              if ($matchedOn -ne 'AI classification') {
+                  $reviewRequired = $true
+                  Warn 'Nothing could be split automatically: no profile field matched and no AI classification was supplied. The whole request was put on the service ticket and no quote ticket was raised. A human should check whether anything needs quoting.'
+              }
+              else {
+                  # The classifier answered. Trust it only if it was sure, and never
+                  # silently merge two unrelated jobs onto one pair of tickets.
+                  $threshold = $MinAiConfidence
+                  $thresholdIn = Get-Answer @('minAiConfidence')
+                  if (-not [string]::IsNullOrWhiteSpace($thresholdIn)) {
+                      try { $threshold = [double]$thresholdIn } catch { Warn "minAiConfidence '$thresholdIn' is not a number; the built-in threshold was used." }
+                  }
+                  if ($null -eq $aiConfidence) {
+                      Warn 'The classifier returned no confidence value, so its answer was taken at face value.'
+                  }
+                  elseif ($aiConfidence -lt $threshold) {
+                      $reviewRequired = $true
+                      Warn ("Classifier confidence {0} is below the {1} threshold, so the split needs checking." -f $aiConfidence, $threshold)
+                  }
+                  if ($aiMultiple) {
+                      $reviewRequired = $true
+                      Warn 'The classifier flagged this as more than one unrelated request. Both tickets were still created, but somebody should decide whether this needs splitting further.'
+                  }
+              }
+          }
+
+          if ($serviceLines.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($sourceBody)) {
+              $serviceLines += ("- Details: " + $sourceBody)
+          }
+
+          # =====================================================================
+          # 4b. STANDARDS-FORMATTED TICKETS FROM THE CLASSIFIER
+          #     The classifier is grounded on your Knowledge (Service Ticket
+          #     Standards, Quote Request Standards, Standard Catalog) and returns
+          #     finished ticket text. For structured forms the profile table
+          #     above still decides WHETHER a quote is raised; the classifier
+          #     decides HOW both tickets read. Without usable classifier output
+          #     the built-in templates are used, so Knowledge is never required.
+          # =====================================================================
+          function Get-Prop {
+              param($Obj, [string]$Name)
+              if ($null -eq $Obj) { return $null }
+              $p = $Obj.PSObject.Properties[$Name]
+              if ($p) { return $p.Value }
+              return $null
+          }
+
+          $agentOut = $null
+          if ($nodeInput -and $nodeInput.PSObject.Properties['quoteItems']) { $agentOut = $nodeInput }
+          $agentService = $null
+          $agentQuote = $null
+          $missingInfo = @()
+          $standardsApplied = @()
+          $standardsSource = ''
+          $formattedBy = 'built-in templates'
+
+          if ($agentOut) {
+              if ($null -eq $aiConfidence) {
+                  $c = Get-Prop $agentOut 'confidence'
+                  if ($null -ne $c) { try { $aiConfidence = [double]$c } catch { Warn 'Classifier returned a confidence value that is not a number; it was ignored.' } }
+              }
+              if (-not $aiMultiple) {
+                  $mText = ([string](Get-Prop $agentOut 'multipleRequests')).Trim().ToLowerInvariant()
+                  if ($mText -eq 'true' -or $mText -eq '1' -or $mText -eq 'yes') { $aiMultiple = $true }
+              }
+              if ([string]::IsNullOrWhiteSpace($aiReason)) { $aiReason = [string](Get-Prop $agentOut 'reason') }
+              $agentService = Get-Prop $agentOut 'serviceTicket'
+              $agentQuote = Get-Prop $agentOut 'quoteTicket'
+              foreach ($x in @(Get-Prop $agentOut 'missingInfo')) { if (-not [string]::IsNullOrWhiteSpace([string]$x)) { $missingInfo += [string]$x } }
+              foreach ($x in @(Get-Prop $agentOut 'standardsApplied')) { if (-not [string]::IsNullOrWhiteSpace([string]$x)) { $standardsApplied += [string]$x } }
+              $standardsSource = [string](Get-Prop $agentOut 'standardsSource')
+
+              # For structured forms the profile table decides whether a quote is
+              # raised. If the classifier disagrees, keep the table's answer and
+              # ask a human to check.
+              if ($structured) {
+                  $agentQuoteCount = @(@(Get-Prop $agentOut 'quoteItems') | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count
+                  $profileWantsQuote = ($quoteLines.Count -gt 0)
+                  if ($profileWantsQuote -ne ($agentQuoteCount -gt 0)) {
+                      $reviewRequired = $true
+                      if ($profileWantsQuote) { Warn 'The form answers call for a quote but the classifier found nothing to buy. The quote was raised from the form answers; check it is needed.' }
+                      else { Warn 'The classifier found something to buy but the form answers did not. No quote was raised; check whether one is needed.' }
+                  }
+              }
+          }
+
+          $formatThreshold = $MinAiConfidence
+          $thresholdIn2 = Get-Answer @('minAiConfidence')
+          if (-not [string]::IsNullOrWhiteSpace($thresholdIn2)) { try { $formatThreshold = [double]$thresholdIn2 } catch { } }
+
+          $useAgentFormat = $false
+          if ($agentService -and -not [string]::IsNullOrWhiteSpace([string](Get-Prop $agentService 'summary')) -and -not [string]::IsNullOrWhiteSpace([string](Get-Prop $agentService 'description'))) {
+              $useAgentFormat = $true
+              if ($null -ne $aiConfidence -and $aiConfidence -lt $formatThreshold) {
+                  $useAgentFormat = $false
+                  Warn 'Classifier confidence is below the threshold, so the tickets use the built-in templates instead of its formatted text.'
+              }
+              if ($aiMultiple) { $useAgentFormat = $false }
+          }
+          if ($useAgentFormat) {
+              $src = if ([string]::IsNullOrWhiteSpace($standardsSource)) { 'unknown' } else { $standardsSource }
+              $formattedBy = "classifier ($src standards)"
+          }
+
+          # Ticket title
+          $subject = ''
+          if ((Get-ProfileKey $fp 'UsePersonName' $false) -eq $true) {
+              $first = Get-Answer @('firstName', 'first_name', 'FirstName', 'givenName')
+              $last = Get-Answer @('lastName', 'last_name', 'LastName', 'surname')
+              $subject = (($first + ' ' + $last)).Trim()
+          }
+          if ([string]::IsNullOrWhiteSpace($subject)) { $subject = Get-Answer (Get-ProfileKey $fp 'SubjectFields' @()) }
+          if ([string]::IsNullOrWhiteSpace($subject)) { $subject = $sourceSubject }
+          if ([string]::IsNullOrWhiteSpace($subject)) { $subject = 'Request' }
+
+          $serviceSummary = (Get-ProfileKey $fp 'ServiceSummary' 'Service request - {subject}').Replace('{subject}', $subject)
+          $quoteSummary = (Get-ProfileKey $fp 'QuoteSummary' 'Quote request - {subject}').Replace('{subject}', $subject)
+          if ([string]::IsNullOrWhiteSpace($quoteSummary)) { $quoteLines = @() }
+
+          # Standards-formatted titles, priority, type and subtype from the classifier.
+          $servicePriority = ''
+          $serviceType = ''
+          $serviceSubType = ''
+          if ($useAgentFormat) {
+              $serviceSummary = [string](Get-Prop $agentService 'summary')
+              $servicePriority = [string](Get-Prop $agentService 'priority')
+              $serviceType = [string](Get-Prop $agentService 'type')
+              $serviceSubType = [string](Get-Prop $agentService 'subtype')
+              if ($agentQuote -and -not [string]::IsNullOrWhiteSpace([string](Get-Prop $agentQuote 'summary'))) {
+                  $quoteSummary = [string](Get-Prop $agentQuote 'summary')
+              }
+          }
+
+          # =====================================================================
+          # 5. PSA LAYER
+          #    ConnectWise Manage is implemented. HaloPSA and Autotask are
+          #    deliberately left as stubs - see the README before enabling them.
+          # =====================================================================
+          $Psa = Get-Answer @('psa', 'psaType')
+          if ([string]::IsNullOrWhiteSpace($Psa)) { $Psa = Secret 'PSA-Type' }
+          if ([string]::IsNullOrWhiteSpace($Psa)) { $Psa = 'connectwise' }
+          $Psa = $Psa.Trim().ToLowerInvariant()
+
+          function Initialize-Cw {
+              $cwUrl = Secret 'CW-ApiUrl'
+              $cwCo = Secret 'CW-CompanyID'
+              $cwPub = Secret 'CW-PublicKey'
+              $cwPriv = Secret 'CW-PrivateKey'
+              $cwClient = Secret 'CW-ClientId'
+              $missing = @()
+              foreach ($p in @(@{n = 'CW-ApiUrl'; v = $cwUrl }, @{n = 'CW-CompanyID'; v = $cwCo }, @{n = 'CW-PublicKey'; v = $cwPub }, @{n = 'CW-PrivateKey'; v = $cwPriv }, @{n = 'CW-ClientId'; v = $cwClient })) {
+                  if ([string]::IsNullOrWhiteSpace($p.v)) { $missing += $p.n }
+              }
+              if ($missing.Count -gt 0) {
+                  $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
+                  Set-NodeOutput @{ status = 'error'; message = $m }
+                  throw $m
+              }
+              $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$cwCo+$cwPub`:$cwPriv"))
+              return @{
+                  Base    = $cwUrl.TrimEnd('/')
+                  Headers = @{ Authorization = "Basic $auth"; clientId = $cwClient; 'Content-Type' = 'application/json'; Accept = 'application/json' }
+              }
+          }
+
+          function Resolve-CwCompany {
+              $companyIn = Get-Answer @('companyIdentifier', 'company', 'companyNumber')
+              if (-not [string]::IsNullOrWhiteSpace($companyIn)) {
+                  if ($companyIn -match '^\d+$') { return [int]$companyIn }
+                  $found = Invoke-RestMethod -Method Get -Uri "$($PsaCtx.Base)/company/companies?conditions=identifier=`"$companyIn`"" -Headers $PsaCtx.Headers
+                  $hit = (@($found) | Select-Object -First 1)
+                  if ($hit) { return $hit.id }
+              }
+              $companyName = Get-Answer @('companyName', 'CompanyName')
+              if (-not [string]::IsNullOrWhiteSpace($companyName)) {
+                  $found = Invoke-RestMethod -Method Get -Uri "$($PsaCtx.Base)/company/companies?conditions=name like `"$companyName`"" -Headers $PsaCtx.Headers
+                  $hit = (@($found) | Select-Object -First 1)
+                  if ($hit) { return $hit.id }
+              }
+              $crCompanyId = Get-Answer @('companyId', 'CompanyId')
+              $crBaseUrl = Secret 'CloudRadial-BaseUrl'
+              if (-not [string]::IsNullOrWhiteSpace($crCompanyId) -and -not [string]::IsNullOrWhiteSpace($crBaseUrl)) {
+                  $crBasic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f (Secret 'CloudRadial-PublicKey'), (Secret 'CloudRadial-PrivateKey'))))
+                  $co = (Invoke-RestMethod -Method Get -Uri "$($crBaseUrl.TrimEnd('/'))/v2/odata/company?`$filter=companyId eq $([int]$crCompanyId)&`$select=name,psaIdentifier" -Headers @{ Authorization = "Basic $crBasic"; Accept = 'application/json' }).value | Select-Object -First 1
+                  if ($co) {
+                      $psaId = [string]$co.psaIdentifier
+                      if ($psaId -match '^\d+$') { return [int]$psaId }
+                      if (-not [string]::IsNullOrWhiteSpace($psaId)) {
+                          $found = Invoke-RestMethod -Method Get -Uri "$($PsaCtx.Base)/company/companies?conditions=identifier=`"$psaId`"" -Headers $PsaCtx.Headers
+                          $hit = (@($found) | Select-Object -First 1)
+                          if ($hit) { return $hit.id }
+                      }
+                  }
+              }
+              return $null
+          }
+
+          function New-CwTicket {
+              param([string]$Summary, [string]$Board, [string]$Description, [int]$CompanyId, [string]$Priority = '', [string]$Type = '', [string]$SubType = '')
+              $s = $Summary
+              if ($s.Length -gt 100) { $s = $s.Substring(0, 100) }
+              $body = @{ summary = $s; board = @{ name = $Board }; company = @{ id = $CompanyId }; initialDescription = $Description }
+              # Priority, type and subtype come from your Service Ticket Standards.
+              # If any name doesn't exist on the board, ConnectWise rejects the
+              # ticket, so retry once without them rather than failing the run.
+              $extras = @{}
+              if (-not [string]::IsNullOrWhiteSpace($Priority)) { $extras.priority = @{ name = $Priority } }
+              if (-not [string]::IsNullOrWhiteSpace($Type)) { $extras.type = @{ name = $Type } }
+              if (-not [string]::IsNullOrWhiteSpace($SubType)) { $extras.subType = @{ name = $SubType } }
+              if ($extras.Count -gt 0) {
+                  $full = $body.Clone()
+                  foreach ($k in $extras.Keys) { $full[$k] = $extras[$k] }
+                  try {
+                      return Invoke-RestMethod -Method Post -Uri "$($PsaCtx.Base)/service/tickets" -Headers $PsaCtx.Headers -Body ($full | ConvertTo-Json -Depth 6)
+                  }
+                  catch {
+                      Warn ("ConnectWise rejected the priority/type/subtype from your standards ({0} / {1} / {2}), so the ticket was created without them. Check the names exist on board '{3}'. Error: {4}" -f $Priority, $Type, $SubType, $Board, $_.Exception.Message)
+                  }
+              }
+              return Invoke-RestMethod -Method Post -Uri "$($PsaCtx.Base)/service/tickets" -Headers $PsaCtx.Headers -Body ($body | ConvertTo-Json -Depth 6)
+          }
+
+          function Add-CwNote {
+              param([int]$TicketId, [string]$Text)
+              $body = @{ text = $Text; detailDescriptionFlag = $false; internalAnalysisFlag = $true; resolutionFlag = $false } | ConvertTo-Json -Depth 4
+              $null = Invoke-RestMethod -Method Post -Uri "$($PsaCtx.Base)/service/tickets/$TicketId/notes" -Headers $PsaCtx.Headers -Body $body
+          }
+
+          function Set-CwStatus {
+              param([int]$TicketId, [string]$StatusName)
+              # PS 5.1 unwraps single-element arrays in ConvertTo-Json, and the
+              # ConnectWise PATCH body must be an array, so bracket it by hand.
+              $op = @{ op = 'replace'; path = 'status'; value = @{ name = $StatusName } } | ConvertTo-Json -Depth 5 -Compress
+              $body = "[$op]"
+              $null = Invoke-RestMethod -Method Patch -Uri "$($PsaCtx.Base)/service/tickets/$TicketId" -Headers $PsaCtx.Headers -Body $body
+          }
+
+          $PsaNotImplemented = "PSA '$Psa' is not implemented in this version. ConnectWise Manage is implemented; HaloPSA and Autotask are stubs. See README-split-request.md, section 'Adding another PSA'."
+
+          function Initialize-Psa {
+              switch ($Psa) {
+                  'connectwise' { return Initialize-Cw }
+                  'cw' { return Initialize-Cw }
+                  default { throw $PsaNotImplemented }
+              }
+          }
+          function Resolve-PsaCompany {
+              switch ($Psa) {
+                  'connectwise' { return Resolve-CwCompany }
+                  'cw' { return Resolve-CwCompany }
+                  default { throw $PsaNotImplemented }
+              }
+          }
+          function New-PsaTicket {
+              param([string]$Summary, [string]$Board, [string]$Description, [int]$CompanyId, [string]$Priority = '', [string]$Type = '', [string]$SubType = '')
+              switch ($Psa) {
+                  'connectwise' { return New-CwTicket -Summary $Summary -Board $Board -Description $Description -CompanyId $CompanyId -Priority $Priority -Type $Type -SubType $SubType }
+                  'cw' { return New-CwTicket -Summary $Summary -Board $Board -Description $Description -CompanyId $CompanyId -Priority $Priority -Type $Type -SubType $SubType }
+                  default { throw $PsaNotImplemented }
+              }
+          }
+          function Add-PsaNote {
+              param([int]$TicketId, [string]$Text)
+              switch ($Psa) {
+                  'connectwise' { Add-CwNote -TicketId $TicketId -Text $Text }
+                  'cw' { Add-CwNote -TicketId $TicketId -Text $Text }
+                  default { throw $PsaNotImplemented }
+              }
+          }
+          function Set-PsaStatus {
+              param([int]$TicketId, [string]$StatusName)
+              switch ($Psa) {
+                  'connectwise' { Set-CwStatus -TicketId $TicketId -StatusName $StatusName }
+                  'cw' { Set-CwStatus -TicketId $TicketId -StatusName $StatusName }
+                  default { throw $PsaNotImplemented }
+              }
+          }
+
+          $PsaCtx = Initialize-Psa
+
+          $ServiceBoard = Get-Answer @('serviceBoard', 'supportBoard')
+          if ([string]::IsNullOrWhiteSpace($ServiceBoard)) { $ServiceBoard = Secret 'CW-ServiceBoard' }
+          $QuoteBoard = Get-Answer @('quoteBoard', 'salesBoard')
+          if ([string]::IsNullOrWhiteSpace($QuoteBoard)) { $QuoteBoard = Secret 'CW-SalesBoard' }
+          if ([string]::IsNullOrWhiteSpace($ServiceBoard)) { throw 'No service board set. Send serviceBoard in the payload or add a CW-ServiceBoard secret.' }
+          if ([string]::IsNullOrWhiteSpace($QuoteBoard) -and $quoteLines.Count -gt 0) { throw 'This request needs a quote but no quote board is set. Send quoteBoard in the payload or add a CW-SalesBoard secret.' }
+
+          $companyId = Resolve-PsaCompany
+          if (-not $companyId) {
+              $m = 'Could not resolve the PSA company. Send companyIdentifier, companyName, or a CloudRadial companyId in the payload.'
+              if ($nodeInput -and $nodeInput.PSObject.Properties['quoteItems'] -and -not $nodeInput.PSObject.Properties['payload']) {
+                  $m = "$m An agent node ran ahead of this one and its output did not include the original intake, so there was nothing to resolve a company from. The classifier agent must copy its input 'payload' object through to its output unchanged."
+              }
+              throw $m
+          }
+
+          # =====================================================================
+          # 6. CREATE THE TICKETS
+          # =====================================================================
+          $srcNote = ''
+          if (-not [string]::IsNullOrWhiteSpace($sourceTicketId)) { $srcNote = " (split from ticket #$sourceTicketId)" }
+
+          if ($useAgentFormat) {
+              # Written by the classifier to your Service Ticket Standards.
+              $svcDesc = [string](Get-Prop $agentService 'description')
+              if (-not [string]::IsNullOrWhiteSpace($srcNote) -and -not $svcDesc.Contains("#$sourceTicketId")) { $svcDesc = "$svcDesc`n`nSplit from ticket #$sourceTicketId." }
+          }
+          else {
+              $svcDesc = "$($fp.Name) for $subject$srcNote."
+              if (-not [string]::IsNullOrWhiteSpace($requester)) { $svcDesc = "$svcDesc Requested by $requester." }
+              if ($serviceLines.Count -gt 0) { $svcDesc = "$svcDesc`n`nWhat is needed:`n" + ($serviceLines -join "`n") }
+              if ($quoteLines.Count -gt 0) { $svcDesc = "$svcDesc`n`nHardware / licences have been split onto a separate quote request." }
+          }
+
+          $svc = New-PsaTicket -Summary $serviceSummary -Board $ServiceBoard -Description $svcDesc -CompanyId ([int]$companyId) -Priority $servicePriority -Type $serviceType -SubType $serviceSubType
+          $serviceTicketId = [int]$svc.id
+
+          $quoteTicketId = 0
+          if ($quoteLines.Count -gt 0) {
+              $agentQuoteDesc = ''
+              if ($useAgentFormat -and $agentQuote) { $agentQuoteDesc = [string](Get-Prop $agentQuote 'description') }
+              if (-not [string]::IsNullOrWhiteSpace($agentQuoteDesc)) {
+                  # Written by the classifier to your Quote Request Standards.
+                  $qDesc = $agentQuoteDesc
+                  if (-not [string]::IsNullOrWhiteSpace($srcNote) -and -not $qDesc.Contains("#$sourceTicketId")) { $qDesc = "$qDesc`n`nSplit from ticket #$sourceTicketId." }
+              }
+              else {
+                  $qDesc = "Quote requested for $subject$srcNote."
+                  if (-not [string]::IsNullOrWhiteSpace($requester)) { $qDesc = "$qDesc Requested by $requester." }
+                  $qDesc = "$qDesc`n`nTo be quoted:`n" + ($quoteLines -join "`n")
+              }
+              if ($missingInfo.Count -gt 0) { $qDesc = "$qDesc`n`nStill needed before this can be quoted:`n" + (($missingInfo | ForEach-Object { "- $_" }) -join "`n") }
+              $qDesc = "$qDesc`n`nRelated service ticket: #$serviceTicketId."
+              $quote = New-PsaTicket -Summary $quoteSummary -Board $QuoteBoard -Description $qDesc -CompanyId ([int]$companyId)
+              $quoteTicketId = [int]$quote.id
+          }
+
+          # =====================================================================
+          # 7. INTERNAL NOTE SUMMARY ON EVERY TICKET
+          # =====================================================================
+          $summaryLines = @()
+          $summaryLines += 'Internal note summary'
+          $summaryLines += "Split by AutomationAI workflow: Split Request - Service + Quote"
+          $summaryLines += "Intake: $sourceKind"
+          if (-not [string]::IsNullOrWhiteSpace($formName)) { $summaryLines += "Form: $formName" }
+          $summaryLines += "Profile matched: $($fp.Name) (matched on $matchedOn)"
+          if (-not [string]::IsNullOrWhiteSpace($requester)) { $summaryLines += "Requested by: $requester" }
+          $summaryLines += "Service ticket: #$serviceTicketId on board $ServiceBoard"
+          if ($quoteTicketId -gt 0) { $summaryLines += "Quote ticket: #$quoteTicketId on board $QuoteBoard" }
+          else { $summaryLines += 'Quote ticket: none - nothing in this request needs purchasing' }
+          if (-not [string]::IsNullOrWhiteSpace($sourceTicketId)) { $summaryLines += "Source ticket: #$sourceTicketId" }
+          if ($quoteLines.Count -gt 0) { $summaryLines += ('Quote items: ' + (($quoteLines | ForEach-Object { $_.TrimStart('- ') }) -join '; ')) }
+          if ($null -ne $aiConfidence) { $summaryLines += ("Classifier confidence: $aiConfidence") }
+          if (-not [string]::IsNullOrWhiteSpace($aiReason)) { $summaryLines += ("Classifier reasoning: $aiReason") }
+          if ($aiMultiple) { $summaryLines += 'MORE THAN ONE REQUEST: the classifier thinks this ticket holds unrelated jobs. Check whether it needs splitting further.' }
+          $summaryLines += "Ticket text written by: $formattedBy"
+          if ($useAgentFormat -and $standardsApplied.Count -gt 0) { $summaryLines += ('Standards applied: ' + ($standardsApplied -join '; ')) }
+          if ($missingInfo.Count -gt 0) { $summaryLines += ('Missing information: ' + ($missingInfo -join '; ')) }
+          if ($reviewRequired) {
+              if (-not $structured -and $matchedOn -ne 'AI classification') {
+                  $summaryLines += 'REVIEW REQUIRED: nothing could be split automatically. The whole request is on this service ticket. Confirm whether anything needs quoting and raise the quote by hand.'
+              }
+              else {
+                  $summaryLines += ('REVIEW REQUIRED: ' + ($warnings -join ' '))
+              }
+          }
+          $internalSummary = $summaryLines -join "`n"
+
+          try { Add-PsaNote -TicketId $serviceTicketId -Text $internalSummary }
+          catch { Warn "Internal note not added to service ticket #$($serviceTicketId): $($_.Exception.Message)" }
+
+          if ($quoteTicketId -gt 0) {
+              try { Add-PsaNote -TicketId $quoteTicketId -Text $internalSummary }
+              catch { Warn "Internal note not added to quote ticket #$($quoteTicketId): $($_.Exception.Message)" }
+          }
+
+          # =====================================================================
+          # 8. SOURCE TICKET - link, note, and close as split
+          # =====================================================================
+          $closeFlag = Get-Answer @('closeSourceTicket')
+          $shouldCloseSource = $false
+          if ($closeFlag -match '^(true|yes|1)$') { $shouldCloseSource = $true }
+          if ($sourceKind -match 'serviceai') { $shouldCloseSource = $true }
+          if ($closeFlag -match '^(false|no|0)$') { $shouldCloseSource = $false }
+          if ($reviewRequired -and $shouldCloseSource) {
+              $shouldCloseSource = $false
+              Warn 'Source ticket left open because the split needs human review.'
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($sourceTicketId) -and $sourceTicketId -match '^\d+$') {
+              $srcId = [int]$sourceTicketId
+              if ($srcId -ne $serviceTicketId) {
+                  try { Add-PsaNote -TicketId $srcId -Text $internalSummary }
+                  catch { Warn "Internal note not added to source ticket #$($srcId): $($_.Exception.Message)" }
+
+                  if ($shouldCloseSource) {
+                      $splitStatus = Get-Answer @('splitClosedStatus')
+                      if ([string]::IsNullOrWhiteSpace($splitStatus)) { $splitStatus = Secret 'PSA-SplitStatus' }
+                      if ([string]::IsNullOrWhiteSpace($splitStatus)) {
+                          Warn "Source ticket #$srcId was left open: no split status configured. Send splitClosedStatus in the payload or add a PSA-SplitStatus secret with a status name that exists on that board."
+                      }
+                      else {
+                          try { Set-PsaStatus -TicketId $srcId -StatusName $splitStatus }
+                          catch { Warn "Could not set status '$splitStatus' on source ticket #$($srcId): $($_.Exception.Message)" }
+                      }
+                  }
+              }
+          }
+
+          # =====================================================================
+          # 9. OUTPUT
+          # =====================================================================
+          $message = "Created service ticket #$serviceTicketId"
+          if ($quoteTicketId -gt 0) { $message = "$message and quote ticket #$quoteTicketId" }
+          else { $message = "$message (no quote needed)" }
+          $message = "$message for $subject."
+          if ($warnings.Count -gt 0) { $message = "$message Warnings: " + ($warnings -join ' | ') }
+
+          Set-NodeOutput @{
+              status          = 'success'
+              message         = $message
+              serviceTicketId = $serviceTicketId
+              quoteTicketId   = $quoteTicketId
+              sourceTicketId  = $sourceTicketId
+              companyId       = $companyId
+              subject         = $subject
+              profileMatched  = $fp.Name
+              matchedOn       = $matchedOn
+              quoteItems      = $quoteLines
+              serviceItems    = $serviceLines
+              reviewRequired  = $reviewRequired
+              aiConfidence    = $aiConfidence
+              aiMultiple      = $aiMultiple
+              aiReason        = $aiReason
+              internalSummary = $internalSummary
+              formattedBy     = $formattedBy
+              standardsSource = $standardsSource
+              standardsApplied = $standardsApplied
+              missingInfo     = $missingInfo
+              warnings        = $warnings
+          }
+        timeoutSeconds: 300
+        retryCount: 0
+        parameters: []
+        aiExtensions:
+          - connectwise-manage
+          - cloudradial-v2-companies
+  connections:
+    - source: start
+      target: node-classify
+      sourceHandle: null
+    - source: node-classify
+      target: node-2
+      sourceHandle: null
+    - source: node-2
+      target: end
+      sourceHandle: null
+  startActivityId: start

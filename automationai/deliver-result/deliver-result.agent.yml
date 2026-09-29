@@ -1,0 +1,77 @@
+automationsAgent: 1
+agent:
+  slug: deliver-result
+  name: Deliver Result
+  vendor: Azurative
+  version: 0.1.0
+  description: Pluggable delivery step — turn a generic result into a PSA ticket (any connected PSA), a Postmark email, or a ServiceAI return-contract, chosen by a channel.
+  category: Utility
+  tags:
+    - psa
+    - email
+    - serviceai
+    - ticketing
+    - delivery
+  detailsMarkdown: |
+    ## How it works
+    A reusable delivery step other automations call (as a workflow **agent node**) so
+    they never hardcode one PSA. Give it a generic result and a `channel`:
+
+    - **`psa`** — create a ticket in whichever **PSA extension is available to this run**
+      (ConnectWise / Autotask / Syncro / HaloPSA / Zendesk). Set the run's
+      `allowedExtensions` on the calling node to the partner's connected PSA — the agent
+      uses that extension's create-ticket / note tools; you don't rebuild per PSA.
+    - **`email`** — send via the **Postmark** extension to the named recipients.
+    - **`serviceai`** — create nothing; return the ServiceAI contract
+      (`status` / `public_note` / `internal_note` / `ticket_id`) so a **Triage Action**
+      posts it. Use this when the automation was triggered by ServiceAI.
+
+    Set `fromEmail` (a verified Postmark sender) and, for PSA, `defaultBoard` (the board /
+    queue / group for new tickets). Runs **dry-run by default**.
+  systemPrompt: |
+    YOUR GOAL: deliver the result you are given through the requested channel. Read the
+    `channel` input: "psa", "email", or "serviceai". Do only what that channel needs.
+    Honor dry-run — when previewing, describe the exact call without making it.
+
+    Inputs you receive: channel; subject; body (may be HTML or plain); optional cc (array
+    of emails); priority; internalNote; and routing hints (companyId / companyIdentifier /
+    companyName for PSA; toEmail array for email; psa to name a specific PSA if several
+    are available).
+
+    === channel = psa ===
+    Use the PSA extension available to this run (there is normally exactly one connected —
+    ConnectWise, Autotask, Syncro, HaloPSA, or Zendesk). Resolve the company/organization
+    from companyId / companyIdentifier / companyName. Create a ticket with the subject as
+    the summary/title and the body as the description, on the board/queue in defaultBoard,
+    at the given priority; add the cc recipients if the PSA supports it and attach the
+    internalNote as an internal/private note. Return the created ticket id.
+
+    === channel = email ===
+    Send via the Postmark extension (postmark_send_email): From = fromEmail, To = the
+    toEmail recipients (comma-joined), Cc = cc, Subject = subject, HtmlBody = body.
+    Confirm the response ErrorCode is 0; a non-zero code (e.g. unverified sender) is a
+    failure — report it. Return the MessageID.
+
+    === channel = serviceai ===
+    Do NOT create a ticket or send email. Return the contract for the calling ServiceAI
+    Triage Action to post: status, message, public_note (client-safe), internal_note
+    (may hold technical detail), and ticket_id if one was supplied in the input.
+
+    Never put secrets, temporary passwords, or sensitive detail in a client-visible field
+    (public_note / email body) — those go only in internalNote / internal_note.
+  model: gpt-5.4
+  requiredExtensionSlugs:
+    - postmark
+    - connectwise-manage
+  requiredSecretNames: []
+  variablesJson: |
+    [
+      {"name":"fromEmail","label":"From address for Postmark email (verified sender)","type":"string","default":"","required":false},
+      {"name":"defaultBoard","label":"PSA board / queue / group for new tickets","type":"string","default":"","required":false},
+      {"name":"messageStream","label":"Postmark message stream","type":"string","default":"outbound","required":false}
+    ]
+  inputSchema: |
+    {"type":"object","properties":{"channel":{"type":"string","enum":["psa","email","serviceai"],"default":"psa"},"subject":{"type":"string"},"body":{"type":"string"},"cc":{"type":"array","items":{"type":"string"}},"priority":{"type":"string"},"internalNote":{"type":"string"},"companyId":{"type":"string"},"companyIdentifier":{"type":"string"},"companyName":{"type":"string"},"toEmail":{"type":"array","items":{"type":"string"}},"psa":{"type":"string"},"ticketId":{"type":"string"}},"required":["channel","subject","body"]}
+  outputSchema: |
+    {"type":"object","properties":{"channel":{"type":"string"},"delivered":{"type":"boolean"},"ticketId":{"type":"string"},"emailMessageId":{"type":"string"},"status":{"type":"string"},"message":{"type":"string"},"public_note":{"type":"string"},"internal_note":{"type":"string"}}}
+  dryRunDefault: true

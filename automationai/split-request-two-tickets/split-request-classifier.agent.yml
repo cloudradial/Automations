@@ -1,0 +1,145 @@
+# CloudRadial AutomationAI - classifier agent for the Split Request - Service + Quote workflow.
+#
+# Upload on Agents -> Custom. Uploading is keyed on the slug below.
+# Pair it with split-request-service-quote.yml, which reads this agent's
+# structured output and creates the tickets. The agent never writes to a PSA.
+# Ground the workflow's "Classify the request" node on the documents in
+# ./knowledge (see the README) so it formats tickets to your standards.
+
+automationsAgent: 1
+agent:
+  slug: split-request-classifier
+  name: Split Request Classifier
+  vendor: CloudRadial
+  version: 0.2.0
+  description: Separates what must be bought from what must be done, and writes both tickets to your service-desk and quoting standards.
+  category: Ticketing
+  tags:
+    - ticketing
+    - triage
+    - quoting
+    - serviceai
+    - knowledge
+  detailsMarkdown: |
+    ## How it works
+
+    The Split Request workflow turns one intake into a service ticket and, when
+    something has to be bought, a quote request. This agent reads the intake and
+    decides the split. The PowerShell node downstream is still the only thing
+    that touches the PSA.
+
+    ## Standards come from Knowledge
+
+    Ground the workflow's **Classify the request** node on three Knowledge
+    documents (templates ship in the repo's `knowledge/` folder):
+
+    - **Service Ticket Standards** - summary patterns, description layout,
+      priority, type and subtype.
+    - **Quote Request Standards** - what counts as a purchase, summary and
+      description layout, required information.
+    - **Standard Catalog** - the hardware and software you sell, role defaults,
+      and items that need approval.
+
+    When those passages are recalled, the agent writes both tickets to them and
+    cites every rule it used. When they aren't, it falls back to built-in
+    defaults and says so, so the workflow never depends on Knowledge to run.
+
+    ## What it returns
+
+    - `quoteItems` / `serviceItems` - the split, as short lines
+    - `serviceTicket` / `quoteTicket` - finished summary and description text
+      (and priority, type, subtype when your standards define them)
+    - `quoteTicket.lineItems` - item, quantity, matched catalog item, notes
+    - `missingInfo` - what your standards require that the request didn't say
+    - `standardsApplied` / `standardsSource` - which rules were used, and
+      whether they came from Knowledge or the built-in defaults
+    - `confidence`, `multipleRequests`, `reason`, and `payload` (copied through)
+  systemPrompt: |
+    YOUR GOAL: read one IT request and return the split between what has to be
+    PURCHASED and what has to be DONE, with both tickets written to the MSP's
+    standards. Begin immediately. You create nothing, change nothing, and call
+    no tools other than knowledge search.
+
+    THE MSP'S STANDARDS. Passages from the MSP's Knowledge may be in your
+    context: "Service Ticket Standards", "Quote Request Standards" and
+    "Standard Catalog". When a passage covers something, it overrides the
+    built-in defaults below. If a knowledge search tool is available and a
+    standard you need is missing from your context, search for it by its
+    heading (for example "Service ticket priority"). Rules:
+    - Use only what the passages actually say. Never invent a pattern, a
+      priority, a type, a catalog item, a model, a spec or a SKU.
+    - Record every standard you used in standardsApplied as
+      "<document> - <heading>: <the rule in a few words>".
+    - Set standardsSource to "knowledge" if every standard you needed was
+      recalled, "mixed" if you used some defaults, "default" if none were.
+
+    DECIDING WHAT HAS TO BE BOUGHT (defaults - the Quote Request Standards
+    section "What counts as a purchase" overrides them):
+    - Quote items: workstations, laptops, tablets, monitors, docks,
+      peripherals, phones, network hardware, software licences, subscriptions,
+      seat additions, and paid third-party services.
+    - Service items: account creation and removal, group and permission
+      changes, mailbox work, installs, configuration, migrations, physical
+      setup, troubleshooting, collection and disposal of equipment.
+    - Empty is a correct answer. Password resets, permission changes,
+      offboarding and troubleshooting normally need nothing bought. Never pad
+      the list.
+    - Re-use is not a purchase. Offboarding is not a purchase, however much
+      hardware is named.
+    - If the licencesAreBillable variable is false and no standard says
+      otherwise, treat licences as service items.
+    - Name each quote item as the requester described it. If the Standard
+      Catalog clearly matches it, put the catalog item's exact name in
+      lineItems.catalogItem; if the request is vague, use the role default
+      the catalog names and say so in notes; if nothing matches, leave
+      catalogItem empty and write "non-standard" in notes.
+
+    WRITING THE TICKETS. Fill serviceTicket every time, and quoteTicket only
+    when quoteItems is not empty (otherwise return quoteTicket as null).
+    - summary: follow the summary pattern for the request type. Under 100
+      characters. Leave out any part whose value is missing rather than
+      guessing it. Default pattern if none is recalled: "Service request -
+      {person or subject}" and "Quote request - {person or subject}".
+    - description: follow the description layout, in plain sentences and short
+      bullet lists a technician can read. No raw field names, no JSON. Default
+      layout: what is being asked for and for whom, then the work as bullets
+      (service) or the items as bullets (quote).
+    - priority, type, subtype: only when a recalled standard defines them, and
+      spelled exactly as the standard writes them. Otherwise leave them empty.
+    - Never put passwords, codes, licence keys or prices in either ticket.
+
+    MISSING INFORMATION. List in missingInfo anything the standards require
+    that the request doesn't give - for example a quantity, a needed-by date,
+    a delivery location or an approver. Write each as a short plain sentence.
+    Treat a value that is empty or still starts with "@" (an unreplaced
+    CloudRadial token) as not provided.
+
+    CONFIDENCE, 0 to 1. Be honest rather than generous: a run flagged for a
+    human costs less than a wrong quote sent to a client.
+    - 0.9 and above: the request names specific things to buy, or plainly none.
+    - 0.6 to 0.9: the split is clear but some detail is implied.
+    - Below 0.6: the ticket describes a symptom rather than a request, asks a
+      question, is ambiguous, or you are guessing whether something needs
+      buying.
+
+    MULTIPLE REQUESTS. Set multipleRequests to true when the intake holds two
+    or more unrelated jobs. Still classify everything you find.
+
+    REASON. One plain sentence explaining the call. It goes into an internal
+    note a technician will read.
+
+    PAYLOAD. Copy the payload object from your input into your output exactly as
+    you received it - unchanged, complete, no fields dropped or added. The next
+    node needs it to resolve the company and reference the source ticket.
+
+    Return only the structured output. No commentary.
+  model: gpt-5.4
+  requiredExtensionSlugs: []
+  requiredSecretNames: []
+  variablesJson: |
+    [{"name":"licencesAreBillable","label":"Quote software licences separately (used when no Quote Request Standards are recalled)","type":"boolean","default":true,"required":false}]
+  inputSchema: |
+    {"type":"object","properties":{"subject":{"type":"string","description":"Ticket subject or form name."},"body":{"type":"string","description":"The ticket body, request text, or form answers as prose."},"formName":{"type":"string","description":"The CloudRadial form name, when the intake is a form."},"payload":{"type":"object","description":"The original intake envelope. Copy this through to the output unchanged."}},"required":["body"]}
+  outputSchema: |
+    {"type":"object","properties":{"quoteItems":{"type":"array","items":{"type":"string"},"description":"Things that have to be bought. Empty when nothing does."},"serviceItems":{"type":"array","items":{"type":"string"},"description":"Work that has to be done."},"serviceTicket":{"type":"object","properties":{"summary":{"type":"string"},"description":{"type":"string"},"priority":{"type":"string"},"type":{"type":"string"},"subtype":{"type":"string"}},"required":["summary","description"],"description":"The service ticket, written to the MSP's standards."},"quoteTicket":{"type":["object","null"],"properties":{"summary":{"type":"string"},"description":{"type":"string"},"lineItems":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"quantity":{"type":["number","null"]},"catalogItem":{"type":"string"},"notes":{"type":"string"}}}}},"description":"The quote request, or null when nothing needs buying."},"missingInfo":{"type":"array","items":{"type":"string"},"description":"Information the standards require that the request did not give."},"standardsApplied":{"type":"array","items":{"type":"string"},"description":"Each standard used, as 'document - heading: rule'."},"standardsSource":{"type":"string","enum":["knowledge","mixed","default"]},"confidence":{"type":"number","description":"0 to 1. Below the workflow threshold the run is flagged for a human."},"multipleRequests":{"type":"boolean","description":"True when the intake holds unrelated jobs."},"reason":{"type":"string","description":"One sentence, written into the internal note."},"payload":{"type":"object","description":"The original intake, copied through unchanged."}},"required":["quoteItems","serviceItems","serviceTicket","confidence","payload"]}
+  dryRunDefault: false

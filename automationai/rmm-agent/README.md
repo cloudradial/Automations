@@ -29,7 +29,18 @@ extension); secrets are `Datto-ApiUrl` / `Datto-ApiKey` / `Datto-ApiSecret`.
 
 - Extension slugs: `datto-rmm` (confirmed), `cloudradial-v2-companies` /
   `cloudradial-v2-services` (confirmed from the migration workflow), and your PSA
-  extension slug (`connectwise-manage` is a placeholder — set your real CW slug).
-- The agent runs **dry-run by default**; turn it off on the deployment when ready.
+  extension slug (`connectwise-manage` — the certified ConnectWise extension; swap it for `autotask-psa`, `halo-psa` or `syncro` if you use a different PSA).
+- The agent runs **dry-run by default** — see [Dry run and going live](#dry-run-and-going-live).
 - Remediation keeps `autoApprove: false` so the cleanup job and any ticket need your
   approval. Patch compliance uses `autoApprove: true` (card upserts only).
+
+## Dry run and going live
+
+`rmm-agent.agent.yml` ships with `dryRunDefault: true`. In dry run the agent does all its reads and shows you each write it *would* make, but changes nothing. AutomationAI has **no dry-run switch** on the workflow's Agent node, the deployment, or the agent's page. The setting lives only in the agent file, so going live means re-importing it:
+
+1. Open `rmm-agent.agent.yml` and change `dryRunDefault: true` to `dryRunDefault: false`. Leave everything else the same.
+2. On **Agents → Custom → Import**, upload the edited file. Import is keyed on the slug, so it replaces the installed agent in place. Workflows that use it pick up the change on their next run; nothing needs re-publishing.
+3. Run once and confirm it's live: Patch Compliance should report `cardsWritten` of 1 or more and `cardsPreviewed: 0`. RMM Auto-Remediation stays approval-gated either way (`autoApprove: false`), so its live fixes still wait for you in the Inbox.
+4. To go back to preview, set it to `true` and re-import.
+
+The change applies to **every** workflow that uses this agent (Patch Compliance and RMM Auto-Remediation). Keep the repo copy on `true`, so a fresh install always starts in preview.

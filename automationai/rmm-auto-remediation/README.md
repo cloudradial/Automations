@@ -22,6 +22,7 @@ alert and, for a safe case, remediate it. This is one of the rmm-agent "commands
 ## Confirm in your tenant
 
 - Extensions: `datto-rmm`, `connectwise-manage` (set your real PSA slug if different).
+- Dry run is set on the agent, not this workflow — see [Dry run and going live](../rmm-agent/README.md#dry-run-and-going-live). While the agent is in dry run, remediation only previews the cleanup job and ticket.
 - `autoApprove: false` — the cleanup job and any ticket wait for your approval in the Inbox.
 - **Safety:** servers are never auto-remediated (ticket only); technical detail stays in the
   internal note.

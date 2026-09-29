@@ -6,7 +6,7 @@ The **judgment** half of a ScalePad Lifecycle Manager → CloudRadial migration:
 
 The **bulk** half — devices, servers, installed software, assessments, roadmap and budget, deliverable PDFs — is the deterministic [ScalePad to CloudRadial Sync](../scalepad-cloudradial-sync/) workflow, which follows every ScalePad page. The agent tells you what the sync will move and what needs a human; it makes at most 10 corrections itself.
 
-Use it with [`lifecycle-manager` 1.2.0](../scalepad-lifecycle-manager-extension/): the catalog 1.0.0 returns only the first page of every ScalePad list.
+It needs the `lifecycle-manager` (ScalePad) extension at **1.2.0 or later**: 1.0.0 returns only the first page of every ScalePad list.
 
 ## Pieces
 
@@ -49,15 +49,14 @@ Example first run: `{"mode":"plan","companyId":1,"phase":"devices"}`
 
 **What it hands to the Sync workflow.** For devices, assets, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"` and the count, plus a single **`syncRun`** — the exact run input for the Sync, for example `{"companyId":9,"scalePadClientId":"…","mode":"plan","phases":"all"}`. Paste it as the Sync's run input. `phases` only ever uses the Sync's six names — initiatives and contracts are `roadmap`, deliverable PDFs are `archive`.
 
-**Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint — network, mobile and imaging devices — and devices with no serial number go to one flexible asset type, **ScalePad Assets**, through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools ([0.2.1](../cloudradial-v2-compliance-extension/) — 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
+**Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint — network, mobile and imaging devices — and devices with no serial number go to one flexible asset type, **ScalePad Assets**, through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools (0.2.1 or later — 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
 
 ## Confirm in your tenant
 
 - **Extension slugs:** `lifecycle-manager` (ScalePad), `cloudradial-v2-companies`,
   `cloudradial-v2-endpoints`, `cloudradial-v2-services` — confirmed from the LifeCycle Manager
-  migration workflow — and `cloudradial-v2-compliance` (flexible assets; import
-  [0.2.1](../cloudradial-v2-compliance-extension/)).
-- **ScalePad paging:** with the catalog `lifecycle-manager` 1.0.0 every list returns only its first page, so counts come out low. Import [1.2.0](../scalepad-lifecycle-manager-extension/) first.
+  migration workflow — and `cloudradial-v2-compliance` (flexible assets; 0.2.1 or later).
+- **ScalePad paging:** with the catalog `lifecycle-manager` 1.0.0 every list returns only its first page, so counts come out low. Check the installed version is 1.2.0 or later.
 - **Company mapping:** confirm the client resolves to a real client company, **not
   `companyId 1`** (the partner's own record). Check `clientsMapped[].matchConfidence`; if it
   falls back to 1 or lands in `unresolvedClients`, pass an explicit `companyId`.

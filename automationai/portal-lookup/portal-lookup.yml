@@ -1,0 +1,109 @@
+automationsWorkflow: 1
+name: Portal Lookup
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 100
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Run inputs
+      type: powershell-script
+      position:
+        x: 300
+        y: 100
+      properties:
+        script: |
+          # === NODE: Run inputs ===
+          # Reads the run input (Run dialog, Routine or webhook body) and fills in the defaults, so the
+          # agent's inputs are always bound. Send any of these fields to change a run; leave them all out
+          # for a portal-wide snapshot.
+          #   companyName          - brief on one company by name
+          #   cloudradialCompanyId - brief on one company by CloudRadial companyId
+          #   warrantyWindowDays   - days ahead that count as "expiring soon" (default 90)
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+
+          $companyName = ([string](Get-Prop $in 'companyName')).Trim()
+          $companyId = 0; [int]::TryParse([string](Get-Prop $in 'cloudradialCompanyId'), [ref]$companyId) | Out-Null
+          $window = 90; if (-not [int]::TryParse([string](Get-Prop $in 'warrantyWindowDays'), [ref]$window) -or $window -lt 1) { $window = 90 }
+
+          $scope = if ($companyName) { "the company named '$companyName'" } elseif ($companyId -gt 0) { "the company with CloudRadial companyId $companyId" } else { 'the whole portal' }
+          $request = "Produce a read-only portal briefing for $scope. Count a warranty as expiring soon when it ends within $window days."
+
+          Set-NodeOutput ([ordered]@{
+              request = $request; companyName = $companyName; cloudradialCompanyId = $companyId; warrantyWindowDays = $window
+              message = "Run inputs: briefing for $scope, warranty window $window days."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        # No binding: this step receives the run's Trigger input (empty is fine - defaults apply).
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyName": "KMCO Group Ltd"}
+    - id: node-agent
+      name: Portal Briefing
+      type: agent
+      position:
+        x: 520
+        y: 100
+      properties:
+        # Runs the CloudRadial UCP Assistant (import cloudradial-ucp/ first). The goal keeps this run
+        # read-only and sets the briefing format; the run inputs arrive as `request` and `companyName`.
+        agentSlug: cloudradial-ucp-assistant
+        goal: |
+          Produce a clear, current CloudRadial portal briefing for meeting prep, as described in
+          the request you are given. This run is READ-ONLY: never call a create, update, patch or
+          delete tool. If part of the request could only be met by changing data, skip it and say so.
+
+          If a company is named (companyName, or a companyId in the request), resolve that one
+          company - exact name first, then a close match. If the match is ambiguous, list the
+          candidates instead of guessing. If no company is named, give a portal-wide snapshot:
+          total companies, then the companies that stand out (most endpoints, most expired
+          warranties, obvious setup gaps).
+
+          For each company in scope, cover:
+            1. Company - name, account manager, PSA identifier, and setup gaps (no logo, no
+               account manager).
+            2. Users - count and role breakdown.
+            3. Endpoints - device count; how many warranties have expired and how many expire
+               within the window in the request.
+            4. Health - anything that looks unconfigured, empty or stale.
+
+          Lead with a one-paragraph summary a technician could read aloud before a call, then the
+          details per section. Write plain sentences, not field dumps.
+        allowedExtensions:
+          - cloudradial-v2-companies
+          - cloudradial-v2-endpoints
+        model: ""
+        timeoutSeconds: 900
+        # false = any mutating call would pause in the Inbox. This workflow never needs one.
+        autoApprove: false
+        # Pre-bound to the Run inputs step - nothing to map after import.
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}","companyName":"{{ nodes.node-inputs.output.companyName }}"}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 740
+        y: 100
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

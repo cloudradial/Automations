@@ -12,12 +12,8 @@ definition:
     properties:
       webhookEnabled: false
   # ---------------------------------------------------------------------------
-  # Agent node — runs the CloudRadial UCP Assistant agent toward the goal below.
-  # Config field names (goal / allowedExtensions / model / timeoutSeconds /
-  # autoApprove) are per the "The Agent node" docs. `agentSlug` references the
-  # saved custom agent by its slug; if your portal uses a different key name for
-  # that reference, set it in the node editor after import (or clear it to run
-  # the goal inline with the extensions listed here).
+  # Agent node - runs the CloudRadial UCP Assistant (import cloudradial-ucp/ first)
+  # toward a read-only audit goal.
   # ---------------------------------------------------------------------------
   - id: node-agent
     name: Fleet Audit
@@ -32,7 +28,7 @@ definition:
         warranty is expired or unknown, and flag any company that has no account
         manager assigned. Return a short per-company summary sorted by the most
         out-of-warranty endpoints first, followed by a one-paragraph overview of
-        the whole estate. This is a read-only audit — do not change anything.
+        the whole estate. This is a read-only audit - do not change anything.
       allowedExtensions:
       - cloudradial-v2-companies
       - cloudradial-v2-endpoints
@@ -40,85 +36,78 @@ definition:
       timeoutSeconds: 900
       autoApprove: false
   # ---------------------------------------------------------------------------
-  # Email node — sends the agent's `answer` via Postmark (same pattern as the
-  # sample-workflow / cloudradial-status workflows).
+  # Message node - turns the audit into the email Deliver Result sends.
+  # Set the recipients here.
   # ---------------------------------------------------------------------------
-  - id: node-email
-    name: Email Audit
+  - id: node-message
+    name: Build Email
     type: powershell-script
     position:
       x: 540
       y: 120
     properties:
       script: |-
-        $postmarkServerToken = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Postmark-ServerToken' -AsPlainText -ErrorAction SilentlyContinue
-        $postmarkFromEmail   = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Postmark-FromEmail'   -AsPlainText -ErrorAction SilentlyContinue
-        $postmarkApiUrl      = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Postmark-ApiUrl'      -AsPlainText -ErrorAction SilentlyContinue
-
-        # ---- set your recipient ----
-        $recipient = 'team@yourmsp.com'
-
-        $missing = @()
-        if ([string]::IsNullOrWhiteSpace($postmarkServerToken)) { $missing += 'Postmark-ServerToken' }
-        if ([string]::IsNullOrWhiteSpace($postmarkFromEmail))   { $missing += 'Postmark-FromEmail' }
-        if ([string]::IsNullOrWhiteSpace($postmarkApiUrl))      { $missing += 'Postmark-ApiUrl' }
-        if ($missing.Count -gt 0) {
-            $m = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missing -join ', ')"
-            Set-NodeOutput @{ status = 'error'; message = $m }
-            throw $m
-        }
+        # ---- set your recipients ----
+        $recipients = @('team@yourmsp.com')
 
         # The Agent node's output (its 'answer' field) arrives as this node's input.
         $agent = Get-NodeInput
-        $answer = if ($agent -and $agent.answer) { [string]$agent.answer } else { 'The agent returned no audit output.' }
+        $answer = if ($agent -and $agent.answer) { [string]$agent.answer } else { 'The audit returned no output.' }
         $safe = ($answer -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;')
-
         $subject = "Weekly Fleet Audit - $((Get-Date).ToString('yyyy-MM-dd'))"
-        $htmlBody = "<html><body><h2>Weekly Fleet Audit</h2><pre style='font-family:Segoe UI,Arial,sans-serif;white-space:pre-wrap'>$safe</pre></body></html>"
 
-        $uri = ($postmarkApiUrl.TrimEnd('/') + '/email')
-        $headers = @{
-            'X-Postmark-Server-Token' = $postmarkServerToken
-            'Accept'                  = 'application/json'
-            'Content-Type'            = 'application/json'
-        }
-        $body = @{
-            From          = $postmarkFromEmail
-            To            = $recipient
-            Subject       = $subject
-            TextBody      = $answer
-            HtmlBody      = $htmlBody
-            MessageStream = 'outbound'
-        } | ConvertTo-Json -Depth 10
-
-        $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body
-
-        Set-NodeOutput @{
-            status     = 'success'
-            message    = "Fleet audit emailed to $recipient"
-            to         = $recipient
-            subject    = $subject
-            postmarkId = $response.MessageID
-        }
-      timeoutSeconds: 1800
+        Set-NodeOutput ([ordered]@{
+            channel = 'email'
+            subject = $subject
+            body    = "<html><body><h2>Weekly Fleet Audit</h2><pre style='font-family:Segoe UI,Arial,sans-serif;white-space:pre-wrap'>$safe</pre></body></html>"
+            toEmail = @($recipients)
+            message = "Audit email ready for $($recipients -join ', ')."
+        })
+      timeoutSeconds: 60
       retryCount: 0
       parameters: []
-      aiExtensions:
+      aiExtensions: []
+  # ---------------------------------------------------------------------------
+  # Delivery node - the shared Deliver Result agent (import deliver-result/ first)
+  # sends the email through the Postmark extension.
+  # ---------------------------------------------------------------------------
+  - id: node-deliver
+    name: Send Audit
+    type: agent
+    position:
+      x: 760
+      y: 120
+    properties:
+      agentSlug: deliver-result
+      goal: |-
+        Deliver the weekly fleet audit you are given by email, exactly as provided:
+        use the subject, body and recipients in your inputs. Do not open a ticket.
+      allowedExtensions:
       - postmark
+      model: ''
+      timeoutSeconds: 300
+      # true = the send goes out unattended. Deliver Result itself ships in dry run
+      # (dryRunDefault: true) until you re-import it live - see its README.
+      autoApprove: true
+      # Pre-bound to the Build Email step - nothing to map after import.
+      inputBindingsJson: '{"channel":"{{ nodes.node-message.output.channel }}","subject":"{{ nodes.node-message.output.subject }}","body":"{{ nodes.node-message.output.body }}","toEmail":"{{ nodes.node-message.output.toEmail }}"}'
   - id: end
     name: End
     type: end
     position:
-      x: 760
+      x: 980
       y: 120
   connections:
   - source: start
     target: node-agent
     sourceHandle: null
   - source: node-agent
-    target: node-email
+    target: node-message
     sourceHandle: null
-  - source: node-email
+  - source: node-message
+    target: node-deliver
+    sourceHandle: null
+  - source: node-deliver
     target: end
     sourceHandle: null
   startActivityId: start

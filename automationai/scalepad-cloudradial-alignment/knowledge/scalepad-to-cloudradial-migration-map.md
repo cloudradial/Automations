@@ -213,8 +213,8 @@ The source is **ScalePad**, not IT Glue. ScalePad hardware that doesn't belong i
 
 ## 12. Automation vehicles (AutomationAI)
 
-- **Workflow — *ScalePad to CloudRadial Sync*** (`automationai/scalepad-cloudradial-sync/`). The deterministic bulk transfer, in phases: devices → assets (other hardware to flexible assets) → software → assessments → roadmap and budget → archive. These six names are the only valid values for its `phases` input — initiatives and contracts are `roadmap`, deliverables are `archive`. Follows every page, `plan` / `apply`, counts per phase.
-- **Extension — `lifecycle-manager` 1.2.0** (`automationai/scalepad-lifecycle-manager-extension/`). Every list tool pages automatically; adds installed software, assessments and deliverables for agents.
-- **Extension — `cloudradial-v2-compliance` 0.2.1** (`automationai/cloudradial-v2-compliance-extension/`). Flexible-asset writes that actually carry data (patch with `traitsJson`, type with `fields`).
+- **Workflow — *ScalePad to CloudRadial Sync*** (`automationai/scalepad-cloudradial-sync/`). The deterministic bulk transfer, in phases: devices → assets (other hardware to flexible assets) → saas → software → assessments → roadmap and budget → insights → archive → meetings → followup. These are the only valid values for its `phases` input — initiatives and contracts are `roadmap`, deliverables are `archive`. Follows every page, `plan` / `apply`, counts per phase.
+- **Extension — `lifecycle-manager` 1.2.0 or later** (the catalog ScalePad extension). Every list tool pages automatically; adds installed software, assessments and deliverables for agents.
+- **Extension — `cloudradial-v2-compliance` 0.2.1 or later** (the catalog extension). Flexible-asset writes that actually carry data (patch with `traitsJson`, type with `fields`).
 - **Agent — *ScalePad to CloudRadial Alignment*.** The judgment: matching clients, reviewing a plan, the long tail the workflow reports as skipped or unmatched. Grounded on this document. It doesn't bulk-write.
 - **Playbook** (future) — recurring, portfolio-wide: sync workflow (plan) → agent review → human approval → sync workflow (apply), with learnings written back to Knowledge.

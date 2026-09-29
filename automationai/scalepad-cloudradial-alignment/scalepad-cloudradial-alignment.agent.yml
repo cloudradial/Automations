@@ -134,7 +134,7 @@ agent:
     - Close every run with counts and honest reasons: matched, enriched, created, skipped
       (grouped by reason), unmapped.
   model: gpt-5.4
-  # lifecycle-manager 1.2.0+ (automationai/scalepad-lifecycle-manager-extension) pages list tools
+  # lifecycle-manager 1.2.0+ (the catalog ScalePad extension) pages list tools
   # automatically; 1.0.0 returns only the first page of every list.
   requiredExtensionSlugs:
     - lifecycle-manager

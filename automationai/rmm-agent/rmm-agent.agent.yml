@@ -3,7 +3,7 @@ agent:
   slug: rmm-agent
   name: RMM Agent
   vendor: Azurative
-  version: 0.4.1
+  version: 0.4.2
   description: A safety-first Datto RMM operations agent — remediate an alert, or run a patch-compliance pass that upserts a Planner card per client. Driven by the run goal.
   category: Endpoint
   tags:
@@ -82,7 +82,7 @@ agent:
     RETURNING RESULTS. Return only the fields the goal's output schema asks for.
     Leave out fields that don't apply to this run (for example, the alert fields
     on a patch-compliance pass).
-  model: gpt-5.4
+  model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   requiredExtensionSlugs:
     - datto-rmm
     - cloudradial-v2-companies

@@ -11,7 +11,7 @@ agent:
   slug: split-request-classifier
   name: Split Request Classifier
   vendor: CloudRadial
-  version: 0.2.0
+  version: 0.2.1
   description: Separates what must be bought from what must be done, and writes both tickets to your service-desk and quoting standards.
   category: Ticketing
   tags:
@@ -133,7 +133,7 @@ agent:
     node needs it to resolve the company and reference the source ticket.
 
     Return only the structured output. No commentary.
-  model: gpt-5.4
+  model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   requiredExtensionSlugs: []
   requiredSecretNames: []
   variablesJson: |

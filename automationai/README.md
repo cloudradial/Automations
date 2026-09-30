@@ -45,5 +45,6 @@ Each subfolder is one automation, with a README that covers what it does, what t
 - **Import agents before the workflows that call them.** A workflow's Agent node finds its agent by slug.
 - **Secrets** live in the runner's Key Vault. Each README lists the secret names; the files never contain values.
 - **Webhooks** ship disabled and without a secret. Enable the webhook under **Properties → Webhook** after import; AutomationAI then issues the URL and secret.
+- **Model.** Agents and Agent nodes leave `model` blank, so they run on the tenant's own AI provider (OpenAI or Anthropic). Don't pin a model name such as `gpt-5.4`: a tenant on a different provider has no model by that name, and the run fails.
 - **Dry run** is set only by `dryRunDefault` in an agent file. Repo copies ship in dry run where the agent supports it, and each agent's README explains how to go live.
 - **Knowledge grounding** points at your tenant's document IDs, so it can't be exported. Re-attach it after every import.

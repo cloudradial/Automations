@@ -14,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.2.4
+  version: 0.2.5
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, keeps non-endpoint hardware as
@@ -133,7 +133,7 @@ agent:
       `currencyNote`.
     - Close every run with counts and honest reasons: matched, enriched, created, skipped
       (grouped by reason), unmapped.
-  model: gpt-5.4
+  model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   # lifecycle-manager 1.2.0+ (the catalog ScalePad extension) pages list tools
   # automatically; 1.0.0 returns only the first page of every list.
   requiredExtensionSlugs:

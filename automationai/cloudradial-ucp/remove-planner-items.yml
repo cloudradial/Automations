@@ -1,0 +1,220 @@
+automationsWorkflow: 1
+name: "Remove Planner Items by Name"
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      webhookEnabled: false
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 520
+      y: 80
+  - id: node-2
+    name: PowerShell Step
+    type: powershell-script
+    position:
+      x: 300
+      y: -40
+    properties:
+      script: |-
+        $CloudRadialBaseUrl = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-BaseUrl' -AsPlainText -ErrorAction SilentlyContinue
+        $CloudRadialPublicKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PublicKey' -AsPlainText -ErrorAction SilentlyContinue
+        $CloudRadialPrivateKey = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'CloudRadial-PrivateKey' -AsPlainText -ErrorAction SilentlyContinue
+
+        $missingSecrets = foreach ($pair in @(
+            @{ Name = 'CloudRadial-BaseUrl'; Value = $CloudRadialBaseUrl },
+            @{ Name = 'CloudRadial-PublicKey'; Value = $CloudRadialPublicKey },
+            @{ Name = 'CloudRadial-PrivateKey'; Value = $CloudRadialPrivateKey }
+        )) {
+            if ([string]::IsNullOrWhiteSpace($pair.Value)) { $pair.Name }
+        }
+        if (@($missingSecrets).Count -gt 0) {
+            $msg = "Please add the following secret(s) to your runner Key Vault and re-run this workflow: $($missingSecrets -join ', ')"
+            Set-NodeOutput @{ status = 'error'; message = $msg }
+            throw $msg
+        }
+
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+
+        try {
+            $BaseUrl = $CloudRadialBaseUrl.TrimEnd('/')
+            $PublicKey = $CloudRadialPublicKey
+            $PrivateKey = $CloudRadialPrivateKey
+
+            # =====================================================================
+            # CONFIG
+            # =====================================================================
+            # SAFETY: dry run by default. Review the output, then set $Apply = $true
+            # to actually delete the matched Planner items.
+            $Apply = $false
+
+            # Which companies to scan. @() = every company (use this to remove an
+            # item that shows in every account). e.g. @(1) for the main company only.
+            $CompanyIdFilter = @()
+
+            # The Planner item names to remove. Matched against each item's title
+            # (case-insensitive; leading/trailing and repeated spaces ignored).
+            $NamesToRemove = @(
+                '24/7 Managed Detection & Response (MDR)',
+                '24/7 Servicedesk Support',
+                'Case Study',
+                'Cloud Backup for Microsoft 365/Google Workspace',
+                'Email Signature Management',
+                'Equipment Storage',
+                'Internet Services',
+                'IT365 Academy',
+                'IT365 Storefront',
+                'Managed IT Consulting/vCIO',
+                'Mobile Services',
+                'Password Manager',
+                'Vulnerability Management'
+            )
+            # =====================================================================
+
+            $authBytes = [Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $PublicKey, $PrivateKey))
+            $headers = @{ Authorization = ('Basic ' + [Convert]::ToBase64String($authBytes)); Accept = 'application/json' }
+
+            function Invoke-CrApi {
+                param([Parameter(Mandatory)][string]$Path, [string]$Method='GET', [object]$Body, [string]$ContentType='application/json')
+                $url = if ($Path -match '^https?://') { $Path } else { "$BaseUrl$Path" }
+                for ($attempt = 1; $attempt -le 6; $attempt++) {
+                    try {
+                        $callArgs = @{ Uri = $url; Method = $Method; Headers = $headers; ContentType = $ContentType }
+                        if ($null -ne $Body) { $callArgs.Body = ($Body | ConvertTo-Json -Depth 12) }
+                        return Invoke-RestMethod @callArgs
+                    } catch {
+                        $code = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
+                        if (($code -eq 429 -or $code -ge 500) -and $attempt -lt 6) { Start-Sleep -Seconds ([Math]::Min(30, [Math]::Pow(2, $attempt))); continue }
+                        $detail = $null
+                        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
+                        if (-not $detail) { try { $s=$_.Exception.Response.GetResponseStream(); $r=[System.IO.StreamReader]::new($s); $detail=$r.ReadToEnd() } catch {} }
+                        throw ("CloudRadial API $Method $url failed (HTTP $code): $detail")
+                    }
+                }
+            }
+
+            function Get-CrCollection {
+                param([Parameter(Mandatory)][string]$Path)
+                $all = [System.Collections.Generic.List[object]]::new()
+                $pageSize = 100; $skip = 0
+                for ($page = 0; $page -lt 1000; $page++) {
+                    $sep = if ($Path -match '\?') { '&' } else { '?' }
+                    $resp = Invoke-CrApi -Path "${Path}${sep}`$top=$pageSize&`$skip=$skip"
+                    if ($null -eq $resp) { break }
+                    $rows = @()
+                    $vp = $resp.PSObject.Properties['value']
+                    if ($vp -and $null -ne $vp.Value) { $rows = @($vp.Value) } elseif ($resp -is [System.Array]) { $rows = @($resp) }
+                    foreach ($r in $rows) { [void]$all.Add($r) }
+                    if (@($rows).Count -lt $pageSize) { break }
+                    $skip += $pageSize
+                }
+                return $all.ToArray()
+            }
+
+            function Get-Field { param($Obj,[string]$Name) if ($null -eq $Obj) { return $null } $p=$Obj.PSObject.Properties[$Name]; if ($p) { return $p.Value } return $null }
+            function Normalize-Name { param($s) if ($null -eq $s) { return '' } return ((([string]$s).Trim() -replace '\s+', ' ').ToLowerInvariant()) }
+
+            # Build the normalized lookup of names to remove (normalized -> original).
+            $removeSet = @{}
+            foreach ($n in $NamesToRemove) { $k = Normalize-Name $n; if ($k) { $removeSet[$k] = $n } }
+
+            # Read Planner items (Product) - scoped or all companies.
+            $filterClause = if (@($CompanyIdFilter).Count -gt 0) { '?$filter=' + ((@($CompanyIdFilter | ForEach-Object { "companyId eq $([int]$_)" }) -join ' or ')) } else { '' }
+            $products = @(Get-CrCollection ("/v2/odata/product$filterClause"))
+
+            $matched = [System.Collections.Generic.List[object]]::new()
+            $seen = @{}
+            $subjectList = [System.Collections.Generic.List[string]]::new()
+
+            foreach ($p in @($products)) {
+                if ([bool](Get-Field $p 'isDeleted')) { continue }
+                $subject = [string](Get-Field $p 'subject')
+                if ([string]::IsNullOrWhiteSpace($subject)) { $subject = [string](Get-Field $p 'name') }
+                $norm = Normalize-Name $subject
+                if ($norm) { $seen[$norm] = $true; [void]$subjectList.Add($subject) }
+                if ($norm -and $removeSet.ContainsKey($norm)) {
+                    [void]$matched.Add([pscustomobject]@{
+                        productId = [string](Get-Field $p 'productId')
+                        companyId = [string](Get-Field $p 'companyId')
+                        subject   = $subject
+                    })
+                }
+            }
+
+            # Which requested names matched nothing (e.g. a spelling/spacing difference).
+            $namesWithNoMatch = @()
+            foreach ($k in $removeSet.Keys) { if (-not $seen.ContainsKey($k)) { $namesWithNoMatch += $removeSet[$k] } }
+
+            $distinctSubjects = @($subjectList.ToArray() | Sort-Object -Unique)
+
+            $counts = [ordered]@{
+                productsScanned = @($products).Count
+                matched         = @($matched).Count
+                deleted         = 0
+                errors          = 0
+                namesRequested  = @($NamesToRemove).Count
+                namesUnmatched  = @($namesWithNoMatch).Count
+            }
+
+            $results = [System.Collections.Generic.List[object]]::new()
+            $firstError = $null
+
+            if ($Apply) {
+                foreach ($m in @($matched.ToArray())) {
+                    try {
+                        $null = Invoke-CrApi -Path "/v2/product/$($m.productId)" -Method 'DELETE'
+                        $counts.deleted++
+                        [void]$results.Add([pscustomobject]@{ productId = $m.productId; companyId = $m.companyId; subject = $m.subject; action = 'deleted' })
+                    } catch {
+                        $counts.errors++
+                        if ($null -eq $firstError) { $firstError = $_.Exception.Message }
+                        [void]$results.Add([pscustomobject]@{ productId = $m.productId; companyId = $m.companyId; subject = $m.subject; action = 'error'; note = $_.Exception.Message })
+                    }
+                }
+                $message = "APPLIED. Scanned $($counts.productsScanned) Planner items; matched $($counts.matched); deleted $($counts.deleted); errors $($counts.errors)."
+            } else {
+                foreach ($m in @($matched.ToArray())) {
+                    [void]$results.Add([pscustomobject]@{ productId = $m.productId; companyId = $m.companyId; subject = $m.subject; action = 'would-delete' })
+                }
+                $message = "DRY RUN - nothing was deleted. Scanned $($counts.productsScanned) Planner items; $($counts.matched) match the named list and WOULD be deleted. Review the results, then set `$Apply = `$true to delete."
+            }
+            if (@($namesWithNoMatch).Count -gt 0) { $message = "$message Names with NO match (check spelling/spacing against distinctProductSubjects): $($namesWithNoMatch -join '; ')." }
+            if ($firstError) { $message = "$message FIRST ERROR: $firstError" }
+
+            Set-NodeOutput @{
+                status                  = 'success'
+                apply                   = $Apply
+                message                 = $message
+                counts                  = $counts
+                matched                 = @($matched.ToArray())
+                results                 = @($results.ToArray())
+                namesWithNoMatch        = $namesWithNoMatch
+                distinctProductSubjects = $distinctSubjects
+                firstError              = $firstError
+            }
+        }
+        catch {
+            $msg = $_.Exception.Message
+            Set-NodeOutput @{ status = 'error'; message = $msg }
+            throw $msg
+        }
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters: []
+  connections:
+  - source: start
+    target: node-2
+    sourceHandle: null
+  - source: node-2
+    target: end
+    sourceHandle: null
+  startActivityId: start

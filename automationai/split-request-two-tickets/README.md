@@ -7,7 +7,7 @@ Turns one intake — a CloudRadial form submission or a ticket being triaged in 
 | File | Type | Role |
 |---|---|---|
 | [`split-request-service-quote.yml`](split-request-service-quote.yml) | `automationsWorkflow` | **Use this one.** Two nodes: *Classify the request* (agent) → *Split into service + quote tickets* (PowerShell, creates the ConnectWise tickets, notes, and closes a ServiceAI source ticket). |
-| [`split-request-classifier.agent.yml`](split-request-classifier.agent.yml) | `automationsAgent` | The classifier (slug `split-request-classifier`, v0.2.0). Decides buy vs do, writes both tickets to your standards, lists missing information, cites the standards it used. Calls no PSA tools. |
+| [`split-request-classifier.agent.yml`](split-request-classifier.agent.yml) | `automationsAgent` | The classifier (slug `split-request-classifier`, v0.2.1). Decides buy vs do, writes both tickets to your standards, lists missing information, cites the standards it used. Calls no PSA tools. |
 | [`knowledge/service-ticket-standards.md`](knowledge/service-ticket-standards.md) | Knowledge | Summary patterns, description layout, priority, type and subtype. |
 | [`knowledge/quote-request-standards.md`](knowledge/quote-request-standards.md) | Knowledge | What counts as a purchase, quote summary and layout, required information. |
 | [`knowledge/standard-catalog.md`](knowledge/standard-catalog.md) | Knowledge | Standard hardware, peripherals, phones and licences; role defaults; items that need approval. |
@@ -26,7 +26,7 @@ If the classifier's output is missing, below the confidence threshold (0.6 by de
 
 ## Install / run
 
-1. **Classifier agent.** Upload `split-request-classifier.agent.yml` on **Agents → Custom** (keyed on the slug, so it replaces v0.1.0).
+1. **Classifier agent.** Upload `split-request-classifier.agent.yml` on **Agents → Custom** (keyed on the slug, so it replaces an earlier version).
 2. **Knowledge.** Edit the three files in `knowledge/` to your own standards (keep the headings — the agent searches by them), then upload them to a Knowledge folder such as **Ticket Standards**.
 3. **Workflow.** **Workflows → Import** `split-request-service-quote.yml`, then publish and deploy to the runner that holds the `CW-*` secrets.
 4. **Turn on grounding.** Open the **Classify the request** node → **Ground on knowledge** → attach the three documents (or the folder). Set **topK to about 12**, so all the relevant sections come back in one recall. Use **Preview recall** to check that the summary-format, priority and catalog sections appear. Grounding can't be exported (it points at your tenant's document IDs), so every install does this step.

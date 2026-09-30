@@ -1,4 +1,22 @@
-# Password Reset (ServiceAI Triage)
+# Resolve Password Reset Tickets Automatically
+
+Password reset tickets close on their own when the requester owns the account, and wait for a quick confirmation when someone else asked.
+
+**Formerly:** Password Reset (ServiceAI Triage) | **Marketplace ID:** AAI-00028 | **Type:** Workflow (ServiceAI Triage Action)
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `password-reset-triage.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/password-reset-triage/password-reset-triage.yml) |
+| Download `password-reset-triage.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/password-reset-triage/password-reset-triage.yml) |
+| All files in this automation | [automationai/password-reset-triage](https://github.com/cloudradial/Automations/tree/main/automationai/password-reset-triage) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/password-reset-triage) |
+| Marketplace listing | [AAI-00028](https://automations.cloudradial.com/marketplace/AAI-00028) |
+
+## How it works
 
 The **triage** counterpart to [Password Reset (Self-Service)](https://github.com/cloudradial/Automations/tree/main/automationai/password-reset). Fired by a
 **ServiceAI Action in Use-in-Triage mode**, where the trigger is a ticket. The ticket carries the target
@@ -15,18 +33,16 @@ Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [requ
 
 | Ticket carries | Outcome |
 |---|---|
-| **No `submittedByUPN`** | **Does not trigger** — returns `status: incomplete`, no action. The authenticated requester is required. |
-| **`submittedByUPN` == target** | **Reset** — verified self-request. Sets a temp password + revokes sessions (subject to the safety gates below). `status: complete`. |
-| **`submittedByUPN` != target** | **No reset** — returns `status: pending_confirmation` with a note that *"someone will reach out shortly to confirm"* before any change. Protects against someone requesting a reset on another user's account. |
+| **No `submittedByUPN`** | **Does not trigger**, returns `status: incomplete`, no action. The authenticated requester is required. |
+| **`submittedByUPN` == target** | **Reset**, verified self-request. Sets a temp password + revokes sessions (subject to the safety gates below). `status: complete`. |
+| **`submittedByUPN` != target** | **No reset**, returns `status: pending_confirmation` with a note that *"someone will reach out shortly to confirm"* before any change. Protects against someone requesting a reset on another user's account. |
 
-`submittedByUPN` (and optional `submittedByOfficeId`) is the un-spoofable, portal-authenticated requester —
-the same trust anchor as the self-service workflow's `@UserEmail`/`@UserOfficeId`. Match is by object id
+`submittedByUPN` (and optional `submittedByOfficeId`) is the un-spoofable, portal-authenticated requester, the same trust anchor as the self-service workflow's `@UserEmail`/`@UserOfficeId`. Match is by object id
 first, then UPN/mail (case-insensitive).
 
 ## Reading fields from the ticket
 
-*Use in Triage* posts the **raw PSA ticket payload**. The Parse node scans common field names for each value —
-both top-level and inside a nested `contact` / `submitter` / `authenticatedUser` object:
+*Use in Triage* posts the **raw PSA ticket payload**. The Parse node scans common field names for each value, both top-level and inside a nested `contact` / `submitter` / `authenticatedUser` object:
 
 - **Target email:** `userPrincipalName`, `contactEmail`, `contactEmailAddress`, `email`, `emailAddress`, `mail`, `userEmail`, …
 - **Requester:** `submittedByUPN`, `submittedBy`, `submitterUpn`, `authenticatedUpn`, `requestedByUpn`, … (+ `submittedByOfficeId`, `userOfficeId`, … for the object id)
@@ -59,8 +75,7 @@ self-service workflow's direct-PSA-API note), tell me the PSA + secret names and
 
 ## Required Runner Key Vault secrets
 
-`M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` (certified Microsoft 365 extension app —
-`User.ReadWrite.All` / `Directory.ReadWrite.All`). No PSA secrets needed for the return-contract design.
+`M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` (certified Microsoft 365 extension app, `User.ReadWrite.All` / `Directory.ReadWrite.All`). No PSA secrets needed for the return-contract design.
 
 ## Import & test
 

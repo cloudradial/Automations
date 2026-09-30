@@ -1,4 +1,21 @@
-# Deliver Result
+# Send Automation Results Wherever Your Team Works
+
+Lets any automation finish by opening a ticket in your PSA, sending an email or handing the result back to ServiceAI, without rebuilding that step each time.
+
+**Formerly:** Deliver Result | **Marketplace ID:** Not yet listed | **Type:** Agent
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `deliver-result.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/deliver-result/deliver-result.agent.yml) |
+| Download `deliver-result.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/deliver-result/deliver-result.agent.yml) |
+| All files in this automation | [automationai/deliver-result](https://github.com/cloudradial/Automations/tree/main/automationai/deliver-result) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/deliver-result) |
+
+## How it works
 
 A reusable **agent** that other automations call as their last step, so they don't hardcode one PSA or one delivery method. Give it a result and a `channel`, and it delivers it:
 
@@ -6,26 +23,26 @@ A reusable **agent** that other automations call as their last step, so they don
 |---|---|
 | `psa` | Creates a ticket in whichever PSA extension the calling node allows (ConnectWise, Autotask, Syncro, HaloPSA or Zendesk), with an internal note. |
 | `email` | Sends through the **Postmark** extension. |
-| `serviceai` | Creates nothing — returns the ServiceAI contract (`status`, `public_note`, `internal_note`, `ticket_id`) for the calling Triage Action to post. |
+| `serviceai` | Creates nothing, returns the ServiceAI contract (`status`, `public_note`, `internal_note`, `ticket_id`) for the calling Triage Action to post. |
 
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`deliver-result.agent.yml`](deliver-result.agent.yml) | `automationsAgent` | Slug `deliver-result`, v0.1.1. Keeps secrets and technical detail out of client-visible fields. Dry-run by default. |
+| [`deliver-result.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/deliver-result/deliver-result.agent.yml) | `automationsAgent` | Slug `deliver-result`, v0.1.1. Keeps secrets and technical detail out of client-visible fields. Dry-run by default. |
 
 ## Install / run
 
 1. Upload `deliver-result.agent.yml` on **Agents → Custom** (keyed on the slug).
-2. Install and connect the extensions you'll deliver through: **Postmark** (catalog `postmark` 1.0.0 — secrets `Postmark-ServerToken`, `Postmark-FromEmail`, `Postmark-ApiUrl`) and your PSA (`connectwise-manage`, `autotask-psa`, `halo-psa`, `syncro` or `zendesk-ticketing`).
-3. Set the agent variables: `fromEmail` (a verified Postmark sender — leave empty to use `Postmark-FromEmail`), `defaultBoard` (board / queue / group for new tickets), `messageStream` (default `outbound`).
+2. Install and connect the extensions you'll deliver through: **Postmark** (catalog `postmark` 1.0.0, secrets `Postmark-ServerToken`, `Postmark-FromEmail`, `Postmark-ApiUrl`) and your PSA (`connectwise-manage`, `autotask-psa`, `halo-psa`, `syncro` or `zendesk-ticketing`).
+3. Set the agent variables: `fromEmail` (a verified Postmark sender, leave empty to use `Postmark-FromEmail`), `defaultBoard` (board / queue / group for new tickets), `messageStream` (default `outbound`).
 4. In the calling workflow, add an **Agent** node with `agentSlug: deliver-result`, set its `allowedExtensions` to the partner's PSA and/or `postmark`, and pass `channel`, `subject`, `body`, plus routing (`companyId` / `companyIdentifier` / `companyName` for PSA, `toEmail` for email).
 
 ## Confirm in your tenant
 
-- `requiredExtensionSlugs` lists `postmark` and `connectwise-manage`. If the partner uses a different PSA, change the PSA slug in the agent file before importing — the agent uses whichever PSA extension the run allows.
+- `requiredExtensionSlugs` lists `postmark` and `connectwise-manage`. If the partner uses a different PSA, change the PSA slug in the agent file before importing, the agent uses whichever PSA extension the run allows.
 - The catalog **Postmark** extension (1.0.0) is the one to use; there's no need for a custom Postmark extension.
-- The agent runs **dry-run by default** — see [Dry run and going live](#dry-run-and-going-live).
+- The agent runs **dry-run by default**, see [Dry run and going live](#dry-run-and-going-live).
 
 ## Dry run and going live
 

@@ -1,4 +1,22 @@
-# Portal Lookup
+# Walk Into Every Client Call Prepared
+
+A one-page snapshot of any client's users, devices, warranties and portal setup gaps in seconds, with nothing changed.
+
+**Formerly:** Portal Lookup | **Marketplace ID:** AAI-00014 | **Type:** Agent
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `portal-lookup.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/portal-lookup/portal-lookup.yml) |
+| Download `portal-lookup.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/portal-lookup/portal-lookup.yml) |
+| All files in this automation | [automationai/portal-lookup](https://github.com/cloudradial/Automations/tree/main/automationai/portal-lookup) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/portal-lookup) |
+| Marketplace listing | [AAI-00014](https://automations.cloudradial.com/marketplace/AAI-00014) |
+
+## How it works
 
 A CloudRadial **AutomationAI workflow** that produces a read-only portal briefing for meeting prep: company footprint, users, endpoints, warranty posture and setup gaps. Name a company and it briefs on that one; name none and it gives a portal-wide snapshot.
 

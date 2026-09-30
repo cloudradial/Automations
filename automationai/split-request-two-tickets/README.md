@@ -1,6 +1,33 @@
-# Split Request — Service + Quote
+# Turn One Request into a Service Ticket and a Quote
 
-Turns one intake — a CloudRadial form submission or a ticket being triaged in ServiceAI — into a **service ticket** for the work and, when something has to be bought, a linked **quote request**. A classifier agent grounded on your **Knowledge** writes both tickets to your own service-desk and quoting standards.
+One portal form or triaged ticket becomes a service ticket written to your standards and, when something has to be bought, a linked quote request.
+
+**Formerly:** Split Request, Service + Quote | **Marketplace ID:** Not yet listed | **Type:** Workflow + Agent
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `split-request-service-quote.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-service-quote.yml) |
+| Download `split-request-service-quote.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/split-request-service-quote.yml) |
+| View `split-request-classifier.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml) |
+| Download `split-request-classifier.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml) |
+| View `split-request-two-tickets.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) |
+| Download `split-request-two-tickets.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) |
+| View `knowledge/service-ticket-standards.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) |
+| Download `knowledge/service-ticket-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) |
+| View `knowledge/quote-request-standards.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/quote-request-standards.md) |
+| Download `knowledge/quote-request-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/quote-request-standards.md) |
+| View `knowledge/standard-catalog.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/standard-catalog.md) |
+| Download `knowledge/standard-catalog.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/standard-catalog.md) |
+| All files in this automation | [automationai/split-request-two-tickets](https://github.com/cloudradial/Automations/tree/main/automationai/split-request-two-tickets) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/split-request-two-tickets) |
+
+## How it works
+
+Turns one intake, a CloudRadial form submission or a ticket being triaged in ServiceAI, into a **service ticket** for the work and, when something has to be bought, a linked **quote request**. A classifier agent grounded on your **Knowledge** writes both tickets to your own service-desk and quoting standards.
 
 ## Pieces
 
@@ -17,9 +44,9 @@ Turns one intake — a CloudRadial form submission or a ticket being triaged in 
 
 | Decision | Made by |
 |---|---|
-| **Whether** a quote is raised (structured form) | The form-profile table in the PowerShell node — deterministic. If the classifier disagrees, the table wins and the run is flagged for review. |
+| **Whether** a quote is raised (structured form) | The form-profile table in the PowerShell node, deterministic. If the classifier disagrees, the table wins and the run is flagged for review. |
 | **Whether** a quote is raised (free-text ServiceAI ticket) | The classifier. |
-| **How** both tickets read — titles, descriptions, priority, type, subtype | The classifier, following your Knowledge documents. |
+| **How** both tickets read, titles, descriptions, priority, type, subtype | The classifier, following your Knowledge documents. |
 | Company lookup, ticket creation, notes, closing the source ticket | The PowerShell node only. |
 
 If the classifier's output is missing, below the confidence threshold (0.6 by default), or flags more than one request, the tickets fall back to the **built-in templates** in the script. Knowledge makes the tickets better; the workflow never depends on it to run.
@@ -32,7 +59,7 @@ If the classifier's output is missing, below the confidence threshold (0.6 by de
 4. **Turn on grounding.** Open the **Classify the request** node → **Ground on knowledge** → attach the three documents (or the folder). Set **topK to about 12**, so all the relevant sections come back in one recall. Use **Preview recall** to check that the summary-format, priority and catalog sections appear. Grounding can't be exported (it points at your tenant's document IDs), so every install does this step.
 5. **Key Vault secrets:** `CW-ApiUrl`, `CW-CompanyID`, `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId`, `CW-ServiceBoard`, `CW-SalesBoard`; optional `PSA-SplitStatus` (ServiceAI path) and `CloudRadial-BaseUrl` / `-PublicKey` / `-PrivateKey` (only to resolve a CloudRadial `companyId`).
 6. **Form profiles.** In the PowerShell node, edit `$FormProfiles` so `Fields` matches the question IDs on your forms. On the stock *Add a New User* form, give the computer question a Field ID of `deviceType` or the hardware detail won't reach the quote.
-7. **Enable the webhook** (Properties → Webhook → Enable — exports ship with it OFF) and point your form's Automation at it, sending the secret in the `X-Crauto-Webhook-Secret` header. For ServiceAI, send `source: serviceai` and `psaTicketId`.
+7. **Enable the webhook** (Properties → Webhook → Enable, exports ship with it OFF) and point your form's Automation at it, sending the secret in the `X-Crauto-Webhook-Secret` header. For ServiceAI, send `source: serviceai` and `psaTicketId`.
 
 ## Writing good Knowledge for this agent
 
@@ -50,9 +77,9 @@ If the classifier's output is missing, below the confidence threshold (0.6 by de
 
 ## Confirm in your tenant
 
-- **Knowledge recall works.** Upload one document and use the node's **Preview recall**. As of 2026-09-24, the only document in Nick's Test showed `embeddingStatus: failed` and recall returned HTTP 500 — re-test with a fresh upload before relying on grounding.
+- **Knowledge recall works.** Upload one document and use the node's **Preview recall**. As of 2026-09-24, the only document in Nick's Test showed `embeddingStatus: failed` and recall returned HTTP 500, re-test with a fresh upload before relying on grounding.
 - **ConnectWise names match** the priority, type and subtype tables in `service-ticket-standards.md`.
-- The classifier has `dryRunDefault: false` — it only reads and returns text, so there's nothing to preview.
+- The classifier has `dryRunDefault: false`, it only reads and returns text, so there's nothing to preview.
 - Only ConnectWise Manage is implemented in the PowerShell node; HaloPSA and Autotask are stubs.
 
 ## Tested (mocked ConnectWise, 2026-09-25)
@@ -67,6 +94,6 @@ If the classifier's output is missing, below the confidence threshold (0.6 by de
 
 ---
 
-## Legacy: Split Request — Support + Quote
+## Legacy: Split Request, Support + Quote
 
 `split-request-two-tickets.yml` creates two linked ConnectWise tickets from the *Add a New User* form only (new user + new PC). It reads the form's Field IDs directly (`firstName`, `lastName`, `department`, `jobTitle`, `email`, `softwareLicenses`, `companyFileAccess`, and `deviceType` if you add it) and needs the same `CW-*` board secrets. Keep it only if you already run it; new installs should use the Service + Quote workflow above.

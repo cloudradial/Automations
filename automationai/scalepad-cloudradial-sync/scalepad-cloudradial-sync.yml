@@ -97,6 +97,8 @@ definition:
           $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
           $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+          # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+          $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
           function Invoke-WithRetry {
               param([scriptblock]$Call, [string]$What)
               for ($i = 1; $i -le 4; $i++) {
@@ -104,8 +106,12 @@ definition:
                   catch {
                       $code = $null
                       try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                      if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                      throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                      $msg = [string]$_.Exception.Message
+                      if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                      $isGet = $What -match ' GET '
+                      $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                      if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                      throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                   }
               }
           }
@@ -269,7 +275,10 @@ definition:
               assetTypes             = @(([string](Get-P $ctx 'assetTypes' '')).Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
               includeNoSerialDevices = -not ([string](Get-P $ctx 'includeNoSerialDevices' 'true') -match '^(false|no|0)$')
               saasTypeName           = [string](Get-P $ctx 'saasTypeName' 'SaaS')
-              flexibleAssetTypeName  = [string](Get-P $ctx 'flexibleAssetTypeName' 'ScalePad Assets')
+              # Blank = one flexible asset type per kind of device (Network Devices, Mobile Devices, ...).
+              flexibleAssetTypeName  = [string](Get-P $ctx 'flexibleAssetTypeName' '')
+              flexibleAssetTypeNames = (ConvertTo-Dict (Get-P $ctx 'flexibleAssetTypeNames' @{}))
+              legacyFlexibleAssetTypeName = [string](Get-P $ctx 'legacyFlexibleAssetTypeName' 'ScalePad Assets')
               confirmCleanup         = ([string](Get-P $ctx 'confirmCleanup' 'false') -match '^(true|yes|1)$')
               skipDevicesWithSoftware = -not ([string](Get-P $ctx 'skipDevicesWithSoftware' 'true') -match '^(false|no|0)$')
               maxSoftwareWrites      = [int](Get-P $ctx 'maxSoftwareWrites' 2000)
@@ -483,6 +492,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -490,8 +501,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -770,6 +785,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -777,8 +794,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -1141,6 +1162,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -1148,8 +1171,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -1295,10 +1322,12 @@ definition:
                   # =====================================================================
                   # Step 3 - Other ScalePad hardware to CloudRadial flexible assets
                   #   Network gear, mobiles, printers/imaging (any ScalePad type that isn't
-                  #   synced as an endpoint) and in-scope devices with no serial number
-                  #   become rows of one flexible asset type ("ScalePad Assets"), shown under
-                  #   Infrastructure. Matched on the ScalePad asset id, so re-runs update
-                  #   rather than duplicate. Native v2 routes: /v2/flexible-asset-type,
+                  #   synced as an endpoint) and in-scope devices with no serial number become
+                  #   flexible assets, one type per kind of device ("Network Devices",
+                  #   "Mobile Devices", "Printers & Imaging", ...), shown under Infrastructure.
+                  #   Matched on the ScalePad asset id, so re-runs update rather than duplicate.
+                  #   Rows an earlier version wrote to the single "ScalePad Assets" type are
+                  #   moved to their device type. Native v2 routes: /v2/flexible-asset-type,
                   #   /v2/flexible-asset-field, /v2/flexible-asset (reads via /v2/odata).
                   # =====================================================================
                   $phase = 'assets'
@@ -1320,6 +1349,28 @@ definition:
                       @{ name = 'Assigned User'; kind = 'Text'; order = 9 },
                       @{ name = 'ScalePad ID'; kind = 'Text'; order = 10; hint = 'Used by the ScalePad to CloudRadial Sync to match this row. Do not edit.' }
                   )
+                  # ScalePad hardware type -> CloudRadial flexible asset type. First match wins.
+                  $TypeRules = @(
+                      @{ match = 'NETWORK|ROUTER|SWITCH|FIREWALL|ACCESS.?POINT|WIRELESS|WIFI|GATEWAY'; name = 'Network Devices'; icon = 'router'; what = 'network devices (routers, switches, firewalls, access points)' },
+                      @{ match = 'MOBILE|PHONE|TABLET'; name = 'Mobile Devices'; icon = 'smartphone'; what = 'mobile phones and tablets' },
+                      @{ match = 'IMAGING|PRINT|SCAN|COPIER|MFP|PLOTTER'; name = 'Printers & Imaging'; icon = 'printer'; what = 'printers, scanners and other imaging devices' },
+                      @{ match = 'STORAGE|NAS|SAN'; name = 'Storage Devices'; icon = 'hdd'; what = 'storage devices (NAS and SAN)' },
+                      @{ match = 'UPS|POWER|PDU'; name = 'Power Devices'; icon = 'battery'; what = 'UPS and power devices' },
+                      @{ match = '^WORKSTATION$|^DESKTOP$|^LAPTOP$'; name = 'Workstations (No Serial)'; icon = 'desktop'; what = 'workstations that have no serial number, so they cannot be matched to an endpoint' },
+                      @{ match = '^SERVER$'; name = 'Servers (No Serial)'; icon = 'server'; what = 'servers that have no serial number, so they cannot be matched to an endpoint' },
+                      @{ match = '^VIRTUAL'; name = 'Virtual Machines (No Serial)'; icon = 'server'; what = 'virtual machines that have no serial number, so they cannot be matched to an endpoint' }
+                  )
+                  $OtherRule = @{ name = 'Other Hardware'; icon = 'cpu'; what = 'other hardware' }
+                  function Get-TypeRule { param([string]$spType)
+                      $single = [string](Get-P $settings 'flexibleAssetTypeName' '')
+                      if ($single) { return @{ name = $single; icon = 'router'; what = 'hardware that is not an endpoint' } }   # opt-in: everything in one type
+                      $rule = $OtherRule
+                      foreach ($r in $TypeRules) { if ($spType -match $r.match) { $rule = $r; break } }
+                      # Optional rename per ScalePad type, e.g. {"NETWORK": "Network Equipment"}.
+                      $names = ConvertTo-Dict (Get-P $settings 'flexibleAssetTypeNames' @{})
+                      if ($names.Contains($spType) -and [string]$names[$spType]) { return @{ name = [string]$names[$spType]; icon = $rule.icon; what = $rule.what } }
+                      return $rule
+                  }
                   function ConvertTo-NameKey { param([string]$n) return (($n.Trim().ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')) }
                   function ConvertFrom-Traits { param($a)
                       $raw = Get-P $a 'traitsJson'
@@ -1327,17 +1378,69 @@ definition:
                       return ConvertTo-Dict (Get-P $a 'traits')
                   }
 
-                  $counts = [ordered]@{ scalePadAssets = 0; byType = [ordered]@{}; noSerialDevices = 0; typeCreated = $false; fieldsAdded = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; errors = 0 }
+                  $counts = [ordered]@{ scalePadAssets = 0; byType = [ordered]@{}; noSerialDevices = 0; typesCreated = 0; fieldsAdded = 0; toCreate = 0; toUpdate = 0; toMove = 0; unchanged = 0; created = 0; updated = 0; moved = 0; errors = 0 }
                   $planned = New-Object System.Collections.ArrayList
+                  $typeIds = [ordered]@{}
+
+                  # Finds (or, in apply, creates) one flexible asset type with the fields above, and reads this company's rows in it.
+                  function Open-FlexType { param([string]$Name, [string]$Icon, [string]$What, [bool]$Create)
+                      $esc = $Name.Replace("'", "''")
+                      $t = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1
+                      $id = if ($t) { [int](Get-P $t 'id') } else { 0 }
+                      $madeNow = $false
+                      if (-not $id -and $Create) {
+                          $null = $planned.Add(@{ action = 'create-type'; type = $Name; fields = @($FieldDefs | ForEach-Object { $_.name }) })
+                          if ($apply) {
+                              $body = [ordered]@{ name = $Name; description = "ScalePad Lifecycle Manager hardware: $What. Kept current by the ScalePad to CloudRadial Sync."; icon = $Icon; showInMenu = $true; fields = $FieldDefs }
+                              try {
+                                  $resp = $null
+                                  try { $resp = Invoke-Cr -Method POST -Path '/v2/flexible-asset-type' -Body $body }
+                                  catch { $body.icon = 'router'; $resp = Invoke-Cr -Method POST -Path '/v2/flexible-asset-type' -Body $body }   # an icon name the portal doesn't know
+                                  $id = [int](Get-P $resp 'id' (Get-P $resp 'flexibleAssetTypeId' 0))
+                                  if (-not $id) { $again = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1; if ($again) { $id = [int](Get-P $again 'id') } }
+                                  if ($id) { $counts.typesCreated++; $madeNow = $true } else { throw 'the type was created but its id could not be read back' }
+                              }
+                              catch { $counts.errors++; Warn "Could not create the '$Name' flexible asset type: $($_.Exception.Message)" }
+                          }
+                      }
+                      $keyOf = @{}; foreach ($f in $FieldDefs) { $keyOf[$f.name] = ConvertTo-NameKey $f.name }
+                      $byId = @{}; $bySerial = @{}
+                      if ($id) {
+                          $fields = @(Get-CrAll "/v2/odata/flexibleassetfield?`$filter=flexibleAssetTypeId eq $id")
+                          $have = @{}; foreach ($f in $fields) { $have[[string](Get-P $f 'name')] = [string](Get-P $f 'nameKey' (ConvertTo-NameKey (Get-P $f 'name'))) }
+                          foreach ($f in $FieldDefs) {
+                              if ($have.ContainsKey($f.name)) { $keyOf[$f.name] = $have[$f.name]; continue }
+                              if ($fields.Count -eq 0 -and $madeNow) { continue }   # created inline just now
+                              if (-not $Create) { continue }
+                              $null = $planned.Add(@{ action = 'add-field'; type = $Name; field = $f.name })
+                              if ($apply) {
+                                  try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset-field' -Body ([ordered]@{ flexibleAssetTypeId = $id } + $f); $counts.fieldsAdded++ }
+                                  catch { $counts.errors++; Warn "Could not add field '$($f.name)' to '$Name': $($_.Exception.Message)" }
+                              }
+                          }
+                          foreach ($a in @(Get-CrAll "/v2/odata/flexibleasset?`$filter=companyId eq $companyId and flexibleAssetTypeId eq $id")) {
+                              $tr = ConvertFrom-Traits $a
+                              $sid = [string](Get-P $tr $keyOf['ScalePad ID'] ''); $sn = Normalize-Serial (Get-P $tr $keyOf['Serial Number'] '')
+                              if ($sid) { $byId[$sid] = $a }
+                              if ($sn -and -not $bySerial.ContainsKey($sn)) { $bySerial[$sn] = $a }
+                          }
+                      }
+                      return @{ name = $Name; id = $id; keyOf = $keyOf; byId = $byId; bySerial = $bySerial }
+                  }
+                  function Find-Row { param($T, $vals)
+                      $m = $T.byId[$vals['ScalePad ID']]
+                      if ($null -eq $m -and $vals['Serial Number']) { $m = $T.bySerial[(Normalize-Serial $vals['Serial Number'])] }
+                      return $m
+                  }
 
                   if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
                       $results[$phase] = [ordered]@{ ran = $false }
                   }
                   else {
-                      $typeName = [string](Get-P $settings 'flexibleAssetTypeName' 'ScalePad Assets')
                       $deviceTypes = @(Get-P $settings 'deviceTypes' @('WORKSTATION', 'SERVER', 'VIRTUAL'))
                       $assetTypes = @(Get-P $settings 'assetTypes' @())
                       $includeNoSerial = [bool](Get-P $settings 'includeNoSerialDevices' $true)
+                      $legacyName = [string](Get-P $settings 'legacyFlexibleAssetTypeName' 'ScalePad Assets')
 
                       $hw = @(Get-SpAll '/core/v1/assets/hardware' @{ 'filter[client.id]' = "eq:$spClientId" })
                       $life = @(Get-SpAll '/lifecycle-manager/v1/assets/hardware/lifecycles' @{ 'filter[client_id]' = "eq:$spClientId" })
@@ -1353,9 +1456,10 @@ definition:
                           if (-not $take) { continue }
                           if ($isDeviceType) { $counts.noSerialDevices++ }
                           $l = if ($serial) { $lifeBySerial[$serial] } else { $null }
-                          $label = if ($type) { (Get-Culture).TextInfo.ToTitleCase($type.ToLowerInvariant()) } else { 'Unknown' }
-                          if (-not $counts.byType.Contains($label)) { $counts.byType[$label] = 0 }
-                          $counts.byType[$label]++
+                          $rule = Get-TypeRule $type
+                          $label = if ($type) { (Get-Culture).TextInfo.ToTitleCase(($type -replace '_', ' ').ToLowerInvariant()) } else { 'Unknown' }
+                          if (-not $counts.byType.Contains($rule.name)) { $counts.byType[$rule.name] = 0 }
+                          $counts.byType[$rule.name]++
                           $vals = [ordered]@{
                               'Name'             = [string](Get-P $d 'name' $serial)
                               'Type'             = $label
@@ -1369,60 +1473,23 @@ definition:
                               'ScalePad ID'      = [string](Get-P $d 'id')
                           }
                           if (Test-Blank $vals['Name']) { $vals['Name'] = "$label $($vals['ScalePad ID'])" }
-                          $null = $rows.Add($vals)
+                          $null = $rows.Add(@{ vals = $vals; rule = $rule })
                       }
                       $counts.scalePadAssets = $rows.Count
 
-                      # --- the flexible asset type and its fields ---
-                      $esc = $typeName.Replace("'", "''")
-                      $type = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1
-                      $typeId = if ($type) { [int](Get-P $type 'id') } else { 0 }
-                      if (-not $typeId -and $rows.Count -gt 0) {
-                          $null = $planned.Add(@{ action = 'create-type'; type = $typeName; fields = @($FieldDefs | ForEach-Object { $_.name }) })
-                          if ($apply) {
-                              $body = [ordered]@{ name = $typeName; description = 'Hardware from ScalePad Lifecycle Manager that is not an endpoint: network, mobile and imaging devices, and devices without a serial number. Kept current by the ScalePad to CloudRadial Sync.'; icon = 'router'; showInMenu = $true; fields = $FieldDefs }
-                              try {
-                                  $resp = Invoke-Cr -Method POST -Path '/v2/flexible-asset-type' -Body $body
-                                  $typeId = [int](Get-P $resp 'id' (Get-P $resp 'flexibleAssetTypeId' 0))
-                                  if (-not $typeId) { $again = @(Get-CrAll "/v2/odata/flexibleassettype?`$filter=name eq '$esc'") | Select-Object -First 1; if ($again) { $typeId = [int](Get-P $again 'id') } }
-                                  if ($typeId) { $counts.typeCreated = $true } else { throw 'the type was created but its id could not be read back' }
-                              }
-                              catch { $counts.errors++; Warn "Could not create the '$typeName' flexible asset type: $($_.Exception.Message)" }
-                          }
-                      }
+                      # Rows an earlier version put in the single legacy type are moved, not duplicated.
+                      $legacy = $null
+                      if ($rows.Count -gt 0 -and $legacyName -and -not ($rows | Where-Object { $_.rule.name -eq $legacyName })) { $legacy = Open-FlexType -Name $legacyName -Icon 'router' -What '' -Create:$false }
 
-                      $keyOf = @{}
-                      foreach ($f in $FieldDefs) { $keyOf[$f.name] = ConvertTo-NameKey $f.name }
-                      $existingAssets = @()
-                      if ($typeId) {
-                          $fields = @(Get-CrAll "/v2/odata/flexibleassetfield?`$filter=flexibleAssetTypeId eq $typeId")
-                          $have = @{}
-                          foreach ($f in $fields) { $have[[string](Get-P $f 'name')] = [string](Get-P $f 'nameKey' (ConvertTo-NameKey (Get-P $f 'name'))) }
-                          foreach ($f in $FieldDefs) {
-                              if ($have.ContainsKey($f.name)) { $keyOf[$f.name] = $have[$f.name]; continue }
-                              if ($fields.Count -eq 0 -and $counts.typeCreated) { continue }   # created inline just now
-                              $null = $planned.Add(@{ action = 'add-field'; field = $f.name })
-                              if ($apply) {
-                                  try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset-field' -Body ([ordered]@{ flexibleAssetTypeId = $typeId } + $f); $counts.fieldsAdded++ }
-                                  catch { $counts.errors++; Warn "Could not add field '$($f.name)' to '$typeName': $($_.Exception.Message)" }
-                              }
-                          }
-                          $existingAssets = @(Get-CrAll "/v2/odata/flexibleasset?`$filter=companyId eq $companyId and flexibleAssetTypeId eq $typeId")
-                      }
-                      $idKey = $keyOf['ScalePad ID']; $serialKey = $keyOf['Serial Number']
-                      $byId = @{}; $bySerial = @{}
-                      foreach ($a in $existingAssets) {
-                          $t = ConvertFrom-Traits $a
-                          $sid = [string](Get-P $t $idKey ''); $sn = Normalize-Serial (Get-P $t $serialKey '')
-                          if ($sid) { $byId[$sid] = $a }
-                          if ($sn -and -not $bySerial.ContainsKey($sn)) { $bySerial[$sn] = $a }
-                      }
-
-                      foreach ($vals in $rows) {
+                      $types = @{}
+                      foreach ($row in $rows) {
+                          $vals = $row.vals; $rule = $row.rule
+                          if (-not $types.ContainsKey($rule.name)) { $types[$rule.name] = Open-FlexType -Name $rule.name -Icon $rule.icon -What $rule.what -Create:$true; $typeIds[$rule.name] = $types[$rule.name].id }
+                          $T = $types[$rule.name]
                           $traits = [ordered]@{}
-                          foreach ($k in $vals.Keys) { if (-not (Test-Blank $vals[$k])) { $traits[$keyOf[$k]] = [string]$vals[$k] } }
-                          $match = $byId[$vals['ScalePad ID']]
-                          if ($null -eq $match -and $vals['Serial Number']) { $match = $bySerial[(Normalize-Serial $vals['Serial Number'])] }
+                          foreach ($k in $vals.Keys) { if (-not (Test-Blank $vals[$k])) { $traits[$T.keyOf[$k]] = [string]$vals[$k] } }
+
+                          $match = Find-Row $T $vals
                           if ($null -ne $match) {
                               $cur = ConvertFrom-Traits $match
                               $merged = [ordered]@{}; foreach ($k in $cur.Keys) { $merged[$k] = $cur[$k] }
@@ -1431,7 +1498,7 @@ definition:
                               if ($changed.Count -eq 0) { $counts.unchanged++; continue }
                               $counts.toUpdate++
                               $assetId = [int](Get-P $match 'id')
-                              $null = $planned.Add(@{ action = 'update'; asset = $vals['Name']; flexibleAssetId = $assetId; fields = $changed })
+                              $null = $planned.Add(@{ action = 'update'; asset = $vals['Name']; type = $rule.name; flexibleAssetId = $assetId; fields = $changed })
                               if ($apply) {
                                   try {
                                       $json = $merged | ConvertTo-Json -Depth 5 -Compress
@@ -1447,15 +1514,27 @@ definition:
                               }
                               continue
                           }
-                          $counts.toCreate++
-                          $null = $planned.Add(@{ action = 'create'; asset = $vals['Name']; type = $vals['Type']; serial = $vals['Serial Number'] })
-                          if ($apply -and $typeId) {
-                              try { $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset' -Body ([ordered]@{ companyId = $companyId; flexibleAssetTypeId = $typeId; traits = $traits }); $counts.created++ }
-                              catch { $counts.errors++; Warn "Create failed for flexible asset $($vals['Name']): $($_.Exception.Message)" }
+
+                          $old = if ($null -ne $legacy -and $legacy.id) { Find-Row $legacy $vals } else { $null }
+                          if ($null -ne $old) { $counts.toMove++ } else { $counts.toCreate++ }
+                          $null = $planned.Add(@{ action = $(if ($null -ne $old) { 'move' } else { 'create' }); asset = $vals['Name']; type = $rule.name; serial = $vals['Serial Number']; from = $(if ($null -ne $old) { $legacyName }) })
+                          if (-not ($apply -and $T.id)) { continue }
+                          try {
+                              $null = Invoke-Cr -Method POST -Path '/v2/flexible-asset' -Body ([ordered]@{ companyId = $companyId; flexibleAssetTypeId = $T.id; traits = $traits })
+                              if ($null -ne $old) {
+                                  $oldId = [int](Get-P $old 'id')
+                                  try { $null = Invoke-Cr -Method DELETE -Path "/v2/flexible-asset/$oldId"; $counts.moved++ }
+                                  catch { $counts.errors++; Warn "Moved '$($vals['Name'])' to '$($rule.name)' but couldn't remove the old copy from '$legacyName' (flexible asset $oldId): $($_.Exception.Message)" }
+                              }
+                              else { $counts.created++ }
                           }
+                          catch { $counts.errors++; Warn "Create failed for flexible asset $($vals['Name']) in '$($rule.name)': $($_.Exception.Message)" }
                       }
+                      $typeList = @($counts.byType.Keys)
                       $results[$phase] = [ordered]@{
-                          ran = $true; counts = $counts; flexibleAssetType = $typeName; flexibleAssetTypeId = $typeId
+                          ran = $true; counts = $counts
+                          flexibleAssetType = ($typeList -join ', '); flexibleAssetTypes = $typeList; flexibleAssetTypeIds = $typeIds
+                          legacyType = $(if ($null -ne $legacy -and $legacy.id) { $legacyName })
                           planned = @($planned | Select-Object -First 150); plannedTotal = $planned.Count
                       }
                   }
@@ -1463,7 +1542,8 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Flexible assets: $($c.scalePadAssets) ScalePad assets that aren't endpoints ($($c.noSerialDevices) of them devices with no serial), $(if ($apply) { "$($c.created) created, $($c.updated) updated" } else { "$($c.toCreate) to create, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
+                  $kinds = @($c.byType.GetEnumerator() | ForEach-Object { "$($_.Value) $($_.Key)" }) -join ', '
+                  Set-SyncOutput @{ status = 'ok'; message = "Flexible assets: $($c.scalePadAssets) ScalePad assets that aren't endpoints$(if ($kinds) { " ($kinds)" }), $($c.noSerialDevices) of them devices with no serial; $(if ($apply) { "$($c.created) created, $($c.moved) moved from the old single type, $($c.updated) updated" } else { "$($c.toCreate) to create, $($c.toMove) to move from the old single type, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message
@@ -1543,6 +1623,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -1550,8 +1632,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -1936,6 +2022,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -1943,8 +2031,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -2297,6 +2389,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -2304,8 +2398,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -2725,6 +2823,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -2732,8 +2832,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -3089,6 +3193,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -3096,8 +3202,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -3424,6 +3534,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -3431,8 +3543,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -3752,6 +3868,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -3759,8 +3877,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -4137,6 +4259,8 @@ definition:
                   $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                   $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                  # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                  $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                   function Invoke-WithRetry {
                       param([scriptblock]$Call, [string]$What)
                       for ($i = 1; $i -le 4; $i++) {
@@ -4144,8 +4268,12 @@ definition:
                           catch {
                               $code = $null
                               try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                              if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                              $msg = [string]$_.Exception.Message
+                              if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                              $isGet = $What -match ' GET '
+                              $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                              if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                              throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                           }
                       }
                   }
@@ -4361,11 +4489,27 @@ definition:
                   }
               }
           }
+          # A phase that fails on a connection error (TLS, DNS, reset, timeout) is run again for this company,
+          # from the context it started with. Phases match what already exists, so a re-run never duplicates.
+          $SyncTransient = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
           foreach ($SyncPhase in $SyncPhases.Keys) {
               if (@($global:SyncCtx.phases) -notcontains $SyncPhase) { continue }   # only the phases this run asked for
-              $global:SyncLast = $null
-              try { & $SyncPhases[$SyncPhase] }
-              catch { $null = $global:SyncLog.Add("$SyncPhase failed: $($_.Exception.Message)"); continue }
+              $SyncBefore = ($global:SyncCtx | ConvertTo-Json -Depth 30)
+              for ($SyncTry = 1; $SyncTry -le 3; $SyncTry++) {
+                  $global:SyncLast = $null
+                  $SyncErr = $null
+                  try { & $SyncPhases[$SyncPhase] } catch { $SyncErr = $_.Exception.Message }
+                  if (-not $SyncErr -and $null -ne $global:SyncLast -and $global:SyncLast.ctx) {
+                      $r = $global:SyncLast.ctx.results
+                      $pr = if ($r -is [System.Collections.IDictionary]) { $r[$SyncPhase] } elseif ($r) { $r.$SyncPhase } else { $null }
+                      if ($pr -and $pr.failed) { $SyncErr = [string]$pr.error }
+                  }
+                  if (-not $SyncErr -or $SyncErr -notmatch $SyncTransient -or $SyncTry -eq 3) { break }
+                  $null = $global:SyncLog.Add("The $SyncPhase step hit a connection error ($SyncErr) - running it again for this company (attempt $($SyncTry + 1) of 3).")
+                  $global:SyncCtx = ($SyncBefore | ConvertFrom-Json)
+                  Start-Sleep -Seconds (15 * $SyncTry)
+              }
+              if ($null -eq $global:SyncLast) { $null = $global:SyncLog.Add("$SyncPhase failed: $SyncErr"); continue }
               if ($null -ne $global:SyncLast) {
                   if ($global:SyncLast.ctx) { $global:SyncCtx = ($global:SyncLast.ctx | ConvertTo-Json -Depth 30 | ConvertFrom-Json) }
                   if ($global:SyncLast.message) { $null = $global:SyncLog.Add([string]$global:SyncLast.message) }
@@ -4499,6 +4643,8 @@ definition:
                       $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
                       $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
 
+                      # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
+                      $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
                       function Invoke-WithRetry {
                           param([scriptblock]$Call, [string]$What)
                           for ($i = 1; $i -le 4; $i++) {
@@ -4506,8 +4652,12 @@ definition:
                               catch {
                                   $code = $null
                                   try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-                                  if ($code -eq 429 -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
-                                  throw "$What failed$(if ($code) { " (HTTP $code)" }): $($_.Exception.Message)"
+                                  $msg = [string]$_.Exception.Message
+                                  if ($_.Exception.InnerException) { $msg += " ($($_.Exception.InnerException.Message))" }
+                                  $isGet = $What -match ' GET '
+                                  $retry = ($code -eq 429) -or (-not $code -and $msg -match $TransientPattern) -or ($isGet -and $code -in @(502, 503, 504))
+                                  if ($retry -and $i -lt 4) { Start-Sleep -Seconds (5 * $i); continue }
+                                  throw "$What failed$(if ($code) { " (HTTP $code)" }): $msg"
                               }
                           }
                       }
@@ -4714,10 +4864,14 @@ definition:
                       }
                       $fa = Get-P $results 'assets.counts'
                       if ($fa) {
-                          $act = if ($apply) { "Created $(Get-P $fa 'created') and updated $(Get-P $fa 'updated')." } else { "Would create $(Get-P $fa 'toCreate') and update $(Get-P $fa 'toUpdate')." }
+                          $moved = [int](Get-P $fa $(if ($apply) { 'moved' } else { 'toMove' }) 0)
+                          $act = if ($apply) { "Created $(Get-P $fa 'created') and updated $(Get-P $fa 'updated')$(if ($moved) { "; moved $moved from the old single type" })." } else { "Would create $(Get-P $fa 'toCreate') and update $(Get-P $fa 'toUpdate')$(if ($moved) { "; would move $moved from the old single type" })." }
                           $byType = @((ConvertTo-Dict (Get-P $fa 'byType')).GetEnumerator() | ForEach-Object { "$($_.Value) $($_.Key)" }) -join ', '
-                          $where = "the '$(Get-P $results 'assets.flexibleAssetType')' flexible asset type (Infrastructure)"
+                          $typeNames = @(Get-P $results 'assets.flexibleAssetTypes' @()); if ($typeNames.Count -eq 0) { $typeNames = @([string](Get-P $results 'assets.flexibleAssetType' '')) }
+                          $where = "the " + ((@($typeNames | ForEach-Object { "'$_'" })) -join ', ') + " flexible asset type$(if ($typeNames.Count -gt 1) { 's' }) (Infrastructure)"
                           $null = $lines.Add("Other hardware: $(Get-P $fa 'scalePadAssets') ScalePad assets that aren't endpoints$(if ($byType) { " ($byType)" }), kept in $where. $act")
+                          $legacyType = [string](Get-P $results 'assets.legacyType' '')
+                          if ($legacyType -and $moved) { $null = $attention.Add("This company's rows in the old '$legacyType' flexible asset type $(if ($apply) { 'were moved' } else { 'will be moved' }) to a type per kind of device. Once every company has been synced, the empty '$legacyType' type can be deleted under Settings.") }
                           $null = $rows.Add(@('Other hardware (flexible assets)', "$(Get-P $fa 'scalePadAssets') assets$(if ($byType) { ": $byType" })", $act, "$(Get-P $fa 'unchanged') unchanged, $(Get-P $fa 'errors') errors"))
                       }
                       $sa = Get-P $results 'saas.counts'

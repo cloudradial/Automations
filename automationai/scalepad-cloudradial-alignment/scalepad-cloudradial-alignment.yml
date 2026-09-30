@@ -70,7 +70,7 @@ definition:
           serial/model/manufacturer only where the portal value is blank; purchase date to endpoint manufacturedDate (only when blank) and
           other extras to endpoint custom-properties; installed software to
           endpointApplications; network, mobile and imaging hardware and devices with no serial
-          to flexible assets ("ScalePad Assets"); maturity/risk
+          to flexible assets, one type per kind of device; maturity/risk
           assessments to assessment upload; historical QBR PDFs to the report archive.
 
           Match endpoints by serial; a device without one is kept as a flexible asset, never an endpoint. Enrich, never clobber

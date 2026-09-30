@@ -61,7 +61,7 @@ Everything below is reachable through the ScalePad API — no exports or files. 
 | Initiative budget | Priced Planner items — one-time → `projectUnitPrice`, recurring → `monthlyUnitPrice` | same | n/a |
 | Contracts | Planner items (or `service` + `serviceinstall`) | `/v2/product` | Partial |
 | Assessments | CloudRadial assessment | `POST /v2/assessment` then `POST /v2/assessment/upload` (Excel) | Its own scoring model |
-| Other hardware — `NETWORK`, `MOBILE`, `IMAGING`, and devices with no serial | **Flexible asset** — type *ScalePad Assets* | `POST /v2/flexible-asset-type` (with fields), `POST /v2/flexible-asset`, `PATCH /v2/flexible-asset/{id}` | ❌ Display only |
+| Other hardware — `NETWORK`, `MOBILE`, `IMAGING`, and devices with no serial | **Flexible asset** — one type per kind of device (*Network Devices*, *Mobile Devices*, *Printers & Imaging*, …) | `POST /v2/flexible-asset-type` (with fields), `POST /v2/flexible-asset`, `PATCH /v2/flexible-asset/{id}` | ❌ Display only |
 | SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | ✅ Certificate / Domain Expiration |
 | QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item` | n/a |
 | Migration run report | **Report Archive** item (HTML) or **knowledge base article** | `POST /v2/archiveitem`, `POST /v2/article` | n/a |
@@ -148,7 +148,7 @@ CloudRadial imports assessments only from Excel (support KB 360052746791, *Impor
 
 ## 8. Flexible assets — ScalePad hardware that isn't an endpoint
 
-The source is **ScalePad**, not IT Glue. ScalePad hardware that doesn't belong in the endpoint list — types `NETWORK`, `MOBILE` and `IMAGING`, plus workstations, servers and VMs that have **no serial number** — becomes rows of one flexible asset type, **ScalePad Assets**, shown under Infrastructure.
+The source is **ScalePad**, not IT Glue. ScalePad hardware that doesn't belong in the endpoint list — types `NETWORK`, `MOBILE` and `IMAGING`, plus workstations, servers and VMs that have **no serial number** — becomes rows of a flexible asset type named for the kind of device — Network Devices, Mobile Devices, Printers & Imaging, Storage Devices, Power Devices, Workstations (No Serial), Servers (No Serial), Virtual Machines (No Serial) or Other Hardware — shown under Infrastructure. Earlier versions used one type, **ScalePad Assets**; the Sync moves those rows to their device type.
 
 | Field (trait key) | From ScalePad |
 |---|---|

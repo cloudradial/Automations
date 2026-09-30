@@ -12,7 +12,7 @@ It needs the `lifecycle-manager` (ScalePad) extension at **1.2.0 or later**: 1.0
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.5). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
+| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.6). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
 | [`scalepad-cloudradial-alignment.yml`](scalepad-cloudradial-alignment.yml) | `automationsWorkflow` | **Command: align.** One agent node, `autoApprove: false` (you approve each write). Static goal — the agent reads `mode`/`phase`/company from its input bag. |
 | [`knowledge/scalepad-to-cloudradial-migration-map.md`](knowledge/scalepad-to-cloudradial-migration-map.md) | Knowledge | Section-by-section map (ScalePad → CloudRadial home → API/import route → policy-evaluable?), the endpoint field map, and the guardrails. Upload to Knowledge and ground the workflow's agent node on it. |
 
@@ -49,7 +49,7 @@ Example first run: `{"mode":"plan","companyId":1,"phase":"devices"}`
 
 **What it hands to the Sync workflow.** For devices, assets, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"` and the count, plus a single **`syncRun`** — the exact run input for the Sync, for example `{"companyId":9,"scalePadClientId":"…","mode":"plan","phases":"all"}`. Paste it as the Sync's run input. `phases` only ever uses the Sync's six names — initiatives and contracts are `roadmap`, deliverable PDFs are `archive`.
 
-**Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint — network, mobile and imaging devices — and devices with no serial number go to one flexible asset type, **ScalePad Assets**, through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools (0.2.1 or later — 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
+**Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint — network, mobile and imaging devices — and devices with no serial number go to one flexible asset type per kind of device (**Network Devices**, **Mobile Devices**, **Printers & Imaging**, and so on) through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools (0.2.1 or later — 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
 
 ## Confirm in your tenant
 

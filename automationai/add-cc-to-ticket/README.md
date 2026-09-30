@@ -1,14 +1,31 @@
-# Add CC to Ticket
+# Let Users Add Colleagues to Ticket Updates
+
+Requesters add a coworker to a ticket's email updates from the portal, with no technician needed.
+
+**Formerly:** Add CC to Ticket | **Marketplace ID:** Not yet listed | **Type:** Workflow
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `add-cc-to-ticket.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/add-cc-to-ticket/add-cc-to-ticket.yml) |
+| Download `add-cc-to-ticket.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/add-cc-to-ticket/add-cc-to-ticket.yml) |
+| All files in this automation | [automationai/add-cc-to-ticket](https://github.com/cloudradial/Automations/tree/main/automationai/add-cc-to-ticket) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/add-cc-to-ticket) |
+
+## How it works
 
 A standalone **workflow** that adds a user/email to an existing ConnectWise ticket's
-notification CC list (de-duplicated), driven from a self-service form field. No agent — a
+notification CC list (de-duplicated), driven from a self-service form field. No agent, a
 single PowerShell script node.
 
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`add-cc-to-ticket.yml`](add-cc-to-ticket.yml) | `automationsWorkflow` | Reads `ticketId` + `ccEmail` from the form payload, appends the address to the CW ticket's `automaticEmailCc` (sets `automaticEmailCcFlag`), and leaves an internal note. Accepts a flat `{key:value}` body or the CloudRadial `{Ticket:{Questions:[{Id,Answer}]}}` shape. |
+| [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/add-cc-to-ticket/add-cc-to-ticket.yml) | `automationsWorkflow` | Reads `ticketId` + `ccEmail` from the form payload, appends the address to the CW ticket's `automaticEmailCc` (sets `automaticEmailCcFlag`), and leaves an internal note. Accepts a flat `{key:value}` body or the CloudRadial `{Ticket:{Questions:[{Id,Answer}]}}` shape. |
 
 ## Install / run
 

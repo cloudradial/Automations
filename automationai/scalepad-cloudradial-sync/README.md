@@ -1,12 +1,31 @@
-# ScalePad to CloudRadial Sync
+# Move Off ScalePad Without Losing Your Data
 
-A deterministic **workflow** that moves ScalePad Lifecycle Manager data into CloudRadial for **every ScalePad client that matches a CloudRadial company by name** — no input needed — API to API, following every ScalePad page, with nothing stored in between. **This is the only workflow a partner needs to migrate a client.** The [ScalePad to CloudRadial Alignment](../scalepad-cloudradial-alignment/) agent is an optional review for messy data — skip it unless you want a second opinion before applying.
+Moves every matched client's devices, other hardware, software, assessments, roadmap, budget, SaaS, insights and QBR documents from ScalePad into CloudRadial, and is safe to re-run.
+
+**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** Not yet listed | **Type:** Workflow
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `scalepad-cloudradial-sync.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
+| Download `scalepad-cloudradial-sync.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
+| All files in this automation | [automationai/scalepad-cloudradial-sync](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/scalepad-cloudradial-sync) |
+| Works with | [scalepad-lifecycle-manager-extension](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-lifecycle-manager-extension) |
+| Works with | [cloudradial-v2-compliance-extension](https://github.com/cloudradial/Automations/tree/main/automationai/cloudradial-v2-compliance-extension) |
+
+## How it works
+
+A deterministic **workflow** that moves ScalePad Lifecycle Manager data into CloudRadial for **every ScalePad client that matches a CloudRadial company by name**, no input needed, API to API, following every ScalePad page, with nothing stored in between. **This is the only workflow a partner needs to migrate a client.** The [ScalePad to CloudRadial Alignment](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-alignment) agent is an optional review for messy data, skip it unless you want a second opinion before applying.
 
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-sync.yml`](scalepad-cloudradial-sync.yml) | `automationsWorkflow` | Three steps: **Match companies by name** → **Migrate each company** (a For Each that runs every phase below for one company, in order) → **Migration report** (one report per company, written into its portal, plus a roll-up in the run output). |
+| [`scalepad-cloudradial-sync.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) | `automationsWorkflow` | Three steps: **Match companies by name** → **Migrate each company** (a For Each that runs every phase below for one company, in order) → **Migration report** (one report per company, written into its portal, plus a roll-up in the run output). |
 
 ## What it moves
 
@@ -17,12 +36,12 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | `saas` | SaaS subscriptions (Microsoft 365, Google Workspace, ...) | CloudRadial's software records always belong to a device and its API has no SaaS or licence route, so each subscription becomes a row of a flexible asset type named **SaaS**: product, vendor, SKU, category, status, licences and assigned seats, term start, renewal date, auto-renew, billing, provider, tenant domain and the ScalePad id (the match key, so re-runs update). |
 | `software` | Installed software per device | One endpoint application per product per device (name, publisher, version), tagged *Added by ScalePad to CloudRadial Sync* in its comments. Devices that already have software in CloudRadial (usually from the RMM, which keeps its own list current) are left alone; otherwise a product is skipped when the device already has one with the same name, ignoring publisher and version. |
 | `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
-| `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>` — updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
+| `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>`, updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
 | `insights` | Lifecycle Manager insights (High-risk, Warranty coverage, Hardware and Software modernization, Windows 11, Backup, Security, custom) | Each insight with affected assets becomes a **Proposed** Planner card `ScalePad Insight - <title>`: priority from the risk level, description, affected count, 30-day trend and, for hardware insights, the affected devices (up to 25). Re-runs refresh the text only, keeping any status or priority you set. Every insight, including clear ones, is listed in the report. |
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
 | `meetings` | Every meeting, completed and upcoming (newest first; `meetingLimit` caps it if set) | One HTML item per meeting in the company's **ScalePad Meeting Notes** report archive (Compliance > Reports): title, type, date, attendees, the notes/agenda converted from ScalePad's rich text, and the action items raised in it. Re-runs skip meetings already archived. |
 | `followup` | Open action items, meetings (upcoming + last 12 months), goals, assessment templates | Nothing is written - these areas have no CloudRadial API. They become the report's **Manual follow-up checklist**, together with anything from the run that needs a person (failed writes, warranty conflicts, skipped cancelled contracts). Action items are listed under the Planner card of their initiative. |
-| _report_ | — | In apply mode, a **migration report** in each company's **ScalePad Migration** report archive (Compliance > Reports - admins only), one item updated each run; `reportTarget: article` writes a knowledge base article instead. It lists what moved per area, what needs attention, and any warnings. |
+| _report_ |, | In apply mode, a **migration report** in each company's **ScalePad Migration** report archive (Compliance > Reports - admins only), one item updated each run; `reportTarget: article` writes a knowledge base article instead. It lists what moved per area, what needs attention, and any warnings. |
 
 ## What it doesn't move
 
@@ -53,18 +72,18 @@ The Sync is built to run again - by hand or as a daily/weekly **Routine** - with
 
 Nothing is deleted in CloudRadial when it disappears from ScalePad.
 
-Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved — the result is visible in the portal itself.
+Every phase is idempotent: re-running updates or skips what's already there. No email or outside service is involved, the result is visible in the portal itself.
 
 ## Install / run
 
 1. **Workflows → Import** `scalepad-cloudradial-sync.yml`, publish, and deploy to your runner.
 2. **Runner Key Vault secrets:** `ScalePad-ApiUrl` (e.g. `https://api.scalepad.com`), `ScalePad-ApiKey`, `CloudRadial-BaseUrl` (e.g. `https://api.us.cloudradial.com`), `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`. That's all. The first step fails with a message listing anything missing.
-3. **Run it** — click **Run** and leave **Trigger input** empty. Every ScalePad client whose name matches a CloudRadial company is migrated; clients with no match are listed in the output. Nothing needs wiring.
-   - **Preview first:** `{"mode": "plan"}` — counts per company and phase, nothing written.
+3. **Run it**, click **Run** and leave **Trigger input** empty. Every ScalePad client whose name matches a CloudRadial company is migrated; clients with no match are listed in the output. Nothing needs wiring.
+   - **Preview first:** `{"mode": "plan"}`, counts per company and phase, nothing written.
    - **One company:** `{"companyId": 9}` · **a few:** `{"companyIds": [9, 12]}` · **pair a client whose names differ:** `{"companyId": 9, "scalePadClientId": "<ScalePad id>"}`.
 4. **Clean up duplicate software (only if needed).** An early version could write a company's ScalePad software twice. `{"companyId": 20, "cleanupDuplicateSoftware": true}` lists the extra copies; `{"companyId": 20, "cleanupDuplicateSoftware": true, "mode": "apply", "confirmCleanup": true}` deletes them. It only looks at records the Sync wrote (ScalePad's all-caps categories or the Sync's comment), keeps the oldest copy of each device + product + version, and never touches RMM software.
 5. **Check the result.** The report step lists each company and where its migration report was written.
-6. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled — enable it only if something else triggers the sync.
+6. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled, enable it only if something else triggers the sync.
 
 ## Run inputs
 
@@ -73,10 +92,10 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | Input | Default | Notes |
 |---|---|---|
 | `companyId` / `companyIds` | all matched | Limit to one CloudRadial company or a list. |
-| `maxCompanies` | — | Cap the number of companies per run. |
-| `scalePadClientId` / `scalePadClientName` | — | Limit to one ScalePad client. With `companyId`, pairs a client whose name differs from the CloudRadial company. |
+| `maxCompanies` |, | Cap the number of companies per run. |
+| `scalePadClientId` / `scalePadClientName` |, | Limit to one ScalePad client. With `companyId`, pairs a client whose name differs from the CloudRadial company. |
 | `mode` | `apply` | `plan` previews without writing. |
-| `phases` | all | Comma list: `devices,assets,saas,software,assessments,roadmap,insights,archive,meetings,followup`. Other names are ignored with a warning — initiatives and contracts are `roadmap`, deliverables are `archive`. |
+| `phases` | all | Comma list: `devices,assets,saas,software,assessments,roadmap,insights,archive,meetings,followup`. Other names are ignored with a warning, initiatives and contracts are `roadmap`, deliverables are `archive`. |
 | `deviceTypes` | `WORKSTATION,SERVER,VIRTUAL` | ScalePad types to sync as endpoints. |
 | `createMissingDevices` | `true` | `false` = only enrich devices CloudRadial already has. |
 | `overwriteWarranty` | `false` | `true` = replace a CloudRadial warranty date that differs from ScalePad's. Otherwise differences are reported. |
@@ -90,8 +109,8 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `saasTypeName` | `SaaS` | Flexible asset type for the `saas` phase - created if missing. |
 | `maxSoftwareWrites` | `2000` | Software records per run; the rest are picked up next run. |
 | `assessmentStatus` | `Completed` | `all` to include in-progress assessments. |
-| `labelScoreMap` | — | JSON overriding answer scoring, e.g. `{"needs_attention": 1}`. |
-| `roadmapCategory` / `roadmapCategoryId` | `Efficiency` / `7` | Planner category for new cards — must exist in your portal. |
+| `labelScoreMap` |, | JSON overriding answer scoring, e.g. `{"needs_attention": 1}`. |
+| `roadmapCategory` / `roadmapCategoryId` | `Efficiency` / `7` | Planner category for new cards, must exist in your portal. |
 | `includeContracts` | `true` | Add contract cards alongside initiatives. |
 | `includeInactiveContracts` | `false` | Cancelled and expired ScalePad contracts are skipped and listed in the warnings; `true` adds them too. |
 | `insightDeviceLimit` / `insightCategory` | `25` / roadmap category | Devices listed per insight card; Planner category for insight cards. |
@@ -111,7 +130,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 - **Assessment import `type`.** The upload's `data` part sends `type: 0`. If the import lands as a template instead of an assessment, change it in the assessments step.
 - **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).
-- **Devices created from ScalePad** have no RMM agent until one is deployed — they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.
+- **Devices created from ScalePad** have no RMM agent until one is deployed, they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.
 
 ## Tested (mocked ScalePad and CloudRadial APIs, 2026-09-25)
 
@@ -119,4 +138,4 @@ All optional. With none, every name-matched company is migrated in apply mode.
 
 **Flexible assets and paging (second pass):** the `assets` phase planned and created the ScalePad Assets type with its fields, then created a network device and a no-serial workstation as rows. With the type already present it added the missing fields, updated a changed row, and used the compatibility route when the native patch was refused. The software step read the list with `page_size` 100, against a mock that rejects anything larger.
 
-**First pass:** a seven-step chain run in plan and apply, with each step's output fed to the next as JSON: two pages of hardware (cursor followed), a matched device enriched (OS, CPU, RAM, purchase date → `manufacturedDate`), a desktop, a server (enclosure 80) and a Mac (platform macOS) created, a network device skipped, software written only to known devices and de-duplicated, one assessment converted to `.xlsx` (opened and checked in Excel — required columns, scoring and suffixes correct), an initiative card updated with budget and roadmap quarter, a contract card created, a deliverable PDF the upload route refused listed for manual upload, and the migration report written to the ScalePad Migration archive. With the archive write forced to fail, the report stays in the run output and is not written to the knowledge base. All steps parse after the round trip through YAML.
+**First pass:** a seven-step chain run in plan and apply, with each step's output fed to the next as JSON: two pages of hardware (cursor followed), a matched device enriched (OS, CPU, RAM, purchase date → `manufacturedDate`), a desktop, a server (enclosure 80) and a Mac (platform macOS) created, a network device skipped, software written only to known devices and de-duplicated, one assessment converted to `.xlsx` (opened and checked in Excel, required columns, scoring and suffixes correct), an initiative card updated with budget and roadmap quarter, a contract card created, a deliverable PDF the upload route refused listed for manual upload, and the migration report written to the ScalePad Migration archive. With the archive write forced to fail, the report stays in the run output and is not written to the knowledge base. All steps parse after the round trip through YAML.

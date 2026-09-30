@@ -1,4 +1,23 @@
-# Weekly Fleet Audit
+# Get a Weekly List of Warranty and Ownership Gaps
+
+A weekly email lists clients with expired or unknown-warranty devices and clients with no account manager, so refresh and ownership conversations don't slip.
+
+**Formerly:** Weekly Fleet Audit | **Marketplace ID:** AAI-00032 | **Type:** Workflow (with an Agent node)
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `weekly-fleet-audit.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/weekly-fleet-audit/weekly-fleet-audit.yml) |
+| Download `weekly-fleet-audit.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/weekly-fleet-audit/weekly-fleet-audit.yml) |
+| All files in this automation | [automationai/weekly-fleet-audit](https://github.com/cloudradial/Automations/tree/main/automationai/weekly-fleet-audit) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/weekly-fleet-audit) |
+| Marketplace listing | [AAI-00032](https://automations.cloudradial.com/marketplace/AAI-00032) |
+| Works with | [Run Portal Admin Tasks by Asking](https://github.com/cloudradial/Automations/tree/main/automationai/cloudradial-ucp) |
+
+## How it works
 
 A CloudRadial **AutomationAI workflow** that audits the fleet on a schedule and emails the result. It shows two agents inside one workflow: the [CloudRadial UCP Assistant](../cloudradial-ucp/) does the audit, and the shared [Deliver Result](../deliver-result/) agent sends it. `Start → Run inputs → Agent (Fleet Audit) → PowerShell (Build Email) → Agent (Send Audit) → End`.
 

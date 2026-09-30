@@ -1,12 +1,29 @@
-# Feedback & CSAT Report
+# See Each Client's Satisfaction Score in Their Planner
 
-A scheduled **workflow** that reads CloudRadial feedback, works out a CSAT summary per company, and writes one plain-language **Feedback & CSAT Report** Planner card per company. It's the AutomationAI version of the `Get-FeedbackReport.ps1` helper — the CSV export becomes Planner cards. No agent — a single PowerShell script node.
+Turns portal feedback into a CSAT score and summary for each client on a Planner card, updated every run.
+
+**Formerly:** Feedback & CSAT Report | **Marketplace ID:** Not yet listed | **Type:** Workflow
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `feedback-csat-report.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/feedback-csat-report/feedback-csat-report.yml) |
+| Download `feedback-csat-report.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/feedback-csat-report/feedback-csat-report.yml) |
+| All files in this automation | [automationai/feedback-csat-report](https://github.com/cloudradial/Automations/tree/main/automationai/feedback-csat-report) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/feedback-csat-report) |
+
+## How it works
+
+A scheduled **workflow** that reads CloudRadial feedback, works out a CSAT summary per company, and writes one plain-language **Feedback & CSAT Report** Planner card per company. It's the AutomationAI version of the `Get-FeedbackReport.ps1` helper, the CSV export becomes Planner cards. No agent, a single PowerShell script node.
 
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`feedback-csat-report.yml`](feedback-csat-report.yml) | `automationsWorkflow` | Reads `/v2/odata/feedback` and companies, groups responses by company, calculates % positive and average rating, and creates or updates one card per company (matched by subject, so re-runs update in place). |
+| [`feedback-csat-report.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/feedback-csat-report/feedback-csat-report.yml) | `automationsWorkflow` | Reads `/v2/odata/feedback` and companies, groups responses by company, calculates % positive and average rating, and creates or updates one card per company (matched by subject, so re-runs update in place). |
 
 ## Install / run
 
@@ -23,6 +40,6 @@ A scheduled **workflow** that reads CloudRadial feedback, works out a CSAT summa
 
 ## Confirm in your tenant
 
-- The Planner category name and id at the top of the script (`$PlannerCategory`, `$PlannerProductCategoryId`) exist in your portal — change them if not.
+- The Planner category name and id at the top of the script (`$PlannerCategory`, `$PlannerProductCategoryId`) exist in your portal, change them if not.
 - Replaces the legacy `feedback-analysis` script listed on the marketplace as **AAI-00022**.
 - The webhook ships disabled; you only need it if something other than a Routine triggers the report.

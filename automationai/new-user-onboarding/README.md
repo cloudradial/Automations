@@ -1,4 +1,23 @@
-# New User Onboarding
+# Get New Hires Ready for Day One
+
+Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
+
+**Formerly:** New User Onboarding (agent) | **Marketplace ID:** Not yet listed | **Type:** Agent
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `new-user-onboarding.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) |
+| Download `new-user-onboarding.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) |
+| View `form-webhook-mapping.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
+| Download `form-webhook-mapping.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
+| All files in this automation | [automationai/new-user-onboarding](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/new-user-onboarding) |
+
+## How it works
 
 A guarded onboarding **agent** that takes one new starter from request to ready for
 day one, plus the **workflow** that runs it. The workflow reads the *Add a New User*
@@ -42,8 +61,8 @@ Every Agent node ships with `autoApprove: false`, so each change waits for appro
 ## Confirm in your tenant
 
 - The 1Password extension slug is `1password-business` (earlier copies used `onepassword-business`, which doesn't exist in the catalog).
-- Device/RMM readiness is deliberately not required — add `ninjaone-rmm-devices`, `datto-rmm` or `microsoft-intune` if you want it, and name it in `rmmPlatform`.
-- The agent runs **dry-run by default** — see [Dry run and going live](#dry-run-and-going-live). Every mutating Microsoft 365, Entra and ConnectWise call is also approval-gated by the extension.
+- Device/RMM readiness is deliberately not required, add `ninjaone-rmm-devices`, `datto-rmm` or `microsoft-intune` if you want it, and name it in `rmmPlatform`.
+- The agent runs **dry-run by default**, see [Dry run and going live](#dry-run-and-going-live). Every mutating Microsoft 365, Entra and ConnectWise call is also approval-gated by the extension.
 
 ## Dry run and going live
 

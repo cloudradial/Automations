@@ -30,6 +30,8 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 - Reads **native endpoint fields** (age from manufacture date, warranty expiry, OS, Windows 11 readiness, SSD/HDD, RAM, server/VM flags) and routes each computer through first-match decision tracks.
 - Creates/updates **one card per (company, category)** via `cr_create_product` / `cr_patch_product`, reconciled by subject so re-runs update in place.
 - Writes plain-language card bodies grouped by priority tier (Critical/High/Medium/Low).
+- **Closes cards whose category is empty.** When no computer lands in a category any more, its card is marked **Completed** with a one-line note, not left open as a placeholder. If devices return to that category later, the card reopens as Proposed.
+- **Critical stays visible.** Planner has no Critical priority, so a Critical card is stored as High, but its summary opens with "Critical:" and the body uses the Critical heading.
 - All decision logic is inline in the prompt — it does **not** call knowledge search or depend on grounding.
 
 ## Heads-up: this agent always writes

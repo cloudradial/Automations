@@ -3,7 +3,7 @@ agent:
   slug: endpoint-warranty-refresh-advisor-planner-cards
   name: Endpoint LifeCycle Manager
   vendor: CloudRadial
-  version: 0.3.4
+  version: 0.3.5
   description: Reviews managed endpoints per company and maintains one Planner
     card per refresh category (each carrying a triage priority) for out-of-spec
     computers. All decision logic is inline in the prompt; it does NOT depend on
@@ -196,6 +196,22 @@ agent:
     present low spec). Skip healthy Retain VMs; do not card them.
 
 
+    ## Empty categories: close the card, don't keep a placeholder
+
+    If this agent already has a card for a (company, category) but no device lands
+    in that category on this run, do NOT rewrite it as a "nothing required"
+    placeholder. Close it: call cr_patch_product to set its status to Completed
+    (status 40), and replace the body with one sentence such as "No computers need
+    action in this category as of <today, e.g. 30 Sep 2026>." plus the reconciliation marker
+    line. Leave its priority as it was. Report it with action "completed". If a
+    card is already Completed and still has no devices, leave it alone and report
+    action "skipped".
+
+    If a card you find is Completed but devices land in its category again, reopen
+    it: update it as normal and set its status back to Proposed (status 0). Report
+    it with action "reopened".
+
+
     ## Card body (human language)
 
     Write the body in plain, full sentences a technician or account manager can
@@ -215,8 +231,9 @@ agent:
 
     ## Scheduling
 
-    Do NOT set estimatedStartDate, estimatedEndDate, scheduledQuarter, or
-    status. Cards are created as Proposed and display as "Not scheduled" so the
+    Do NOT set estimatedStartDate, estimatedEndDate or scheduledQuarter, and do
+    not set status except to close or reopen a card (see "Empty categories").
+    Cards are created as Proposed and display as "Not scheduled" so the
     team schedules them later, which is the intended behavior. (AutomationAI's
     cr_create_product and cr_patch_product tools currently reject date
     parameters with a "should be of type 'string'" error, so this agent sends NO
@@ -243,8 +260,12 @@ agent:
     parameter triggers a tool error ("should be of type 'string'"), so omitting
     all dates is required and is what makes the write succeed.
 
-    - priority integers: Low = -1, Medium = 0, High = 1. There is NO Critical
-    code: use High (1) for Critical and write "Critical" in the body.
+    - priority integers: Low = -1, Medium = 0, High = 1. Planner has NO Critical
+    priority: send High (1) for a Critical card. The card itself must still say
+    Critical: open the summary with "Critical:" (for example "Critical: one
+    MacBook Air is running macOS 11, which no longer gets security updates.")
+    and use the Critical tier heading in the body. Never mention the priority
+    code or the High-for-Critical mapping in any text a person reads.
 
     - Reconcile before writing: pull cr_list_product filtered to the company's
     companyId. Do NOT request an OData count ($count=true); it is rejected. Just
@@ -263,6 +284,12 @@ agent:
 
     Return ONLY a JSON object matching the output schema: aggregate counts plus
     a per-card results list. Do not include any prose outside the JSON object.
+    In each result, "priority" is the card's tier as a person would say it:
+    Critical, High, Medium or Low (Critical even though Planner stores High).
+    "note" is one or two plain sentences about the devices and the action, with
+    no priority codes, field names or tool mechanics. cardsUpdated counts
+    updated and reopened cards; cardsCompleted counts cards closed because
+    their category is now empty.
   model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   requiredExtensionSlugs:
     - cloudradial-v2-endpoints
@@ -278,5 +305,5 @@ agent:
     target date offset in
     days","type":"number","default":"30","required":false}]'
   inputSchema: '{"type":"object","properties":{},"required":[],"additionalProperties":false}'
-  outputSchema: '{"type":"object","properties":{"evaluated":{"type":"number"},"flaggedEndpoints":{"type":"number"},"excludedNonComputer":{"type":"number"},"skippedHealthy":{"type":"number"},"companiesProcessed":{"type":"number"},"cardsCreated":{"type":"number"},"cardsUpdated":{"type":"number"},"cardsSkipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"companyId":{"type":"string"},"category":{"type":"string"},"priority":{"type":"string"},"action":{"type":"string","enum":["created","updated","skipped","error"]},"productId":{"type":"string"},"deviceCount":{"type":"number"},"note":{"type":"string"}},"required":["companyId","category","action","deviceCount","note"]}}},"required":["evaluated","flaggedEndpoints","companiesProcessed","cardsCreated","cardsUpdated","errors","results"],"additionalProperties":false}'
+  outputSchema: '{"type":"object","properties":{"evaluated":{"type":"number"},"flaggedEndpoints":{"type":"number"},"excludedNonComputer":{"type":"number"},"skippedHealthy":{"type":"number"},"companiesProcessed":{"type":"number"},"cardsCreated":{"type":"number"},"cardsUpdated":{"type":"number"},"cardsCompleted":{"type":"number"},"cardsSkipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"companyId":{"type":"string"},"category":{"type":"string"},"priority":{"type":"string"},"action":{"type":"string","enum":["created","updated","reopened","completed","skipped","error"]},"productId":{"type":"string"},"deviceCount":{"type":"number"},"note":{"type":"string"}},"required":["companyId","category","action","deviceCount","note"]}}},"required":["evaluated","flaggedEndpoints","companiesProcessed","cardsCreated","cardsUpdated","errors","results"],"additionalProperties":false}'
   dryRunDefault: false

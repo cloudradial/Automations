@@ -1,0 +1,97 @@
+automationsWorkflow: 1
+name: "Bulk-Create KB Articles"
+description: 'Creates many knowledge-base articles in a CloudRadial portal from a list, via the CloudRadial UCP Assistant agent. Send {"companyName":"Acme Ltd","articles":[{"subject":"VPN setup","category":"Networking","body":"..."}, ...]}. Skips articles that already exist by subject; every create is approval-gated. Replaces the AAI-00025 CSV import script.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read articles
+      type: powershell-script
+      position:
+        x: 300
+        y: 120
+      properties:
+        script: |-
+          # Run input: {"companyName":"Acme Ltd","articles":[{"subject":"VPN setup","category":"Networking","body":"<p>...</p>","author":"MSP"}, ...]}
+          # or {"companyId":42,"articles":[ ... ]}. Each article needs subject and body.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); if ($s.StartsWith('{') -or $s.StartsWith('[')) { $in = $s | ConvertFrom-Json } }
+          $companyName = Get-Prop $in 'companyName'
+          $companyId   = Get-Prop $in 'companyId'
+          $list = Get-Prop $in 'articles'; if ($null -eq $list) { $list = $in }
+          $articles = @(@($list) | Where-Object { $_ -and (Get-Prop $_ 'subject') -and (Get-Prop $_ 'body') })
+          if ($articles.Count -eq 0) {
+              $m = 'No articles: pass {"companyName":"Acme Ltd","articles":[{"subject":"...","body":"..."}, ...]} (each needs subject and body).'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          if (-not $companyName -and -not $companyId) {
+              $m = 'No company: pass companyName or companyId so the articles are created under the right company.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          $json = $articles | ConvertTo-Json -Depth 6 -Compress
+          $scope = if ($companyId) { "companyId $companyId" } else { "the company named '$companyName'" }
+          Set-NodeOutput ([ordered]@{
+              count   = $articles.Count
+              request = "Create these knowledge-base articles under $scope. Resolve the company first. For EACH article, search existing articles by subject; if one with the same subject already exists, skip it and say so; otherwise create it with the provided subject, body, and any category/author. Never invent content. Articles (JSON): $json"
+              message = "$($articles.Count) article(s) to create under $scope."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyName":"Acme Ltd","articles":[{"subject":"How to connect to the VPN","category":"Networking","body":"<p>Open the client and sign in.</p>"}]}
+    - id: node-agent
+      name: Create articles
+      type: agent
+      position:
+        x: 500
+        y: 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: >-
+          Create the knowledge-base articles you are given in the CloudRadial portal. Your
+          "request" input holds the target company and a JSON array of articles. (1) Resolve
+          the company first; if the name is ambiguous, list the candidates and stop. (2) For
+          EACH article, search existing articles by subject; if one with the same subject
+          already exists, do NOT duplicate it, record it as "skipped (already exists)".
+          (3) Otherwise create the article with the provided subject and body (and category,
+          author when given). Never invent content. Every create is mutating and
+          approval-gated: state exactly what you will create before doing it. Finish with a
+          per-article result (created / skipped / error) and a one-line summary.
+        model: ""
+        allowedExtensions:
+          - cloudradial-v2-content
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"created":{"type":"number"},"skipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["created","skipped","error"]},"note":{"type":"string"}},"required":["name","action"]}},"summary":{"type":"string"}},"required":["created","skipped","errors","summary"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 700
+        y: 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

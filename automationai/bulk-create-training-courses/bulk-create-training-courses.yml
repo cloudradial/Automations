@@ -1,0 +1,99 @@
+automationsWorkflow: 1
+name: "Bulk-Create Training Courses"
+description: 'Creates training courses and their lessons in a CloudRadial portal from a list, via the CloudRadial UCP Assistant agent. Send {"companyName":"Acme Ltd","courses":[{"name":"Security Basics","category":"Security","lessons":[{"title":"Phishing","text":"..."}]}, ...]}. Skips courses that already exist by name; every create is approval-gated. Replaces the AAI-00026 CSV import script.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read courses
+      type: powershell-script
+      position:
+        x: 300
+        y: 120
+      properties:
+        script: |-
+          # Run input: {"companyName":"Acme Ltd","courses":[{"name":"Security Basics","shortDescription":"...","description":"...","category":"Security","estimatedTime":15,"lessons":[{"title":"Phishing","overview":"...","text":"<p>...</p>","order":1}]}, ...]}
+          # or {"companyId":42,"courses":[ ... ]}. Each course needs a name; each lesson needs title and text.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); if ($s.StartsWith('{') -or $s.StartsWith('[')) { $in = $s | ConvertFrom-Json } }
+          $companyName = Get-Prop $in 'companyName'
+          $companyId   = Get-Prop $in 'companyId'
+          $list = Get-Prop $in 'courses'; if ($null -eq $list) { $list = $in }
+          $courses = @(@($list) | Where-Object { $_ -and (Get-Prop $_ 'name') })
+          if ($courses.Count -eq 0) {
+              $m = 'No courses: pass {"companyName":"Acme Ltd","courses":[{"name":"...","lessons":[...]}, ...]} (each course needs a name).'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          if (-not $companyName -and -not $companyId) {
+              $m = 'No company: pass companyName or companyId so the courses are created under the right company.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          $json = $courses | ConvertTo-Json -Depth 8 -Compress
+          $scope = if ($companyId) { "companyId $companyId" } else { "the company named '$companyName'" }
+          Set-NodeOutput ([ordered]@{
+              count   = $courses.Count
+              request = "Create these training courses and their lessons under $scope. Resolve the company first. For EACH course, search existing courses by name; if one with the same name already exists, skip it and say so; otherwise create the course (name, shortDescription, description, category, estimatedTime), then create each of its lessons (title, overview, text, order) against the new courseId, in order. Never invent content. Courses (JSON): $json"
+              message = "$($courses.Count) course(s) to create under $scope."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyName":"Acme Ltd","courses":[{"name":"Security Basics","shortDescription":"Core security habits","description":"Intro to security","category":"Security","estimatedTime":15,"lessons":[{"title":"Spotting phishing","overview":"Recognise phishing","text":"<p>Check the sender.</p>","order":1}]}]}
+    - id: node-agent
+      name: Create courses
+      type: agent
+      position:
+        x: 500
+        y: 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: >-
+          Create the training courses you are given in the CloudRadial portal. Your "request"
+          input holds the target company and a JSON array of courses, each with an optional
+          lessons array. (1) Resolve the company first; if the name is ambiguous, list the
+          candidates and stop. (2) For EACH course, search existing courses by name; if one
+          with the same name already exists, do NOT duplicate it, record it as "skipped
+          (already exists)". (3) Otherwise create the course (name, shortDescription,
+          description, category, estimatedTime), then create each of its lessons (title,
+          overview, text, order) against the new course, in order. Never invent content.
+          Every create is mutating and approval-gated: state exactly what you will create
+          before doing it. Finish with a per-course result (created / skipped / error, with a
+          lesson count) and a one-line summary.
+        model: ""
+        allowedExtensions:
+          - cloudradial-v2-training
+        timeoutSeconds: 1200
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"created":{"type":"number"},"skipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["created","skipped","error"]},"lessons":{"type":"number"},"note":{"type":"string"}},"required":["name","action"]}},"summary":{"type":"string"}},"required":["created","skipped","errors","summary"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 700
+        y: 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

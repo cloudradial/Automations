@@ -1,0 +1,100 @@
+automationsWorkflow: 1
+name: "Import Service Catalog Items"
+description: 'Creates service-catalog items and their questions in a CloudRadial portal from a list, via the CloudRadial UCP Assistant agent. Send {"companyName":"Acme Ltd","catalogs":[{"subject":"New Laptop Request","category":"Hardware","questions":[{"label":"Model"}]}, ...]}. Skips catalog items that already exist by subject; every create is approval-gated. Replaces the AAI-00003 export/import script.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read catalog items
+      type: powershell-script
+      position:
+        x: 300
+        y: 120
+      properties:
+        script: |-
+          # Run input: {"companyName":"Acme Ltd","catalogs":[{"subject":"New Laptop Request","category":"Hardware","description":"...","shortDescription":"...","questions":[{"label":"Model","placeholder":"e.g. Dell 5570","options":"A|B|C"}]}, ...]}
+          # or {"companyId":42,"catalogs":[ ... ]}. Each catalog item needs subject and category.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); if ($s.StartsWith('{') -or $s.StartsWith('[')) { $in = $s | ConvertFrom-Json } }
+          $companyName = Get-Prop $in 'companyName'
+          $companyId   = Get-Prop $in 'companyId'
+          $list = Get-Prop $in 'catalogs'; if ($null -eq $list) { $list = $in }
+          $catalogs = @(@($list) | Where-Object { $_ -and (Get-Prop $_ 'subject') -and (Get-Prop $_ 'category') })
+          if ($catalogs.Count -eq 0) {
+              $m = 'No catalog items: pass {"companyName":"Acme Ltd","catalogs":[{"subject":"...","category":"...","questions":[...]}, ...]} (each needs subject and category).'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          if (-not $companyName -and -not $companyId) {
+              $m = 'No company: pass companyName or companyId so the catalog items are created under the right company.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          $json = $catalogs | ConvertTo-Json -Depth 8 -Compress
+          $scope = if ($companyId) { "companyId $companyId" } else { "the company named '$companyName'" }
+          Set-NodeOutput ([ordered]@{
+              count   = $catalogs.Count
+              request = "Create these service-catalog items and their questions under $scope. Resolve the company first. For EACH catalog item, search existing catalog items by subject; if one with the same subject already exists, skip it and say so; otherwise create the catalog item (subject, category, description, shortDescription), then create each of its questions (label, type, options, placeholder, defaultValue) against the new companyCatalogId, in order (set each question's order 1,2,3...). Never invent content. Catalog items (JSON): $json"
+              message = "$($catalogs.Count) catalog item(s) to create under $scope."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyName":"Acme Ltd","catalogs":[{"subject":"New Laptop Request","category":"Hardware","shortDescription":"Request a new laptop","questions":[{"label":"Preferred model","placeholder":"e.g. Dell 5570"},{"label":"Justification"}]}]}
+    - id: node-agent
+      name: Create catalog items
+      type: agent
+      position:
+        x: 500
+        y: 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: >-
+          Create the service-catalog items you are given in the CloudRadial portal. Your
+          "request" input holds the target company and a JSON array of catalog items, each
+          with an optional questions array. (1) Resolve the company first; if the name is
+          ambiguous, list the candidates and stop. (2) For EACH catalog item, search existing
+          catalog items by subject; if one with the same subject already exists, do NOT
+          duplicate it, record it as "skipped (already exists)". (3) Otherwise create the
+          catalog item (subject, category, description, shortDescription), then create each of
+          its questions (label, type, options, placeholder, defaultValue) against the new
+          catalog item, giving each an increasing order. Never invent content. Every create is
+          mutating and approval-gated: state exactly what you will create before doing it.
+          Finish with a per-item result (created / skipped / error, with a question count) and
+          a one-line summary.
+        model: ""
+        allowedExtensions:
+          - cloudradial-v2-content
+        timeoutSeconds: 1200
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"created":{"type":"number"},"skipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["created","skipped","error"]},"questions":{"type":"number"},"note":{"type":"string"}},"required":["name","action"]}},"summary":{"type":"string"}},"required":["created","skipped","errors","summary"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 700
+        y: 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

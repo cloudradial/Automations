@@ -1,0 +1,93 @@
+automationsWorkflow: 1
+name: "Add Companies to the Portal"
+description: 'Bulk-adds client companies to CloudRadial from a list, via the CloudRadial UCP Assistant agent. Send {"companies":[{"name":"Acme Ltd","accountManager":"jsmith@msp.com","city":"Austin"}, ...]}. Skips companies that already exist; every create is approval-gated. Replaces the AAI-00002 bulk-add script.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read companies
+      type: powershell-script
+      position:
+        x: 300
+        y: 120
+      properties:
+        script: |-
+          # Run input: {"companies":[{"name":"Acme Ltd","accountManager":"jsmith@msp.com","city":"Austin"}, ...]}
+          # Also accepts a bare JSON array, or a newline/comma list of names.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) {
+              $s = $in.Trim()
+              if ($s.StartsWith('{') -or $s.StartsWith('[')) { $in = $s | ConvertFrom-Json }
+              else { $in = @{ companies = @($s -split '[\r\n,]' | ForEach-Object { @{ name = $_.Trim() } }) } }
+          }
+          $list = Get-Prop $in 'companies'; if ($null -eq $list) { $list = $in }
+          $companies = @(@($list) | Where-Object { $_ -and (Get-Prop $_ 'name') })
+          if ($companies.Count -eq 0) {
+              $m = 'No companies to add: pass {"companies":[{"name":"Acme Ltd"}, ...]} in the run input.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          $json = $companies | ConvertTo-Json -Depth 6 -Compress
+          Set-NodeOutput ([ordered]@{
+              count   = $companies.Count
+              request = "Add these companies to the CloudRadial portal. For each, first search by name; if it already exists skip it and say so; otherwise create it and set only the provided fields (e.g. account manager, city). Companies (JSON): $json"
+              message = "$($companies.Count) company/companies to add."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companies":[{"name":"Acme Ltd","city":"Austin"},{"name":"Globex Inc"}]}
+    - id: node-agent
+      name: Add companies
+      type: agent
+      position:
+        x: 500
+        y: 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: >-
+          Add the companies you are given to the CloudRadial portal. Your "request" input
+          holds a JSON array of companies. For EACH company: (1) search existing companies
+          by name first - if one already exists (exact or clearly the same), do NOT create a
+          duplicate, record it as "skipped (already exists)"; (2) otherwise create the company,
+          setting only the fields provided (name, account manager, city, etc.). Never invent
+          values; never guess an id. Every create is mutating and approval-gated: state exactly
+          what you will create before doing it. Finish with a per-company result
+          (created / skipped / error) and a one-line summary of how many were added.
+        model: ""
+        allowedExtensions:
+          - cloudradial-v2-companies
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"created":{"type":"number"},"skipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["created","skipped","error"]},"note":{"type":"string"}},"required":["name","action"]}},"summary":{"type":"string"}},"required":["created","skipped","errors","summary"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 700
+        y: 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

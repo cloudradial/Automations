@@ -1,0 +1,232 @@
+automationsWorkflow: 1
+name: "Turn Microsoft Secure Score into a Client Assessment"
+description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, creates the assessment and uploads it - all in one deterministic PowerShell node. Send {"companyId":9,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-secure-score
+      name: Import Secure Score
+      type: powershell-script
+      position:
+        x: 320
+        y: 120
+      properties:
+        script: |-
+          # =====================================================================
+          #  Secure Score -> CloudRadial Assessment (deterministic, in-memory xlsx)
+          #  Run input: {"companyId":9,"tenantId":"<client Graph tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
+          #    companyId  - CloudRadial company the assessment is created under (required)
+          #    tenantId   - the CLIENT's Entra tenant id to pull Secure Score from (required)
+          #    mode       - "apply" (default) writes; "plan" previews only
+          #  Secrets (runner Key Vault): CloudRadial-BaseUrl / -PublicKey / -PrivateKey,
+          #    and M365-ClientID / M365-ClientSecret (an Entra app with
+          #    SecurityEvents.Read.All application permission, consented in the client tenant).
+          # =====================================================================
+          $ErrorActionPreference = 'Stop'
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+
+          function Get-Secret { param([string]$Name) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue }
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+
+          # ---- run input ----
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); if ($s.StartsWith('{')) { $in = $s | ConvertFrom-Json } }
+          $companyId = Get-Prop $in 'companyId'
+          $tenantId  = Get-Prop $in 'tenantId'
+          $title     = [string](Get-Prop $in 'assessmentTitle'); if ([string]::IsNullOrWhiteSpace($title)) { $title = 'Microsoft Secure Score' }
+          $mode      = [string](Get-Prop $in 'mode'); if ([string]::IsNullOrWhiteSpace($mode)) { $mode = 'apply' }
+          if (-not $companyId -or [string]::IsNullOrWhiteSpace([string]$tenantId)) {
+              $m = 'Need companyId (CloudRadial) and tenantId (the client Entra tenant). e.g. {"companyId":9,"tenantId":"00000000-0000-0000-0000-000000000000"}.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+
+          # ---- secrets ----
+          $crBaseRaw = Get-Secret 'CloudRadial-BaseUrl'; $pub = Get-Secret 'CloudRadial-PublicKey'; $prv = Get-Secret 'CloudRadial-PrivateKey'
+          $appId = Get-Secret 'M365-ClientID'; $appSecret = Get-Secret 'M365-ClientSecret'
+          $missing = foreach ($pair in @(
+              @{ n='CloudRadial-BaseUrl'; v=$crBaseRaw }, @{ n='CloudRadial-PublicKey'; v=$pub }, @{ n='CloudRadial-PrivateKey'; v=$prv },
+              @{ n='M365-ClientID'; v=$appId }, @{ n='M365-ClientSecret'; v=$appSecret }
+          )) { if ([string]::IsNullOrWhiteSpace([string]$pair.v)) { $pair.n } }
+          if (@($missing).Count -gt 0) { $m = "Add these runner Key Vault secret(s) and re-run: $($missing -join ', ')."; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+          $crBase = ([string]$crBaseRaw).TrimEnd('/')
+          $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$pub`:$prv"))
+
+          # ---- CloudRadial helpers ----
+          function Invoke-Cr {
+              param([string]$Method,[string]$Path,[object]$Body)
+              $u = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
+              $h = @{ Authorization = $crAuth; Accept = 'application/json' }
+              $a = @{ Uri = $u; Method = $Method; Headers = $h; ContentType = 'application/json' }
+              if ($null -ne $Body) { $a.Body = ($Body | ConvertTo-Json -Depth 10) }
+              Invoke-RestMethod @a
+          }
+          function Get-CrAll {
+              param([string]$Path)
+              $all = @(); $skip = 0
+              for ($p = 0; $p -lt 500; $p++) {
+                  $sep = if ($Path -match '\?') { '&' } else { '?' }
+                  $r = Invoke-Cr -Method GET -Path "${Path}${sep}`$top=100&`$skip=$skip"
+                  $rows = if ($r.PSObject.Properties['value']) { @($r.value) } elseif ($r -is [System.Array]) { @($r) } else { @() }
+                  $all += $rows
+                  if (@($rows).Count -lt 100) { break }
+                  $skip += 100
+              }
+              return $all
+          }
+          function Send-CrMultipart {
+              param([string]$Path,[string]$DataJson,[byte[]]$FileBytes,[string]$FileName)
+              Add-Type -AssemblyName System.Net.Http
+              $client = New-Object System.Net.Http.HttpClient
+              $client.DefaultRequestHeaders.Add('Authorization', $crAuth)
+              $form = New-Object System.Net.Http.MultipartFormDataContent
+              $form.Add((New-Object System.Net.Http.StringContent($DataJson, [Text.Encoding]::UTF8, 'application/json')), 'data')
+              $fc = New-Object System.Net.Http.ByteArrayContent(, $FileBytes)
+              $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+              $form.Add($fc, 'file', $FileName)
+              $resp = $client.PostAsync("$crBase$Path", $form).GetAwaiter().GetResult()
+              $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              $client.Dispose()
+              if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode): $text" }
+              return $text
+          }
+
+          # ---- assessment template (51-col) + a 15-col working subset ----
+          $Columns = @('Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Partner Notes')
+          $TemplateColumns = @('Partner Notes','Monthly Unit Cost','Project Unit Cost','Psa Board','Psa Item','Psa Status','Psa Category','Psa Sub Type','Psa Type','Psa Priority','Psa Source','Psa Estimated Time','Email List','Teams Webhook','Slack Webhook','Flow Webhook','Json Webhook','Script','Checklist','Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Monthly Units','Monthly Unit Price','Project Units','Project Unit Price','Control Type','Likelihood','Risk','Risk Cost','Risk Impact','Owner','Updated by','Update Key','Content Update Key','Note Compliant','Note Partially Compliant','Note NA','Note Missing','Note Not Compliant')
+          function ConvertTo-TemplateRows { param([object[]]$Rows)
+              $idx = @{}; for ($i = 0; $i -lt $Columns.Count; $i++) { $idx[$Columns[$i]] = $i }
+              $out = New-Object System.Collections.ArrayList
+              foreach ($r in $Rows) { $row = @($r); $null = $out.Add(@($TemplateColumns | ForEach-Object { if ($idx.ContainsKey($_)) { $row[$idx[$_]] } else { $null } })) }
+              return $out.ToArray()
+          }
+          function New-XlsxBytes {
+              param([string[]]$Header,[object[]]$Rows)
+              Add-Type -AssemblyName System.IO.Compression
+              $esc = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
+              $colName = { param([int]$n) $s=''; $n++; while ($n -gt 0) { $m = ($n-1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n-1)/26) }; $s }
+              $sb = New-Object System.Text.StringBuilder
+              $null = $sb.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
+              $all = @(, $Header) + $Rows
+              for ($r = 0; $r -lt $all.Count; $r++) {
+                  $null = $sb.Append("<row r=""$($r+1)"">")
+                  $row = @($all[$r])
+                  for ($c = 0; $c -lt $row.Count; $c++) {
+                      $ref = (& $colName $c) + ($r+1); $val = $row[$c]
+                      if ($val -is [int] -or $val -is [long] -or $val -is [double]) { $null = $sb.Append("<c r=""$ref""><v>$val</v></c>") }
+                      elseif (-not [string]::IsNullOrEmpty([string]$val)) { $null = $sb.Append("<c r=""$ref"" t=""inlineStr""><is><t xml:space=""preserve"">$(& $esc $val)</t></is></c>") }
+                  }
+                  $null = $sb.Append('</row>')
+              }
+              $null = $sb.Append('</sheetData></worksheet>')
+              $files = [ordered]@{
+                  '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
+                  '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+                  'xl/workbook.xml'            = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>'
+                  'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+                  'xl/worksheets/sheet1.xml'   = $sb.ToString()
+              }
+              $ms = New-Object System.IO.MemoryStream
+              $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+              foreach ($k in $files.Keys) { $entry = $zip.CreateEntry($k); $w = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding($false))); $w.Write($files[$k]); $w.Dispose() }
+              $zip.Dispose()
+              return , $ms.ToArray()
+          }
+
+          # ---- Microsoft Graph: token + Secure Score ----
+          $tokUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
+          $tok = (Invoke-RestMethod -Uri $tokUri -Method Post -ContentType 'application/x-www-form-urlencoded' -Body @{ grant_type='client_credentials'; client_id=$appId; client_secret=$appSecret; scope='https://graph.microsoft.com/.default' }).access_token
+          if (-not $tok) { throw 'Could not get a Microsoft Graph token - check the app id/secret and that the app is consented in the client tenant.' }
+          $gh = @{ Authorization = "Bearer $tok" }
+          $score = (Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/security/secureScores?$top=1' -Headers $gh).value | Select-Object -First 1
+          if (-not $score) { throw 'No Secure Score data for this tenant (is Microsoft Secure Score enabled, and does the app have SecurityEvents.Read.All?).' }
+          $tenantCur = [double]$score.currentScore; $tenantMax = [double]$score.maxScore
+          $lookup = @{}; foreach ($cs in @($score.controlScores)) { $lookup[[string]$cs.controlName] = $cs.score }
+          $profiles = @(); $uri = 'https://graph.microsoft.com/v1.0/security/secureScoreControlProfiles'
+          while ($uri) { $r = Invoke-RestMethod -Uri $uri -Headers $gh; $profiles += @($r.value); $uri = $r.'@odata.nextLink' }
+          $active = @($profiles | Where-Object { -not $_.deprecated })
+          if ($active.Count -eq 0) { throw 'No active Secure Score control profiles returned.' }
+
+          # ---- build the 15-column assessment rows ----
+          $catOrder = @{ 'Identity'=1; 'Device'=2; 'Apps'=3; 'Data'=4; 'Infrastructure'=5 }
+          $sorted = $active | Sort-Object @(
+              @{ Expression = { $k=[string]$_.controlCategory; if ($catOrder.ContainsKey($k)) { $catOrder[$k] } else { 99 } } },
+              @{ Expression = { $_.rank } }
+          )
+          $rows = New-Object System.Collections.ArrayList
+          $order = 0; $compliantCount = 0
+          foreach ($c in $sorted) {
+              $order += 10
+              $cc = [string]$c.controlCategory
+              $cat = switch ($cc) { 'Account' { 'Identity' } 'Identity' { 'Identity' } 'Data' { 'Data' } 'Device' { 'Device' } 'Apps' { 'Apps' } 'Infrastructure' { 'Infrastructure' } default { $cc } }
+              $cur = if ($lookup.ContainsKey([string]$c.id)) { [double]$lookup[[string]$c.id] } else { 0 }
+              $max = if ($c.maxScore) { [double]$c.maxScore } else { 0 }
+              $isCompliant = ($cur -ge $max) -and ($max -gt 0)
+              if ($isCompliant) { $compliantCount++ }
+              $answer = if ($isCompliant) { 2 } else { -2 }
+              $txt = if ($isCompliant) { 'Compliant' } else { 'Not compliant' }
+              $flag = if ($isCompliant) { 'No' } else { 'Yes' }
+              $pct = if ($tenantMax -gt 0) { [math]::Round(($max / $tenantMax) * 100, 2) } else { 0 }
+              $rem = if ($c.remediation) { ($c.remediation -replace '<[^>]+>','') } else { '' }
+              $remSum = if ($rem) { $rem.Substring(0, [math]::Min(200, $rem.Length)) } else { '' }
+              $null = $rows.Add(@(
+                  $cat, [string]$c.title, $order,
+                  "Service: $($c.service) | Score impact: $pct% | Points: $cur / $max", 'List',
+                  $answer, $txt, 'Compliant,Partially Compliant+,N/A=,Missing*,Not Compliant-', $flag, '',
+                  'Review this control in the Microsoft 365 Defender portal under Secure Score.',
+                  $remSum, $rem, "Microsoft Secure Score - $($c.service)", ''
+              ))
+          }
+
+          $titleFinal = "$title ($(Get-Date -Format 'yyyy-MM-dd'))"
+          $summary = "$($rows.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
+
+          # ---- duplicate check ----
+          $existing = @(); $dupe = $false
+          try { $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { }
+          foreach ($a in $existing) { if (([string](Get-Prop $a 'title')) -eq $titleFinal) { $dupe = $true } }
+
+          if ($dupe) {
+              Set-NodeOutput ([ordered]@{ status='skipped'; message="An assessment titled '$titleFinal' already exists for companyId $companyId - not re-created."; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+          }
+          elseif ($mode -eq 'plan') {
+              Set-NodeOutput ([ordered]@{ status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+          }
+          else {
+              $desc = "Imported from Microsoft Secure Score on $(Get-Date -Format 'yyyy-MM-dd'). Tenant score $tenantCur / $tenantMax."
+              $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId=[int]$companyId; title=$titleFinal; category='Security'; description=$desc })
+              $aid = Get-Prop $created 'assessmentId'; if (-not $aid) { $aid = Get-Prop $created 'id' }
+              if (-not $aid) { throw 'CloudRadial did not return an assessmentId from POST /v2/assessment.' }
+              $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
+              $data = (@{ name = $titleFinal; assessmentId = [int]$aid; type = 0; companyId = [int]$companyId } | ConvertTo-Json -Compress)
+              $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx'
+              Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=[int]$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+          }
+        timeoutSeconds: 600
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyId":1,"tenantId":"00000000-0000-0000-0000-000000000000","mode":"plan"}
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 540
+        y: 120
+  connections:
+    - source: start
+      target: node-secure-score
+      sourceHandle: null
+    - source: node-secure-score
+      target: end
+      sourceHandle: null
+  startActivityId: start

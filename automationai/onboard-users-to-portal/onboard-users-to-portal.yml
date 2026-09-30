@@ -1,0 +1,98 @@
+automationsWorkflow: 1
+name: "Onboard Users into the Portal"
+description: 'Bulk-creates portal users under a company from a list, via the CloudRadial UCP Assistant agent. Send {"companyName":"Acme Ltd","users":[{"email":"a@acme.com","firstName":"Ann","lastName":"Lee"}, ...]}. Skips users that already exist by email; every create is approval-gated. Replaces the AAI-00006 CSV import script.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read users
+      type: powershell-script
+      position:
+        x: 300
+        y: 120
+      properties:
+        script: |-
+          # Run input: {"companyName":"Acme Ltd","users":[{"email":"a@acme.com","firstName":"Ann","lastName":"Lee","title":"Ops"}, ...]}
+          # or {"companyId":42,"users":[ ... ]}. Each user needs email, firstName, lastName.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); if ($s.StartsWith('{') -or $s.StartsWith('[')) { $in = $s | ConvertFrom-Json } }
+          $companyName = Get-Prop $in 'companyName'
+          $companyId   = Get-Prop $in 'companyId'
+          $list = Get-Prop $in 'users'; if ($null -eq $list) { $list = $in }
+          $users = @(@($list) | Where-Object { $_ -and (Get-Prop $_ 'email') -and (Get-Prop $_ 'firstName') -and (Get-Prop $_ 'lastName') })
+          if ($users.Count -eq 0) {
+              $m = 'No users to add: pass {"companyName":"Acme Ltd","users":[{"email":"a@acme.com","firstName":"Ann","lastName":"Lee"}, ...]} (each user needs email, firstName, lastName).'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          if (-not $companyName -and -not $companyId) {
+              $m = 'No company: pass companyName or companyId in the run input so the users are created under the right company.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          $usersJson = $users | ConvertTo-Json -Depth 6 -Compress
+          $scope = if ($companyId) { "companyId $companyId" } else { "the company named '$companyName'" }
+          Set-NodeOutput ([ordered]@{
+              count   = $users.Count
+              request = "Create these portal users under $scope. Resolve the company first, then for each user search by email; if a user with that email already exists in the company skip it and say so; otherwise create the user with the provided fields (email, firstName, lastName, and any title/department/phone). Never invent values. Users (JSON): $usersJson"
+              message = "$($users.Count) user(s) to onboard under $scope."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyName":"Acme Ltd","users":[{"email":"ann.lee@acme.com","firstName":"Ann","lastName":"Lee","title":"Operations"},{"email":"bo.ng@acme.com","firstName":"Bo","lastName":"Ng"}]}
+    - id: node-agent
+      name: Onboard users
+      type: agent
+      position:
+        x: 500
+        y: 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: >-
+          Onboard the users you are given into the CloudRadial portal. Your "request" input
+          holds the target company and a JSON array of users. (1) Resolve the company first
+          (by companyId, or by name with cr_list_company); if the name is ambiguous, list the
+          candidates and stop - do not guess. (2) For EACH user, search that company's users by
+          email first; if a user with that email already exists, do NOT create a duplicate,
+          record it as "skipped (already exists)". (3) Otherwise create the user with the
+          provided fields (email, firstName, lastName required; set title/department/phone when
+          given). Never invent values; never guess an id. Every create is mutating and
+          approval-gated: state exactly what you will create before doing it. Finish with a
+          per-user result (created / skipped / error) and a one-line summary.
+        model: ""
+        allowedExtensions:
+          - cloudradial-v2-companies
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"created":{"type":"number"},"skipped":{"type":"number"},"errors":{"type":"number"},"results":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["created","skipped","error"]},"note":{"type":"string"}},"required":["name","action"]}},"summary":{"type":"string"}},"required":["created","skipped","errors","summary"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 700
+        y: 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

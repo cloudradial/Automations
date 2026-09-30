@@ -1,0 +1,103 @@
+automationsWorkflow: 1
+name: "Sync IT Glue Documentation into the Portal"
+description: 'Copies an IT Glue flexible-asset type and its records into a CloudRadial company as flexible assets, via the CloudRadial UCP Assistant agent (IT Glue read + CloudRadial compliance write). Send {"companyName":"Acme Ltd","itglueOrgName":"Acme","flexibleAssetTypeName":"SSL Certificates"}. Idempotent: matches existing assets so re-runs update rather than duplicate. Every write is approval-gated. Replaces the AAI-00004 IT Glue sync script.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read inputs
+      type: powershell-script
+      position:
+        x: 300
+        y: 120
+      properties:
+        script: |-
+          # Run input: {"companyName":"Acme Ltd","itglueOrgName":"Acme","flexibleAssetTypeName":"SSL Certificates","matchTrait":"name"}
+          # companyId may be used instead of companyName. matchTrait is optional (the trait used to de-duplicate; defaults to name).
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o,$n) if($null -eq $o){return $null}; if($o -is [System.Collections.IDictionary]){ if($o.Contains($n)){return $o[$n]}; return $null }; $p=$o.PSObject.Properties[$n]; if($p){return $p.Value}; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); if ($s.StartsWith('{')) { $in = $s | ConvertFrom-Json } }
+          $companyName = Get-Prop $in 'companyName'
+          $companyId   = Get-Prop $in 'companyId'
+          $org         = Get-Prop $in 'itglueOrgName'
+          $typeName    = Get-Prop $in 'flexibleAssetTypeName'
+          $matchTrait  = Get-Prop $in 'matchTrait'; if (-not $matchTrait) { $matchTrait = 'name' }
+          if ((-not $companyName -and -not $companyId) -or -not $org -or -not $typeName) {
+              $m = 'Need a CloudRadial company (companyName or companyId), an itglueOrgName, and a flexibleAssetTypeName. e.g. {"companyName":"Acme Ltd","itglueOrgName":"Acme","flexibleAssetTypeName":"SSL Certificates"}.'
+              Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+          }
+          $scope = if ($companyId) { "CloudRadial companyId $companyId" } else { "the CloudRadial company named '$companyName'" }
+          Set-NodeOutput ([ordered]@{
+              request = "Copy the IT Glue flexible-asset type '$typeName' for the IT Glue organization '$org' into $scope as CloudRadial flexible assets, de-duplicating on the '$matchTrait' trait."
+              message = "IT Glue '$typeName' for '$org' -> $scope."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"companyName":"Acme Ltd","itglueOrgName":"Acme","flexibleAssetTypeName":"SSL Certificates","matchTrait":"name"}
+    - id: node-agent
+      name: Sync flexible assets
+      type: agent
+      position:
+        x: 500
+        y: 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: >-
+          Copy an IT Glue flexible-asset type and its records into a CloudRadial company as
+          flexible assets. Work from the "request" input (it names the CloudRadial company, the
+          IT Glue organization, the flexible-asset type, and the trait to de-duplicate on).
+          Steps: (1) Resolve the CloudRadial company (by id, or by name with cr_list_company;
+          stop if ambiguous). (2) Resolve the IT Glue organization with
+          itglue_list_organizations (stop if ambiguous), and the flexible-asset type with
+          itglue_list_flexible_asset_types; read its trait field names with
+          itglue_get_flexible_asset_type - never guess trait names. (3) Ensure a matching
+          CloudRadial flexible-asset type exists: list with cr_list_flexible_asset_type, and if
+          it is missing create it (cr_create_flexible_asset_type) with a field per IT Glue trait
+          (nameKey = the field name lowercased with spaces as hyphens). (4) List the IT Glue
+          records with itglue_list_flexible_assets (flexibleAssetTypeId is REQUIRED) scoped to
+          the organization. (5) For EACH record, read the CloudRadial flexible assets of that
+          type and match on the de-dup trait; if a match exists, update it
+          (cr_patch_flexible_asset) only when a value changed; otherwise create it
+          (cr_create_flexible_asset) with the traits mapped from IT Glue. Never invent values;
+          never echo any password/secret value from IT Glue. Every create/update is mutating and
+          approval-gated: state exactly what will change before doing it. Finish with counts
+          (created / updated / skipped / errors) and a short per-record list.
+        model: ""
+        allowedExtensions:
+          - it-glue
+          - cloudradial-v2-compliance
+        timeoutSeconds: 1800
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"created":{"type":"number"},"updated":{"type":"number"},"skipped":{"type":"number"},"errors":{"type":"number"},"typeCreated":{"type":"boolean"},"results":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["created","updated","skipped","error"]},"note":{"type":"string"}},"required":["name","action"]}},"summary":{"type":"string"}},"required":["created","updated","skipped","errors","summary"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 700
+        y: 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

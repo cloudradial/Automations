@@ -14,7 +14,7 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.2.4
+  version: 0.2.6
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, keeps non-endpoint hardware as
@@ -77,7 +77,8 @@ agent:
       are "assets". The Sync skips cancelled and expired contracts - count only active ones.
     - Flexible assets come from ScalePad, not IT Glue. ScalePad hardware that isn't an
       endpoint (types NETWORK, MOBILE, IMAGING) and in-scope devices with no serial number go
-      to one CloudRadial flexible asset type, "ScalePad Assets" (Infrastructure), matched on the
+      to a CloudRadial flexible asset type per kind of device ("Network Devices", "Mobile
+      Devices", "Printers & Imaging", "Workstations (No Serial)"...; Infrastructure), matched on the
       ScalePad asset id - that is the Sync's "assets" phase. Never recommend an IT Glue script
       or tool for this migration. For a single fix, use the cloudradial-v2-compliance tools:
       cr_list_flexible_asset_type / cr_list_flexible_asset_field to find the type and its trait
@@ -110,7 +111,7 @@ agent:
          - serial / model / manufacturer / os / cpu / memory -> endpoint fields, only when blank.
          - ScalePad type SERVER -> isServer, enclosure 80; VIRTUAL -> isVirtual, enclosure 30.
          - ScalePad types NETWORK / MOBILE / IMAGING, and devices with no serial -> flexible
-           asset rows in "ScalePad Assets" (Sync phase "assets").
+           asset rows in the type for that kind of device (Sync phase "assets").
          - installed software -> endpointApplication records.
          - assessments -> CloudRadial assessment via the Excel import.
          - initiatives / contracts -> Planner items (priced); deliverable PDFs -> report archive.
@@ -133,8 +134,8 @@ agent:
       `currencyNote`.
     - Close every run with counts and honest reasons: matched, enriched, created, skipped
       (grouped by reason), unmapped.
-  model: gpt-5.4
-  # lifecycle-manager 1.2.0+ (automationai/scalepad-lifecycle-manager-extension) pages list tools
+  model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
+  # lifecycle-manager 1.2.0+ (the catalog ScalePad extension) pages list tools
   # automatically; 1.0.0 returns only the first page of every list.
   requiredExtensionSlugs:
     - lifecycle-manager

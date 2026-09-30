@@ -1,0 +1,211 @@
+automationsWorkflow: 1
+name: New User Onboarding
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 200
+      properties:
+        # Enable the webhook in Properties after import; AutomationAI issues the URL and secret.
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read the request
+      type: powershell-script
+      position:
+        x: 280
+        y: 200
+      properties:
+        script: |
+          # === NODE: Read the request ===
+          # Reads the "Add a New User" webhook body (see form-webhook-mapping.md), drops answers
+          # CloudRadial left as literal @tokens (an unset Field ID arrives as "@startDate"), and
+          # writes the briefing every stage reads.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          $b = Get-Prop $in 'body'; if ($null -ne $b) { $in = $b }
+          if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+
+          $labels = [ordered]@{
+              ticketId = 'Ticket'; ticketSubject = 'Ticket subject'; companyName = 'Company'; companyPsaId = 'Company PSA id'
+              companyTenantId = 'Microsoft 365 tenant'; requestedBy = 'Requested by (email)'; requestedByName = 'Requested by'
+              requestedByOfficeId = 'Requester Microsoft 365 id'; requestedByPsaId = 'Requester PSA contact'; requestedByIsAdmin = 'Requester is a portal admin'
+              firstName = 'First name'; lastName = 'Last name'; department = 'Department'; jobTitle = 'Job title'
+              officeLocation = 'Office location'; startDate = 'Start date'; mirrorFromUser = 'Mirror access from'
+              software = 'Software'; needsM365License = 'Needs a Microsoft 365 licence'; m365License = 'Microsoft 365 licence'
+              securityGroups = 'Security groups'; vpnRequired = 'VPN required'; otherAdditions = 'Other access'
+              needsEmail = 'Needs an email account'; email = 'Email address'; mailGroups = 'Mail groups'
+              computerSource = 'Computer'; existingEndpoint = 'Existing endpoint'; newComputerType = 'New computer type'
+              printer = 'Printer'; otherEquipment = 'Other equipment'; deskPhone = 'Desk phone'
+          }
+          $fields = [ordered]@{}; $missing = New-Object System.Collections.ArrayList
+          foreach ($k in $labels.Keys) {
+              $v = Get-Prop $in $k
+              if ($v -is [array]) { $v = ($v | ForEach-Object { [string]$_ }) -join ', ' }
+              $v = ([string]$v).Trim()
+              if ($v -eq '' -or $v.StartsWith('@')) { $null = $missing.Add($labels[$k]); continue }
+              $fields[$k] = $v
+          }
+          $name = ((@($fields['firstName'], $fields['lastName']) | Where-Object { $_ }) -join ' ')
+          $lines = foreach ($k in $fields.Keys) { "- $($labels[$k]): $($fields[$k])" }
+          $briefing = "New starter request from the CloudRadial 'Add a New User' form.`n" + ($lines -join "`n") +
+              $(if ($missing.Count) { "`nNot answered: $($missing -join ', ')." } else { '' })
+
+          Set-NodeOutput ([ordered]@{
+              briefing = $briefing; starter = $name; startDate = [string]$fields['startDate']; ticketId = [string]$fields['ticketId']
+              hasStartDate = [bool]$fields['startDate']; fields = $fields
+              message = "Request read for $(if ($name) { $name } else { 'an unnamed starter' })$(if (-not $fields['startDate']) { ' - no start date, so intake will report it as blocked' })."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        # No binding: this step receives the webhook body (or the Run dialog's Trigger input).
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"source":"cloudradial-form","form":"Add a New User","ticketId":"12345","companyName":"Contoso","requestedBy":"manager@contoso.com","requestedByName":"Pat Manager","requestedByIsAdmin":"true","firstName":"Sam","lastName":"Starter","department":"Sales","jobTitle":"Account Executive","startDate":"2026-10-12","mirrorFromUser":"alex@contoso.com","needsM365License":"Yes","needsEmail":"Yes","computerSource":"New","newComputerType":"Laptop","deskPhone":"No"}
+    # --- Stages: each Agent node runs the new-user-onboarding agent for one stage. It reads the
+    # --- briefing and the previous stage's output (context), and stops early when a starter is blocked.
+    - id: node-intake
+      name: Intake
+      type: agent
+      position:
+        x: 460
+        y: 200
+      properties:
+        agentSlug: new-user-onboarding
+        goal: |
+          Stage: intake. From the briefing, establish each starter's full name, start date, role,
+          department, company, who raised the request, whose access to mirror, and the ticket number.
+          Check the requester is approved to request starters for this client. If there's no start
+          date, report the starter as blocked and go no further.
+        allowedExtensions: [connectwise-manage, cloudradial-v2-companies, microsoft-entra-id]
+        model: ""
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"stage":"intake","briefing":"{{ nodes.node-inputs.output.briefing }}"}'
+    - id: node-procurement
+      name: Procurement
+      type: agent
+      position:
+        x: 640
+        y: 200
+      properties:
+        agentSlug: new-user-onboarding
+        goal: |
+          Stage: procurement. Using the intake result in your context, work out what has to be
+          bought (computer, phone, software, other equipment) and raise quote requests - never buy.
+          If intake reported the starter blocked, do nothing and pass the block on.
+        allowedExtensions: [connectwise-manage]
+        model: ""
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"stage":"procurement","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-intake.output }}"}'
+    - id: node-access
+      name: Access plan
+      type: agent
+      position:
+        x: 820
+        y: 200
+      properties:
+        agentSlug: new-user-onboarding
+        goal: |
+          Stage: access_plan. Plan the starter's access from the mirror-from user, the requested
+          groups, VPN and printer. Never copy privileged or sensitive groups - list them under
+          needsApproval with who holds them and why they were flagged. If an earlier stage reported
+          the starter blocked, do nothing and pass the block on.
+        allowedExtensions: [microsoft-entra-id, microsoft-365]
+        model: ""
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"stage":"access_plan","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-procurement.output }}"}'
+    - id: node-provision
+      name: Provision
+      type: agent
+      position:
+        x: 1000
+        y: 200
+      properties:
+        agentSlug: new-user-onboarding
+        goal: |
+          Stage: provision. Create the new account, licence, mailbox and the approved access from the
+          access plan in your context. Hand the first credential over only through the configured
+          1Password vault - stop rather than send it by email or chat. Never change an existing user.
+          If an earlier stage reported the starter blocked, do nothing and pass the block on.
+        allowedExtensions: [microsoft-entra-id, microsoft-365, 1password-business, connectwise-manage]
+        model: ""
+        timeoutSeconds: 1800
+        # false = every account, licence and group change waits for approval in the Inbox.
+        autoApprove: false
+        inputBindingsJson: '{"stage":"provision","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-access.output }}"}'
+    - id: node-portal
+      name: Portal and training
+      type: agent
+      position:
+        x: 1180
+        y: 200
+      properties:
+        agentSlug: new-user-onboarding
+        goal: |
+          Stage: portal_training. Make sure the starter can use the CloudRadial portal and has the
+          client's standard onboarding courses assigned. If an earlier stage reported the starter
+          blocked, do nothing and pass the block on.
+        allowedExtensions: [cloudradial-v2-companies, cloudradial-v2-training]
+        model: ""
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"stage":"portal_training","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-provision.output }}"}'
+    - id: node-verify
+      name: Verify
+      type: agent
+      position:
+        x: 1360
+        y: 200
+      properties:
+        agentSlug: new-user-onboarding
+        goal: |
+          Stage: verify. Check what actually exists now - account, licence, mailbox, groups, portal
+          user, courses, quote tickets - and report each starter as ready or not, with what's done,
+          what's waiting on a human, and what was skipped. Report what you verified, not what was
+          attempted. Add a note to the ticket with the result.
+        allowedExtensions: [microsoft-entra-id, microsoft-365, cloudradial-v2-companies, cloudradial-v2-training, connectwise-manage, microsoft-teams]
+        model: ""
+        timeoutSeconds: 900
+        autoApprove: false
+        inputBindingsJson: '{"stage":"verify","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-portal.output }}"}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 1540
+        y: 200
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-intake
+      sourceHandle: null
+    - source: node-intake
+      target: node-procurement
+      sourceHandle: null
+    - source: node-procurement
+      target: node-access
+      sourceHandle: null
+    - source: node-access
+      target: node-provision
+      sourceHandle: null
+    - source: node-provision
+      target: node-portal
+      sourceHandle: null
+    - source: node-portal
+      target: node-verify
+      sourceHandle: null
+    - source: node-verify
+      target: end
+      sourceHandle: null
+  startActivityId: start

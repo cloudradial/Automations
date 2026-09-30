@@ -13,7 +13,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | Phase | From ScalePad | To CloudRadial |
 |---|---|---|
 | `devices` | Core hardware (workstations, servers, VMs) + lifecycle records | Endpoints matched by serial. Existing ones get their blanks filled: warranty → `expirationDate`, purchase date → `manufacturedDate`, model, manufacturer, OS, CPU, RAM. Missing ones are created — servers as `isServer` / enclosure Server, VMs as `isVirtual`, tagged `ScalePad`. A device ScalePad calls a workstation but that runs **Windows Server** is treated as a server, and an existing endpoint with a Windows Server OS that isn't marked as a server is corrected. Network, mobile and imaging devices, and devices with no serial, go to the `assets` phase instead. |
-| `assets` | Other hardware: types `NETWORK`, `MOBILE`, `IMAGING`, plus workstations, servers and VMs with no serial number | Rows of one flexible asset type, **ScalePad Assets** (Infrastructure), created with its fields if missing: name, type, manufacturer, model, serial, warranty and purchase dates, location, assigned user and the ScalePad id. Matched on the ScalePad id, so re-runs update the row. |
+| `assets` | Other hardware: types `NETWORK`, `MOBILE`, `IMAGING`, plus workstations, servers and VMs with no serial number | One flexible asset type per kind of device (Infrastructure): Network Devices, Mobile Devices, Printers & Imaging, Storage Devices, Power Devices, Workstations (No Serial), Servers (No Serial), Virtual Machines (No Serial) or Other Hardware. Each type is created with its fields if missing: name, type, manufacturer, model, serial, warranty and purchase dates, location, assigned user and the ScalePad id. Matched on the ScalePad id, so re-runs update the row. Rows an earlier version wrote to the single **ScalePad Assets** type are moved to their device type; the report says when the old type can be deleted. |
 | `saas` | SaaS subscriptions (Microsoft 365, Google Workspace, ...) | CloudRadial's software records always belong to a device and its API has no SaaS or licence route, so each subscription becomes a row of a flexible asset type named **SaaS**: product, vendor, SKU, category, status, licences and assigned seats, term start, renewal date, auto-renew, billing, provider, tenant domain and the ScalePad id (the match key, so re-runs update). |
 | `software` | Installed software per device | One endpoint application per product per device (name, publisher, version), tagged *Added by ScalePad to CloudRadial Sync* in its comments. Devices that already have software in CloudRadial (usually from the RMM, which keeps its own list current) are left alone; otherwise a product is skipped when the device already has one with the same name, ignoring publisher and version. |
 | `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
@@ -82,7 +82,9 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `overwriteWarranty` | `false` | `true` = replace a CloudRadial warranty date that differs from ScalePad's. Otherwise differences are reported. |
 | `assetTypes` | every type not in `deviceTypes` | ScalePad types kept as flexible assets, e.g. `NETWORK,IMAGING`. |
 | `includeNoSerialDevices` | `true` | Keep workstations, servers and VMs that have no serial as flexible assets (they are never created as endpoints). |
-| `flexibleAssetTypeName` | `ScalePad Assets` | Flexible asset type for the `assets` phase — created if missing. |
+| `flexibleAssetTypeNames` | — | Rename a device type's flexible asset type, keyed by ScalePad type, e.g. `{"NETWORK": "Network Equipment"}`. |
+| `flexibleAssetTypeName` | *(blank)* | Set only to put every `assets` row in one type instead of one per kind of device. |
+| `legacyFlexibleAssetTypeName` | `ScalePad Assets` | The single type earlier versions used. Its rows are moved to their device type. |
 | `skipDevicesWithSoftware` | `true` | `false` = also add ScalePad software to devices that already have a software list, skipping only products they already have. |
 | `cleanupDuplicateSoftware` / `confirmCleanup` | `false` | Run only the duplicate-software clean-up; deletes only with `mode: apply` **and** `confirmCleanup: true`. |
 | `saasTypeName` | `SaaS` | Flexible asset type for the `saas` phase - created if missing. |
@@ -102,6 +104,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 ## Confirm in your tenant
 
 - **Flexible asset updates.** New rows use `POST /v2/flexible-asset` (the route the KnowBe4 sync already uses). Changed rows are sent as `PATCH /v2/flexible-asset/{id}` replacing `traitsJson`, falling back to `PATCH /compatibility/flexible_assets/{id}` with `traits`. After the first apply run that updates a row, check it in the portal.
+- **Connection errors are retried.** A request that fails before it reaches the server (TLS handshake, DNS, reset, timeout) is retried up to 3 more times. If a whole step still fails that way, it is run again for that company, up to 3 attempts, and the run output notes it. Steps match what already exists, so a re-run never duplicates.
 - **ScalePad software paging.** The installed-software list accepts `page_size` 100 at most (the other lists take 200); the step asks for 100. Any list that rejects 200 is retried at 100 automatically.
 
 - **Archive upload route.** `POST /api/beta/archive/{id}/item` takes the PDF as multipart/form-data. The create call doesn't always return the new archive's id, so the step looks the archive up again by name before uploading (a first live run uploaded to archive 0 and failed with "Sequence contains no elements").
@@ -111,6 +114,8 @@ All optional. With none, every name-matched company is migrated in apply mode.
 - **Devices created from ScalePad** have no RMM agent until one is deployed — they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.
 
 ## Tested (mocked ScalePad and CloudRadial APIs, 2026-09-25)
+
+**Flexible assets by device type (third pass):** with a network device already in the old ScalePad Assets type, the `assets` phase created a Network Devices type and a Workstations (No Serial) type, moved the network device (created in the new type, then deleted from the old one), and created the no-serial workstation. With the ScalePad hardware read failing on a TLS error five times in a row, the requests retried and the devices step then ran again for the company and completed.
 
 **Flexible assets and paging (second pass):** the `assets` phase planned and created the ScalePad Assets type with its fields, then created a network device and a no-serial workstation as rows. With the type already present it added the missing fields, updated a changed row, and used the compatibility route when the native patch was refused. The software step read the list with `page_size` 100, against a mock that rejects anything larger.
 

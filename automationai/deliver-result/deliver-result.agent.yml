@@ -3,7 +3,7 @@ agent:
   slug: deliver-result
   name: Deliver Result
   vendor: Azurative
-  version: 0.1.0
+  version: 0.1.1
   description: Pluggable delivery step — turn a generic result into a PSA ticket (any connected PSA), a Postmark email, or a ServiceAI return-contract, chosen by a channel.
   category: Utility
   tags:
@@ -59,7 +59,7 @@ agent:
 
     Never put secrets, temporary passwords, or sensitive detail in a client-visible field
     (public_note / email body) — those go only in internalNote / internal_note.
-  model: gpt-5.4
+  model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   requiredExtensionSlugs:
     - postmark
     - connectwise-manage

@@ -1,9 +1,13 @@
-# New User Onboarding (agent)
+# New User Onboarding
 
 A guarded onboarding **agent** that takes one new starter from request to ready for
-day one. It's the brain behind the **New User Onboarding - Day One** playbook, which
-calls it once per stage (`intake`, `procurement`, `access_plan`, `provision`,
-`portal_training`, `verify`).
+day one, plus the **workflow** that runs it. The workflow reads the *Add a New User*
+form's webhook and calls the agent once per stage, in order: `intake`, `procurement`,
+`access_plan`, `provision`, `portal_training`, `verify`. The **New User Onboarding -
+Day One** playbook runs the same stages.
+
+> **Still in testing.** Keep the agent in dry run and every Agent node on
+> `autoApprove: false` until a full run has been checked end to end.
 
 ## Pieces
 
@@ -11,13 +15,29 @@ calls it once per stage (`intake`, `procurement`, `access_plan`, `provision`,
 |---|---|---|
 | [`form-webhook-mapping.md`](form-webhook-mapping.md) | Reference | How the CloudRadial *Add a New User* form maps, question by question, to the webhook JSON that starts the Day One playbook. |
 | [`new-user-onboarding.agent.yml`](new-user-onboarding.agent.yml) | `automationsAgent` | The brain. Refuses privileged or sensitive group copies, purchases, changes to existing users and insecure credential handoff; reports what it verified, not what it attempted. Publish it → slug `new-user-onboarding`. |
+| [`new-user-onboarding.yml`](new-user-onboarding.yml) | `automationsWorkflow` | **Read the request** (turns the webhook body into the briefing and drops unanswered `@token` values) → six Agent nodes, one per stage. Each stage gets the briefing and the previous stage's output as `context`, and passes a block on instead of acting. |
 
 ## Install / run
 
 1. Upload `new-user-onboarding.agent.yml` on **Agents → Custom** (import is keyed on the slug `new-user-onboarding`, so it overwrites an earlier copy).
 2. Make sure these extensions are installed and connected: `connectwise-manage`, `microsoft-365`, `microsoft-entra-id`, `cloudradial-v2-companies`, `cloudradial-v2-training`, `1password-business`, `microsoft-teams`.
 3. Set the agent variables: `credentialVault` (the 1Password vault for credential handoff — the agent stops rather than falling back to email or chat without it), `defaultLicenceSku`, `sensitiveGroupPatterns`, `hardwareBufferDays`, and `rmmPlatform` if the playbook checks device readiness.
-4. Run it from the **New User Onboarding - Day One** playbook, or in the AI Playground with a `stage` and a `briefing`.
+4. On **Workflows → Import**, upload `new-user-onboarding.yml`. Enable the webhook under **Properties → Webhook**, then **Publish** and **deploy** it to your runner.
+5. Point the *Add a New User* form's Webhook activity at the workflow's webhook URL, with the secret in the `X-Crauto-Webhook-Secret` header. The Content is the JSON in [form-webhook-mapping.md](form-webhook-mapping.md).
+6. To test without the form, run the workflow from **Test** with a request body as the Trigger input. The **Read the request** node has a sample.
+
+## Stages
+
+| Node | Stage | What it does | Extensions allowed |
+|---|---|---|---|
+| Intake | `intake` | Names, start date, role, requester check, mirror-from user, ticket. No start date → blocked. | `connectwise-manage`, `cloudradial-v2-companies`, `microsoft-entra-id` |
+| Procurement | `procurement` | Quote requests for hardware, phone and software. Never buys. | `connectwise-manage` |
+| Access plan | `access_plan` | Access from the mirror-from user; privileged or sensitive groups go to `needsApproval`. | `microsoft-entra-id`, `microsoft-365` |
+| Provision | `provision` | Account, licence, mailbox, approved access; credential only through 1Password. | `microsoft-entra-id`, `microsoft-365`, `1password-business`, `connectwise-manage` |
+| Portal and training | `portal_training` | CloudRadial portal user and onboarding courses. | `cloudradial-v2-companies`, `cloudradial-v2-training` |
+| Verify | `verify` | Checks what exists now, reports ready or not, notes the ticket. | all of the above plus `microsoft-teams` |
+
+Every Agent node ships with `autoApprove: false`, so each change waits for approval in the Inbox. Each stage sees only the stage before it; **Verify** re-reads the live state rather than trusting earlier stages.
 
 ## Confirm in your tenant
 

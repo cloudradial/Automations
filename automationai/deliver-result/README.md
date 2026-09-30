@@ -12,7 +12,7 @@ A reusable **agent** that other automations call as their last step, so they don
 
 | File | Type | Role |
 |---|---|---|
-| [`deliver-result.agent.yml`](deliver-result.agent.yml) | `automationsAgent` | Slug `deliver-result`, v0.1.0. Keeps secrets and technical detail out of client-visible fields. Dry-run by default. |
+| [`deliver-result.agent.yml`](deliver-result.agent.yml) | `automationsAgent` | Slug `deliver-result`, v0.1.1. Keeps secrets and technical detail out of client-visible fields. Dry-run by default. |
 
 ## Install / run
 

@@ -3,7 +3,7 @@ agent:
   slug: endpoint-warranty-refresh-advisor-planner-cards
   name: Endpoint LifeCycle Manager
   vendor: CloudRadial
-  version: 0.3.3
+  version: 0.3.4
   description: Reviews managed endpoints per company and maintains one Planner
     card per refresh category (each carrying a triage priority) for out-of-spec
     computers. All decision logic is inline in the prompt; it does NOT depend on
@@ -263,7 +263,7 @@ agent:
 
     Return ONLY a JSON object matching the output schema: aggregate counts plus
     a per-card results list. Do not include any prose outside the JSON object.
-  model: gpt-5.4
+  model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   requiredExtensionSlugs:
     - cloudradial-v2-endpoints
     - cloudradial-v2-services

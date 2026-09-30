@@ -1,22 +1,25 @@
 # Endpoint LifeCycle Manager
 
-A CloudRadial **AutomationAI agent** that reviews managed computers per company and maintains one **Planner card per refresh category** — Replace, Plan replacement, Upgrade in place, Retain, Needs data, Human review, Virtual machines — each carrying a triage priority and listing that category's devices in plain language.
+A CloudRadial **AutomationAI agent and workflow** that reviews managed computers per company against industry refresh standards and maintains one **Planner card per refresh category** — Replace, Plan replacement, Upgrade in place, Retain, Needs data, Human review, Virtual machines — each carrying a triage priority and listing that category's devices in plain language.
 
 ## Scope — CloudRadial portal only
 
 This agent uses **only the CloudRadial portal's endpoints** — both **workstations and servers** (servers route to *Human review*, VMs to their own track). It needs **no RMM and no ScalePad** connection; every decision comes from native endpoint fields already in CloudRadial.
 
-It is a **separate automation** from:
-- *Endpoint Warranty Report* (**AAI-00021**) — the older warranty-focused report, and
-- the **ScalePad → CloudRadial** lifecycle sync (**AAI-00030**), which brings *external* warranty/EOL data in.
+Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lifecycle Manager data into CloudRadial first, use the [ScalePad to CloudRadial Sync](../scalepad-cloudradial-sync/) workflow; this agent then works from whatever the endpoints hold.
 
-Use this one when the source of truth is the CloudRadial portal itself.
+## Pieces
+
+| File | Type | Role |
+|---|---|---|
+| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`. |
+| [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml) | `automationsWorkflow` | Runs the agent with its goal - one Agent node. Attach a Routine to it to run on a schedule. |
 
 ## Download & import
 
-**Download the agent:** [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml)
-
-In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `endpoint-warranty-refresh-advisor-planner-cards`). Run it on a **Routine** (scheduled); it takes no runtime input.
+1. On **Agents → Custom → Import**, upload [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) (keyed on the slug `endpoint-warranty-refresh-advisor-planner-cards`). Set its variables below.
+2. On **Workflows → Import**, upload [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml), then **Publish** and **deploy** it to your runner.
+3. Run it from **Test**, or attach a **Routine** (e.g. monthly). It takes no run input.
 
 **Requires:** AutomationAI + these CloudRadial extensions installed and connected:
 - `cloudradial-v2-endpoints` — read endpoints (workstations **and** servers)
@@ -31,7 +34,7 @@ In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is 
 
 ## Heads-up: this agent always writes
 
-It has **no preview mode** (`dryRunDefault: false`) — every in-scope company with out-of-spec computers gets its cards created/updated. If you drive it from a workflow's Agent node, decide deliberately whether to enable **auto-approve**.
+It has **no preview mode** (`dryRunDefault: false`) — every in-scope company with out-of-spec computers gets its cards created/updated. The workflow ships with `autoApprove: false`, so each card write waits for approval in the Inbox. Set it to `true` once you trust an unattended scheduled run.
 
 ## Variables
 

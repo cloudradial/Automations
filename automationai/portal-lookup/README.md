@@ -1,17 +1,36 @@
 # Portal Lookup
 
-A CloudRadial **AutomationAI agent** that produces a read-only portal briefing — company footprint, users, endpoints, warranty posture, and setup gaps — for meeting prep. Given a company it briefs on that company; with none it gives a portal-wide snapshot.
+A CloudRadial **AutomationAI workflow** that produces a read-only portal briefing for meeting prep: company footprint, users, endpoints, warranty posture and setup gaps. Name a company and it briefs on that one; name none and it gives a portal-wide snapshot.
 
-## Download & import
+It runs the [CloudRadial UCP Assistant](../cloudradial-ucp/) agent with a read-only goal, so there's no separate agent to maintain.
 
-**Download the agent:** [`portal-lookup.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/portal-lookup/portal-lookup.agent.yml)
+## Pieces
 
-In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-portal-lookup`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies` (which also carries the user tools), `cloudradial-v2-endpoints`. Run it, optionally passing a `companyName` (or `cloudradialCompanyId`); with none it gives a portal-wide snapshot.
-
-## Settings
-
-| Variable | Default | What it does |
+| File | Type | Role |
 |---|---|---|
-| `warrantyWindowDays` | `90` | Days ahead to count an endpoint warranty as "expiring soon" in the briefing. |
+| [`portal-lookup.yml`](portal-lookup.yml) | `automationsWorkflow` | **Run inputs** (fills in defaults and writes the request) → **Portal Briefing** (an Agent node running `cloudradial-ucp-assistant`). |
 
-Strictly read-only — it never creates, updates, or deletes anything.
+## Install / run
+
+1. Import the agent first: [`cloudradial-ucp/`](../cloudradial-ucp/) on **Agents → Custom → Import** (slug `cloudradial-ucp-assistant`).
+2. Make sure the first-party extensions `cloudradial-v2-companies` (which also carries the user tools) and `cloudradial-v2-endpoints` are installed and connected.
+3. On **Workflows → Import**, upload `portal-lookup.yml`, then **Publish** and **deploy** it to your runner.
+4. Run it from **Test** or the Run dialog. Leave the Trigger input empty for a portal-wide snapshot, or send one of the inputs below.
+
+## Inputs
+
+All optional.
+
+| Field | Default | What it does |
+|---|---|---|
+| `companyName` | — | Brief on one company by name. |
+| `cloudradialCompanyId` | — | Brief on one company by CloudRadial companyId. |
+| `warrantyWindowDays` | `90` | Days ahead that count a warranty as "expiring soon". |
+
+Example: `{"companyName": "KMCO Group Ltd"}`
+
+## Read-only
+
+The goal tells the agent never to create, update or delete anything, and the Agent node keeps `autoApprove: false`, so any write it tried would wait in the Inbox for approval.
+
+The briefing comes back as the agent's `answer`. To send it somewhere, add a [Deliver Result](../deliver-result/) Agent node after it, the way [Weekly Fleet Audit](../weekly-fleet-audit/) does.

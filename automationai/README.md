@@ -28,7 +28,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`endpoint-names-token/`](endpoint-names-token/) | Workflow |
 | [`feedback-csat-report/`](feedback-csat-report/) | Workflow |
 | [`knowbe4/`](knowbe4/) | Workflow |
-| [`new-user-onboarding/`](new-user-onboarding/) | Agent + workflow + form-to-webhook reference (in testing) |
+| [`new-user-onboarding/`](new-user-onboarding/) | Agent + workflow, a no-AI PowerShell workflow, and a form-to-webhook reference (in testing) |
 | [`password-reset/`](password-reset/) | Workflow (self-service) |
 | [`password-reset-triage/`](password-reset-triage/) | Workflow (ServiceAI triage) |
 | [`patch-compliance/`](patch-compliance/) | Workflow (runs the RMM Agent) |

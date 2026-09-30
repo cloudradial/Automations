@@ -2,7 +2,9 @@
 
 Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
 
-**Formerly:** New User Onboarding (agent) | **Marketplace ID:** Not yet listed | **Type:** Agent
+**Formerly:** New User Onboarding (agent) | **Marketplace ID:** Not yet listed | **Type:** Agent + Workflow
+
+This folder has two ways to onboard. The agent workflow below plans and verifies each stage with AI. The [direct workflow](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding#direct-workflow-create-a-new-hires-accounts-straight-from-the-form) does the same core account setup with PowerShell only and no AI.
 
 ## Files (always the latest version)
 
@@ -14,6 +16,8 @@ These links point at the `main` branch, so they always open the current version.
 | Download `new-user-onboarding.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) |
 | View `form-webhook-mapping.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
 | Download `form-webhook-mapping.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
+| View `new-user-onboarding-direct.yml` (no-AI workflow, see [below](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding#direct-workflow-create-a-new-hires-accounts-straight-from-the-form)) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding-direct.yml) |
+| Download `new-user-onboarding-direct.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/new-user-onboarding-direct.yml) |
 | All files in this automation | [automationai/new-user-onboarding](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/new-user-onboarding) |
 
@@ -74,3 +78,106 @@ Every Agent node ships with `autoApprove: false`, so each change waits for appro
 4. To go back to preview, set it to `true` and re-import.
 
 The change applies to **every** workflow that uses this agent (the New User Onboarding - Day One playbook and any workflow that calls it). Keep the repo copy on `true`, so a fresh install always starts in preview.
+
+
+## Direct workflow: Create a New Hire's Accounts Straight From the Form
+
+A submitted Add a New User form becomes a Microsoft 365 account with its licence, mailbox, groups and portal login, and the ticket gets a note of everything done. It checks the tenant first and never touches an existing account or grants admin access.
+
+`new-user-onboarding-direct.yml` is a PowerShell-only workflow (no Agent nodes, no AI). Use it when you want predictable account creation from the form. Use the agent workflow above when you want access mirrored from a similar user, quotes raised and the result verified.
+
+> **Untested in a live tenant.** Every node has been run against mocked Microsoft Graph, CloudRadial and ConnectWise responses, but not against real ones. Keep `confirm` false until one preview and one live run have been checked end to end.
+
+### How it works
+
+One node per step, so each can be tested on its own:
+
+| Node | What it does | Changes anything? |
+|---|---|---|
+| Receive form data | Reads the webhook body, flat `{key:value}` or the CloudRadial `{Ticket:{Questions:[...]},Company:{...}}` shape. Answers still left as `@token` count as not answered. | No |
+| Check and plan | Fails closed on the checks under [Safety](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding#safety). Resolves the sign-in name, manager, licence, groups and CloudRadial company, then writes the plan. Stops here with a preview when `confirm` is false. | No |
+| Create Microsoft 365 user | Creates the account with a random 16-character temporary password (change forced at first sign-in) and sets the manager. | Yes |
+| Assign licence and groups | Assigns the licence (Exchange Online creates the mailbox from it) and adds the approved groups. | Yes |
+| Create portal user | Creates the CloudRadial portal user (`POST /v2/user`). | Yes |
+| PSA ticket and manager | Uses the form's ticket, or creates a ConnectWise ticket if there isn't one. Emails the manager that the account exists (no password). | Yes |
+| Internal note and result | Builds the output and posts `internal_note` to the ticket as a ConnectWise internal note. | Yes, only when `confirm` is true |
+
+It records the device type in the notes but doesn't order hardware. For quotes, use the agent workflow or [Split Request](https://github.com/cloudradial/Automations/tree/main/automationai/split-request-two-tickets).
+
+### Requirements
+
+No extensions. Every call is made from PowerShell with runner Key Vault secrets.
+
+| Secret | Required | Used for |
+|---|---|---|
+| `M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` | Yes | Microsoft Graph. The same secrets Password Reset uses (`Entra-*` and `Graph-*` names also work). |
+| `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey` | For the portal user | Without them the portal user is skipped and listed as follow-up. |
+| `CW-ApiUrl`, `CW-CompanyID`, `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId` | For the ticket note | Without them the note isn't posted, but it's still returned in `internal_note`. |
+| `CW-ServiceBoard` | Only when the request has no ticket | The board for the new onboarding ticket. |
+| `Onboarding-NotifySender` | No | A mailbox to email the manager from. Without it the manager isn't emailed. |
+| `Onboarding-ProtectedGroupPatterns` | No | Extra comma-separated group name patterns to never add, on top of `admin`, `administrator`, `privileged` and `global`. |
+
+The Microsoft 365 app needs these Graph application permissions: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
+
+The PSA steps call ConnectWise Manage only. For another PSA, leave the CW secrets out and post `internal_note` yourself.
+
+### Setup
+
+1. On **Workflows → Import**, upload `new-user-onboarding-direct.yml`.
+2. Add the secrets above to the runner's Key Vault. Deploy to the runner whose vault holds them.
+3. Enable the webhook under **Properties → Webhook**, then **Publish** and **deploy**.
+4. In the *Add a New User* form's automation, add a Webhook activity pointing at this workflow's webhook URL (it must be absolute), with the secret in the `X-Crauto-Webhook-Secret` header. Use the Content JSON from [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md), plus the keys under Settings that you want to use.
+5. There's no manager question on the stock form. To set and notify the manager, add one with the Field ID `managerEmail` and add `"managerEmail": "@managerEmail"` to the Content.
+6. Leave `confirm` out of the Content at first, so every submission returns a preview. Once you trust the previews, add `"confirm": "true"` to the Content to let the form create accounts.
+
+### Settings
+
+Every input is optional apart from the name, and each has a default.
+
+| Input | Default | Notes |
+|---|---|---|
+| `firstName`, `lastName` | none | Required. Missing either one returns `incomplete`. |
+| `displayName` | first and last name | |
+| `email` or `userPrincipalName` | built from `upnFormat` | Must be on a verified domain in the tenant. |
+| `upnFormat` | `first.last` | Also `firstlast`, `flast` or `first`, at the tenant's default domain. Used only when no email is given. |
+| `usageLocation` | `US` | Two-letter country code. A licence can't be assigned without it. |
+| `licenseSku` / `m365License` | none | A SKU id, a part number such as `SPB`, or a common name such as "Microsoft 365 Business Premium". `needsM365License: "No"` skips it. |
+| `groups` / `securityGroups` / `mailGroups` | none | Names or ids, comma separated. |
+| `managerEmail` | none | |
+| `deviceType` / `newComputerType` | none | Recorded in the notes only. |
+| `companyTenantId` | none | Send `@CompanyTenantId`. Required: a missing or different tenant is rejected. |
+| `companyId`, `companyPsaId`, `companyName` | none | Used to match the CloudRadial company and, for a new ticket, the ConnectWise company. |
+| `ticketId` | none | The form's ticket. Without it, a ConnectWise ticket is created. |
+| `confirm` (or `approvedToWrite`) | `false` | `false` returns a preview and changes nothing. |
+
+### Safety
+
+- Nothing changes unless `confirm` is `true`. A preview makes no writes, not even the ticket note.
+- The request's `companyTenantId` must match this runner's `M365-TenantId`. If it's missing or different, the run is rejected.
+- If the sign-in name is already used as a UPN, mail address or proxy address, the run is rejected. It never changes an existing account.
+- It never assigns a directory role. It skips any group that is role-assignable or whose name matches a protected pattern, and lists it for a technician.
+- It skips distribution lists, mail-enabled security groups and on-premises synced groups, which Graph can't change, and lists them for a technician.
+- It never buys a licence. If the licence isn't in the tenant or has no free seat, the run stops before anything is created.
+- The temporary password appears only in `internal_note`, which is also posted to the ticket as a ConnectWise internal note. It's never in `public_note`, `message` or the manager's email. Node outputs in the run history also carry it between steps, so limit who can see workflow runs.
+- It warns when the requester isn't a portal admin for the client (`requestedByIsAdmin` is false).
+
+### Output
+
+| Field | Contents |
+|---|---|
+| `status` | `success`, `pending_confirmation` (preview), `incomplete` (partly done or missing input), `rejected` (a safety check failed) or `error` |
+| `message`, `public_note` | Client-safe summary. No password. |
+| `internal_note` | For technicians: what ran, the result, what needs a technician, warnings, and the temporary password when an account was created. |
+| `ticket_id` | The form's ticket, or the one created |
+| `upn`, `user_id` | The new account |
+| `plan` | What the run would do (filled on a preview) |
+| `actions`, `warnings`, `followUp` | Every action taken, anything worth checking, and anything left for a technician |
+| `counts` | `accountsCreated`, `licencesAssigned`, `groupsAdded`, `portalUsersCreated` |
+
+### Test before production
+
+1. Run the workflow from **Test** with the sample Trigger input on **Receive form data**. Change `companyTenantId` to your test tenant id first. With `confirm` false it should return `pending_confirmation` and a plan, and write nothing.
+2. Check the plan: the sign-in name, the licence, which groups are added, and which are left for a technician.
+3. Run it once with `"confirm": "true"` for a throwaway test user. Check the account, licence, mailbox, groups, portal user and the ticket note, then delete the test user.
+4. Submit the real form once with `confirm` left out, and check the preview shows real values instead of `@token` text.
+5. Scheduled runs don't apply. This workflow runs from the form webhook.

@@ -206,7 +206,10 @@ definition:
           foreach ($ep in $endpoints) {
               $cid = [int](Get-Prop $ep 'companyId')
               if ($CompanyIds.Count -and $CompanyIds -notcontains $cid) { continue }
-              $a = Get-Assessment $ep
+              # Every key present: the runner runs in strict mode, where reading a missing key throws.
+              $found = Get-Assessment $ep
+              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null }
+              foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
               if ($a.excluded) { $counts.excludedNonComputer++; continue }
               $null = $companiesInScope.Add($cid)
               $counts.evaluated++; $evaluatedBy[$cid] = 1 + [int]$evaluatedBy[$cid]

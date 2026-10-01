@@ -83,6 +83,7 @@ cd automationai/weekly-fleet-audit/src
 npm install
 pwsh ./test.ps1 -HtmlOut ./preview.html   # mock API, strict mode; open preview.html to see the email
 node build-audit.js                       # writes ../weekly-fleet-audit.yml
+pwsh ./test.ps1 -Built                    # re-runs the test on the scripts embedded in the .yml
 ```
 
 `test.ps1 -NoAccountManager` simulates an API without the account manager field, and `-Empty` a portal with no endpoints. The harness also checks that the email body is safe to drop into Send Audit's JSON binding: no double quotes, backslashes or newlines.

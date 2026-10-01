@@ -112,90 +112,7 @@ definition:
           function Enc { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
           function Parse-Date { param($v) $d = [datetime]::MinValue; if ($null -ne $v -and [string]$v -and [datetime]::TryParse([string]$v, $ci, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$d)) { if ($d.Year -gt 1900) { return $d } }; return $null }
           function Friendly { param([datetime]$d) $d.ToString('d MMM yyyy', $ci) }
-          function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed
-
-          # ---- 1. companies and account managers ----
-          $companies = @(Get-CrAll '/v2/odata/company')
-          $names = [ordered]@{}; $am = @{}; $amCheck = 'unavailable'
-          foreach ($co in $companies) { $names[[string](Get-Prop $co 'companyId')] = [string](Get-Prop $co 'name') }
-          if ($companies.Count -and $companies[0].PSObject.Properties['accountManager']) {
-              $amCheck = 'ok'; foreach ($co in $companies) { $am[[string](Get-Prop $co 'companyId')] = ([string](Get-Prop $co 'accountManager')).Trim() }
-          }
-          else {
-              # The OData list leaves accountManager out; the single-company read may include it.
-              foreach ($id in @($names.Keys)) {
-                  $r = $null; try { $r = Invoke-CrApi -Path "/v2/company/$id" } catch { continue }
-                  $c = Get-Prop $r 'data'; if ($null -eq $c) { $c = $r }
-                  if ($null -eq $c -or $c -is [string] -or -not $c.PSObject.Properties['accountManager']) { if ($amCheck -ne 'ok') { break }; continue }
-                  $amCheck = 'ok'; $am[$id] = ([string](Get-Prop $c 'accountManager')).Trim()
-              }
-          }
-
-          # ---- 2. grade every computer ----
-          $rows = [ordered]@{}
-          function Get-Row { param([string]$id)
-              if (-not $rows.Contains($id)) {
-                  $cats = [ordered]@{}; foreach ($k in $Categories) { $cats[$k] = 0 }
-                  $amVal = $null; if ($amCheck -eq 'ok') { $amVal = $(if ($am.ContainsKey($id)) { $am[$id] } else { '' }) }
-                  $rows[$id] = [ordered]@{ companyId = $id; name = $(if ($names.Contains($id) -and $names[$id]) { $names[$id] } else { "Company $id" }); computers = 0; otherDevices = 0; flagged = 0
-                      critical = 0; high = 0; warrantyExpired = 0; warrantyExpiring = 0; warrantyUnknown = 0; accountManager = $amVal; categories = $cats; flaggedItems = (New-Object System.Collections.ArrayList) }
-              }
-              return $rows[$id]
-          }
-          foreach ($id in @($names.Keys)) { $null = Get-Row $id }   # every company gets a row, even with no computers
-
-          $endpoints = @(Get-CrAll '/v2/odata/endpoint')
-          $orphaned = 0
-          foreach ($ep in $endpoints) {
-              $cid = [string](Get-Prop $ep 'companyId')
-              # The endpoint list still returns endpoints of deleted companies (no deleted flag in the API).
-              if ($names.Count -and -not $names.Contains($cid)) { $orphaned++; continue }
-              $row = Get-Row $cid
-              # Every key present: the runner runs in strict mode, where reading a missing key throws.
-              $found = Get-Assessment $ep
-              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null }
-              foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
-              if ($a.excluded) { $row.otherDevices++; continue }
-              $row.computers++
-              if (-not [bool](Get-Prop $ep 'isVirtual')) {
-                  switch ((Get-Warranty $ep).status) { 'expired' { $row.warrantyExpired++ } 'expiring' { $row.warrantyExpiring++ } 'unknown' { $row.warrantyUnknown++ } }
-              }
-              if (-not $a.flagged) { continue }
-              $row.flagged++
-              $row.categories[$a.category] = 1 + [int]$row.categories[$a.category]
-              if ($a.tier -eq 'Critical') { $row.critical++ } elseif ($a.tier -eq 'High') { $row.high++ }
-              $null = $row.flaggedItems.Add([ordered]@{ tier = $a.tier; category = $a.category; line = $a.line })
-          }
-
-          # ---- 3. sort and summarise ----
-          $list = @($rows.Values | Sort-Object -Property @{ Expression = { $_.critical }; Descending = $true }, @{ Expression = { $_.categories['Replace'] }; Descending = $true }, @{ Expression = { $_.flagged }; Descending = $true }, @{ Expression = { $_.name } })
-          $out = New-Object System.Collections.ArrayList
-          foreach ($r in $list) {
-              $top = @($r.flaggedItems | Sort-Object -Property @{ Expression = { $TierRank[$_.tier] }; Descending = $true } | Where-Object { $TierRank[$_.tier] -ge 2 } | Select-Object -First $DetailLimit)
-              $o = [ordered]@{}; foreach ($k in @($r.Keys)) { if ($k -ne 'flaggedItems') { $o[$k] = $r[$k] } }
-              $o.urgent = $top; $o.moreFlagged = $r.flagged - $top.Count
-              $null = $out.Add($o)
-          }
-          $totals = [ordered]@{ companies = $out.Count; computers = 0; flagged = 0; critical = 0; high = 0; warrantyExpired = 0; warrantyExpiring = 0; warrantyUnknown = 0; noAccountManager = 0; orphanedEndpoints = $orphaned }
-          $catTotals = [ordered]@{}; foreach ($k in $Categories) { $catTotals[$k] = 0 }
-          foreach ($r in $out) {
-              foreach ($k in @('computers', 'flagged', 'critical', 'high', 'warrantyExpired', 'warrantyExpiring', 'warrantyUnknown')) { $totals[$k] += $r[$k] }
-              foreach ($k in $Categories) { $catTotals[$k] += $r.categories[$k] }
-              if ($amCheck -eq 'ok' -and -not $r.accountManager) { $totals.noAccountManager++ }
-          }
-          $totals.categories = $catTotals
-
-          $msg = "Audited $($totals.computers) computers across $($totals.companies) companies: $($totals.critical) critical, $($catTotals['Replace']) to replace, $($totals.warrantyExpired) with expired warranty, $($totals.warrantyUnknown) with no warranty date."
-          $msg += $(if ($amCheck -eq 'ok') { " $($totals.noAccountManager) $(if ($totals.noAccountManager -eq 1) { 'company has' } else { 'companies have' }) no account manager." } else { ' Account managers could not be checked.' })
-          Set-NodeOutput ([ordered]@{
-              status              = 'ok'
-              auditDate           = $runDate.ToString('yyyy-MM-dd', $ci)
-              accountManagerCheck = $amCheck
-              totals              = $totals
-              companies           = @($out)
-              message             = $msg
-          })
-          ) }
+          function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed$') }
 
           # ---- rules (identical to the agent's decision tracks) ----
           function Get-Age { param($ep)
@@ -390,15 +307,18 @@ definition:
           function Tile { param([int]$n, [string]$label, [string]$color) "<td style='padding:12px 14px;border:1px solid $line;border-radius:6px;text-align:center;width:16%'><div style='font-size:24px;font-weight:700;color:$(if ($n) { $color } else { '#8c959f' })'>$n</div><div style='font-size:12px;color:$muted'>$label</div></td>" }
           function Badge { param([string]$tier) $c = $(if ($tier -eq 'Critical') { $red } else { $amber }); "<span style='display:inline-block;padding:1px 6px;border:1px solid $c;border-radius:10px;color:$c;font-size:11px;font-weight:600'>$tier</span>" }
 
+          $failed = $false
           $b = New-Object System.Text.StringBuilder
           function W { param([string]$s) $null = $b.Append($s) }
           W "<html><body style='margin:0;padding:16px;background:#ffffff'><div style='$font;color:$ink;max-width:820px'>"
           W "<h2 style='margin:0 0 4px;font-size:22px'>Weekly Fleet Audit</h2>"
 
           if ($null -eq $totals -or -not $companies.Count) {
-              $why = [string](Get-Prop $a 'message'); if (-not $why) { $why = 'The audit step returned no data.' }
-              W "<p style='font-size:14px'>$(Enc $why)</p>"
-              $critical = 0
+              # The runner carries on after a failed step, so say plainly that this week's audit didn't run.
+              $why = [string](Get-Prop $a 'message')
+              W "<p style='font-size:14px;color:$red'><strong>The audit didn't run this week.</strong> The Fleet Audit step failed or returned no data. Check this run's log in AutomationAI.</p>"
+              if ($why) { W "<p style='font-size:13px;color:$muted'>$(Enc $why)</p>" }
+              $critical = 0; $failed = $true
           }
           else {
               $n = Num (Get-Prop $totals 'computers'); $critical = Num (Get-Prop $totals 'critical')
@@ -464,7 +384,7 @@ definition:
 
           # One line, and nothing that would break the JSON string the Send Audit binding puts it in.
           $body = $b.ToString() -replace '[\r\n\t]+', ' ' -replace '\\', '&#92;' -replace '"', '&quot;'
-          $subject = "Weekly Fleet Audit - $date$(if ($critical) { " - $critical critical" })"
+          $subject = "Weekly Fleet Audit - $date$(if ($failed) { ' - audit failed' } elseif ($critical) { " - $critical critical" })"
           Set-NodeOutput ([ordered]@{
               channel = 'email'
               subject = $subject

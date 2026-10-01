@@ -16,7 +16,8 @@ const shared = elm.match(/^# ---- shared: begin[^\n]*\n([\s\S]*?)^# ---- shared:
 if (!shared) throw new Error('shared block markers not found in elm.ps1');
 const audit = read(__dirname + '/audit.ps1');
 if (!audit.includes('#@@ELM_SHARED@@')) throw new Error('#@@ELM_SHARED@@ placeholder not found in audit.ps1');
-const auditScript = audit.replace('#@@ELM_SHARED@@', '# ---- shared with Endpoint LifeCycle Manager (copied from elm.ps1 by build-audit.js) ----\n' + shared[1].trimEnd() + '\n# ---- end shared ----').trimEnd() + '\n';
+// A function replacement: a string one would expand the $' and $` sequences in the PowerShell.
+const auditScript = audit.replace('#@@ELM_SHARED@@', () => '# ---- shared with Endpoint LifeCycle Manager (copied from elm.ps1 by build-audit.js) ----\n' + shared[1].trimEnd() + '\n# ---- end shared ----').trimEnd() + '\n';
 
 const audNode = acts.find((a) => a.id === 'node-audit');
 if (!audNode) throw new Error('node-audit step not found');

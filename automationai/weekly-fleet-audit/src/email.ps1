@@ -31,15 +31,18 @@ function Cell { param([int]$n, [string]$color = $ink) if ($n -eq 0) { "<td style
 function Tile { param([int]$n, [string]$label, [string]$color) "<td style='padding:12px 14px;border:1px solid $line;border-radius:6px;text-align:center;width:16%'><div style='font-size:24px;font-weight:700;color:$(if ($n) { $color } else { '#8c959f' })'>$n</div><div style='font-size:12px;color:$muted'>$label</div></td>" }
 function Badge { param([string]$tier) $c = $(if ($tier -eq 'Critical') { $red } else { $amber }); "<span style='display:inline-block;padding:1px 6px;border:1px solid $c;border-radius:10px;color:$c;font-size:11px;font-weight:600'>$tier</span>" }
 
+$failed = $false
 $b = New-Object System.Text.StringBuilder
 function W { param([string]$s) $null = $b.Append($s) }
 W "<html><body style='margin:0;padding:16px;background:#ffffff'><div style='$font;color:$ink;max-width:820px'>"
 W "<h2 style='margin:0 0 4px;font-size:22px'>Weekly Fleet Audit</h2>"
 
 if ($null -eq $totals -or -not $companies.Count) {
-    $why = [string](Get-Prop $a 'message'); if (-not $why) { $why = 'The audit step returned no data.' }
-    W "<p style='font-size:14px'>$(Enc $why)</p>"
-    $critical = 0
+    # The runner carries on after a failed step, so say plainly that this week's audit didn't run.
+    $why = [string](Get-Prop $a 'message')
+    W "<p style='font-size:14px;color:$red'><strong>The audit didn't run this week.</strong> The Fleet Audit step failed or returned no data. Check this run's log in AutomationAI.</p>"
+    if ($why) { W "<p style='font-size:13px;color:$muted'>$(Enc $why)</p>" }
+    $critical = 0; $failed = $true
 }
 else {
     $n = Num (Get-Prop $totals 'computers'); $critical = Num (Get-Prop $totals 'critical')
@@ -105,7 +108,7 @@ W "</div></body></html>"
 
 # One line, and nothing that would break the JSON string the Send Audit binding puts it in.
 $body = $b.ToString() -replace '[\r\n\t]+', ' ' -replace '\\', '&#92;' -replace '"', '&quot;'
-$subject = "Weekly Fleet Audit - $date$(if ($critical) { " - $critical critical" })"
+$subject = "Weekly Fleet Audit - $date$(if ($failed) { ' - audit failed' } elseif ($critical) { " - $critical critical" })"
 Set-NodeOutput ([ordered]@{
     channel = 'email'
     subject = $subject

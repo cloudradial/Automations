@@ -1,6 +1,7 @@
-param([switch]$NoAccountManager, [switch]$Empty, [string]$HtmlOut = '')
+param([switch]$NoAccountManager, [switch]$Empty, [string]$HtmlOut = '', [switch]$Built)
 # Mock harness for audit.ps1 + email.ps1: fake Key Vault, CloudRadial API, and node I/O, in strict mode.
-# Assembles audit.ps1 with the shared block from elm.ps1 the same way build-audit.js does.
+# Default: assembles audit.ps1 with the shared block from elm.ps1.
+# -Built: runs the scripts actually embedded in ../weekly-fleet-audit.yml (run after node build-audit.js).
 $global:Out = $null; $global:In = $null; $global:Writes = 0
 $env:RUNNER_KV_NAME = 'kv'
 function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText, $ErrorAction) @{ 'CloudRadial-BaseUrl' = 'https://api.test'; 'CloudRadial-PublicKey' = 'pk'; 'CloudRadial-PrivateKey' = 'sk' }[$Name] }
@@ -33,6 +34,14 @@ function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
 $elm = (Get-Content -Raw "$PSScriptRoot\..\..\endpoint-lifecycle-manager\src\elm.ps1") -replace "`r`n", "`n"
 if ($elm -notmatch '(?ms)^# ---- shared: begin[^\n]*\n(.*?)^# ---- shared: end ----$') { throw 'shared markers missing in elm.ps1' }
 $auditSrc = (Get-Content -Raw "$PSScriptRoot\audit.ps1").Replace('#@@ELM_SHARED@@', $Matches[1])
+$emailSrc = Get-Content -Raw "$PSScriptRoot\email.ps1"
+if ($Built) {
+    $js = "const y=require('js-yaml'),fs=require('fs');const a=y.load(fs.readFileSync(process.argv[1],'utf8')).definition.activities;const s=a.find(x=>x.id===process.argv[2]).properties.script;process.stdout.write(Buffer.from(s).toString('base64'))"
+    $yml = "$PSScriptRoot\..\weekly-fleet-audit.yml"
+    $dec = { param($id) [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((node -e $js $yml $id))) }
+    $auditSrc = & $dec 'node-audit'; $emailSrc = & $dec 'node-message'
+    "testing the scripts embedded in weekly-fleet-audit.yml"
+}
 
 Set-StrictMode -Version Latest   # as on the runner
 $global:In = [pscustomobject]@{ toEmail = @('team@example.com'); message = 'x' }
@@ -40,7 +49,7 @@ $global:In = [pscustomobject]@{ toEmail = @('team@example.com'); message = 'x' }
 $audit = $global:Out
 # Node output reaches the next step as JSON.
 $global:In = ($audit | ConvertTo-Json -Depth 12) | ConvertFrom-Json
-. "$PSScriptRoot\email.ps1"
+& ([scriptblock]::Create($emailSrc))
 Set-StrictMode -Off
 
 $audit.message

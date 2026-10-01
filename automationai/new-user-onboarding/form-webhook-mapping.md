@@ -15,7 +15,7 @@ The playbook's **intake** stage has to establish, for each starter: full name, *
 
 ## Question → Field ID → JSON key
 
-The "Field ID" column is the value to set on each question. The first seven rows already have IDs in the current Content; the rest need one set.
+The "Field ID" column is the value to set on each question. The first seven rows already have IDs in the current Content; the rest need one set. **Make these changes in the package source**, not in a client portal (see [Where to make the form changes](#where-to-make-the-form-changes)).
 
 | Page | Question | Type | Field ID | JSON key | Used by |
 |---|---|---|---|---|---|
@@ -23,15 +23,16 @@ The "Field ID" column is the value to set on each question. The first seven rows
 | 1 | Last Name | text | `lastName` | `lastName` | intake |
 | 1 | Department | text | `department` | `department` | intake, access plan |
 | 1 | Job Title | text | `jobTitle` | `jobTitle` | intake, access plan |
+| 1 | **Manager** *(new question)* | user lookup | `managerEmail` | `managerEmail` | intake, provision (sets the manager and emails them) |
 | 3 | New User Email | email (shown when email = Yes) | `email` | `email` | provision |
-| 3 | Security Groups | multi-choice (Administrators, Users, Editors, Owners) | `companyFileAccess` | `securityGroups` | access plan |
+| 3 | Security Groups | multi-choice: **replace the stock choices** (see below) | `companyFileAccess` | `securityGroups` | access plan |
 | 3 | Mail Distribution Groups | multi-choice (from `@MailGroups`) | `mailGroups` | `mailGroups` | access plan |
 | 1 | Office Location | text | `officeLocation` | `officeLocation` | provision (usage location, office) |
 | 1 | **Start Date** | date | `startDate` | `startDate` | **intake — required, or the run blocks** |
 | 2 | Model the new user's account access from | user lookup | `modelAccessFrom` | `mirrorFromUser` | access plan |
 | 2 | Software applications required | multi-choice (Adobe Acrobat, Google Chrome, Microsoft Office 365, AutoCAD) | `softwareLicenses` | `software` | procurement, provision |
 | 2 | Does the user need a Microsoft 365 License? | Yes / No | `needsM365License` | `needsM365License` | provision |
-| 2 | Microsoft 365 License | dropdown (shown when licence = Yes) | `m365License` | `m365License` | provision |
+| 2 | Microsoft 365 License | dropdown (shown when licence = Yes): **use the choices below** | `m365License` | `m365License` | provision |
 | 3 | Is VPN remote access required? | Yes / No | `vpnRequired` | `vpnRequired` | access plan |
 | 3 | Other additions | long text | `otherAdditions` | `otherAdditions` | access plan |
 | 3 | Does the user require an email account? | Yes / No | `needsEmail` | `needsEmail` | provision |
@@ -41,6 +42,23 @@ The "Field ID" column is the value to set on each question. The first seven rows
 | 4 | Which printer does the user need access to? | dropdown | `printer` | `printer` | access plan |
 | 4 | Other equipment | long text | `otherEquipment` | `otherEquipment` | procurement (quote) |
 | 4 | Does this User need a desk phone? | Yes / No | `deskPhone` | `deskPhone` | procurement |
+
+### Choices that have to match the tenant
+
+- **Manager.** This is a new user-lookup question on page 1. The direct workflow looks the value up in Microsoft Graph, so it has to arrive as the manager's email or UPN, not their display name. Check this on the first test submission.
+- **Security Groups.** The stock choices (Administrators, Users, Editors, Owners) aren't real groups. The direct workflow looks each choice up by its exact Entra display name. *Administrators* is always blocked as protected, and the others are skipped as not found. Either replace the choices with the client's real group names, or remove the question and let the agent workflow plan access from **Model the new user's account access from**.
+- **Microsoft 365 License.** Each choice must be one of these names, a SKU part number such as `SPB`, or a SKU id. Any other choice stops the direct workflow before it creates anything:
+  - Microsoft 365 Business Basic
+  - Microsoft 365 Business Standard
+  - Microsoft 365 Business Premium
+  - Office 365 E1
+  - Office 365 E3
+  - Microsoft 365 E3
+  - Microsoft 365 E5
+
+  If the licence answer is Yes but no licence is chosen, the direct workflow uses the runner's `Onboarding-DefaultLicenceSku` secret, and the agent uses its `defaultLicenceSku` variable.
+- **Office Location** is free text and isn't turned into a country. The account's usage location comes from the runner's `Onboarding-UsageLocation` secret, and is `US` if that secret isn't set.
+- **Model the new user's account access from** is used only by the agent workflow. The direct workflow never copies another user's access.
 
 `softwareLicenses` and `companyFileAccess` keep their existing Field IDs so the older **New User Creation** workflow still reads them; the JSON key renames them to what they actually hold. Attachments and the signature aren't sent.
 
@@ -93,6 +111,7 @@ Token rules from the same article that matter here:
   "lastName": "@lastName",
   "department": "@department",
   "jobTitle": "@jobTitle",
+  "managerEmail": "@managerEmail",
   "officeLocation": "@officeLocation",
   "startDate": "@startDate",
   "mirrorFromUser": "@modelAccessFrom",
@@ -116,8 +135,11 @@ Token rules from the same article that matter here:
 
 Every value is quoted, so an empty or multi-choice answer still produces valid JSON.
 
+## Where to make the form changes
+
+Make the Field ID, Manager question and choice changes in the **package source** for *Add a New User*. Subscribed portals then pick them up. Don't edit the form in a client portal: in the Westgate Tech Services portal it's subscribed content, and **Edit → Continue** detaches it, so it stops receiving package updates.
+
 ## Confirm before relying on it
 
-- **Editing the form's Field IDs detaches it from its subscription.** In the Westgate Tech Services portal, *Add a New User* is subscribed content, and **Edit → Continue** stops it receiving updates from the package. Decide that before setting the IDs, or make the change in the package source instead.
 - The playbook's status must allow a webhook to start a run (it was **Done** after a manual stop on 2026-09-22).
-- Submit one test request and check the playbook run's briefing shows every key with a real value — especially `startDate`, `mirrorFromUser`, and `requestedBy`. An `@token` that shows up literally means that question's Field ID doesn't match. Conditional questions that weren't shown (for example `existingEndpoint` when the computer is new) should arrive empty, since they still have a Field ID.
+- Submit one test request and check the playbook run's briefing shows every key with a real value — especially `startDate`, `mirrorFromUser`, `managerEmail` and `requestedBy`. An `@token` that shows up literally means that question's Field ID doesn't match. Conditional questions that weren't shown (for example `existingEndpoint` when the computer is new) should arrive empty, since they still have a Field ID.

@@ -36,7 +36,7 @@ definition:
               companyTenantId = 'Microsoft 365 tenant'; requestedBy = 'Requested by (email)'; requestedByName = 'Requested by'
               requestedByOfficeId = 'Requester Microsoft 365 id'; requestedByPsaId = 'Requester PSA contact'; requestedByIsAdmin = 'Requester is a portal admin'
               firstName = 'First name'; lastName = 'Last name'; department = 'Department'; jobTitle = 'Job title'
-              officeLocation = 'Office location'; startDate = 'Start date'; mirrorFromUser = 'Mirror access from'
+              managerEmail = 'Manager'; officeLocation = 'Office location'; startDate = 'Start date'; mirrorFromUser = 'Mirror access from'
               software = 'Software'; needsM365License = 'Needs a Microsoft 365 licence'; m365License = 'Microsoft 365 licence'
               securityGroups = 'Security groups'; vpnRequired = 'VPN required'; otherAdditions = 'Other access'
               needsEmail = 'Needs an email account'; email = 'Email address'; mailGroups = 'Mail groups'
@@ -67,7 +67,7 @@ definition:
         parameters: []
         aiExtensions: []
         testInput: |-
-          {"source":"cloudradial-form","form":"Add a New User","ticketId":"12345","companyName":"Contoso","requestedBy":"manager@contoso.com","requestedByName":"Pat Manager","requestedByIsAdmin":"true","firstName":"Sam","lastName":"Starter","department":"Sales","jobTitle":"Account Executive","startDate":"2026-10-12","mirrorFromUser":"alex@contoso.com","needsM365License":"Yes","needsEmail":"Yes","computerSource":"New","newComputerType":"Laptop","deskPhone":"No"}
+          {"source":"cloudradial-form","form":"Add a New User","ticketId":"12345","companyName":"Contoso","requestedBy":"manager@contoso.com","requestedByName":"Pat Manager","requestedByIsAdmin":"true","firstName":"Sam","lastName":"Starter","department":"Sales","jobTitle":"Account Executive","managerEmail":"manager@contoso.com","startDate":"2026-10-12","mirrorFromUser":"alex@contoso.com","needsM365License":"Yes","needsEmail":"Yes","computerSource":"New","newComputerType":"Laptop","deskPhone":"No"}
     # --- Stages: each Agent node runs the new-user-onboarding agent for one stage. It reads the
     # --- briefing and the previous stage's output (context), and stops early when a starter is blocked.
     - id: node-intake

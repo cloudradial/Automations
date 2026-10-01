@@ -1,0 +1,641 @@
+automationsWorkflow: 1
+name: New User Onboarding (Direct)
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 200
+    properties:
+      # Enable the webhook in Properties after import; AutomationAI issues the URL and secret.
+      webhookEnabled: false
+  - id: node-parse
+    name: Receive form data
+    type: powershell-script
+    position:
+      x: 280
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Receive form data ===
+        # Reads the "Add a New User" webhook body. Accepts a flat {key:value} object (the form's
+        # Webhook activity Content, see form-webhook-mapping.md) or the CloudRadial
+        # {Ticket:{Questions:[...]},Company:{...}} shape. Answers CloudRadial left as literal
+        # @tokens (an unset Field ID arrives as "@startDate") are treated as not answered.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-Pairs { param($o) if ($null -eq $o) { return @() }; if ($o -is [System.Collections.IDictionary]) { return @($o.Keys | ForEach-Object { @{ Name = [string]$_; Value = $o[$_] } }) }; return @($o.PSObject.Properties | ForEach-Object { @{ Name = $_.Name; Value = $_.Value } }) }
+        function Stop-Incomplete { param($Msg, $TicketId)
+            Set-NodeOutput ([ordered]@{ status = 'incomplete'; reason = $Msg; ticketId = [string]$TicketId; confirm = $false; fields = [ordered]@{}; actions = @(); warnings = @(); followUp = @() }) }
+
+        $in = Get-NodeInput
+        $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+        $b = Get-Prop $in 'body'; if ($null -ne $b) { $in = $b }
+        if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { Stop-Incomplete 'The webhook body was text that is not valid JSON.' ''; return } }
+        if ($null -eq $in) { Stop-Incomplete 'No webhook body was received. This workflow expects the Add a New User form webhook.' ''; return }
+
+        # Collect every answer by key: flat values first, then Ticket.Questions[].Id, then Company.
+        $answers = @{}
+        foreach ($p in (Get-Pairs $in)) {
+            $v = $p.Value
+            if ($null -eq $v) { continue }
+            if ($v -is [string] -or $v.GetType().IsValueType) { $answers[$p.Name] = $v }
+            elseif ($v -is [array]) { $answers[$p.Name] = (@($v | ForEach-Object { [string]$_ }) -join ', ') }
+        }
+        $ticket = Get-Prop $in 'Ticket'
+        if ($null -ne $ticket) {
+            foreach ($q in @(Get-Prop $ticket 'Questions')) {
+                $qid = [string](Get-Prop $q 'Id'); if ([string]::IsNullOrWhiteSpace($qid)) { continue }
+                $qv = Get-Prop $q 'Value'; if ($qv -is [array]) { $qv = (@($qv | ForEach-Object { [string]$_ }) -join ', ') }
+                $answers[$qid] = $qv
+            }
+            $tid = Get-Prop $ticket 'TicketId'; if ($null -ne $tid) { $answers['ticketId'] = $tid }
+        }
+        $company = Get-Prop $in 'Company'
+        if ($null -ne $company) {
+            $ctid = Get-Prop $company 'CompanyTenantId'; if ($null -ne $ctid) { $answers['companyTenantId'] = $ctid }
+        }
+
+        function Get-Field { param([string[]]$Names, [string]$Default = '')
+            foreach ($n in $Names) {
+                if (-not $answers.ContainsKey($n)) { continue }
+                $v = ([string]$answers[$n]).Trim()
+                if ($v -eq '' -or $v.StartsWith('@')) { continue }
+                return $v
+            }
+            return $Default
+        }
+        function Test-Yes { param([string]$v, [bool]$Default) if ([string]::IsNullOrWhiteSpace($v)) { return $Default }; return (@('true', 'yes', 'y', '1') -contains $v.Trim().ToLowerInvariant()) }
+
+        $f = [ordered]@{
+            firstName         = Get-Field @('firstName', 'givenName')
+            lastName          = Get-Field @('lastName', 'surname')
+            displayName       = Get-Field @('displayName')
+            department        = Get-Field @('department')
+            jobTitle          = Get-Field @('jobTitle', 'title')
+            managerEmail      = Get-Field @('managerEmail', 'managerUpn', 'manager')
+            licenseSku        = Get-Field @('licenseSku', 'licenseSkuId', 'm365License')
+            needsLicense      = Test-Yes (Get-Field @('needsM365License')) $true
+            groups            = ((@(Get-Field @('groups', 'groupIds'); Get-Field @('securityGroups', 'companyFileAccess'); Get-Field @('mailGroups')) | Where-Object { $_ }) -join ', ')
+            deviceType        = Get-Field @('deviceType', 'newComputerType')
+            computerSource    = Get-Field @('computerSource')
+            existingEndpoint  = Get-Field @('existingEndpoint')
+            startDate         = Get-Field @('startDate')
+            officeLocation    = Get-Field @('officeLocation')
+            usageLocation     = (Get-Field @('usageLocation')).ToUpperInvariant()
+            email             = Get-Field @('userPrincipalName', 'email')
+            upnFormat         = (Get-Field @('upnFormat') 'first.last').ToLowerInvariant()
+            companyTenantId   = Get-Field @('companyTenantId', 'CompanyTenantId', 'tenantId')
+            companyName       = Get-Field @('companyName', 'CompanyName')
+            companyPsaId      = Get-Field @('companyPsaId', 'CompanyPsaId')
+            companyId         = Get-Field @('companyId', 'CompanyId')
+            submittedByUpn    = Get-Field @('submittedByUpn', 'requestedBy', 'UserEmail')
+            requestedByIsAdmin = Get-Field @('requestedByIsAdmin', 'UserIsAdmin')
+            otherAdditions    = Get-Field @('otherAdditions')
+        }
+        if ($f.displayName -eq '') { $f.displayName = ((@($f.firstName, $f.lastName) | Where-Object { $_ }) -join ' ') }
+        if ($f.deviceType -eq '' -and $f.computerSource -match '^(?i)existing' -and $f.existingEndpoint -ne '') { $f.deviceType = "Existing computer: $($f.existingEndpoint)" }
+        $ticketId = Get-Field @('ticketId', 'TicketId', 'ticket_id')
+        # confirm (or approvedToWrite) must be true for anything to change. Default: preview only.
+        $confirm = Test-Yes (Get-Field @('confirm', 'approvedToWrite')) $false
+
+        $missing = @()
+        if ($f.firstName -eq '') { $missing += 'First name' }
+        if ($f.lastName -eq '') { $missing += 'Last name' }
+        if ($missing.Count -gt 0) { Stop-Incomplete "The request is missing: $($missing -join ', '). Nothing was created." $ticketId; return }
+        if (@('first.last', 'firstlast', 'flast', 'first') -notcontains $f.upnFormat) { Stop-Incomplete "upnFormat '$($f.upnFormat)' isn't supported. Use first.last, firstlast, flast or first." $ticketId; return }
+
+        $warnings = @()
+        if ($f.startDate -eq '') { $warnings += 'No start date was given.' }
+        if ($f.submittedByUpn -eq '') { $warnings += 'The requester was not identified (submittedByUpn / @UserEmail is empty).' }
+
+        Set-NodeOutput ([ordered]@{
+            status = 'ok'; confirm = $confirm; ticketId = $ticketId; fields = $f
+            actions = @("Read the request for $($f.displayName)"); warnings = $warnings; followUp = @()
+            message = "Request read for $($f.displayName)$(if (-not $confirm) { ' (preview only: confirm is false)' })."
+        })
+      timeoutSeconds: 600
+      retryCount: 0
+      parameters:
+      - name: trigger
+        expression: '{{ nodes.trigger.output }}'
+      aiExtensions: []
+      testInput: |-
+        {
+          "source": "cloudradial-form",
+          "form": "Add a New User",
+          "ticketId": "12345",
+          "companyName": "Contoso",
+          "companyPsaId": "Contoso",
+          "companyTenantId": "00000000-0000-0000-0000-000000000000",
+          "requestedBy": "manager@contoso.com",
+          "requestedByIsAdmin": "true",
+          "firstName": "Sam",
+          "lastName": "Starter",
+          "department": "Sales",
+          "jobTitle": "Account Executive",
+          "startDate": "2026-10-12",
+          "managerEmail": "manager@contoso.com",
+          "m365License": "Microsoft 365 Business Premium",
+          "securityGroups": "Sales Team",
+          "newComputerType": "Laptop",
+          "confirm": "false"
+        }
+  - id: node-gates
+    name: Check and plan
+    type: powershell-script
+    position:
+      x: 460
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Check and plan (read-only) ===
+        # Fails closed when the request's Microsoft 365 tenant isn't this runner's tenant, when the
+        # account already exists, or when the licence can't be found or has no free seat. Resolves
+        # the manager, groups and CloudRadial company, and writes the plan. Changes nothing. When
+        # confirm is false the run stops here and returns the plan as a preview.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-State { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in $in.Keys) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Add-To { param($S, $Key, $Text) $S[$Key] = @(@($S[$Key] | Where-Object { $null -ne $_ }) + $Text) }
+        function Stop-Run { param($S, $Status, $Reason) $S['status'] = $Status; $S['reason'] = $Reason; Set-NodeOutput $S }
+        function Get-KvSecret { param([string[]]$Names) foreach ($n in $Names) { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue; if (-not [string]::IsNullOrWhiteSpace($v)) { return $v } }; return $null }
+        function Invoke-Graph { param($Method, $Path, $Body, $Headers, [hashtable]$Extra = @{}) $h = @{}; foreach ($k in $Headers.Keys) { $h[$k] = $Headers[$k] }; foreach ($k in $Extra.Keys) { $h[$k] = $Extra[$k] }; $p = @{ Method = $Method; Uri = "https://graph.microsoft.com$Path"; Headers = $h }; if ($null -ne $Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 10) }; Invoke-RestMethod @p }
+        function Get-GraphStatus { param($Err) try { return [int]$Err.Exception.Response.StatusCode } catch { return 0 } }
+        function Esc { param([string]$v) return $v.Replace("'", "''") }
+
+        $state = Read-State
+        if ([string]$state['status'] -ne 'ok') { Set-NodeOutput $state; return }
+        $f = $state['fields']
+        function F { param($n) return [string](Get-Prop $f $n) }
+
+        # --- Microsoft 365 app credentials (the certified Microsoft 365 extension's secrets) ---
+        $tenantId = Get-KvSecret @('M365-TenantId', 'M365-TenantID', 'Entra-TenantID', 'Graph-TenantId')
+        $clientId = Get-KvSecret @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId')
+        $clientSecret = Get-KvSecret @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret')
+        if (-not $tenantId -or -not $clientId -or -not $clientSecret) { Stop-Run $state 'error' "Microsoft 365 app secrets are missing from runner Key Vault '$($env:RUNNER_KV_NAME)'. Add M365-TenantId, M365-ClientId and M365-ClientSecret."; return }
+
+        # --- Gate: the request's tenant must be this runner's tenant ---
+        $reqTenant = (F 'companyTenantId').Trim().ToLowerInvariant()
+        if ($reqTenant -notmatch '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$') { Stop-Run $state 'rejected' 'The request has no Microsoft 365 tenant id (@CompanyTenantId), so the tenant could not be confirmed. Nothing was created.'; return }
+        if ($reqTenant -ne $tenantId.Trim().ToLowerInvariant()) { Stop-Run $state 'rejected' "The request is for tenant $reqTenant, but this runner is set up for a different tenant. Cross-tenant creation is blocked. Nothing was created."; return }
+
+        try {
+            $tok = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" -Body @{ client_id = $clientId; client_secret = $clientSecret; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' }
+            $H = @{ Authorization = "Bearer $($tok.access_token)"; 'Content-Type' = 'application/json' }
+        } catch { Stop-Run $state 'error' "Could not get a Microsoft Graph token: $($_.Exception.Message)"; return }
+
+        # --- Usage location: the form doesn't ask for a country, so fall back to the runner default, then US ---
+        if ((F 'usageLocation') -eq '') { $ul = Get-KvSecret @('Onboarding-UsageLocation'); $f.usageLocation = $(if ($ul) { $ul.Trim().ToUpperInvariant() } else { 'US' }) }
+        if ((F 'usageLocation') -notmatch '^[A-Z]{2}$') { Stop-Run $state 'incomplete' "Usage location '$(F 'usageLocation')' isn't a two-letter country code such as US or GB. Nothing was created."; return }
+
+        # --- Work out the sign-in name ---
+        try { $org = Invoke-Graph 'Get' '/v1.0/organization?$select=verifiedDomains' $null $H } catch { Stop-Run $state 'error' "Could not read the tenant's domains: $($_.Exception.Message)"; return }
+        $orgRows = @($org.value)
+        $domains = $(if ($orgRows.Count) { @($orgRows[0].verifiedDomains) } else { @() })
+        $def = @($domains | Where-Object { $_.isDefault })
+        $defaultDomain = $(if ($def.Count) { [string]$def[0].name } else { '' })
+        $upn = (F 'email').ToLowerInvariant()
+        if ($upn -eq '') {
+            $clean = { param($s) (($s.ToLowerInvariant().Normalize([Text.NormalizationForm]::FormD) -replace '\p{Mn}', '') -replace '[^a-z0-9]', '') }
+            $fn = & $clean (F 'firstName'); $ln = & $clean (F 'lastName')
+            $local = switch (F 'upnFormat') { 'firstlast' { "$fn$ln" } 'flast' { "$($fn.Substring(0, [Math]::Min(1, $fn.Length)))$ln" } 'first' { $fn } default { "$fn.$ln" } }
+            $upn = "$local@$defaultDomain"
+            Add-To $state 'warnings' "No email was given, so the sign-in name was built as $upn ($(F 'upnFormat') at the default domain). Check it matches the client's format."
+        }
+        if ($upn -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { Stop-Run $state 'incomplete' "The sign-in name '$upn' isn't a valid address. Nothing was created."; return }
+        $upnDomain = $upn.Split('@')[1]
+        if (-not (@($domains | ForEach-Object { ([string]$_.name).ToLowerInvariant() }) -contains $upnDomain)) { Stop-Run $state 'rejected' "The domain $upnDomain isn't a verified domain in this tenant. Nothing was created."; return }
+
+        # --- Gate: the account must not already exist ---
+        $exists = $null
+        try { $exists = Invoke-Graph 'Get' "/v1.0/users/$([uri]::EscapeDataString($upn))?`$select=id,userPrincipalName" $null $H } catch { if ((Get-GraphStatus $_) -ne 404) { Stop-Run $state 'error' "Could not check whether $upn exists: $($_.Exception.Message)"; return } }
+        if ($null -eq $exists) {
+            try {
+                $q = Esc $upn
+                $hit = Invoke-Graph 'Get' "/v1.0/users?`$filter=mail eq '$q' or proxyAddresses/any(p:p eq 'smtp:$q')&`$count=true&`$select=id,userPrincipalName" $null $H @{ ConsistencyLevel = 'eventual' }
+                if (@($hit.value).Count -gt 0) { $exists = @($hit.value)[0] }
+            } catch { Stop-Run $state 'error' "Could not check whether $upn is already in use: $($_.Exception.Message)"; return }
+        }
+        if ($null -ne $exists) { Stop-Run $state 'rejected' "$upn is already in use by $($exists.userPrincipalName). This workflow never changes an existing account. Nothing was created."; return }
+        $state['upn'] = $upn
+        $state['mailNickname'] = $upn.Split('@')[0]
+
+        # --- Manager (optional) ---
+        $state['managerId'] = ''; $state['managerMail'] = ''
+        $mgr = F 'managerEmail'
+        if ($mgr -ne '') {
+            try { $m = Invoke-Graph 'Get' "/v1.0/users/$([uri]::EscapeDataString($mgr))?`$select=id,displayName,mail,userPrincipalName" $null $H; $state['managerId'] = [string]$m.id; $state['managerMail'] = $(if ($m.mail) { [string]$m.mail } else { [string]$m.userPrincipalName }); $state['managerName'] = [string]$m.displayName }
+            catch { Add-To $state 'warnings' "Manager $mgr wasn't found in the tenant, so no manager will be set or notified." }
+        }
+
+        # --- Licence: must exist and have a free seat. Never buys. ---
+        $state['skuId'] = ''; $state['skuName'] = ''; $state['hasExchange'] = $false
+        $sku = F 'licenseSku'
+        $needsLicense = [bool](Get-Prop $f 'needsLicense')
+        if ($needsLicense -and $sku -eq '') {
+            $dflt = Get-KvSecret @('Onboarding-DefaultLicenceSku')
+            if ($dflt) { $sku = $dflt.Trim(); $f.licenseSku = $sku; Add-To $state 'warnings' "No licence was chosen on the form, so the runner default $sku (Onboarding-DefaultLicenceSku) was used." }
+        }
+        if ($needsLicense -and $sku -ne '') {
+            # Friendly names the form's licence dropdown may send, mapped to Microsoft's SKU part numbers.
+            $friendly = @{ 'microsoft 365 business basic' = 'O365_BUSINESS_ESSENTIALS'; 'microsoft 365 business standard' = 'O365_BUSINESS_PREMIUM'; 'microsoft 365 business premium' = 'SPB'; 'office 365 e1' = 'STANDARDPACK'; 'office 365 e3' = 'ENTERPRISEPACK'; 'microsoft 365 e3' = 'SPE_E3'; 'microsoft 365 e5' = 'SPE_E5' }
+            $want = $sku.Trim(); if ($friendly.ContainsKey($want.ToLowerInvariant())) { $want = $friendly[$want.ToLowerInvariant()] }
+            try { $skus = @((Invoke-Graph 'Get' '/v1.0/subscribedSkus' $null $H).value) } catch { Stop-Run $state 'error' "Could not read the tenant's licences: $($_.Exception.Message)"; return }
+            $match = @($skus | Where-Object { [string]$_.skuId -eq $want -or ([string]$_.skuPartNumber).ToLowerInvariant() -eq $want.ToLowerInvariant() })
+            if ($match.Count -eq 0) { Stop-Run $state 'incomplete' "Licence '$sku' isn't in this tenant. Available: $((@($skus | ForEach-Object { $_.skuPartNumber }) | Sort-Object) -join ', '). Nothing was created."; return }
+            $s = $match[0]; $free = [int]$s.prepaidUnits.enabled - [int]$s.consumedUnits
+            if ($free -le 0) { Stop-Run $state 'incomplete' "Licence $($s.skuPartNumber) has no free seats ($($s.consumedUnits) of $($s.prepaidUnits.enabled) used). Buy a seat first; this workflow never purchases. Nothing was created."; return }
+            $state['skuId'] = [string]$s.skuId; $state['skuName'] = [string]$s.skuPartNumber
+            $state['hasExchange'] = [bool](@($s.servicePlans | Where-Object { ([string]$_.servicePlanName) -like 'EXCHANGE_S_*' }).Count)
+            if (-not $state['hasExchange']) { Add-To $state 'warnings' "Licence $($s.skuPartNumber) doesn't include Exchange Online, so no mailbox will be created." }
+        } elseif ($needsLicense) { Add-To $state 'warnings' 'No licence was requested, so the account will have no licence and no mailbox.' }
+
+        # --- Groups: add only ordinary security and Microsoft 365 groups. Never admin roles. ---
+        $protected = @('admin', 'administrator', 'privileged', 'global') + @(((Get-KvSecret @('Onboarding-ProtectedGroupPatterns')) -split ',') | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+        $plannedGroups = @()
+        foreach ($g in @(((F 'groups') -split '[,;]') | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)) {
+            try {
+                $sel = 'id,displayName,groupTypes,mailEnabled,securityEnabled,isAssignableToRole,onPremisesSyncEnabled'
+                if ($g -match '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { $found = @(Invoke-Graph 'Get' "/v1.0/groups/$g`?`$select=$sel" $null $H) }
+                else { $found = @((Invoke-Graph 'Get' "/v1.0/groups?`$filter=displayName eq '$(Esc $g)'&`$select=$sel" $null $H).value) }
+            } catch { Add-To $state 'warnings' "Group '$g' couldn't be looked up, so it was skipped."; continue }
+            if ($found.Count -eq 0) { Add-To $state 'warnings' "Group '$g' wasn't found, so it was skipped."; continue }
+            if ($found.Count -gt 1) { Add-To $state 'warnings' "More than one group is called '$g', so it was skipped. Use the group id instead."; continue }
+            $gr = $found[0]; $gn = [string]$gr.displayName; $lower = $gn.ToLowerInvariant()
+            $isUnified = @($gr.groupTypes) -contains 'Unified'
+            if ([bool]$gr.isAssignableToRole -or @($protected | Where-Object { $lower.Contains($_) }).Count -gt 0) { Add-To $state 'followUp' "Group '$gn' can grant admin access, so it was not added. A technician must add it by hand if it's approved."; continue }
+            if ([bool]$gr.onPremisesSyncEnabled) { Add-To $state 'followUp' "Group '$gn' is synced from on-premises Active Directory. Add the user there."; continue }
+            if ([bool]$gr.mailEnabled -and -not $isUnified) { Add-To $state 'followUp' "Group '$gn' is a distribution list or mail-enabled security group, which Microsoft Graph can't change. Add the user in Exchange admin."; continue }
+            $plannedGroups += [ordered]@{ id = [string]$gr.id; name = $gn }
+        }
+        $state['groups'] = $plannedGroups
+
+        # --- CloudRadial company for the portal user (optional) ---
+        $state['crCompanyId'] = ''
+        $crBase = Get-KvSecret @('CloudRadial-BaseUrl'); $crPub = Get-KvSecret @('CloudRadial-PublicKey'); $crPriv = Get-KvSecret @('CloudRadial-PrivateKey')
+        if (-not $crBase -or -not $crPub -or -not $crPriv) { Add-To $state 'followUp' 'CloudRadial API secrets are missing, so no portal user will be created. Add CloudRadial-BaseUrl, CloudRadial-PublicKey and CloudRadial-PrivateKey.' }
+        else {
+            $crH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$crPub`:$crPriv")); Accept = 'application/json' }
+            $crRoot = $crBase.TrimEnd('/')
+            $co = $null
+            try {
+                if ((F 'companyId') -match '^\d+$') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=companyId eq $(F 'companyId')&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
+                if (-not $co -and (F 'companyPsaId') -ne '') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=psaIdentifier eq '$(Esc (F 'companyPsaId'))'&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
+                if (-not $co -and (F 'companyName') -ne '') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=name eq '$(Esc (F 'companyName'))'&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
+            } catch { Add-To $state 'warnings' "Couldn't look up the CloudRadial company: $($_.Exception.Message)" }
+            if (-not $co) { Add-To $state 'followUp' 'The CloudRadial company could not be matched, so no portal user will be created.' }
+            else {
+                $existingCr = $null
+                try { $existingCr = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/user?`$filter=email eq '$(Esc $upn)'&`$select=userId,email" -Headers $crH).value) | Select-Object -First 1 } catch { }
+                if ($existingCr) { Add-To $state 'warnings' "A CloudRadial portal user for $upn already exists, so none will be created." }
+                else { $state['crCompanyId'] = [string]$co.companyId; $state['crCompanyName'] = [string]$co.name }
+            }
+        }
+
+        # --- Requester signal ---
+        if ((F 'requestedByIsAdmin') -match '^(?i)false$') { Add-To $state 'warnings' "The requester ($(F 'submittedByUpn')) is not a portal admin for this client. Check they're allowed to request new starters." }
+
+        # --- Plan ---
+        $plan = @("Create Microsoft 365 account $upn ($(F 'displayName')), usage location $(F 'usageLocation'), password change forced at first sign-in")
+        if ($state['managerId']) { $plan += "Set manager to $($state['managerMail'])" }
+        if ($state['skuId']) { $plan += "Assign licence $($state['skuName'])$(if ($state['hasExchange']) { ' (includes the mailbox)' })" }
+        foreach ($g in $plannedGroups) { $plan += "Add to group $($g.name)" }
+        if ($state['crCompanyId']) { $plan += "Create CloudRadial portal user in $($state['crCompanyName'])" }
+        if ([string]$state['ticketId']) { $plan += "Add an internal note to ticket $($state['ticketId'])" } else { $plan += 'Create a ConnectWise ticket for the onboarding and note it' }
+        if ($state['managerMail']) { $plan += "Email the manager ($($state['managerMail'])) that the account is ready (no password in the email)" }
+        $state['plan'] = $plan
+        Add-To $state 'actions' "Checked tenant, sign-in name, licence and groups: $upn is free to create"
+
+        if (-not [bool]$state['confirm']) { Stop-Run $state 'pending_confirmation' 'Preview only. Run again with confirm set to true to make these changes.'; return }
+        Set-NodeOutput $state
+      timeoutSeconds: 600
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-create-user
+    name: Create Microsoft 365 user
+    type: powershell-script
+    position:
+      x: 640
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Create Microsoft 365 user ===
+        # Creates the new account with a random temporary password (change forced at first sign-in)
+        # and sets the manager. Never assigns a directory role. Runs only after the checks passed with
+        # confirm = true.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-State { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in $in.Keys) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Add-To { param($S, $Key, $Text) $S[$Key] = @(@($S[$Key] | Where-Object { $null -ne $_ }) + $Text) }
+        function Get-KvSecret { param([string[]]$Names) foreach ($n in $Names) { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue; if (-not [string]::IsNullOrWhiteSpace($v)) { return $v } }; return $null }
+        function Get-GraphHeaders { $t = Get-KvSecret @('M365-TenantId', 'M365-TenantID', 'Entra-TenantID', 'Graph-TenantId'); $c = Get-KvSecret @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId'); $x = Get-KvSecret @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret'); $r = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$t/oauth2/v2.0/token" -Body @{ client_id = $c; client_secret = $x; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' }; return @{ Authorization = "Bearer $($r.access_token)"; 'Content-Type' = 'application/json' } }
+        function Invoke-Graph { param($Method, $Path, $Body, $Headers) $p = @{ Method = $Method; Uri = "https://graph.microsoft.com$Path"; Headers = $Headers }; if ($null -ne $Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 10) }; Invoke-RestMethod @p }
+        function New-TempPassword { param([int]$Length = 16) $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; $L = 'abcdefghijkmnpqrstuvwxyz'; $D = '23456789'; $S = '!@#$%^&*-_=+'; $all = $U + $L + $D + $S; $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $pick = { param($set) $b = New-Object 'System.Byte[]' 1; $rng.GetBytes($b); $set[[int]($b[0] % $set.Length)] }; $chars = @((& $pick $U), (& $pick $L), (& $pick $D), (& $pick $S)); for ($i = $chars.Count; $i -lt $Length; $i++) { $chars += (& $pick $all) }; ($chars | Sort-Object { Get-Random }) -join '' }
+
+        $state = Read-State
+        if ([string]$state['status'] -ne 'ok') { Set-NodeOutput $state; return }
+        $f = $state['fields']
+        function F { param($n) return [string](Get-Prop $f $n) }
+
+        try { $H = Get-GraphHeaders } catch { $state['status'] = 'error'; $state['reason'] = "Could not get a Microsoft Graph token: $($_.Exception.Message)"; Set-NodeOutput $state; return }
+
+        $tempPassword = New-TempPassword 16
+        $body = [ordered]@{
+            accountEnabled = $true; displayName = F 'displayName'; givenName = F 'firstName'; surname = F 'lastName'
+            mailNickname = [string]$state['mailNickname']; userPrincipalName = [string]$state['upn']; usageLocation = F 'usageLocation'
+            passwordProfile = @{ password = $tempPassword; forceChangePasswordNextSignIn = $true }
+        }
+        if ((F 'jobTitle') -ne '') { $body['jobTitle'] = F 'jobTitle' }
+        if ((F 'department') -ne '') { $body['department'] = F 'department' }
+        if ((F 'officeLocation') -ne '') { $body['officeLocation'] = F 'officeLocation' }
+        try { $u = Invoke-Graph 'Post' '/v1.0/users' $body $H }
+        catch { $state['status'] = 'error'; $state['reason'] = "Microsoft 365 rejected the new account $($state['upn']): $($_.Exception.Message). Nothing was created."; Set-NodeOutput $state; return }
+        $state['userId'] = [string]$u.id
+        $state['tempPassword'] = $tempPassword
+        Add-To $state 'actions' "Created Microsoft 365 account $($state['upn']) (id $($u.id)); password change is forced at first sign-in"
+
+        if ([string]$state['managerId']) {
+            try { Invoke-Graph 'Put' "/v1.0/users/$($u.id)/manager/`$ref" @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($state['managerId'])" } $H | Out-Null; Add-To $state 'actions' "Set manager to $($state['managerMail'])" }
+            catch { Add-To $state 'followUp' "Couldn't set the manager to $($state['managerMail']): $($_.Exception.Message)" }
+        }
+        Set-NodeOutput $state
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-license-groups
+    name: Assign licence and groups
+    type: powershell-script
+    position:
+      x: 820
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Assign licence and groups ===
+        # Assigns the checked licence (Exchange Online creates the mailbox from it) and adds the user
+        # to the groups the checks approved. A failure here is recorded as follow-up; the account stays.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-State { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in $in.Keys) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Add-To { param($S, $Key, $Text) $S[$Key] = @(@($S[$Key] | Where-Object { $null -ne $_ }) + $Text) }
+        function Get-KvSecret { param([string[]]$Names) foreach ($n in $Names) { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue; if (-not [string]::IsNullOrWhiteSpace($v)) { return $v } }; return $null }
+        function Get-GraphHeaders { $t = Get-KvSecret @('M365-TenantId', 'M365-TenantID', 'Entra-TenantID', 'Graph-TenantId'); $c = Get-KvSecret @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId'); $x = Get-KvSecret @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret'); $r = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$t/oauth2/v2.0/token" -Body @{ client_id = $c; client_secret = $x; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' }; return @{ Authorization = "Bearer $($r.access_token)"; 'Content-Type' = 'application/json' } }
+        function Invoke-Graph { param($Method, $Path, $Body, $Headers) $p = @{ Method = $Method; Uri = "https://graph.microsoft.com$Path"; Headers = $Headers }; if ($null -ne $Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 10) }; Invoke-RestMethod @p }
+
+        $state = Read-State
+        if ([string]$state['status'] -ne 'ok') { Set-NodeOutput $state; return }
+        $userId = [string]$state['userId']
+        $state['licencesAssigned'] = 0; $state['groupsAdded'] = 0
+
+        try { $H = Get-GraphHeaders } catch { Add-To $state 'followUp' "Could not get a Microsoft Graph token, so no licence or groups were added: $($_.Exception.Message)"; Set-NodeOutput $state; return }
+
+        if ([string]$state['skuId']) {
+            try {
+                Invoke-Graph 'Post' "/v1.0/users/$userId/assignLicense" @{ addLicenses = @(@{ skuId = [string]$state['skuId']; disabledPlans = @() }); removeLicenses = @() } $H | Out-Null
+                $state['licencesAssigned'] = 1
+                Add-To $state 'actions' "Assigned licence $($state['skuName'])"
+                if ([bool]$state['hasExchange']) { Add-To $state 'actions' 'Mailbox requested: Exchange Online creates it from the licence, usually within a few minutes' }
+            } catch { Add-To $state 'followUp' "Couldn't assign licence $($state['skuName']): $($_.Exception.Message). Assign it by hand; there's no mailbox until you do." }
+        }
+
+        foreach ($g in @($state['groups'] | Where-Object { $null -ne $_ })) {
+            $gid = [string](Get-Prop $g 'id'); $gname = [string](Get-Prop $g 'name')
+            try {
+                Invoke-Graph 'Post' "/v1.0/groups/$gid/members/`$ref" @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$userId" } $H | Out-Null
+                $state['groupsAdded'] = [int]$state['groupsAdded'] + 1
+                Add-To $state 'actions' "Added to group $gname"
+            } catch { Add-To $state 'followUp' "Couldn't add the user to group $gname`: $($_.Exception.Message)" }
+        }
+        Set-NodeOutput $state
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-portal-user
+    name: Create portal user
+    type: powershell-script
+    position:
+      x: 1000
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Create portal user ===
+        # Creates the CloudRadial portal user (POST /v2/user) in the company the checks matched.
+        # Skipped when the company wasn't matched or the user already exists.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-State { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in $in.Keys) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Add-To { param($S, $Key, $Text) $S[$Key] = @(@($S[$Key] | Where-Object { $null -ne $_ }) + $Text) }
+        function Get-KvSecret { param([string[]]$Names) foreach ($n in $Names) { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue; if (-not [string]::IsNullOrWhiteSpace($v)) { return $v } }; return $null }
+
+        $state = Read-State
+        if ([string]$state['status'] -ne 'ok') { Set-NodeOutput $state; return }
+        $state['portalUsersCreated'] = 0
+        if (-not [string]$state['crCompanyId']) { Set-NodeOutput $state; return }
+        $f = $state['fields']
+        function F { param($n) return [string](Get-Prop $f $n) }
+
+        $crBase = (Get-KvSecret @('CloudRadial-BaseUrl')).TrimEnd('/')
+        $crH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$(Get-KvSecret @('CloudRadial-PublicKey')):$(Get-KvSecret @('CloudRadial-PrivateKey'))")); Accept = 'application/json'; 'Content-Type' = 'application/json' }
+        $body = [ordered]@{ companyId = [int]$state['crCompanyId']; email = [string]$state['upn']; firstName = F 'firstName'; lastName = F 'lastName' }
+        if ((F 'department') -ne '') { $body['department'] = F 'department' }
+        if ((F 'jobTitle') -ne '') { $body['title'] = F 'jobTitle' }
+        try {
+            $r = Invoke-RestMethod -Method Post -Uri "$crBase/v2/user" -Headers $crH -Body ($body | ConvertTo-Json -Depth 4)
+            $state['portalUsersCreated'] = 1
+            $rid = [string](Get-Prop $r 'userId')
+            Add-To $state 'actions' "Created CloudRadial portal user in $($state['crCompanyName'])$(if ($rid) { " (user id $rid)" })"
+        } catch { Add-To $state 'followUp' "Couldn't create the CloudRadial portal user: $($_.Exception.Message)" }
+        Set-NodeOutput $state
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-psa
+    name: PSA ticket and manager
+    type: powershell-script
+    position:
+      x: 1180
+      y: 200
+    properties:
+      script: |-
+        # === NODE: PSA ticket and manager ===
+        # Uses the form's ticket when there is one; otherwise creates a ConnectWise ticket on the
+        # CW-ServiceBoard board. Emails the manager that the account exists, from the mailbox in the
+        # optional Onboarding-NotifySender secret. The email never contains the password.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-State { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in $in.Keys) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Add-To { param($S, $Key, $Text) $S[$Key] = @(@($S[$Key] | Where-Object { $null -ne $_ }) + $Text) }
+        function Get-KvSecret { param([string[]]$Names) foreach ($n in $Names) { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue; if (-not [string]::IsNullOrWhiteSpace($v)) { return $v } }; return $null }
+        function Get-GraphHeaders { $t = Get-KvSecret @('M365-TenantId', 'M365-TenantID', 'Entra-TenantID', 'Graph-TenantId'); $c = Get-KvSecret @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId'); $x = Get-KvSecret @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret'); $r = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$t/oauth2/v2.0/token" -Body @{ client_id = $c; client_secret = $x; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' }; return @{ Authorization = "Bearer $($r.access_token)"; 'Content-Type' = 'application/json' } }
+        function Esc { param([string]$v) return $v.Replace('"', '\"') }
+
+        $state = Read-State
+        if ([string]$state['status'] -ne 'ok') { Set-NodeOutput $state; return }
+        $f = $state['fields']
+        function F { param($n) return [string](Get-Prop $f $n) }
+
+        # --- PSA ticket ---
+        if (-not [string]$state['ticketId']) {
+            $cw = @{}; foreach ($n in @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId', 'CW-ServiceBoard')) { $cw[$n] = Get-KvSecret @($n) }
+            $miss = @($cw.Keys | Where-Object { -not $cw[$_] } | Sort-Object)
+            if ($miss.Count -gt 0) { Add-To $state 'followUp' "No ticket was given and ConnectWise secrets are missing ($($miss -join ', ')), so no PSA ticket was created. Log the onboarding by hand." }
+            else {
+                $base = $cw['CW-ApiUrl'].TrimEnd('/')
+                $cwH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($cw['CW-CompanyID'])+$($cw['CW-PublicKey']):$($cw['CW-PrivateKey'])")); clientId = $cw['CW-ClientId']; 'Content-Type' = 'application/json'; Accept = 'application/json' }
+                $coId = $null
+                try {
+                    $psa = F 'companyPsaId'
+                    if ($psa -match '^\d+$') { $coId = [int]$psa }
+                    elseif ($psa -ne '') { $coId = (@(Invoke-RestMethod -Method Get -Uri "$base/company/companies?conditions=identifier=`"$(Esc $psa)`"" -Headers $cwH) | Select-Object -First 1) | ForEach-Object { Get-Prop $_ 'id' } }
+                    if (-not $coId -and (F 'companyName') -ne '') { $coId = (@(Invoke-RestMethod -Method Get -Uri "$base/company/companies?conditions=name=`"$(Esc (F 'companyName'))`"" -Headers $cwH) | Select-Object -First 1) | ForEach-Object { Get-Prop $_ 'id' } }
+                } catch { Add-To $state 'warnings' "ConnectWise company lookup failed: $($_.Exception.Message)" }
+                if (-not $coId) { Add-To $state 'followUp' 'The ConnectWise company could not be matched, so no PSA ticket was created. Log the onboarding by hand.' }
+                else {
+                    $summary = "New user onboarding: $(F 'displayName')"; if ($summary.Length -gt 100) { $summary = $summary.Substring(0, 100) }
+                    $desc = "New starter $(F 'displayName') ($($state['upn'])). Start date: $(if ((F 'startDate')) { F 'startDate' } else { 'not given' }). Requested by: $(if ((F 'submittedByUpn')) { F 'submittedByUpn' } else { 'unknown' }). Device: $(if ((F 'deviceType')) { F 'deviceType' } else { 'not requested' })."
+                    try {
+                        $tk = Invoke-RestMethod -Method Post -Uri "$base/service/tickets" -Headers $cwH -Body (@{ summary = $summary; board = @{ name = $cw['CW-ServiceBoard'] }; company = @{ id = [int]$coId }; initialDescription = $desc } | ConvertTo-Json -Depth 5)
+                        $state['ticketId'] = [string]$tk.id
+                        Add-To $state 'actions' "Created ConnectWise ticket $($tk.id) on board $($cw['CW-ServiceBoard'])"
+                    } catch { Add-To $state 'followUp' "ConnectWise didn't accept the new ticket: $($_.Exception.Message)" }
+                }
+            }
+        }
+
+        # --- Notify the manager (optional) ---
+        $mgr = [string]$state['managerMail']
+        if ($mgr) {
+            $sender = Get-KvSecret @('Onboarding-NotifySender')
+            if (-not $sender) { Add-To $state 'followUp' "The manager ($mgr) was not emailed. Add an Onboarding-NotifySender secret (a mailbox to send from) to turn this on." }
+            else {
+                $text = "Hello,`n`nA Microsoft 365 account has been created for your new starter, $(F 'displayName').`n`nSign-in name: $($state['upn'])`nStart date: $(if ((F 'startDate')) { F 'startDate' } else { 'not given' })`n`nYour IT team will share the first sign-in details securely before the start date.$(if ([string]$state['ticketId']) { " Reference: ticket $($state['ticketId'])." })"
+                $mail = @{ message = @{ subject = "Account ready for $(F 'displayName')"; body = @{ contentType = 'Text'; content = $text }; toRecipients = @(@{ emailAddress = @{ address = $mgr } }) }; saveToSentItems = $false }
+                try {
+                    $H = Get-GraphHeaders
+                    Invoke-RestMethod -Method Post -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($sender))/sendMail" -Headers $H -Body ($mail | ConvertTo-Json -Depth 8) | Out-Null
+                    Add-To $state 'actions' "Emailed the manager ($mgr) that the account is ready"
+                } catch { Add-To $state 'followUp' "Couldn't email the manager ($mgr): $($_.Exception.Message)" }
+            }
+        }
+        Set-NodeOutput $state
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-finish
+    name: Internal note and result
+    type: powershell-script
+    position:
+      x: 1360
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Internal note and result ===
+        # Builds the output contract. The temporary password goes only in internal_note. When confirm
+        # was true and there's a ticket, internal_note is also posted to the ConnectWise ticket as an
+        # internal note. A preview (confirm false) posts nothing.
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-State { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in $in.Keys) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Get-KvSecret { param([string[]]$Names) foreach ($n in $Names) { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue; if (-not [string]::IsNullOrWhiteSpace($v)) { return $v } }; return $null }
+        function List { param($v) return @($v | Where-Object { $null -ne $_ -and [string]$_ -ne '' }) }
+
+        $state = Read-State
+        $f = $state['fields']
+        function F { param($n) return [string](Get-Prop $f $n) }
+        $status = [string]$state['status']
+        $actions = @(List $state['actions']); $warnings = @(List $state['warnings']); $followUp = @(List $state['followUp']); $plan = @(List $state['plan'])
+        $name = $(if ((F 'displayName')) { F 'displayName' } else { 'the new starter' })
+        $upn = [string]$state['upn']; $ticketId = [string]$state['ticketId']; $userId = [string]$state['userId']
+        $created = [bool]$userId
+        if ($status -eq 'ok') { $status = $(if ($followUp.Count -gt 0) { 'incomplete' } else { 'success' }) }
+        if ($status -eq 'error' -and $created) { $status = 'incomplete' }
+
+        $lines = @("New user onboarding for $name$(if ($upn) { " ($upn)" }): $status.", "Run: $((Get-Date).ToString('yyyy-MM-dd HH:mm K'))")
+        if ((F 'submittedByUpn')) { $lines += "Requested by: $(F 'submittedByUpn')" }
+        if ((F 'startDate')) { $lines += "Start date: $(F 'startDate')" }
+        if ((F 'deviceType')) { $lines += "Device needed: $(F 'deviceType') (not ordered by this workflow)" }
+        if ((F 'otherAdditions')) { $lines += "Other requests on the form: $(F 'otherAdditions')" }
+        if ([string]$state['reason']) { $lines += ''; $lines += [string]$state['reason'] }
+        if ($status -eq 'pending_confirmation' -and $plan.Count) { $lines += ''; $lines += 'Would do:'; $lines += @($plan | ForEach-Object { " - $_" }) }
+        if ($actions.Count) { $lines += ''; $lines += 'Done:'; $lines += @($actions | ForEach-Object { " - $_" }) }
+        if ($followUp.Count) { $lines += ''; $lines += 'Needs a technician:'; $lines += @($followUp | ForEach-Object { " - $_" }) }
+        if ($warnings.Count) { $lines += ''; $lines += 'Warnings:'; $lines += @($warnings | ForEach-Object { " - $_" }) }
+        if ([string]$state['tempPassword']) { $lines += ''; $lines += "Temporary password (give it to the starter out of band; they must change it at first sign-in): $($state['tempPassword'])" }
+        $internal = $lines -join "`n"
+
+        $public = switch ($status) {
+            'success' { "The account for $name is set up. Your IT team will share the first sign-in details securely before the start date." }
+            'pending_confirmation' { "Your request for $name has been received and is waiting for a technician to confirm it." }
+            'incomplete' { $(if ($created) { "The account for $name has been created. A technician is finishing a few remaining steps and will follow up." } else { "We couldn't finish setting up $name automatically. A technician will follow up." }) }
+            default { "We couldn't set up $name automatically. A technician will follow up." }
+        }
+
+        # Post the internal note to the ticket, only when changes were confirmed.
+        if ([bool]$state['confirm'] -and $ticketId -match '^\d+$') {
+            $cw = @{}; foreach ($n in @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')) { $cw[$n] = Get-KvSecret @($n) }
+            if (@($cw.Keys | Where-Object { -not $cw[$_] }).Count -gt 0) { $warnings += "ConnectWise secrets are missing, so the internal note wasn't posted to ticket $ticketId." }
+            else {
+                $cwH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($cw['CW-CompanyID'])+$($cw['CW-PublicKey']):$($cw['CW-PrivateKey'])")); clientId = $cw['CW-ClientId']; 'Content-Type' = 'application/json'; Accept = 'application/json' }
+                try {
+                    Invoke-RestMethod -Method Post -Uri "$($cw['CW-ApiUrl'].TrimEnd('/'))/service/tickets/$ticketId/notes" -Headers $cwH -Body (@{ text = $internal; detailDescriptionFlag = $false; internalAnalysisFlag = $true; resolutionFlag = $false } | ConvertTo-Json) | Out-Null
+                    $actions += "Posted the internal note to ticket $ticketId"
+                } catch { $warnings += "Couldn't post the internal note to ticket ${ticketId}: $($_.Exception.Message)" }
+            }
+        }
+
+        Set-NodeOutput ([ordered]@{
+            status = $status; message = $public; public_note = $public; internal_note = $internal; ticket_id = $ticketId
+            upn = $upn; user_id = $userId; plan = $plan; actions = $actions; warnings = $warnings; followUp = $followUp
+            counts = [ordered]@{ accountsCreated = [int]$created; licencesAssigned = [int]$state['licencesAssigned']; groupsAdded = [int]$state['groupsAdded']; portalUsersCreated = [int]$state['portalUsersCreated'] }
+        })
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 1540
+      y: 200
+  connections:
+  - source: start
+    target: node-parse
+    sourceHandle: null
+  - source: node-parse
+    target: node-gates
+    sourceHandle: null
+  - source: node-gates
+    target: node-create-user
+    sourceHandle: null
+  - source: node-create-user
+    target: node-license-groups
+    sourceHandle: null
+  - source: node-license-groups
+    target: node-portal-user
+    sourceHandle: null
+  - source: node-portal-user
+    target: node-psa
+    sourceHandle: null
+  - source: node-psa
+    target: node-finish
+    sourceHandle: null
+  - source: node-finish
+    target: end
+    sourceHandle: null
+  startActivityId: start

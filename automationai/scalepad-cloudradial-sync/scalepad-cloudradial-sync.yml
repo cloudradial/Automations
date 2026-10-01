@@ -5065,23 +5065,44 @@ definition:
           }
           $mode = [string](Get-Field $ReportResolve 'mode')
           $unmatched = @(Get-Field $ReportResolve 'unmatched' | Where-Object { $_ })
-          $expected = @(Get-Field $ReportResolve 'targets').Count
-          $msg = if ($ReportCompanies.Count -eq 0 -and $expected -gt 0) {
-              "The migration step didn't return a result for any of the $expected matched compan$(if ($expected -eq 1) { 'y' } else { 'ies' }). $(if ($failedIterations.Count) { 'Error: ' + $failedIterations[0] })"
+          $targets = @(Get-Field $ReportResolve 'targets')
+          $expected = $targets.Count
+          # A For Each iteration that threw has no output, so name its company from the resolve step's targets (same order).
+          $failedCompanies = New-Object System.Collections.ArrayList
+          $syncItems = @(Get-Field $ReportSync 'items')
+          for ($i = 0; $i -lt $syncItems.Count; $i++) {
+              $si = ConvertFrom-MaybeJson $syncItems[$i]
+              $err = [string](Get-Field $si 'error')
+              if (-not $err -and [string](Get-Field $si 'status') -ne 'failed') { continue }
+              $idx = Get-Field $si 'index'; if ($null -eq $idx) { $idx = $i }
+              $t = $(if ([int]$idx -ge 0 -and [int]$idx -lt $expected) { $targets[[int]$idx] } else { $null })
+              $null = $failedCompanies.Add([ordered]@{ companyId = Get-Field $t 'companyId'; companyName = [string](Get-Field $t 'companyName'); scalePadClientName = [string](Get-Field $t 'scalePadClientName'); error = $(if ($err) { ($err -split "`r?`n")[0].Trim() -replace '^[\w.]+Exception:\s*', '' } else { 'failed with no error message' }) })
+          }
+          $failedText = (@($failedCompanies | Select-Object -First 10 | ForEach-Object { "$($_.companyName) ($($_.companyId)): $(([string]$_.error).TrimEnd('.'))" })) -join '; '
+          $retryIds = (@($failedCompanies | ForEach-Object { $_.companyId } | Where-Object { $_ })) -join ','
+          $allFailed = ($expected -gt 0 -and $ReportCompanies.Count -eq 0)
+          $msg = if ($allFailed) {
+              "None of the $expected matched compan$(if ($expected -eq 1) { 'y was' } else { 'ies were' }) migrated - $(if ($expected -eq 1) { 'it' } else { 'every one' }) failed. $(if ($failedCompanies.Count) { 'First error: ' + $failedCompanies[0].error } elseif ($failedIterations.Count) { 'Error: ' + (($failedIterations[0] -split "`r?`n")[0].Trim() -replace '^[\w.]+Exception:\s*', '') })"
           } elseif ($ReportCompanies.Count -eq 0) {
               "No ScalePad client matched a CloudRadial company by name, so nothing was migrated. $($unmatched.Count) ScalePad clients checked. Rename to match, or send {""companyId"": <id>, ""scalePadClientId"": ""<id>""} to pair one."
           } else {
-              "$(if ($mode -eq 'plan') { 'Previewed' } else { 'Migrated' }) $($ReportCompanies.Count) compan$(if ($ReportCompanies.Count -eq 1) { 'y' } else { 'ies' }): " + ((@($ReportCompanies | ForEach-Object { "$($_.companyName) - $($_.reportLocation)" })) -join '; ') + $(if ($unmatched.Count) { ". $($unmatched.Count) ScalePad clients had no CloudRadial company with the same name." } else { '.' })
+              "$(if ($mode -eq 'plan') { 'Previewed' } else { 'Migrated' }) $($ReportCompanies.Count) compan$(if ($ReportCompanies.Count -eq 1) { 'y' } else { 'ies' }): " + ((@($ReportCompanies | ForEach-Object { "$($_.companyName) - $($_.reportLocation)" })) -join '; ') + $(if ($unmatched.Count) { ". $($unmatched.Count) ScalePad clients had no CloudRadial company with the same name." } else { '.' }) +
+                  $(if ($failedCompanies.Count) { " $($failedCompanies.Count) compan$(if ($failedCompanies.Count -eq 1) { 'y' } else { 'ies' }) failed and $(if ($failedCompanies.Count -eq 1) { 'was' } else { 'were' }) not migrated: $failedText$(if ($failedCompanies.Count -gt 10) { '; ...' }). Re-run with {""companyIds"": ""$retryIds""} to retry $(if ($failedCompanies.Count -eq 1) { 'it' } else { 'them' })." } else { '' })
           }
+          $status = if ($allFailed) { 'failed' } elseif ($failedCompanies.Count -or @($ReportCompanies | Where-Object { $_.status -ne 'ok' }).Count) { 'completed_with_errors' } else { 'ok' }
           Set-NodeOutput @{
-              status = $(if (@($ReportCompanies | Where-Object { $_.status -ne 'ok' }).Count) { 'completed_with_errors' } else { 'ok' })
+              status = $status
               mode = $mode
               message = $msg
               summary = $msg
               companies = @($ReportCompanies)
+              failedCompanies = @($failedCompanies)
               unmatchedScalePadClients = $unmatched
+              # Areas of ScalePad that have no CloudRadial API (the same for every company), not companies.
               notMigrated = @(@($ReportCompanies | Select-Object -First 1 | ForEach-Object { $_.notMigrated }) | Where-Object { $_ })
           }
+          # Every matched company failed: fail the run too, so History doesn't show it as Succeeded.
+          if ($allFailed) { throw $msg }
         timeoutSeconds: 600
         retryCount: 0
         aiExtensions: []

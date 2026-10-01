@@ -1,4 +1,4 @@
-param([string]$InputJson = '{}', [switch]$RejectNotes)
+param([string]$InputJson = '{}', [switch]$RejectNotes, [int]$FailCompany = 0)
 # Mock harness for elm.ps1: fake Key Vault, CloudRadial API, and node I/O.
 $global:Writes = New-Object System.Collections.ArrayList
 $global:Out = $null
@@ -15,7 +15,8 @@ $eps = @(
     @{ companyId = 1; name = 'win-10-test'; os = 'Windows 10 Pro'; isVirtual = $true; memory = 0 },
     @{ companyId = 1; name = 'OK-LAPTOP'; os = 'Windows 11 Pro'; manufacturedDate = '2025-01-10T00:00:00Z'; expirationDate = '2028-01-10T00:00:00Z'; memory = 17179869184 },
     @{ companyId = 1; name = 'Draytek'; os = '' },
-    @{ companyId = 2; name = 'OLD-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2017-01-01T00:00:00Z' }
+    @{ companyId = 2; name = 'OLD-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2017-01-01T00:00:00Z' },
+    @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(
     @{ productId = 145; companyId = 1; subject = 'Endpoint Hardware Refresh - Replace'; status = 'Proposed'; body = '' },
@@ -31,10 +32,12 @@ function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
     if ($Method -ne 'GET') {
         $null = $global:Writes.Add("$Method $($u -replace 'https://api.test','') $Body")
         if ($RejectNotes -and $Body -match 'notes') { throw 'HTTP 400: unknown field notes' }
-        if ($Method -eq 'POST') { return [pscustomobject]@{ productId = 900 } }
+        if ($FailCompany -and ($Body -match "company $FailCompany /" -or $Body -match "`"companyId`":\s*$FailCompany\b")) { throw 'HTTP 400: mock rejection' }
+        if ($Method -eq 'POST') { return [pscustomobject]@{ success = $true; message = ''; data = [pscustomobject]@{ productId = 900 } } }
         return $null
     }
     if ($u -match 'skip=([1-9])') { return [pscustomobject]@{ value = @() } }
+    if ($u -match '/v2/odata/company') { return [pscustomobject]@{ value = @(1, 2 | ForEach-Object { [pscustomobject]@{ companyId = $_ } }) } }
     if ($u -match '/v2/odata/endpoint') { $f = $eps; if ($u -match 'companyId eq (\d+)' -and $u -notmatch ' or ') { $f = @($eps | Where-Object { $_.companyId -eq [int]$Matches[1] }) }; return [pscustomobject]@{ value = @($f | ForEach-Object { [pscustomobject]$_ }) } }
     if ($u -match '/v2/odata/product.*companyId eq (\d+)') { $c = [int]$Matches[1]; return [pscustomobject]@{ value = @($cards | Where-Object { $_.companyId -eq $c } | ForEach-Object { [pscustomobject]$_ }) } }
     throw "unmocked GET $u"

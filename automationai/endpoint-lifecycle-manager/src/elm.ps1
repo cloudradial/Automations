@@ -178,11 +178,18 @@ function Get-Summary { param([string]$category, [int]$n, [string]$top, $tierCoun
 # ---- 1. read endpoints and sort them into categories ----
 $filter = if ($CompanyIds.Count) { '?$filter=' + (($CompanyIds | ForEach-Object { "companyId eq $_" }) -join ' or ') } else { '' }
 $endpoints = Get-CrAll "/v2/odata/endpoint$filter"
-$counts = [ordered]@{ evaluated = 0; flaggedEndpoints = 0; excludedNonComputer = 0; skippedHealthy = 0; companiesProcessed = 0; cardsCreated = 0; cardsUpdated = 0; cardsCompleted = 0; cardsSkipped = 0; errors = 0 }
-$buckets = @{}; $evaluatedBy = @{}; $companiesInScope = New-Object System.Collections.Generic.HashSet[int]
+# The endpoint list still returns deleted endpoints of deleted companies (no deleted flag in the API);
+# card writes for those fail with "Company not found", so skip any company not in the company list.
+$knownCompanies = $null
+try { $knownCompanies = New-Object System.Collections.Generic.HashSet[int]; foreach ($co in @(Get-CrAll '/v2/odata/company?$select=companyId')) { $null = $knownCompanies.Add([int](Get-Prop $co 'companyId')) } }
+catch { $knownCompanies = $null }   # can't list companies: carry on without the check
+if ($null -ne $knownCompanies -and $knownCompanies.Count -eq 0) { $knownCompanies = $null }
+$counts = [ordered]@{ evaluated = 0; flaggedEndpoints = 0; excludedNonComputer = 0; skippedHealthy = 0; orphanedEndpoints = 0; companiesProcessed = 0; cardsCreated = 0; cardsUpdated = 0; cardsCompleted = 0; cardsSkipped = 0; errors = 0 }
+$buckets = @{}; $evaluatedBy = @{}; $companiesInScope = New-Object System.Collections.Generic.HashSet[int]; $orphanedBy = @{}
 foreach ($ep in $endpoints) {
     $cid = [int](Get-Prop $ep 'companyId')
     if ($CompanyIds.Count -and $CompanyIds -notcontains $cid) { continue }
+    if ($null -ne $knownCompanies -and -not $knownCompanies.Contains($cid)) { $counts.orphanedEndpoints++; $orphanedBy[$cid] = 1 + [int]$orphanedBy[$cid]; continue }
     # Every key present: the runner runs in strict mode, where reading a missing key throws.
     $found = Get-Assessment $ep
     $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null }
@@ -196,7 +203,7 @@ foreach ($ep in $endpoints) {
     if (-not $buckets[$cid].ContainsKey($a.category)) { $buckets[$cid][$a.category] = New-Object System.Collections.ArrayList }
     $null = $buckets[$cid][$a.category].Add($a)
 }
-foreach ($c in $CompanyIds) { $null = $companiesInScope.Add($c) }   # a named company with no computers still gets its old cards closed
+foreach ($c in $CompanyIds) { if ($null -eq $knownCompanies -or $knownCompanies.Contains($c)) { $null = $companiesInScope.Add($c) } elseif (-not $orphanedBy.ContainsKey($c)) { $orphanedBy[$c] = 0 } }   # a named company with no computers still gets its old cards closed
 
 # ---- 2. one card per company and category ----
 $results = New-Object System.Collections.ArrayList
@@ -213,6 +220,7 @@ function Send-Patch { param($id, $fields)
     }
 }
 $optionalDropped = $false
+foreach ($oc in @($orphanedBy.Keys | Sort-Object)) { Add-Result $oc '' '' 'skipped' '' $orphanedBy[$oc] "Company $oc has been deleted, so its $(if ($orphanedBy[$oc] -eq 1) { 'leftover endpoint was' } else { "$($orphanedBy[$oc]) leftover endpoints were" }) skipped and no cards were written." }
 
 foreach ($cid in @($companiesInScope | Sort-Object)) {
     $counts.companiesProcessed++
@@ -235,9 +243,10 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                 if ($null -eq $card) { continue }
                 if (Test-Completed $card) { $counts.cardsSkipped++; Add-Result $cid $cat '' 'skipped' (Get-Prop $card 'productId') 0 'Already closed; no computers in this category.'; continue }
                 if (-not $CloseEmpty) { continue }
+                # Write first, then count: a failed write is reported only as an error.
+                if ($Apply) { Send-Patch (Get-Prop $card 'productId') @{ status = 40; body = "<p>No computers need action in this category as of $today.</p><p><em>$marker</em></p>"; notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today; none in $cat, so this card was closed. Marker: $marker." } }
                 $counts.cardsCompleted++
                 Add-Result $cid $cat '' 'completed' (Get-Prop $card 'productId') 0 "No computers need action in this category any more, so the card $(if ($Apply) { 'was' } else { 'would be' }) marked Completed."
-                if ($Apply) { Send-Patch (Get-Prop $card 'productId') @{ status = 40; body = "<p>No computers need action in this category as of $today.</p><p><em>$marker</em></p>"; notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today; none in $cat, so this card was closed. Marker: $marker." } }
                 continue
             }
             $top = ($devices | Sort-Object { $TierRank[$_.tier] } -Descending | Select-Object -First 1).tier
@@ -268,13 +277,12 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                 $id = Get-Prop $card 'productId'
                 $reopen = Test-Completed $card
                 if ($reopen) { $fields.status = $(if ($OnRoadmap) { 20 } else { 0 }) } elseif ($OnRoadmap) { $fields.status = 20 }
+                if ($Apply) { Send-Patch $id $fields }
                 $counts.cardsUpdated++
                 Add-Result $cid $cat $top $(if ($reopen) { 'reopened' } else { 'updated' }) $id $n $summary
-                if ($Apply) { Send-Patch $id $fields }
             }
             else {
-                $counts.cardsCreated++
-                Add-Result $cid $cat $top 'created' '' $n $summary
+                $newId = ''
                 if ($Apply) {
                     $body = [ordered]@{ companyId = $cid; datePublished = $runDate.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); isRequired = $false; isShowPrice = $false; isClientVisible = $false; status = $(if ($OnRoadmap) { 20 } else { 0 }) }
                     foreach ($k in $fields.Keys) { $body[$k] = $fields[$k] }
@@ -284,8 +292,11 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                         foreach ($k in @('notes', 'productType', 'scheduledQuarter', 'quarterOffset')) { $body.Remove($k) }
                         $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body; $optionalDropped = $true
                     }
-                    $results[$results.Count - 1].productId = [string](Get-Prop $new 'productId')
+                    # POST replies { success, message, data = { productId, ... } }.
+                    $newId = [string](Get-Prop $new 'productId'); if (-not $newId) { $newId = [string](Get-Prop (Get-Prop $new 'data') 'productId') }
                 }
+                $counts.cardsCreated++
+                Add-Result $cid $cat $top 'created' $newId $n $summary
             }
         }
         catch { $counts.errors++; Add-Result $cid $cat '' 'error' $(if ($card) { Get-Prop $card 'productId' }) $devices.Count $_.Exception.Message }
@@ -298,5 +309,5 @@ $out = [ordered]@{ status = $(if ($counts.errors) { 'completed_with_errors' } el
 foreach ($k in $counts.Keys) { $out[$k] = $counts[$k] }
 $out.optionalFieldsDropped = $optionalDropped
 $out.results = @($results)
-$out.message = "Endpoint LifeCycle Manager$verb for $scope : $($counts.evaluated) computers evaluated, $($counts.flaggedEndpoints) on cards, $($counts.excludedNonComputer) non-computers excluded. Cards: $($counts.cardsCreated) created, $($counts.cardsUpdated) updated, $($counts.cardsCompleted) closed, $($counts.errors) errors."
+$out.message = "Endpoint LifeCycle Manager$verb for $scope : $($counts.evaluated) computers evaluated, $($counts.flaggedEndpoints) on cards, $($counts.excludedNonComputer) non-computers excluded$(if ($counts.orphanedEndpoints) { ", $($counts.orphanedEndpoints) skipped from deleted companies" }). Cards: $($counts.cardsCreated) created, $($counts.cardsUpdated) updated, $($counts.cardsCompleted) closed, $($counts.errors) errors."
 Set-NodeOutput $out

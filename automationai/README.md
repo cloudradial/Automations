@@ -21,7 +21,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 |---|---|
 | [`add-cc-to-ticket/`](add-cc-to-ticket/) | Workflow |
 | [`certificate-expiration-report/`](certificate-expiration-report/) | Workflow |
-| [`cloudradial-ucp/`](cloudradial-ucp/) | Agent (run by Portal Lookup and Weekly Fleet Audit) |
+| [`cloudradial-ucp/`](cloudradial-ucp/) | Agent (run by Portal Lookup) |
 | [`deliver-result/`](deliver-result/) | Agent (a reusable delivery step other workflows call) |
 | [`domain-expiration-report/`](domain-expiration-report/) | Workflow |
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Workflow (no AI) + optional agent and agent workflow |
@@ -38,7 +38,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`scalepad-cloudradial-alignment/`](scalepad-cloudradial-alignment/) | Agent + workflow + Knowledge (optional review before a Sync) |
 | [`scalepad-cloudradial-sync/`](scalepad-cloudradial-sync/) | Workflow |
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Agent + workflows + Knowledge |
-| [`weekly-fleet-audit/`](weekly-fleet-audit/) | Workflow (runs the UCP Assistant and Deliver Result) |
+| [`weekly-fleet-audit/`](weekly-fleet-audit/) | Workflow (no-AI audit, sent by Deliver Result) |
 
 ## Conventions
 

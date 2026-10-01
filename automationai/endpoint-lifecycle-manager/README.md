@@ -81,4 +81,4 @@ From `src/`:
 2. `pwsh -File test.ps1 -InputJson '{"mode":"apply","companyIds":"1"}'` runs `elm.ps1` against a mocked Key Vault, CloudRadial API and set of cards, in strict mode as on the runner. Add `-RejectNotes` to check the fallback when the portal refuses the internal note.
 3. `node build-elm.js` writes `elm.ps1` into `../endpoint-lifecycle-manager.yml`.
 
-The agent (`endpoint-lifecycle-manager.agent.yml`) follows the same rules. If you change a rule in `elm.ps1`, change the agent's system prompt to match.
+[Weekly Fleet Audit](../weekly-fleet-audit/) copies the rules block (between `# ---- shared: begin` and `# ---- shared: end ----`) at build time, so after changing a rule, run its `build-audit.js` too. The agent (`endpoint-lifecycle-manager.agent.yml`) follows the same rules. If you change a rule in `elm.ps1`, change the agent's system prompt to match.

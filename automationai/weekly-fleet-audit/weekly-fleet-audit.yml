@@ -1,144 +1,517 @@
 automationsWorkflow: 1
-name: "Weekly Fleet Audit"
+name: Weekly Fleet Audit
 definition:
   schemaVersion: 1
   activities:
-  - id: start
-    name: Start
-    type: start
-    position:
-      x: 100
-      y: 120
-    properties:
-      webhookEnabled: false
-  # ---------------------------------------------------------------------------
-  # Run inputs - reads who gets the audit from the run input (Run dialog or Routine).
-  # ---------------------------------------------------------------------------
-  - id: node-inputs
-    name: Run inputs
-    type: powershell-script
-    position:
-      x: 260
-      y: 120
-    properties:
-      script: |-
-        # Run input: {"toEmail": "team@yourmsp.com"} - one address, a comma list, or a JSON list.
-        $ErrorActionPreference = 'Stop'
-        function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
-        $in = Get-NodeInput
-        $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
-        if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        'y': 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Run inputs
+      type: powershell-script
+      position:
+        x: 260
+        'y': 120
+      properties:
+        script: |-
+          # Run input: {"toEmail": "team@yourmsp.com"} - one address, a comma list, or a JSON list.
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
 
-        $raw = Get-Prop $in 'toEmail'
-        $to = @(@($raw) | ForEach-Object { ([string]$_) -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' } | Select-Object -Unique)
-        if ($to.Count -eq 0) {
-            $m = 'No recipients: set toEmail in the run input (the Run dialog Trigger input, or the Routine input), e.g. {"toEmail": "team@yourmsp.com"}.'
-            Set-NodeOutput @{ status = 'error'; message = $m }
-            throw $m
-        }
-        Set-NodeOutput ([ordered]@{ toEmail = $to; message = "Audit goes to $($to -join ', ')." })
-      timeoutSeconds: 60
-      retryCount: 0
-      # No binding: this step receives the run input.
-      parameters: []
-      aiExtensions: []
-      testInput: |-
-        {"toEmail": "team@yourmsp.com"}
-  # ---------------------------------------------------------------------------
-  # Agent node - runs the CloudRadial UCP Assistant (import cloudradial-ucp/ first)
-  # toward a read-only audit goal.
-  # ---------------------------------------------------------------------------
-  - id: node-agent
-    name: Fleet Audit
-    type: agent
-    position:
-      x: 420
-      y: 120
-    properties:
-      agentSlug: cloudradial-ucp-assistant
-      goal: |-
-        For every company in the CloudRadial portal, count the endpoints whose
-        warranty is expired or unknown, and flag any company that has no account
-        manager assigned. Return a short per-company summary sorted by the most
-        out-of-warranty endpoints first, followed by a one-paragraph overview of
-        the whole estate. This is a read-only audit - do not change anything.
-      allowedExtensions:
-      - cloudradial-v2-companies
-      - cloudradial-v2-endpoints
-      model: ''
-      timeoutSeconds: 900
-      autoApprove: false
-  # ---------------------------------------------------------------------------
-  # Message node - turns the audit into the email Deliver Result sends.
-  # ---------------------------------------------------------------------------
-  - id: node-message
-    name: Build Email
-    type: powershell-script
-    position:
-      x: 600
-      y: 120
-    properties:
-      script: |-
-        # The Agent node's output (its 'answer' field) arrives as this node's input.
-        $agent = Get-NodeInput
-        $answer = if ($agent -and $agent.answer) { [string]$agent.answer } else { 'The audit returned no output.' }
-        $safe = ($answer -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;')
-        $subject = "Weekly Fleet Audit - $((Get-Date).ToString('yyyy-MM-dd'))"
+          $raw = Get-Prop $in 'toEmail'
+          $to = @(@($raw) | ForEach-Object { ([string]$_) -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' } | Select-Object -Unique)
+          if ($to.Count -eq 0) {
+              $m = 'No recipients: set toEmail in the run input (the Run dialog Trigger input, or the Routine input), e.g. {"toEmail": "team@yourmsp.com"}.'
+              Set-NodeOutput @{ status = 'error'; message = $m }
+              throw $m
+          }
+          Set-NodeOutput ([ordered]@{ toEmail = $to; message = "Audit goes to $($to -join ', ')." })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: '{"toEmail": "team@yourmsp.com"}'
+    - id: node-audit
+      name: Fleet Audit
+      type: powershell-script
+      position:
+        x: 420
+        'y': 120
+      properties:
+        script: |
+          # =====================================================================
+          #  Weekly Fleet Audit - audit step (no AI)
+          #  Grades every managed computer with the Endpoint LifeCycle Manager rules
+          #  (age, warranty, OS support, RAM, server / VM) and checks each company for
+          #  an account manager. Read-only: nothing in CloudRadial is changed.
+          #  The rules are copied in from endpoint-lifecycle-manager/src/elm.ps1 at
+          #  build time (build-audit.js), so this report and the Planner cards agree.
+          #  Secrets (runner Key Vault): CloudRadial-BaseUrl, CloudRadial-PublicKey,
+          #  CloudRadial-PrivateKey.
+          # =====================================================================
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 
-        Set-NodeOutput ([ordered]@{
-            channel = 'email'
-            subject = $subject
-            body    = "<html><body><h2>Weekly Fleet Audit</h2><pre style='font-family:Segoe UI,Arial,sans-serif;white-space:pre-wrap'>$safe</pre></body></html>"
-            message = 'Audit email ready.'
-        })
-      timeoutSeconds: 60
-      retryCount: 0
-      parameters: []
-      aiExtensions: []
-  # ---------------------------------------------------------------------------
-  # Delivery node - the shared Deliver Result agent (import deliver-result/ first)
-  # sends the email through the Postmark extension.
-  # ---------------------------------------------------------------------------
-  - id: node-deliver
-    name: Send Audit
-    type: agent
-    position:
-      x: 780
-      y: 120
-    properties:
-      agentSlug: deliver-result
-      goal: |-
-        Deliver the weekly fleet audit you are given by email, exactly as provided:
-        use the subject, body and recipients in your inputs. Do not open a ticket.
-      allowedExtensions:
-      - postmark
-      model: ''
-      timeoutSeconds: 300
-      # true = the send goes out unattended. Deliver Result itself ships in dry run
-      # (dryRunDefault: true) until you re-import it live - see its README.
-      autoApprove: true
-      # Pre-bound: recipients from Run inputs, subject and body from Build Email.
-      inputBindingsJson: '{"channel":"{{ nodes.node-message.output.channel }}","subject":"{{ nodes.node-message.output.subject }}","body":"{{ nodes.node-message.output.body }}","toEmail":"{{ nodes.node-inputs.output.toEmail }}"}'
-  - id: end
-    name: End
-    type: end
-    position:
-      x: 980
-      y: 120
+          # ---- secrets ----
+          function Get-Secret { param([string]$Name) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue }
+          $BaseUrl = Get-Secret 'CloudRadial-BaseUrl'; $PublicKey = Get-Secret 'CloudRadial-PublicKey'; $PrivateKey = Get-Secret 'CloudRadial-PrivateKey'
+          $missing = @(@{ n = 'CloudRadial-BaseUrl'; v = $BaseUrl }, @{ n = 'CloudRadial-PublicKey'; v = $PublicKey }, @{ n = 'CloudRadial-PrivateKey'; v = $PrivateKey } | Where-Object { [string]::IsNullOrWhiteSpace($_.v) } | ForEach-Object { $_.n })
+          if ($missing.Count) { $m = "Please add these secrets to your runner Key Vault and run again: $($missing -join ', ')"; Set-NodeOutput @{ status = 'error'; message = $m }; throw $m }
+          $BaseUrl = $BaseUrl.TrimEnd('/')
+          $headers = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${PublicKey}:${PrivateKey}")); Accept = 'application/json' }
+
+          $ci = [System.Globalization.CultureInfo]::InvariantCulture
+          $runDate = (Get-Date).ToUniversalTime()
+          $Categories = @('Replace', 'Plan replacement', 'Upgrade in place', 'Retain', 'Needs data', 'Human review', 'Virtual machines')
+          $TierRank = @{ Critical = 3; High = 2; Medium = 1; Low = 0 }
+          $DetailLimit = 3   # most urgent computers listed per company; the full list is on the Planner cards
+
+          # ---- shared with Endpoint LifeCycle Manager (copied from elm.ps1 by build-audit.js) ----
+          function Invoke-CrApi {
+              param([string]$Path, [string]$Method = 'GET', $Body, [string]$ContentType = 'application/json')
+              $url = if ($Path -match '^https?://') { $Path } else { "$BaseUrl$Path" }
+              for ($i = 1; $i -le 6; $i++) {
+                  try {
+                      $a = @{ Uri = $url; Method = $Method; Headers = $headers; ContentType = $ContentType }
+                      if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 }) }
+                      return Invoke-RestMethod @a
+                  }
+                  catch {
+                      $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+                      $msg = [string]$_.Exception.Message
+                      $transient = (-not $code -and $msg -match 'SSL connection|could not be established|No such host|actively refused|forcibly closed|error occurred while sending|timed out|TaskCanceled')
+                      if (($code -eq 429 -or ($Method -eq 'GET' -and $code -ge 500) -or $transient) -and $i -lt 6) { Start-Sleep -Seconds ([Math]::Min(30, [Math]::Pow(2, $i))); continue }
+                      $detail = $(if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $msg })
+                      throw "CloudRadial $Method $Path failed$(if ($code) { " (HTTP $code)" }): $detail"
+                  }
+              }
+          }
+          function Get-CrAll {
+              # OData lists stop at 200 rows with no nextLink, so page with $top/$skip.
+              param([string]$Path)
+              $rows = New-Object System.Collections.ArrayList; $skip = 0; $page = 200
+              for ($n = 0; $n -lt 500; $n++) {
+                  $sep = if ($Path -match '\?') { '&' } else { '?' }
+                  $resp = Invoke-CrApi -Path "$Path$sep`$top=$page&`$skip=$skip"
+                  $batch = @(); $v = $(if ($null -ne $resp) { $resp.PSObject.Properties['value'] } else { $null })
+                  if ($v -and $null -ne $v.Value) { $batch = @($v.Value) } elseif ($resp -is [array]) { $batch = @($resp) }
+                  foreach ($r in $batch) { $null = $rows.Add($r) }
+                  if ($batch.Count -lt $page) { break }
+                  $skip += $page
+              }
+              return @($rows)
+          }
+          function Enc { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
+          function Parse-Date { param($v) $d = [datetime]::MinValue; if ($null -ne $v -and [string]$v -and [datetime]::TryParse([string]$v, $ci, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$d)) { if ($d.Year -gt 1900) { return $d } }; return $null }
+          function Friendly { param([datetime]$d) $d.ToString('d MMM yyyy', $ci) }
+          function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed
+
+          # ---- 1. companies and account managers ----
+          $companies = @(Get-CrAll '/v2/odata/company')
+          $names = [ordered]@{}; $am = @{}; $amCheck = 'unavailable'
+          foreach ($co in $companies) { $names[[string](Get-Prop $co 'companyId')] = [string](Get-Prop $co 'name') }
+          if ($companies.Count -and $companies[0].PSObject.Properties['accountManager']) {
+              $amCheck = 'ok'; foreach ($co in $companies) { $am[[string](Get-Prop $co 'companyId')] = ([string](Get-Prop $co 'accountManager')).Trim() }
+          }
+          else {
+              # The OData list leaves accountManager out; the single-company read may include it.
+              foreach ($id in @($names.Keys)) {
+                  $r = $null; try { $r = Invoke-CrApi -Path "/v2/company/$id" } catch { continue }
+                  $c = Get-Prop $r 'data'; if ($null -eq $c) { $c = $r }
+                  if ($null -eq $c -or $c -is [string] -or -not $c.PSObject.Properties['accountManager']) { if ($amCheck -ne 'ok') { break }; continue }
+                  $amCheck = 'ok'; $am[$id] = ([string](Get-Prop $c 'accountManager')).Trim()
+              }
+          }
+
+          # ---- 2. grade every computer ----
+          $rows = [ordered]@{}
+          function Get-Row { param([string]$id)
+              if (-not $rows.Contains($id)) {
+                  $cats = [ordered]@{}; foreach ($k in $Categories) { $cats[$k] = 0 }
+                  $amVal = $null; if ($amCheck -eq 'ok') { $amVal = $(if ($am.ContainsKey($id)) { $am[$id] } else { '' }) }
+                  $rows[$id] = [ordered]@{ companyId = $id; name = $(if ($names.Contains($id) -and $names[$id]) { $names[$id] } else { "Company $id" }); computers = 0; otherDevices = 0; flagged = 0
+                      critical = 0; high = 0; warrantyExpired = 0; warrantyExpiring = 0; warrantyUnknown = 0; accountManager = $amVal; categories = $cats; flaggedItems = (New-Object System.Collections.ArrayList) }
+              }
+              return $rows[$id]
+          }
+          foreach ($id in @($names.Keys)) { $null = Get-Row $id }   # every company gets a row, even with no computers
+
+          $endpoints = @(Get-CrAll '/v2/odata/endpoint')
+          $orphaned = 0
+          foreach ($ep in $endpoints) {
+              $cid = [string](Get-Prop $ep 'companyId')
+              # The endpoint list still returns endpoints of deleted companies (no deleted flag in the API).
+              if ($names.Count -and -not $names.Contains($cid)) { $orphaned++; continue }
+              $row = Get-Row $cid
+              # Every key present: the runner runs in strict mode, where reading a missing key throws.
+              $found = Get-Assessment $ep
+              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null }
+              foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
+              if ($a.excluded) { $row.otherDevices++; continue }
+              $row.computers++
+              if (-not [bool](Get-Prop $ep 'isVirtual')) {
+                  switch ((Get-Warranty $ep).status) { 'expired' { $row.warrantyExpired++ } 'expiring' { $row.warrantyExpiring++ } 'unknown' { $row.warrantyUnknown++ } }
+              }
+              if (-not $a.flagged) { continue }
+              $row.flagged++
+              $row.categories[$a.category] = 1 + [int]$row.categories[$a.category]
+              if ($a.tier -eq 'Critical') { $row.critical++ } elseif ($a.tier -eq 'High') { $row.high++ }
+              $null = $row.flaggedItems.Add([ordered]@{ tier = $a.tier; category = $a.category; line = $a.line })
+          }
+
+          # ---- 3. sort and summarise ----
+          $list = @($rows.Values | Sort-Object -Property @{ Expression = { $_.critical }; Descending = $true }, @{ Expression = { $_.categories['Replace'] }; Descending = $true }, @{ Expression = { $_.flagged }; Descending = $true }, @{ Expression = { $_.name } })
+          $out = New-Object System.Collections.ArrayList
+          foreach ($r in $list) {
+              $top = @($r.flaggedItems | Sort-Object -Property @{ Expression = { $TierRank[$_.tier] }; Descending = $true } | Where-Object { $TierRank[$_.tier] -ge 2 } | Select-Object -First $DetailLimit)
+              $o = [ordered]@{}; foreach ($k in @($r.Keys)) { if ($k -ne 'flaggedItems') { $o[$k] = $r[$k] } }
+              $o.urgent = $top; $o.moreFlagged = $r.flagged - $top.Count
+              $null = $out.Add($o)
+          }
+          $totals = [ordered]@{ companies = $out.Count; computers = 0; flagged = 0; critical = 0; high = 0; warrantyExpired = 0; warrantyExpiring = 0; warrantyUnknown = 0; noAccountManager = 0; orphanedEndpoints = $orphaned }
+          $catTotals = [ordered]@{}; foreach ($k in $Categories) { $catTotals[$k] = 0 }
+          foreach ($r in $out) {
+              foreach ($k in @('computers', 'flagged', 'critical', 'high', 'warrantyExpired', 'warrantyExpiring', 'warrantyUnknown')) { $totals[$k] += $r[$k] }
+              foreach ($k in $Categories) { $catTotals[$k] += $r.categories[$k] }
+              if ($amCheck -eq 'ok' -and -not $r.accountManager) { $totals.noAccountManager++ }
+          }
+          $totals.categories = $catTotals
+
+          $msg = "Audited $($totals.computers) computers across $($totals.companies) companies: $($totals.critical) critical, $($catTotals['Replace']) to replace, $($totals.warrantyExpired) with expired warranty, $($totals.warrantyUnknown) with no warranty date."
+          $msg += $(if ($amCheck -eq 'ok') { " $($totals.noAccountManager) $(if ($totals.noAccountManager -eq 1) { 'company has' } else { 'companies have' }) no account manager." } else { ' Account managers could not be checked.' })
+          Set-NodeOutput ([ordered]@{
+              status              = 'ok'
+              auditDate           = $runDate.ToString('yyyy-MM-dd', $ci)
+              accountManagerCheck = $amCheck
+              totals              = $totals
+              companies           = @($out)
+              message             = $msg
+          })
+          ) }
+
+          # ---- rules (identical to the agent's decision tracks) ----
+          function Get-Age { param($ep)
+              foreach ($f in @('manufacturedDate', 'biosDate', 'cpuDate')) { $d = Parse-Date (Get-Prop $ep $f); if ($d) { return @{ years = [math]::Round(($runDate - $d).TotalDays / 365.25, 1); estimated = ($f -ne 'manufacturedDate') } } }
+              return $null
+          }
+          function Get-Warranty { param($ep)
+              $d = Parse-Date (Get-Prop $ep 'expirationDate')
+              if (-not $d) { return @{ status = 'unknown'; date = $null } }
+              if ($d -lt $runDate) { return @{ status = 'expired'; date = $d } }
+              if ($d -le $runDate.AddDays(90)) { return @{ status = 'expiring'; date = $d } }
+              return @{ status = 'active'; date = $d }
+          }
+          function Get-OsType { param([string]$os) if ($os -match '(?i)windows') { 'windows' } elseif ($os -match '(?i)mac\s?os|os x') { 'macos' } else { 'other' } }
+          function Get-MacMajor { param([string]$os) if ($os -match '(?i)mac\s?os[^\d]*(\d+)') { [int]$Matches[1] } else { $null } }
+          function Get-OsSupport { param([string]$os, [string]$type)
+              if ($type -eq 'windows') { if ($os -match '(?i)windows\s*11') { return 'supported' }; if ($os -match '(?i)windows\s*(10|8|7|xp|vista)') { return 'unsupported' }; return 'unknown' }
+              if ($type -eq 'macos') { $m = Get-MacMajor $os; if ($null -eq $m) { return 'unknown' }; if ($m -ge 14) { return 'supported' }; return 'unsupported' }
+              return 'unknown'
+          }
+          function Get-RamGb { param($ep) $b = 0.0; if ([double]::TryParse([string](Get-Prop $ep 'memory'), [System.Globalization.NumberStyles]::Float, $ci, [ref]$b) -and $b -gt 0) { [math]::Round($b / 1073741824, 1) } else { $null } }
+          function Get-Tier { param([string]$mode, $age, [string]$war, [string]$sup, [string]$type, $macMajor, $ram)
+              if ($mode -eq 'vm') { if ($sup -eq 'unsupported' -or ($null -ne $ram -and $ram -lt 4)) { return 'High' }; return 'Low' }
+              $hardEol = ($type -eq 'windows' -and $sup -eq 'unsupported') -or ($type -eq 'macos' -and $null -ne $macMajor -and $macMajor -le 12)
+              if (($null -ne $age -and $age -ge 7) -or $hardEol -or ($null -ne $ram -and $ram -lt 4)) { return 'Critical' }
+              if (($null -ne $age -and $age -ge 5) -or $war -eq 'expired' -or $sup -eq 'unsupported') { return 'High' }
+              if (($null -ne $age -and $age -ge 4.5) -or $war -eq 'expiring') { return 'Medium' }
+              return 'Low'
+          }
+          function Get-Assessment { param($ep)
+              $name = [string](Get-Prop $ep 'name'); $os = [string](Get-Prop $ep 'os')
+              $type = Get-OsType $os
+              if ($type -eq 'other') { return @{ excluded = $true } }
+              $ageO = Get-Age $ep; $age = if ($ageO) { $ageO.years } else { $null }
+              $war = Get-Warranty $ep; $sup = Get-OsSupport $os $type; $mac = if ($type -eq 'macos') { Get-MacMajor $os } else { $null }
+              $ram = Get-RamGb $ep; $w11 = ([string](Get-Prop $ep 'windows11Readiness')) -match '(?i)installed|capable'
+              $mk = ([string](Get-Prop $ep 'manufacturer')).Trim(); $md = ([string](Get-Prop $ep 'model')).Trim(); $sn = ([string](Get-Prop $ep 'serialNumber')).Trim()
+              $ident = (@($mk, $md) | Where-Object { $_ }) -join ' '; if ($sn) { $ident = $(if ($ident) { "$ident, serial $sn" } else { "serial $sn" }) }
+              $lead = "<strong>$(Enc $name)</strong>$(if ($ident) { " ($(Enc $ident))" })"
+              $ageTxt = if ($null -eq $age) { 'has no age on file' } elseif ($ageO.estimated) { "is about $age years old (estimated)" } else { "is about $age years old" }
+              $warTxt = switch ($war.status) { 'expired' { "and its warranty expired on $(Friendly $war.date)" } 'expiring' { "and its warranty ends on $(Friendly $war.date)" } 'active' { "and is under warranty until $(Friendly $war.date)" } default { 'and has no warranty date on file' } }
+              $osTxt = if (-not $os) { '' } else { " It is running $(Enc $os)$(switch ($sup) { 'supported' { ', which is supported' } 'unsupported' { ', which no longer gets security updates' } default { '' } })." }
+
+              if ([bool](Get-Prop $ep 'isServer')) {
+                  return @{ flagged = $true; category = 'Human review'; tier = (Get-Tier 'std' $age $war.status $sup $type $mac $ram); line = "$lead $ageTxt $warTxt.$osTxt A technician should review this server and decide the next step." }
+              }
+              if ([bool](Get-Prop $ep 'isVirtual')) {
+                  $act = if ($sup -eq 'unsupported') { 'upgrade or rebuild the guest operating system onto Windows 11' } elseif ($null -ne $ram -and $ram -lt 4) { 'increase its assigned memory' } elseif ($null -ne $ram -and $ram -lt 8) { 'review and tune its assigned resources' } else { $null }
+                  if (-not $act) { return @{ flagged = $false } }   # healthy VM - not carded; unknown memory is not low
+                  return @{ flagged = $true; category = 'Virtual machines'; tier = (Get-Tier 'vm' $age $war.status $sup $type $mac $ram); line = "$lead is a virtual machine running $(if ($os) { Enc $os } else { 'an unknown operating system' }). Recommended action: $act." }
+              }
+              $rec = if (($null -ne $age -and $age -ge 5) -or ($sup -eq 'unsupported' -and -not $w11) -or ($null -ne $ram -and $ram -lt 4)) { 'Replace' }
+                  elseif ($sup -eq 'unsupported' -and $w11) { 'Upgrade in place' }
+                  elseif ($null -ne $age -and $age -ge 3) { 'Plan replacement' }
+                  elseif ($null -ne $age) { 'Retain' }
+                  elseif ($war.status -eq 'unknown' -and $sup -eq 'unknown') { 'Needs data' }
+                  else { 'Retain' }
+              $flag = switch ($rec) { 'Retain' { ($war.status -in @('expired', 'expiring')) -or ($null -ne $ram -and $ram -lt 8) } default { $true } }
+              if (-not $flag) { return @{ flagged = $false } }
+              $act = switch ($rec) {
+                  'Replace' { 'replace this computer' }; 'Upgrade in place' { 'upgrade it to Windows 11 in place; the hardware is capable' }
+                  'Plan replacement' { 'plan its replacement this cycle, and extend the warranty or upgrade parts as a bridge' }
+                  'Retain' { 'extend the warranty or make a targeted upgrade' }; 'Needs data' { 'confirm its age, warranty and operating system so it can be placed next time' }
+              }
+              return @{ flagged = $true; category = $rec; tier = (Get-Tier 'std' $age $war.status $sup $type $mac $ram); line = "$lead $ageTxt $warTxt.$osTxt Recommended action: $act." }
+          }
+          # ---- end shared ----
+
+          # ---- 1. companies and account managers ----
+          $companies = @(Get-CrAll '/v2/odata/company')
+          $names = [ordered]@{}; $am = @{}; $amCheck = 'unavailable'
+          foreach ($co in $companies) { $names[[string](Get-Prop $co 'companyId')] = [string](Get-Prop $co 'name') }
+          if ($companies.Count -and $companies[0].PSObject.Properties['accountManager']) {
+              $amCheck = 'ok'; foreach ($co in $companies) { $am[[string](Get-Prop $co 'companyId')] = ([string](Get-Prop $co 'accountManager')).Trim() }
+          }
+          else {
+              # The OData list leaves accountManager out; the single-company read may include it.
+              foreach ($id in @($names.Keys)) {
+                  $r = $null; try { $r = Invoke-CrApi -Path "/v2/company/$id" } catch { continue }
+                  $c = Get-Prop $r 'data'; if ($null -eq $c) { $c = $r }
+                  if ($null -eq $c -or $c -is [string] -or -not $c.PSObject.Properties['accountManager']) { if ($amCheck -ne 'ok') { break }; continue }
+                  $amCheck = 'ok'; $am[$id] = ([string](Get-Prop $c 'accountManager')).Trim()
+              }
+          }
+
+          # ---- 2. grade every computer ----
+          $rows = [ordered]@{}
+          function Get-Row { param([string]$id)
+              if (-not $rows.Contains($id)) {
+                  $cats = [ordered]@{}; foreach ($k in $Categories) { $cats[$k] = 0 }
+                  $amVal = $null; if ($amCheck -eq 'ok') { $amVal = $(if ($am.ContainsKey($id)) { $am[$id] } else { '' }) }
+                  $rows[$id] = [ordered]@{ companyId = $id; name = $(if ($names.Contains($id) -and $names[$id]) { $names[$id] } else { "Company $id" }); computers = 0; otherDevices = 0; flagged = 0
+                      critical = 0; high = 0; warrantyExpired = 0; warrantyExpiring = 0; warrantyUnknown = 0; accountManager = $amVal; categories = $cats; flaggedItems = (New-Object System.Collections.ArrayList) }
+              }
+              return $rows[$id]
+          }
+          foreach ($id in @($names.Keys)) { $null = Get-Row $id }   # every company gets a row, even with no computers
+
+          $endpoints = @(Get-CrAll '/v2/odata/endpoint')
+          $orphaned = 0
+          foreach ($ep in $endpoints) {
+              $cid = [string](Get-Prop $ep 'companyId')
+              # The endpoint list still returns endpoints of deleted companies (no deleted flag in the API).
+              if ($names.Count -and -not $names.Contains($cid)) { $orphaned++; continue }
+              $row = Get-Row $cid
+              # Every key present: the runner runs in strict mode, where reading a missing key throws.
+              $found = Get-Assessment $ep
+              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null }
+              foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
+              if ($a.excluded) { $row.otherDevices++; continue }
+              $row.computers++
+              if (-not [bool](Get-Prop $ep 'isVirtual')) {
+                  switch ((Get-Warranty $ep).status) { 'expired' { $row.warrantyExpired++ } 'expiring' { $row.warrantyExpiring++ } 'unknown' { $row.warrantyUnknown++ } }
+              }
+              if (-not $a.flagged) { continue }
+              $row.flagged++
+              $row.categories[$a.category] = 1 + [int]$row.categories[$a.category]
+              if ($a.tier -eq 'Critical') { $row.critical++ } elseif ($a.tier -eq 'High') { $row.high++ }
+              $null = $row.flaggedItems.Add([ordered]@{ tier = $a.tier; category = $a.category; line = $a.line })
+          }
+
+          # ---- 3. sort and summarise ----
+          $list = @($rows.Values | Sort-Object -Property @{ Expression = { $_.critical }; Descending = $true }, @{ Expression = { $_.categories['Replace'] }; Descending = $true }, @{ Expression = { $_.flagged }; Descending = $true }, @{ Expression = { $_.name } })
+          $out = New-Object System.Collections.ArrayList
+          foreach ($r in $list) {
+              $top = @($r.flaggedItems | Sort-Object -Property @{ Expression = { $TierRank[$_.tier] }; Descending = $true } | Where-Object { $TierRank[$_.tier] -ge 2 } | Select-Object -First $DetailLimit)
+              $o = [ordered]@{}; foreach ($k in @($r.Keys)) { if ($k -ne 'flaggedItems') { $o[$k] = $r[$k] } }
+              $o.urgent = $top; $o.moreFlagged = $r.flagged - $top.Count
+              $null = $out.Add($o)
+          }
+          $totals = [ordered]@{ companies = $out.Count; computers = 0; flagged = 0; critical = 0; high = 0; warrantyExpired = 0; warrantyExpiring = 0; warrantyUnknown = 0; noAccountManager = 0; orphanedEndpoints = $orphaned }
+          $catTotals = [ordered]@{}; foreach ($k in $Categories) { $catTotals[$k] = 0 }
+          foreach ($r in $out) {
+              foreach ($k in @('computers', 'flagged', 'critical', 'high', 'warrantyExpired', 'warrantyExpiring', 'warrantyUnknown')) { $totals[$k] += $r[$k] }
+              foreach ($k in $Categories) { $catTotals[$k] += $r.categories[$k] }
+              if ($amCheck -eq 'ok' -and -not $r.accountManager) { $totals.noAccountManager++ }
+          }
+          $totals.categories = $catTotals
+
+          $msg = "Audited $($totals.computers) computers across $($totals.companies) companies: $($totals.critical) critical, $($catTotals['Replace']) to replace, $($totals.warrantyExpired) with expired warranty, $($totals.warrantyUnknown) with no warranty date."
+          $msg += $(if ($amCheck -eq 'ok') { " $($totals.noAccountManager) $(if ($totals.noAccountManager -eq 1) { 'company has' } else { 'companies have' }) no account manager." } else { ' Account managers could not be checked.' })
+          Set-NodeOutput ([ordered]@{
+              status              = 'ok'
+              auditDate           = $runDate.ToString('yyyy-MM-dd', $ci)
+              accountManagerCheck = $amCheck
+              totals              = $totals
+              companies           = @($out)
+              message             = $msg
+          })
+        timeoutSeconds: 900
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+    - id: node-message
+      name: Build Email
+      type: powershell-script
+      position:
+        x: 600
+        'y': 120
+      properties:
+        script: |
+          # =====================================================================
+          #  Weekly Fleet Audit - Build Email step
+          #  Turns the Fleet Audit step's output (its node output arrives as this
+          #  step's input) into the subject and HTML body Deliver Result sends.
+          #  The body is one line with single-quoted attributes and no double quotes
+          #  or backslashes, because Send Audit's binding puts it inside a JSON string.
+          # =====================================================================
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function Enc { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
+          function Num { param($v) $n = 0; [void][int]::TryParse([string]$v, [ref]$n); $n }
+          function Plural { param([int]$n, [string]$one, [string]$many) "$n $(if ($n -eq 1) { $one } else { $many })" }
+
+          $a = $null; try { $a = Get-NodeInput } catch { }
+          if ($a -is [string]) { $a = $(if ($a.Trim().StartsWith('{')) { $a | ConvertFrom-Json } else { $null }) }
+          $ci = [System.Globalization.CultureInfo]::InvariantCulture
+          $date = [string](Get-Prop $a 'auditDate'); if (-not $date) { $date = (Get-Date).ToString('yyyy-MM-dd', $ci) }
+          $niceDate = ([datetime]::ParseExact($date, 'yyyy-MM-dd', $ci)).ToString('d MMMM yyyy', $ci)
+          $totals = Get-Prop $a 'totals'; $cats = Get-Prop $totals 'categories'
+          $companies = @(Get-Prop $a 'companies' | Where-Object { $null -ne $_ })
+          $amOk = [string](Get-Prop $a 'accountManagerCheck') -eq 'ok'
+
+          # ---- styles (inline: most mail clients drop <style> blocks) ----
+          $font = "font-family:Segoe UI,Helvetica,Arial,sans-serif"
+          $ink = '#1f2328'; $muted = '#59636e'; $line = '#d1d9e0'; $red = '#b42318'; $amber = '#9a6700'; $green = '#1a7f37'
+          $th = "padding:8px 10px;border-bottom:2px solid $line;text-align:center;font-size:12px;color:$muted;font-weight:600"
+          $thL = $th -replace 'text-align:center', 'text-align:left'
+          $td = "padding:8px 10px;border-bottom:1px solid $line;text-align:center;font-size:14px"
+          $tdL = $td -replace 'text-align:center', 'text-align:left'
+          function Cell { param([int]$n, [string]$color = $ink) if ($n -eq 0) { "<td style='$td;color:#8c959f'>0</td>" } else { "<td style='$td;color:$color;font-weight:600'>$n</td>" } }
+          function Tile { param([int]$n, [string]$label, [string]$color) "<td style='padding:12px 14px;border:1px solid $line;border-radius:6px;text-align:center;width:16%'><div style='font-size:24px;font-weight:700;color:$(if ($n) { $color } else { '#8c959f' })'>$n</div><div style='font-size:12px;color:$muted'>$label</div></td>" }
+          function Badge { param([string]$tier) $c = $(if ($tier -eq 'Critical') { $red } else { $amber }); "<span style='display:inline-block;padding:1px 6px;border:1px solid $c;border-radius:10px;color:$c;font-size:11px;font-weight:600'>$tier</span>" }
+
+          $b = New-Object System.Text.StringBuilder
+          function W { param([string]$s) $null = $b.Append($s) }
+          W "<html><body style='margin:0;padding:16px;background:#ffffff'><div style='$font;color:$ink;max-width:820px'>"
+          W "<h2 style='margin:0 0 4px;font-size:22px'>Weekly Fleet Audit</h2>"
+
+          if ($null -eq $totals -or -not $companies.Count) {
+              $why = [string](Get-Prop $a 'message'); if (-not $why) { $why = 'The audit step returned no data.' }
+              W "<p style='font-size:14px'>$(Enc $why)</p>"
+              $critical = 0
+          }
+          else {
+              $n = Num (Get-Prop $totals 'computers'); $critical = Num (Get-Prop $totals 'critical')
+              $replace = Num (Get-Prop $cats 'Replace'); $plan = Num (Get-Prop $cats 'Plan replacement')
+              $wExp = Num (Get-Prop $totals 'warrantyExpired'); $wUnk = Num (Get-Prop $totals 'warrantyUnknown'); $noAm = Num (Get-Prop $totals 'noAccountManager')
+              W "<div style='font-size:13px;color:$muted;margin-bottom:16px'>$niceDate &middot; $(Plural $companies.Count 'company' 'companies') &middot; $(Plural $n 'computer' 'computers') reviewed &middot; read-only</div>"
+
+              # ---- headline numbers ----
+              W "<table role='presentation' cellspacing='6' cellpadding='0' style='border-collapse:separate;width:100%;margin:0 -6px 8px'><tr>"
+              W (Tile $critical 'Critical' $red); W (Tile $replace 'Replace' $red); W (Tile $plan 'Plan replacement' $amber)
+              W (Tile $wExp 'Warranty expired' $amber); W (Tile $wUnk 'No warranty date' $amber)
+              W $(if ($amOk) { Tile $noAm 'No account manager' $amber } else { "<td style='padding:12px 14px;border:1px solid $line;border-radius:6px;text-align:center;width:16%'><div style='font-size:24px;font-weight:700;color:#8c959f'>&ndash;</div><div style='font-size:12px;color:$muted'>Account manager not checked</div></td>" })
+              W "</tr></table>"
+
+              # ---- what to do first ----
+              $todo = New-Object System.Collections.ArrayList
+              foreach ($c in @($companies | Where-Object { (Num (Get-Prop $_ 'critical')) -gt 0 -or (Num (Get-Prop (Get-Prop $_ 'categories') 'Replace')) -gt 0 } | Select-Object -First 3)) {
+                  $cc = Num (Get-Prop $c 'critical'); $cr = Num (Get-Prop (Get-Prop $c 'categories') 'Replace')
+                  $parts = @(); if ($cc) { $parts += "$(Plural $cc 'critical computer' 'critical computers')" }; if ($cr) { $parts += "$cr due for replacement" }
+                  $null = $todo.Add("<strong>$(Enc (Get-Prop $c 'name'))</strong>: $($parts -join ', ').")
+              }
+              if ($amOk -and $noAm) {
+                  $who = @($companies | Where-Object { -not [string](Get-Prop $_ 'accountManager') } | ForEach-Object { Enc (Get-Prop $_ 'name') })
+                  $shown = ($who | Select-Object -First 5) -join ', '; if ($who.Count -gt 5) { $shown += " and $($who.Count - 5) more" }
+                  $null = $todo.Add("<strong>$(Plural $noAm 'company has' 'companies have') no account manager</strong>: $shown.")
+              }
+              if ($wUnk) { $null = $todo.Add("<strong>$(Plural $wUnk 'computer has' 'computers have') no warranty date.</strong> Run the ScalePad sync or add the dates, so warranty gaps show up here.") }
+              if (-not $amOk) { $null = $todo.Add("Account managers could not be checked: the CloudRadial API did not return the field.") }
+              $orph = Num (Get-Prop $totals 'orphanedEndpoints'); if ($orph) { $null = $todo.Add($(if ($orph -eq 1) { '1 endpoint belongs to a deleted company and was left out.' } else { "$orph endpoints belong to deleted companies and were left out." })) }
+              if ($todo.Count) {
+                  W "<h3 style='margin:20px 0 8px;font-size:16px'>Start here</h3><ul style='margin:0;padding-left:20px;font-size:14px;line-height:1.6'>"
+                  foreach ($t in $todo) { W "<li>$t</li>" }
+                  W "</ul>"
+              }
+              else { W "<p style='font-size:14px;color:$green'><strong>Nothing needs attention this week.</strong></p>" }
+
+              # ---- by company ----
+              W "<h3 style='margin:24px 0 8px;font-size:16px'>By company</h3>"
+              W "<table cellspacing='0' cellpadding='0' style='border-collapse:collapse;width:100%'><tr>"
+              W "<th style='$thL'>Company</th><th style='$th'>Computers</th><th style='$th'>Critical</th><th style='$th'>Replace</th><th style='$th'>Plan replacement</th><th style='$th'>Windows 11 upgrade</th><th style='$th'>Needs data</th><th style='$th'>Warranty expired</th><th style='$th'>No warranty date</th><th style='$thL'>Account manager</th></tr>"
+              foreach ($c in $companies) {
+                  $cc = Get-Prop $c 'categories'
+                  $amTxt = $(if (-not $amOk) { "<span style='color:#8c959f'>&ndash;</span>" } elseif ([string](Get-Prop $c 'accountManager')) { Enc (Get-Prop $c 'accountManager') } else { "<span style='color:$red;font-weight:600'>None</span>" })
+                  W "<tr><td style='$tdL;min-width:150px;font-weight:600'>$(Enc (Get-Prop $c 'name'))</td>$(Cell (Num (Get-Prop $c 'computers')))$(Cell (Num (Get-Prop $c 'critical')) $red)$(Cell (Num (Get-Prop $cc 'Replace')) $red)$(Cell (Num (Get-Prop $cc 'Plan replacement')) $amber)$(Cell (Num (Get-Prop $cc 'Upgrade in place')))$(Cell (Num (Get-Prop $cc 'Needs data')))$(Cell (Num (Get-Prop $c 'warrantyExpired')) $amber)$(Cell (Num (Get-Prop $c 'warrantyUnknown')))<td style='$tdL;white-space:nowrap'>$amTxt</td></tr>"
+              }
+              W "</table>"
+
+              # ---- most urgent computers ----
+              $withUrgent = @($companies | Where-Object { @(Get-Prop $_ 'urgent' | Where-Object { $null -ne $_ }).Count -gt 0 })
+              if ($withUrgent.Count) {
+                  W "<h3 style='margin:24px 0 4px;font-size:16px'>Most urgent computers</h3><div style='font-size:13px;color:$muted;margin-bottom:8px'>Up to three per company. The Endpoint Hardware Refresh cards in Planner list every computer.</div>"
+                  foreach ($c in $withUrgent) {
+                      W "<div style='font-size:14px;font-weight:600;margin:12px 0 4px'>$(Enc (Get-Prop $c 'name'))</div><ul style='margin:0;padding-left:20px;font-size:13px;line-height:1.5'>"
+                      foreach ($u in @(Get-Prop $c 'urgent' | Where-Object { $null -ne $_ })) { W "<li style='margin-bottom:4px'>$(Badge ([string](Get-Prop $u 'tier'))) <span style='color:$muted'>$(Enc (Get-Prop $u 'category'))</span> &middot; $([string](Get-Prop $u 'line'))</li>" }
+                      $more = Num (Get-Prop $c 'moreFlagged'); if ($more -gt 0) { W "<li style='color:$muted;list-style:none'>+ $(Plural $more 'more flagged computer' 'more flagged computers')</li>" }
+                      W "</ul>"
+                  }
+              }
+          }
+
+          W "<p style='margin-top:24px;padding-top:12px;border-top:1px solid $line;font-size:12px;color:$muted;line-height:1.5'>Computers are graded with the Endpoint LifeCycle Manager rules: <strong>Replace</strong> at 5 or more years old, on an unsupported operating system that can't take Windows 11, or under 4 GB of memory. <strong>Plan replacement</strong> at 3 or more years. <strong>Critical</strong> means 7 or more years old, Windows 10 or older, macOS 12 or older, or under 4 GB of memory. Servers and virtual machines are listed separately. This report is read-only: nothing in CloudRadial was changed.</p>"
+          W "</div></body></html>"
+
+          # One line, and nothing that would break the JSON string the Send Audit binding puts it in.
+          $body = $b.ToString() -replace '[\r\n\t]+', ' ' -replace '\\', '&#92;' -replace '"', '&quot;'
+          $subject = "Weekly Fleet Audit - $date$(if ($critical) { " - $critical critical" })"
+          Set-NodeOutput ([ordered]@{
+              channel = 'email'
+              subject = $subject
+              body    = $body
+              message = "Audit email ready ($([math]::Round($body.Length / 1024, 1)) KB)."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+    - id: node-deliver
+      name: Send Audit
+      type: agent
+      position:
+        x: 780
+        'y': 120
+      properties:
+        agentSlug: deliver-result
+        goal: |-
+          Deliver the weekly fleet audit you are given by email, exactly as provided:
+          use the subject, body and recipients in your inputs. Do not open a ticket.
+        allowedExtensions:
+          - postmark
+        model: ''
+        timeoutSeconds: 300
+        autoApprove: true
+        inputBindingsJson: '{"channel":"{{ nodes.node-message.output.channel }}","subject":"{{ nodes.node-message.output.subject }}","body":"{{ nodes.node-message.output.body }}","toEmail":"{{ nodes.node-inputs.output.toEmail }}"}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 980
+        'y': 120
   connections:
-  - source: start
-    target: node-inputs
-    sourceHandle: null
-  - source: node-inputs
-    target: node-agent
-    sourceHandle: null
-  - source: node-agent
-    target: node-message
-    sourceHandle: null
-  - source: node-message
-    target: node-deliver
-    sourceHandle: null
-  - source: node-deliver
-    target: end
-    sourceHandle: null
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-audit
+      sourceHandle: null
+    - source: node-audit
+      target: node-message
+      sourceHandle: null
+    - source: node-message
+      target: node-deliver
+      sourceHandle: null
+    - source: node-deliver
+      target: end
+      sourceHandle: null
   startActivityId: start

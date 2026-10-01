@@ -26,7 +26,7 @@ A general-purpose CloudRadial **AutomationAI agent**, the platform-native analog
 
 In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-ucp-assistant`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies` (which also carries the user tools), `cloudradial-v2-endpoints`, `cloudradial-v2-services`, `cloudradial-v2-tokens`.
 
-Run it interactively in the **AI Playground**, or from a workflow that gives it a goal: [Portal Lookup](../portal-lookup/) (read-only briefing) and [Weekly Fleet Audit](../weekly-fleet-audit/) (scheduled audit, emailed) both run it. Pass a `request` (a question, an audit/report ask, or a change to make) and optionally a `companyName` to focus on one company.
+Run it interactively in the **AI Playground**, or from a workflow that gives it a goal: [Portal Lookup](../portal-lookup/) (read-only briefing) runs it. Pass a `request` (a question, an audit/report ask, or a change to make) and optionally a `companyName` to focus on one company.
 
 ## What it does
 

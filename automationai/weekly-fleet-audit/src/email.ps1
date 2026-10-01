@@ -32,6 +32,7 @@ function Tile { param([int]$n, [string]$label, [string]$color) "<td style='paddi
 function Badge { param([string]$tier) $c = $(if ($tier -eq 'Critical') { $red } else { $amber }); "<span style='display:inline-block;padding:1px 6px;border:1px solid $c;border-radius:10px;color:$c;font-size:11px;font-weight:600'>$tier</span>" }
 
 $failed = $false
+$orph = Num (Get-Prop $totals 'orphanedEndpoints')
 $b = New-Object System.Text.StringBuilder
 function W { param([string]$s) $null = $b.Append($s) }
 W "<html><body style='margin:0;padding:16px;background:#ffffff'><div style='$font;color:$ink;max-width:820px'>"
@@ -71,7 +72,6 @@ else {
     }
     if ($wUnk) { $null = $todo.Add("<strong>$(Plural $wUnk 'computer has' 'computers have') no warranty date.</strong> Run the ScalePad sync or add the dates, so warranty gaps show up here.") }
     if (-not $amOk) { $null = $todo.Add("Account managers could not be checked: the CloudRadial API did not return the field.") }
-    $orph = Num (Get-Prop $totals 'orphanedEndpoints'); if ($orph) { $null = $todo.Add($(if ($orph -eq 1) { '1 endpoint belongs to a deleted company and was left out.' } else { "$orph endpoints belong to deleted companies and were left out." })) }
     if ($todo.Count) {
         W "<h3 style='margin:20px 0 8px;font-size:16px'>Start here</h3><ul style='margin:0;padding-left:20px;font-size:14px;line-height:1.6'>"
         foreach ($t in $todo) { W "<li>$t</li>" }
@@ -103,7 +103,7 @@ else {
     }
 }
 
-W "<p style='margin-top:24px;padding-top:12px;border-top:1px solid $line;font-size:12px;color:$muted;line-height:1.5'>Computers are graded with the Endpoint LifeCycle Manager rules: <strong>Replace</strong> at 5 or more years old, on an unsupported operating system that can't take Windows 11, or under 4 GB of memory. <strong>Plan replacement</strong> at 3 or more years. <strong>Critical</strong> means 7 or more years old, Windows 10 or older, macOS 12 or older, or under 4 GB of memory. Servers and virtual machines are listed separately. This report is read-only: nothing in CloudRadial was changed.</p>"
+W "<p style='margin-top:24px;padding-top:12px;border-top:1px solid $line;font-size:12px;color:$muted;line-height:1.5'>Computers are graded with the Endpoint LifeCycle Manager rules: <strong>Replace</strong> at 5 or more years old, on an unsupported operating system that can't take Windows 11, or under 4 GB of memory. <strong>Plan replacement</strong> at 3 or more years. <strong>Critical</strong> means 7 or more years old, Windows 10 or older, macOS 12 or older, or under 4 GB of memory. Servers and virtual machines are listed separately.$(if ($orph) { " $(if ($orph -eq 1) { '1 endpoint belongs to a deleted company and was' } else { "$orph endpoints belong to deleted companies and were" }) left out." }) This report is read-only: nothing in CloudRadial was changed.</p>"
 W "</div></body></html>"
 
 # One line, and nothing that would break the JSON string the Send Audit binding puts it in.

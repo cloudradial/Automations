@@ -29,7 +29,7 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 
 | File | Type | Role |
 |---|---|---|
-| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.0. |
+| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.1. |
 | [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml) | `automationsWorkflow` | Runs the agent with its goal - one Agent node. Attach a Routine to it to run on a schedule. |
 
 ## Download & import

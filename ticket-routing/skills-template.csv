@@ -1,0 +1,7 @@
+Skill,Role,Engineer,Skill Description
+Network Firewall Basic L1 (General),Tickets,"Lee, Jordan","Basic firewall changes: single rules, NAT for one host, viewing logs"
+Network Firewall Basic L1 (General),Tickets,"Patel, Riya","Basic firewall changes: single rules, NAT for one host, viewing logs"
+Network Firewall Fortinet,Tickets,"Patel, Riya","FortiGate policy, VPN and SD-WAN changes"
+Network Firewall Fortinet,Install,"Okafor, Chidi","FortiGate policy, VPN and SD-WAN changes"
+Microsoft 365 Administration L2 (General),Tickets,"Lee, Jordan","Mailbox permissions, shared mailboxes, licensing, Entra groups"
+Role only,Escalation Coordination,"Okafor, Chidi",

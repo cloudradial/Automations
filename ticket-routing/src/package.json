@@ -1,0 +1,7 @@
+{
+  "name": "ticket-routing-build",
+  "private": true,
+  "description": "Builds ticket-routing.yml and Test-RoutingTable.ps1 from the scripts in this folder.",
+  "scripts": { "build": "node build.js", "test": "node build.js && pwsh -NoProfile -File test.ps1" },
+  "dependencies": { "js-yaml": "^4.1.0" }
+}

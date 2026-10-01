@@ -57,6 +57,7 @@ $Opening = @{
 }
 $RoadmapQuarter = @{ Critical = 1; High = 1; Medium = 2; Low = 3 }
 
+# ---- shared: begin (Weekly Fleet Audit embeds everything down to "shared: end"; it needs $BaseUrl, $headers, $ci, $runDate, Get-Prop) ----
 function Invoke-CrApi {
     param([string]$Path, [string]$Method = 'GET', $Body, [string]$ContentType = 'application/json')
     $url = if ($Path -match '^https?://') { $Path } else { "$BaseUrl$Path" }
@@ -161,6 +162,7 @@ function Get-Assessment { param($ep)
     }
     return @{ flagged = $true; category = $rec; tier = (Get-Tier 'std' $age $war.status $sup $type $mac $ram); line = "$lead $ageTxt $warTxt.$osTxt Recommended action: $act." }
 }
+# ---- shared: end ----
 
 function Get-Summary { param([string]$category, [int]$n, [string]$top, $tierCounts)
     $noun = if ($category -eq 'Human review') { if ($n -eq 1) { 'server needs' } else { 'servers need' } } elseif ($category -eq 'Virtual machines') { if ($n -eq 1) { 'virtual machine needs' } else { 'virtual machines need' } } else { if ($n -eq 1) { 'computer is' } else { 'computers are' } }

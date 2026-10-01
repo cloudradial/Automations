@@ -23,7 +23,7 @@ A reusable RMM operations **agent** that uses the partner's RMM extension to res
 issues automatically, plus thin **workflows** that each run it with a goal for one
 trigger: an RMM alert webhook, a ServiceAI Triage Action on a ticket, or a schedule.
 Each workflow is a `type: agent` node with a `goal` + `agentSlug` (the same pattern as
-[Weekly Fleet Audit](../weekly-fleet-audit/)).
+[Portal Lookup](../portal-lookup/)).
 
 This build uses the **Datto RMM** extension (`datto-rmm`). To support another RMM, add
 its extension slug to the agent's `requiredExtensionSlugs` and the workflow node's

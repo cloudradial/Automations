@@ -4499,10 +4499,17 @@ definition:
                   $global:SyncLast = $null
                   $SyncErr = $null
                   try { & $SyncPhases[$SyncPhase] } catch { $SyncErr = $_.Exception.Message }
-                  if (-not $SyncErr -and $null -ne $global:SyncLast -and $global:SyncLast.ctx) {
-                      $r = $global:SyncLast.ctx.results
-                      $pr = if ($r -is [System.Collections.IDictionary]) { $r[$SyncPhase] } elseif ($r) { $r.$SyncPhase } else { $null }
-                      if ($pr -and $pr.failed) { $SyncErr = [string]$pr.error }
+                  if (-not $SyncErr -and $global:SyncLast -is [System.Collections.IDictionary] -and $global:SyncLast.Contains('ctx') -and $global:SyncLast['ctx']) {
+                      $SyncLastCtx = $global:SyncLast['ctx']
+                      $r = $(if ($SyncLastCtx -is [System.Collections.IDictionary]) { if ($SyncLastCtx.Contains('results')) { $SyncLastCtx['results'] } } elseif ($SyncLastCtx.PSObject.Properties['results']) { $SyncLastCtx.results })
+                      # Read with property checks: the runner runs in strict mode, where a missing property throws.
+                      $pr = $null
+                      if ($r -is [System.Collections.IDictionary]) { if ($r.Contains($SyncPhase)) { $pr = $r[$SyncPhase] } }
+                      elseif ($null -ne $r -and $r.PSObject.Properties[$SyncPhase]) { $pr = $r.PSObject.Properties[$SyncPhase].Value }
+                      $prFailed = $false; $prError = ''
+                      if ($pr -is [System.Collections.IDictionary]) { if ($pr.Contains('failed')) { $prFailed = [bool]$pr['failed'] }; if ($pr.Contains('error')) { $prError = [string]$pr['error'] } }
+                      elseif ($null -ne $pr) { if ($pr.PSObject.Properties['failed']) { $prFailed = [bool]$pr.failed }; if ($pr.PSObject.Properties['error']) { $prError = [string]$pr.error } }
+                      if ($prFailed) { $SyncErr = $prError }
                   }
                   if (-not $SyncErr -or $SyncErr -notmatch $SyncTransient -or $SyncTry -eq 3) { break }
                   $null = $global:SyncLog.Add("The $SyncPhase step hit a connection error ($SyncErr) - running it again for this company (attempt $($SyncTry + 1) of 3).")

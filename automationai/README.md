@@ -24,7 +24,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`cloudradial-ucp/`](cloudradial-ucp/) | Agent (run by Portal Lookup and Weekly Fleet Audit) |
 | [`deliver-result/`](deliver-result/) | Agent (a reusable delivery step other workflows call) |
 | [`domain-expiration-report/`](domain-expiration-report/) | Workflow |
-| [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Agent + workflow |
+| [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Workflow (no AI) + optional agent and agent workflow |
 | [`endpoint-names-token/`](endpoint-names-token/) | Workflow |
 | [`feedback-csat-report/`](feedback-csat-report/) | Workflow |
 | [`knowbe4/`](knowbe4/) | Workflow |

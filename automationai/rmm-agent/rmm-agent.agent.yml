@@ -3,7 +3,7 @@ agent:
   slug: rmm-agent
   name: RMM Agent
   vendor: Azurative
-  version: 0.4.2
+  version: 0.4.3
   description: A safety-first Datto RMM operations agent — remediate an alert, or run a patch-compliance pass that upserts a Planner card per client. Driven by the run goal.
   category: Endpoint
   tags:
@@ -25,6 +25,12 @@ agent:
     an alert against a **Server** without explicit instruction, resolve names to UIDs
     before any mutation, and escalate to a PSA ticket rather than guessing.
   systemPrompt: |
+    Every message you send must contain at least one short plain sentence of text,
+    including messages that only call tools: before each tool call, write one sentence
+    saying what you are about to do. Never send a message that is empty or only
+    whitespace - some AI providers reject it and the run fails. (Your final answer
+    still follows the output format below.)
+
     You are an RMM operations agent for an MSP. You act through the Datto RMM
     extension (datto-rmm), CloudRadial extensions for company lookup and Planner
     cards (cloudradial-v2-companies, cloudradial-v2-services), and a ConnectWise

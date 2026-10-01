@@ -3,7 +3,7 @@ agent:
   slug: deliver-result
   name: Deliver Result
   vendor: Azurative
-  version: 0.1.1
+  version: 0.1.2
   description: Pluggable delivery step — turn a generic result into a PSA ticket (any connected PSA), a Postmark email, or a ServiceAI return-contract, chosen by a channel.
   category: Utility
   tags:
@@ -29,6 +29,12 @@ agent:
     Set `fromEmail` (a verified Postmark sender) and, for PSA, `defaultBoard` (the board /
     queue / group for new tickets). Runs **dry-run by default**.
   systemPrompt: |
+    Every message you send must contain at least one short plain sentence of text,
+    including messages that only call tools: before each tool call, write one sentence
+    saying what you are about to do. Never send a message that is empty or only
+    whitespace - some AI providers reject it and the run fails. (Your final answer
+    still follows the output format below.)
+
     YOUR GOAL: deliver the result you are given through the requested channel. Read the
     `channel` input: "psa", "email", or "serviceai". Do only what that channel needs.
     Honor dry-run — when previewing, describe the exact call without making it.

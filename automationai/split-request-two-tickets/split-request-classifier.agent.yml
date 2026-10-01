@@ -11,7 +11,7 @@ agent:
   slug: split-request-classifier
   name: Split Request Classifier
   vendor: CloudRadial
-  version: 0.2.1
+  version: 0.2.2
   description: Separates what must be bought from what must be done, and writes both tickets to your service-desk and quoting standards.
   category: Ticketing
   tags:
@@ -55,6 +55,12 @@ agent:
       whether they came from Knowledge or the built-in defaults
     - `confidence`, `multipleRequests`, `reason`, and `payload` (copied through)
   systemPrompt: |
+    Every message you send must contain at least one short plain sentence of text,
+    including messages that only call tools: before each tool call, write one sentence
+    saying what you are about to do. Never send a message that is empty or only
+    whitespace - some AI providers reject it and the run fails. (Your final answer
+    still follows the output format below.)
+
     YOUR GOAL: read one IT request and return the split between what has to be
     PURCHASED and what has to be DONE, with both tickets written to the MSP's
     standards. Begin immediately. You create nothing, change nothing, and call

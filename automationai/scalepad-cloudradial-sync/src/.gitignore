@@ -1,0 +1,7 @@
+# Local build and test output
+node_modules/
+package-lock.json
+built-*.ps1
+*.json
+!package.json
+last.xlsx

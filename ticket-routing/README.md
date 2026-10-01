@@ -81,24 +81,34 @@ The workflow calls each PSA's API directly from its script steps, using the **sa
 
 ## ServiceAI Action
 
+**The split:** ServiceAI triages the ticket. It replies, sets the board, type and priority, and adds its notes. Then its triage AI runs this Action, and AutomationAI picks the engineer and assigns them. ServiceAI doesn't read the webhook's response, so the workflow writes its own internal note.
+
 In **ServiceAI → Settings → Actions**, create an Action named **Assign Engineer**:
 
-- **URL:** the workflow's webhook URL. **Header:** `X-Crauto-Webhook-Secret` with the webhook secret, kept in the ServiceAI Secrets manager.
-- **Mode:** **Use in Triage**. This is how the automation runs: every new ticket, with no technician involved.
-- **Body:** either of these works.
-  - **The raw PSA ticket**, which the Triage editor posts by default. The workflow looks for the id in `ticketId`, `id`, `ticketID`, `TicketID` and `ticket.id`. A raw ticket has no `confirm` field, so the routing table's `liveAssign` setting decides whether it assigns.
-  - **A mapped body**, if your editor lets you build one from the PSA ticket sample:
+- **Mode:** **Use in Triage**.
+- **URL:** the workflow's webhook URL. **Header:** `X-Crauto-Webhook-Secret` with `{{secret.<name>}}`, a secret you add in the ServiceAI Secrets manager holding the webhook secret.
+- **Body:** a template the triage AI fills in from the ticket. Use the raw-ticket sample in the editor to find the ticket id field for your PSA:
 
-    ```json
-    {"triggerSource":"serviceai-triage","ticketId":"<ticket id from the sample>"}
-    ```
+  ```json
+  {"triggerSource":"serviceai-triage","ticketId":"{{<ticket id field>}}"}
+  ```
 
-    Add `"confirm":"true"` or `"false"` only to override `liveAssign`.
-- **Triage rule:** *"After you have set the board, type and priority on a new ticket that has no assigned technician, run the **Assign Engineer** action."*
+  Leave `confirm` out. The routing table's `liveAssign` setting decides whether a Triage run assigns, which keeps the write switch out of an AI-filled body. The workflow also accepts the whole raw ticket, and looks for the id in `ticketId`, `id`, `ticketID`, `TicketID` and `ticket.id`.
+- **Triage rules:** ServiceAI's triage can assign technicians too, so tell it not to, or the two will fight over the assignee. For example:
+  - *"Never assign a technician or resource to a ticket yourself."*
+  - *"After you have set the board, type and priority on a new ticket that has no assigned technician, run the **Assign Engineer** action and include the ticket id."*
 
 **Going live:** `liveAssign` starts as `no`, so every Triage run is a preview that writes nothing. Check the picks in **Action Runs** and the AutomationAI run history. When they look right, set `liveAssign: yes` in the engineers article. You don't need to edit the Action. To stop assigning, set it back to `no`.
 
-**Optional, for technicians:** the same Action in **Use in AI** mode, with a Quick Action pill labelled "Find the right engineer" and the prompt *"Run Assign Engineer for this ticket with confirm false and show me who it would pick and why."* An explicit `confirm` false keeps it a preview even when `liveAssign` is on.
+**Retries are safe.** A retry from Action Runs replays the same request. The ticket is already assigned by then, so the workflow leaves it alone.
+
+**Optional, for technicians:** an Action can only be Use in Triage *or* Use in AI, so this needs a **second** Action, for example **Find Engineer (preview)**:
+- **Mode:** Use in AI, with the same URL and header.
+- **Parameter:** `ticketId` (required).
+- **Example body:** `{"triggerSource":"serviceai-ai","ticketId":"12345","confirm":"false"}`.
+- **Pod Quick Action pill (optional):** label "Find the right engineer", prompt *"Run Find Engineer (preview) for this ticket and show me who it would pick and why."*
+
+The explicit `confirm` false keeps it a preview even when `liveAssign` is on.
 
 ## Inputs
 
@@ -169,7 +179,7 @@ Plus:
 1. Run `Test-RoutingTable.ps1` on your tables until it reports no errors.
 2. In AutomationAI, open the workflow's **Test** run and send `{"ticketId":"<a test ticket>","confirm":"false"}`. The first step's Test Input has a sample. Check `assignee`, `candidates` and `internal_note`.
 3. Send the same with `"confirm":"true"` against a test ticket, and check the assignee and the internal note in the PSA.
-4. Wire the ServiceAI Action with `confirm` false, create a ticket, and check **Action Runs** and the run history.
+4. Wire the ServiceAI Triage Action with `liveAssign: no`, create a test ticket, and check **Action Runs** and the run history. Check that ServiceAI's own triage update afterwards doesn't clear the assignee once you switch `liveAssign: yes`.
 
 ### For developers
 

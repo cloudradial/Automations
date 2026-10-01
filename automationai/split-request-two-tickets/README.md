@@ -34,7 +34,7 @@ Turns one intake, a CloudRadial form submission or a ticket being triaged in Ser
 | File | Type | Role |
 |---|---|---|
 | [`split-request-service-quote.yml`](split-request-service-quote.yml) | `automationsWorkflow` | **Use this one.** Two nodes: *Classify the request* (agent) → *Split into service + quote tickets* (PowerShell, creates the ConnectWise tickets, notes, and closes a ServiceAI source ticket). |
-| [`split-request-classifier.agent.yml`](split-request-classifier.agent.yml) | `automationsAgent` | The classifier (slug `split-request-classifier`, v0.2.1). Decides buy vs do, writes both tickets to your standards, lists missing information, cites the standards it used. Calls no PSA tools. |
+| [`split-request-classifier.agent.yml`](split-request-classifier.agent.yml) | `automationsAgent` | The classifier (slug `split-request-classifier`, v0.2.2). Decides buy vs do, writes both tickets to your standards, lists missing information, cites the standards it used. Calls no PSA tools. |
 | [`knowledge/service-ticket-standards.md`](knowledge/service-ticket-standards.md) | Knowledge | Summary patterns, description layout, priority, type and subtype. |
 | [`knowledge/quote-request-standards.md`](knowledge/quote-request-standards.md) | Knowledge | What counts as a purchase, quote summary and layout, required information. |
 | [`knowledge/standard-catalog.md`](knowledge/standard-catalog.md) | Knowledge | Standard hardware, peripherals, phones and licences; role defaults; items that need approval. |

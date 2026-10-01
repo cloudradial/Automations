@@ -29,7 +29,7 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 
 | File | Type | Role |
 |---|---|---|
-| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.1. |
+| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.2. |
 | [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml) | `automationsWorkflow` | Runs the agent with its goal - one Agent node. Attach a Routine to it to run on a schedule. |
 
 ## Download & import
@@ -61,7 +61,7 @@ It has **no preview mode** (`dryRunDefault: false`) — every in-scope company w
 
 | Variable | Default | What it does |
 |---|---|---|
-| `companyIds` | `1` | Companies to process, comma list (`1,4,7`) or blank for all. |
+| `companyIds` | `1` | Companies to process, comma list (`1,4,7`) or blank for all. The agent handles **up to 3 companies per run** so it finishes inside the runner's 25-turn limit; any others are listed as skipped, so run again with those IDs. |
 | `plannerCategory` | `Efficiency` | Planner category name for the cards. |
 | `plannerProductCategoryId` | `7` | Planner category id. |
 | `scheduleOnRoadmap` | `true` | Put cards on the Planner roadmap by urgency. Set `false` to leave them Proposed and "Not scheduled". |

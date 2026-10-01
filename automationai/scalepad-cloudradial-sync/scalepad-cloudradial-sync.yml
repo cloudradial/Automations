@@ -248,6 +248,32 @@ definition:
               return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
           }
           function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+          # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+          # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+          function Get-CrCards { param([int]$CompanyId)
+              $cards = @{}
+              $rows = $null
+              try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+              catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+              foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+              return $cards
+          }
+          function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+          # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+          function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+              $changed = @{}
+              foreach ($k in $Fields.Keys) {
+                  $new = $Fields[$k]
+                  $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                  if (-not $has) { $changed[$k] = $new; continue }
+                  $cur = Get-P $Existing $k
+                  $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                      $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                  } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                  if (-not $same) { $changed[$k] = $new }
+              }
+              return $changed
+          }
 
           $mode = [string](Get-P $ctx 'mode' 'plan')
           if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -643,6 +669,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -936,6 +988,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -1313,6 +1391,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -1774,6 +1878,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -2173,6 +2303,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -2540,6 +2696,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -2974,6 +3156,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -2990,7 +3198,7 @@ definition:
                   $settings = Get-P $ctx 'settings'
                   $companyId = [int](Get-P $ctx 'companyId')
                   $spClientId = [string](Get-P $ctx 'scalePadClientId')
-                  $counts = [ordered]@{ initiatives = 0; contracts = 0; toCreate = 0; toUpdate = 0; created = 0; updated = 0; errors = 0 }
+                  $counts = [ordered]@{ initiatives = 0; contracts = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; errors = 0 }
                   $items = New-Object System.Collections.ArrayList
                   $currencies = New-Object System.Collections.Generic.HashSet[string]
 
@@ -3013,11 +3221,13 @@ definition:
                   function Save-Card { param([string]$Subject, [hashtable]$Fields, [string]$Kind)
                       $existing = $cards[$Subject.ToLowerInvariant()]
                       if ($null -ne $existing) {
+                          # Keep whatever status and priority the partner has set since the card was created; write only what changed.
+                          $upd = @{}; foreach ($k in $Fields.Keys) { if ($k -notin @('status', 'priority')) { $upd[$k] = $Fields[$k] } }
+                          $upd = Get-ChangedFields $existing $upd
+                          if ($upd.Count -eq 0) { $counts.unchanged++; return }
                           $counts.toUpdate++
-                          $null = $items.Add(@{ kind = $Kind; subject = $Subject; action = 'update'; productId = Get-P $existing 'productId' })
+                          $null = $items.Add(@{ kind = $Kind; subject = $Subject; action = 'update'; productId = Get-P $existing 'productId'; fields = @($upd.Keys | Sort-Object) })
                           if ($apply) {
-                              # Keep whatever status and priority the partner has set since the card was created.
-                              $upd = @{}; foreach ($k in $Fields.Keys) { if ($k -notin @('status', 'priority')) { $upd[$k] = $Fields[$k] } }
                               try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $upd); $counts.updated++ }
                               catch { $counts.errors++; Warn "Update failed for '$Subject': $($_.Exception.Message)" }
                           }
@@ -3037,8 +3247,7 @@ definition:
                       $results[$phase] = [ordered]@{ ran = $false }
                   }
                   else {
-                      $cards = @{}
-                      foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      $cards = Get-CrCards $companyId
 
                       # --- Initiatives ---
                       $inits = @(Get-SpAll '/lifecycle-manager/v2/initiatives' @{ 'filter[client.id]' = "eq:$spClientId"; include_unscheduled = 'true' })
@@ -3113,7 +3322,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Roadmap: $($c.initiatives) initiatives and $($c.contracts) contracts; $(if ($apply) { "$($c.created) cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" }), $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Roadmap: $($c.initiatives) initiatives and $($c.contracts) contracts; $(if ($apply) { "$($c.created) cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message
@@ -3344,6 +3553,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -3364,7 +3599,7 @@ definition:
                   $settings = Get-P $ctx 'settings'
                   $companyId = [int](Get-P $ctx 'companyId')
                   $spClientId = [string](Get-P $ctx 'scalePadClientId')
-                  $counts = [ordered]@{ insights = 0; active = 0; toCreate = 0; toUpdate = 0; created = 0; updated = 0; closed = 0; reopened = 0; errors = 0 }
+                  $counts = [ordered]@{ insights = 0; active = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; closed = 0; reopened = 0; errors = 0 }
                   $items = New-Object System.Collections.ArrayList
                   $table = New-Object System.Collections.ArrayList
                   $PriorityMap = @{ high = 1; medium = 0; low = -1 }
@@ -3374,8 +3609,7 @@ definition:
                       $results[$phase] = [ordered]@{ ran = $false }
                   }
                   else {
-                      $cards = @{}
-                      foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject,status")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      $cards = Get-CrCards $companyId
                       function Test-CardCompleted { param($card) $st = [string](Get-P $card 'status' ''); return ($st -eq '40' -or $st -match '(?i)^completed$') }
 
                       # The insights list takes only a client filter (no paging parameters).
@@ -3426,12 +3660,15 @@ definition:
 
                           $existing = $cards[$subject.ToLowerInvariant()]
                           if ($null -ne $existing) {
+                              # Text only: keep whatever status/priority the partner has set since; write only what changed.
+                              $fix = Get-ChangedFields $existing @{ summary = $summary; body = $body }
+                              $reopen = Test-CardCompleted $existing   # the insight is back - reopen as Proposed
+                              if ($reopen) { $fix.status = 0 }
+                              if ($fix.Count -eq 0) { $counts.unchanged++; continue }
                               $counts.toUpdate++
-                              $null = $items.Add(@{ subject = $subject; action = 'update'; affected = $affected })
+                              $null = $items.Add(@{ subject = $subject; action = $(if ($reopen) { 'reopen' } else { 'update' }); affected = $affected; fields = @($fix.Keys | Sort-Object) })
                               if ($apply) {
-                                  # Text only: keep whatever status/priority the partner has set since.
-                                  $fix = @{ summary = $summary; body = $body }
-                                  if (Test-CardCompleted $existing) { $fix.status = 0; $counts.reopened++ }   # the insight is back - reopen as Proposed
+                                  if ($reopen) { $counts.reopened++ }
                                   try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $fix); $counts.updated++ }
                                   catch { $counts.errors++; Warn "Update failed for '$subject': $($_.Exception.Message)" }
                               }
@@ -3454,7 +3691,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Insights: $($c.insights) in ScalePad, $($c.active) with affected assets; $(if ($apply) { "$($c.created) Planner cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" })$(if ($c.closed) { ", $($c.closed) closed as resolved" })$(if ($c.reopened) { ", $($c.reopened) reopened" }), $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Insights: $($c.insights) in ScalePad, $($c.active) with affected assets; $(if ($apply) { "$($c.created) Planner cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" })$(if ($c.closed) { ", $($c.closed) closed as resolved" })$(if ($c.reopened) { ", $($c.reopened) reopened" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message
@@ -3685,6 +3922,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -4019,6 +4282,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -4410,6 +4699,32 @@ definition:
                       return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                   }
                   function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                  # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                  # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                  function Get-CrCards { param([int]$CompanyId)
+                      $cards = @{}
+                      $rows = $null
+                      try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                      catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                      foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                      return $cards
+                  }
+                  function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                  # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                  function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                      $changed = @{}
+                      foreach ($k in $Fields.Keys) {
+                          $new = $Fields[$k]
+                          $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                          if (-not $has) { $changed[$k] = $new; continue }
+                          $cur = Get-P $Existing $k
+                          $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                              $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                          } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                          if (-not $same) { $changed[$k] = $new }
+                      }
+                      return $changed
+                  }
 
                   $mode = [string](Get-P $ctx 'mode' 'plan')
                   if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -4801,6 +5116,32 @@ definition:
                           return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
                       }
                       function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+                      # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+                      # If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+                      function Get-CrCards { param([int]$CompanyId)
+                          $cards = @{}
+                          $rows = $null
+                          try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+                          catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+                          foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+                          return $cards
+                      }
+                      function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+                      # The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+                      function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+                          $changed = @{}
+                          foreach ($k in $Fields.Keys) {
+                              $new = $Fields[$k]
+                              $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+                              if (-not $has) { $changed[$k] = $new; continue }
+                              $cur = Get-P $Existing $k
+                              $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+                                  $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+                              } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+                              if (-not $same) { $changed[$k] = $new }
+                          }
+                          return $changed
+                      }
 
                       $mode = [string](Get-P $ctx 'mode' 'plan')
                       if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }
@@ -4906,13 +5247,13 @@ definition:
                       if ($r) {
                           $act = if ($apply) { "Created $(Get-P $r 'created') cards and updated $(Get-P $r 'updated')." } else { "Would create $(Get-P $r 'toCreate') cards and update $(Get-P $r 'toUpdate')." }
                           $null = $lines.Add("Roadmap: $(Get-P $r 'initiatives') initiatives and $(Get-P $r 'contracts') contracts. $act")
-                          $null = $rows.Add(@('Roadmap and budget', "$(Get-P $r 'initiatives') initiatives, $(Get-P $r 'contracts') contracts", $act, "$(Get-P $r 'errors') errors"))
+                          $null = $rows.Add(@('Roadmap and budget', "$(Get-P $r 'initiatives') initiatives, $(Get-P $r 'contracts') contracts", $act, "$(Get-P $r 'unchanged' 0) unchanged, $(Get-P $r 'errors') errors"))
                       }
                       $ins = Get-P $results 'insights.counts'
                       if ($ins) {
                           $act = if ($apply) { "Created $(Get-P $ins 'created') Planner cards, updated $(Get-P $ins 'updated'), closed $(Get-P $ins 'closed' 0) resolved." } else { "Would create $(Get-P $ins 'toCreate') Planner cards and update $(Get-P $ins 'toUpdate')." }
                           $null = $lines.Add("Insights: $(Get-P $ins 'insights') in ScalePad, $(Get-P $ins 'active') with affected assets. $act")
-                          $null = $rows.Add(@('Insights and recommendations', "$(Get-P $ins 'insights') insights, $(Get-P $ins 'active') with affected assets", $act, "$(Get-P $ins 'errors') errors"))
+                          $null = $rows.Add(@('Insights and recommendations', "$(Get-P $ins 'insights') insights, $(Get-P $ins 'active') with affected assets", $act, "$(Get-P $ins 'unchanged' 0) unchanged, $(Get-P $ins 'errors') errors"))
                       }
                       $mn = Get-P $results 'meetings.counts'
                       if ($mn) {

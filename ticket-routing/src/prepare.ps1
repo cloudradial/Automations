@@ -36,7 +36,8 @@ try {
     # ---------- 1. the request ----------
     $out.ticketId = Get-In @('ticketId', 'id', 'ticketID', 'TicketID', 'TicketId', 'Id', 'ticket.id', 'Ticket.TicketId', 'ticket_id')
     $out.triggerSource = Get-In @('triggerSource')
-    $out.confirm = Test-Yes (Get-In @('confirm'))
+    $confirmIn = Get-In @('confirm')   # an explicit confirm in the body wins; otherwise the table's liveAssign setting decides (below)
+    $out.confirm = $confirmIn -ne '' -and (Test-Yes $confirmIn)
     $out.reassign = Test-Yes (Get-In @('reassign'))
     $psa = (Get-In @('psa')).ToLowerInvariant(); if (-not $psa) { $psa = ([string](Secret 'PSA-Type')).Trim().ToLowerInvariant() }
     $out.psa = $psa
@@ -79,6 +80,8 @@ try {
     foreach ($w in @($check.Warnings)) { $null = $warnings.Add($w) }
     if ($check.Errors.Count) { Stop-Prepare 'incomplete' ("The routing table has errors, so nothing was assigned. Fix them in the KB articles (Test-RoutingTable.ps1 shows the same list):`n- " + ($check.Errors -join "`n- ")); return }
     $null = $actions.Add("Read the routing table: $(@($table.Skills).Count) skills rows, $(@($table.Engineers).Count) engineers")
+    # A Triage Action may post the raw PSA ticket with no confirm field, so the table can switch live assignment on.
+    if ($confirmIn -eq '') { $out.confirm = Test-Yes ([string]$table.Settings.liveAssign) }
 
     # ---------- 3. the ticket ----------
     $null = Connect-Psa $psa

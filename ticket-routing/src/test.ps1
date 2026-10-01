@@ -239,6 +239,13 @@ $x = Invoke-Routing $body -NoSecretPsa
 Check 'missing PSA' ($x.r.status -eq 'incomplete' -and $x.r.message -match 'PSA-Type') $x.r.message
 $x = Invoke-Routing @{ id = 12345; ticketNumber = 'T20261001.0001'; title = 'New VPN tunnel to Leeds'; contactID = 30 } -Psa autotask -Wrap
 Check 'raw Autotask ticket body (preview)' ($x.r.status -eq 'pending_confirmation' -and $x.r.ticket_id -eq '12345') "$($x.r.status) $($x.r.ticket_id)"
+$raw = @{ id = 12345; ticketNumber = 'T20261001.0001'; title = 'New VPN tunnel to Leeds'; contactID = 30 }
+$x = Invoke-Routing $raw -Psa autotask -Wrap -Settings @('liveAssign: yes')
+Check 'triage raw body + liveAssign yes assigns' ($x.r.status -eq 'success' -and $x.writes.Count -eq 2) "$($x.r.status) $($x.writes.Count)"
+$x = Invoke-Routing @{ ticketId = '12345'; confirm = 'false' } -Settings @('liveAssign: yes')
+Check 'body confirm false overrides liveAssign' ($x.r.status -eq 'pending_confirmation' -and $x.writes.Count -eq 0)
+$x = Invoke-Routing $raw -Settings @('liveAssign: maybe')
+Check 'invalid liveAssign stops' ($x.r.status -eq 'incomplete' -and $x.r.internal_note -match 'liveAssign')
 $x = Invoke-Routing @{ ticket = @{ id = 12345 }; confirm = 'true' }
 Check 'nested ticket.id' ($x.r.status -eq 'success')
 $x = Invoke-Routing @{ ticketId = '{{ticket.id}}'; confirm = 'true' }

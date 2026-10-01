@@ -66,6 +66,7 @@ Put these at the top of the engineers article, one per line, under a `[Settings]
 | `noMatch` | `leave-unassigned` | `leave-unassigned`: assign nobody and add a note. `assign-fallback`: assign to `fallbackEngineer`. `recommend-only`: add a note naming up to three candidates, but don't assign. |
 | `fallbackEngineer` | blank | An engineer name from the engineers table. Required when `noMatch` is `assign-fallback`. |
 | `minConfidence` | `0.7` | 0 to 1. Below this, the AI's pick is treated as no match. |
+| `liveAssign` | `no` | `no`: every run is a preview that writes nothing. `yes`: Triage runs assign the ticket and add the note. A `confirm` sent in the Action body overrides this. |
 
 **About the tie-breaks:**
 - **`least-recently-assigned`** looks at the newest ticket currently assigned to each engineer, because no PSA API records when a ticket was assigned. A ticket reassigned away from someone no longer counts for them.
@@ -84,6 +85,7 @@ tieBreak: least-open-tickets
 respectMaxOpen: yes
 noMatch: leave-unassigned
 minConfidence: 0.7
+liveAssign: no
 
 [Engineers]
 Engineer,Email,PSA User Id,PSA Role Id,Active,Max Open Tickets

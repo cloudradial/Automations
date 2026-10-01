@@ -101,7 +101,7 @@ definition:
                       }
                   }
               }
-              $settings = [ordered]@{ tieBreak = 'least-open-tickets'; respectMaxOpen = 'yes'; noMatch = 'leave-unassigned'; fallbackEngineer = ''; minConfidence = '0.7' }
+              $settings = [ordered]@{ tieBreak = 'least-open-tickets'; respectMaxOpen = 'yes'; noMatch = 'leave-unassigned'; fallbackEngineer = ''; minConfidence = '0.7'; liveAssign = 'no' }
               foreach ($l in @($SettingLines)) { if ($l -match '^\s*"?([A-Za-z]+)\s*[:=]\s*(.*?)"?,?$') { $settings[$Matches[1]] = $Matches[2].Trim() } }
               return [pscustomobject]@{ Skills = $skills; Engineers = $engineers; Settings = $settings }
           }
@@ -143,6 +143,7 @@ definition:
                   elseif ($t.Engineers.Count -and @($t.Engineers | ForEach-Object { $_.Engineer }) -notcontains (($s.fallbackEngineer -replace '\s+,', ',' -replace ',(?=\S)', ', ').Trim())) { $errors += "fallbackEngineer '$($s.fallbackEngineer)' isn't in the engineers table." }
               }
               if ($s.respectMaxOpen -notmatch '^(?i)(yes|no)$') { $errors += 'respectMaxOpen must be yes or no.' }
+              if ($s.liveAssign -notmatch '^(?i)(yes|no)$') { $errors += 'liveAssign must be yes or no.' }
               [double]$mc = 0; if (-not [double]::TryParse([string]$s.minConfidence, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$mc) -or $mc -lt 0 -or $mc -gt 1) { $errors += 'minConfidence must be a number from 0 to 1.' }
               return [pscustomobject]@{ Errors = $errors; Warnings = $warnings }
           }
@@ -442,7 +443,8 @@ definition:
               # ---------- 1. the request ----------
               $out.ticketId = Get-In @('ticketId', 'id', 'ticketID', 'TicketID', 'TicketId', 'Id', 'ticket.id', 'Ticket.TicketId', 'ticket_id')
               $out.triggerSource = Get-In @('triggerSource')
-              $out.confirm = Test-Yes (Get-In @('confirm'))
+              $confirmIn = Get-In @('confirm')   # an explicit confirm in the body wins; otherwise the table's liveAssign setting decides (below)
+              $out.confirm = $confirmIn -ne '' -and (Test-Yes $confirmIn)
               $out.reassign = Test-Yes (Get-In @('reassign'))
               $psa = (Get-In @('psa')).ToLowerInvariant(); if (-not $psa) { $psa = ([string](Secret 'PSA-Type')).Trim().ToLowerInvariant() }
               $out.psa = $psa
@@ -485,6 +487,8 @@ definition:
               foreach ($w in @($check.Warnings)) { $null = $warnings.Add($w) }
               if ($check.Errors.Count) { Stop-Prepare 'incomplete' ("The routing table has errors, so nothing was assigned. Fix them in the KB articles (Test-RoutingTable.ps1 shows the same list):`n- " + ($check.Errors -join "`n- ")); return }
               $null = $actions.Add("Read the routing table: $(@($table.Skills).Count) skills rows, $(@($table.Engineers).Count) engineers")
+              # A Triage Action may post the raw PSA ticket with no confirm field, so the table can switch live assignment on.
+              if ($confirmIn -eq '') { $out.confirm = Test-Yes ([string]$table.Settings.liveAssign) }
 
               # ---------- 3. the ticket ----------
               $null = Connect-Psa $psa

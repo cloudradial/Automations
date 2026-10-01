@@ -84,25 +84,28 @@ The workflow calls each PSA's API directly from its script steps, using the **sa
 In **ServiceAI → Settings → Actions**, create an Action named **Assign Engineer**:
 
 - **URL:** the workflow's webhook URL. **Header:** `X-Crauto-Webhook-Secret` with the webhook secret, kept in the ServiceAI Secrets manager.
-- **Mode:** **Use in Triage**. Optionally also Use in AI, so technicians can run it from a ticket.
-- **Body:** map the ticket id from the PSA ticket sample in the Action editor:
+- **Mode:** **Use in Triage**. This is how the automation runs: every new ticket, with no technician involved.
+- **Body:** either of these works.
+  - **The raw PSA ticket**, which the Triage editor posts by default. The workflow looks for the id in `ticketId`, `id`, `ticketID`, `TicketID` and `ticket.id`. A raw ticket has no `confirm` field, so the routing table's `liveAssign` setting decides whether it assigns.
+  - **A mapped body**, if your editor lets you build one from the PSA ticket sample:
 
-  ```json
-  {"triggerSource":"serviceai-triage","ticketId":"<ticket id from the sample>","confirm":"false"}
-  ```
+    ```json
+    {"triggerSource":"serviceai-triage","ticketId":"<ticket id from the sample>"}
+    ```
 
-  The workflow also accepts the raw PSA ticket as the whole body. It looks for the id in `ticketId`, `id`, `ticketID`, `TicketID` and `ticket.id`.
+    Add `"confirm":"true"` or `"false"` only to override `liveAssign`.
 - **Triage rule:** *"After you have set the board, type and priority on a new ticket that has no assigned technician, run the **Assign Engineer** action."*
-- **Quick Action pill (optional):** label "Find the right engineer", prompt *"Run Assign Engineer for this ticket with confirm false and show me who it would pick and why."*
 
-Leave `confirm` as `"false"` until the previews look right in **Action Runs** and the AutomationAI run history, then change the body to `"true"`.
+**Going live:** `liveAssign` starts as `no`, so every Triage run is a preview that writes nothing. Check the picks in **Action Runs** and the AutomationAI run history. When they look right, set `liveAssign: yes` in the engineers article. You don't need to edit the Action. To stop assigning, set it back to `no`.
+
+**Optional, for technicians:** the same Action in **Use in AI** mode, with a Quick Action pill labelled "Find the right engineer" and the prompt *"Run Assign Engineer for this ticket with confirm false and show me who it would pick and why."* An explicit `confirm` false keeps it a preview even when `liveAssign` is on.
 
 ## Inputs
 
 | Field | Default | What it does |
 |---|---|---|
 | `ticketId` | none | Required. The PSA ticket id. |
-| `confirm` | `false` | `false` returns who it **would** assign and writes nothing, not even the note. `true` assigns and adds the note. |
+| `confirm` | the table's `liveAssign` (default `no`) | `false` returns who it **would** assign and writes nothing, not even the note. `true` assigns and adds the note. When it's left out, as in a raw Triage body, `liveAssign` decides. |
 | `reassign` | `false` | `false` leaves a ticket that already has an assignee alone. |
 | `psa` | secret `PSA-Type` | `connectwise`, `autotask`, `halopsa`, `kaseyabms`, `syncro` or `zendesk` |
 | `routingCompanyId` | secret `Routing-CompanyId` | The CloudRadial company that holds the routing articles |
@@ -153,7 +156,7 @@ Plus:
 
 ## Safety
 
-- With `confirm` false it writes nothing: no assignment and no note.
+- Until `liveAssign` is `yes` (or the body sends `confirm` true) it writes nothing: no assignment and no note.
 - It never reassigns a ticket that already has an assignee unless `reassign` is true.
 - It never assigns anyone who isn't in the engineers table, is marked inactive, or (with `respectMaxOpen`) is at their limit.
 - It never trusts an invented skill. An AI answer that isn't in the table counts as no match.

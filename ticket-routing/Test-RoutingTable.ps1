@@ -95,7 +95,7 @@ function Read-RoutingTable {
             }
         }
     }
-    $settings = [ordered]@{ tieBreak = 'least-open-tickets'; respectMaxOpen = 'yes'; noMatch = 'leave-unassigned'; fallbackEngineer = ''; minConfidence = '0.7' }
+    $settings = [ordered]@{ tieBreak = 'least-open-tickets'; respectMaxOpen = 'yes'; noMatch = 'leave-unassigned'; fallbackEngineer = ''; minConfidence = '0.7'; liveAssign = 'no' }
     foreach ($l in @($SettingLines)) { if ($l -match '^\s*"?([A-Za-z]+)\s*[:=]\s*(.*?)"?,?$') { $settings[$Matches[1]] = $Matches[2].Trim() } }
     return [pscustomobject]@{ Skills = $skills; Engineers = $engineers; Settings = $settings }
 }
@@ -137,6 +137,7 @@ function Test-RoutingData {
         elseif ($t.Engineers.Count -and @($t.Engineers | ForEach-Object { $_.Engineer }) -notcontains (($s.fallbackEngineer -replace '\s+,', ',' -replace ',(?=\S)', ', ').Trim())) { $errors += "fallbackEngineer '$($s.fallbackEngineer)' isn't in the engineers table." }
     }
     if ($s.respectMaxOpen -notmatch '^(?i)(yes|no)$') { $errors += 'respectMaxOpen must be yes or no.' }
+    if ($s.liveAssign -notmatch '^(?i)(yes|no)$') { $errors += 'liveAssign must be yes or no.' }
     [double]$mc = 0; if (-not [double]::TryParse([string]$s.minConfidence, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$mc) -or $mc -lt 0 -or $mc -gt 1) { $errors += 'minConfidence must be a number from 0 to 1.' }
     return [pscustomobject]@{ Errors = $errors; Warnings = $warnings }
 }

@@ -14,8 +14,8 @@ These links point at the `main` branch, so they always open the current version.
 | Download `scalepad-cloudradial-sync.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
 | All files in this automation | [automationai/scalepad-cloudradial-sync](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/scalepad-cloudradial-sync) |
-| Works with | [scalepad-lifecycle-manager-extension](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-lifecycle-manager-extension) |
-| Works with | [cloudradial-v2-compliance-extension](https://github.com/cloudradial/Automations/tree/main/automationai/cloudradial-v2-compliance-extension) |
+| Works with | [Review Messy ScalePad Data Before You Migrate](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-alignment) |
+| Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync/src) |
 
 ## How it works
 
@@ -26,6 +26,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | File | Type | Role |
 |---|---|---|
 | [`scalepad-cloudradial-sync.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) | `automationsWorkflow` | Three steps: **Match companies by name** → **Migrate each company** (a For Each that runs every phase below for one company, in order) → **Migration report** (one report per company, written into its portal, plus a roll-up in the run output). |
+| [`src/`](src/) | Source | The PowerShell for each step and phase, the build script that assembles them into the `.yml`, and a mocked test harness. Partners don't need it; see [Changing the workflow](#changing-the-workflow). |
 
 ## What it moves
 
@@ -139,3 +140,26 @@ All optional. With none, every name-matched company is migrated in apply mode.
 **Flexible assets and paging (second pass):** the `assets` phase planned and created the ScalePad Assets type with its fields, then created a network device and a no-serial workstation as rows. With the type already present it added the missing fields, updated a changed row, and used the compatibility route when the native patch was refused. The software step read the list with `page_size` 100, against a mock that rejects anything larger.
 
 **First pass:** a seven-step chain run in plan and apply, with each step's output fed to the next as JSON: two pages of hardware (cursor followed), a matched device enriched (OS, CPU, RAM, purchase date → `manufacturedDate`), a desktop, a server (enclosure 80) and a Mac (platform macOS) created, a network device skipped, software written only to known devices and de-duplicated, one assessment converted to `.xlsx` (opened and checked in Excel, required columns, scoring and suffixes correct), an initiative card updated with budget and roadmap quarter, a contract card created, a deliverable PDF the upload route refused listed for manual upload, and the migration report written to the ScalePad Migration archive. With the archive write forced to fail, the report stays in the run output and is not written to the knowledge base. All steps parse after the round trip through YAML.
+
+## Changing the workflow
+
+`scalepad-cloudradial-sync.yml` is **generated** from [`src/`](src/). Don't edit the scripts inside the `.yml`; change the source and rebuild.
+
+| File | What |
+|---|---|
+| `COMMON.ps1` | Shared helpers, embedded in every step: ScalePad paging, CloudRadial API calls, connection-error retries. |
+| `1-resolve.ps1` | **Match companies by name.** |
+| `2c-cleanup.ps1`, `2-devices.ps1`, `2b-assets.ps1`, `2d-saas.ps1`, `3-software.ps1`, `4-assessments.ps1`, `5-roadmap.ps1`, `5b-insights.ps1`, `6-archive.ps1`, `6b-meetings.ps1`, `5c-followup.ps1` | One file per phase, run in order inside **Migrate each company**. |
+| `7-summary.ps1` | **Migration report.** |
+| `make-saas.js` | Generates `2d-saas.ps1` from `2b-assets.ps1`. Run it after changing `2b-assets.ps1`. |
+| `build-wf.js` | Assembles the `.yml`: the per-company loop, the per-phase re-run on connection errors, and checks on the result. |
+| `harness.ps1`, `test-flow.ps1` | Run the built steps against mocked ScalePad and CloudRadial APIs, in strict mode as on the runner. |
+
+From `src/`:
+
+1. `npm install` (installs js-yaml).
+2. `node make-saas.js` if you changed `2b-assets.ps1`.
+3. `node build-wf.js` rewrites `../scalepad-cloudradial-sync.yml`.
+4. `pwsh -File test-flow.ps1 -InputJson '{"mode":"plan"}'`, then with `"apply"`.
+
+The runner runs PowerShell steps under `Set-StrictMode -Version Latest`, so reading a property or key that doesn't exist throws. The harness does the same, so test there before importing.

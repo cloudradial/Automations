@@ -29,7 +29,7 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 
 | File | Type | Role |
 |---|---|---|
-| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`. |
+| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | The decision tracks, categories and card format. Slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.0. |
 | [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml) | `automationsWorkflow` | Runs the agent with its goal - one Agent node. Attach a Routine to it to run on a schedule. |
 
 ## Download & import
@@ -46,7 +46,11 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 
 - Reads **native endpoint fields** (age from manufacture date, warranty expiry, OS, Windows 11 readiness, SSD/HDD, RAM, server/VM flags) and routes each computer through first-match decision tracks.
 - Creates/updates **one card per (company, category)** via `cr_create_product` / `cr_patch_product`, reconciled by subject so re-runs update in place.
-- Writes plain-language card bodies grouped by priority tier (Critical/High/Medium/Low).
+- Writes a **client-readable card body**: an opening sentence with the count, **What we recommend**, each device under its tier (Critical / High / Medium / Low) with model, serial, age, warranty date, OS and the action, then a **Summary** of tier counts.
+- Adds an **internal note** to every card (not shown to clients): the company, how many computers were evaluated, and the tier counts on the card.
+- **Places cards on the Planner roadmap** by urgency when `scheduleOnRoadmap` is on (the default): Critical and High, Human review and Needs data go in the next quarter, Medium the one after, Low the third. If the Services extension rejects the roadmap fields, the card is written without them and the run reports `roadmapFieldsDropped`.
+- **Closes cards whose category is empty.** When no computer lands in a category any more, its card is marked **Completed** with a one-line note, not left open as a placeholder. If devices return to that category later, the card reopens (on the roadmap again when `scheduleOnRoadmap` is on).
+- **Critical stays visible.** Planner has no Critical priority, so a Critical card is stored as High, but its summary opens with "Critical:" and the body uses the Critical heading.
 - All decision logic is inline in the prompt, it does **not** call knowledge search or depend on grounding.
 
 ## Heads-up: this agent always writes
@@ -60,4 +64,5 @@ It has **no preview mode** (`dryRunDefault: false`) — every in-scope company w
 | `companyIds` | `1` | Companies to process, comma list (`1,4,7`) or blank for all. |
 | `plannerCategory` | `Efficiency` | Planner category name for the cards. |
 | `plannerProductCategoryId` | `7` | Planner category id. |
+| `scheduleOnRoadmap` | `true` | Put cards on the Planner roadmap by urgency. Set `false` to leave them Proposed and "Not scheduled". |
 | `defaultTargetDays` | `30` | Fallback target-date offset. |

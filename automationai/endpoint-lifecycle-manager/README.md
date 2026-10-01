@@ -61,6 +61,7 @@ Example: `{"companyIds": "1,4", "mode": "plan"}`
 ## What it does
 
 - Reads **native endpoint fields** (age from manufacture date, warranty expiry, OS, Windows 11 readiness, RAM, server and VM flags) and routes each computer through first-match decision tracks. Non-computers (no recognisable OS) are counted and skipped, and healthy computers aren't carded.
+- **Skips deleted companies.** The endpoint list can still return endpoints that belong to a deleted company, and cards can't be written to a company that no longer exists. Those endpoints are left out and counted as `orphanedEndpoints`, and each deleted company shows as one `skipped` result.
 - Keeps **one card per company and category**, matched by subject (`Endpoint Hardware Refresh - <Category>`) or the marker line in the body, so re-runs update in place. Other Planner cards are never touched.
 - Writes a **client-readable card**: an opening sentence with the count, **What we recommend**, each device under its tier (Critical / High / Medium / Low) with model, serial, age, warranty date, OS and the action, then a **Summary** of tier counts.
 - Adds an **internal note** to every card (not shown to clients): the company, how many computers were evaluated, and the tier counts on the card.

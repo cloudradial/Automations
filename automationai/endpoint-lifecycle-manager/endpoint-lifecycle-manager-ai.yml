@@ -1,0 +1,51 @@
+automationsWorkflow: 1
+name: Endpoint LifeCycle Manager (AI agent)
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 100
+      properties:
+        webhookEnabled: false
+    - id: node-agent
+      name: LifeCycle Review
+      type: agent
+      position:
+        x: 320
+        y: 100
+      properties:
+        # Runs the imported Endpoint LifeCycle Manager agent. Its systemPrompt carries the decision
+        # tracks, categories and card format; this goal starts the run. The agent takes no input -
+        # which companies to review is set by its companyIds variable.
+        agentSlug: endpoint-warranty-refresh-advisor-planner-cards
+        goal: |
+          Review the managed computers - workstations and servers - for every company in scope,
+          using only the CloudRadial endpoint data. Route each computer through your decision
+          tracks, then create or update one Planner card per company and refresh category, matched
+          by subject so re-runs update the existing card. Finish with your summary counts.
+        allowedExtensions:
+          - cloudradial-v2-endpoints
+          - cloudradial-v2-services
+        model: ""
+        timeoutSeconds: 1800
+        # false = each card create/update waits for approval in the Inbox. The agent always writes
+        # (no dry run), so set true only once you trust an unattended scheduled run.
+        autoApprove: false
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 540
+        y: 100
+  connections:
+    - source: start
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

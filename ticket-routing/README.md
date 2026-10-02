@@ -12,10 +12,13 @@ These links point at the `main` branch, so they always open the current version.
 |---|---|
 | View `ticket-routing.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ticket-routing.yml) |
 | Download `ticket-routing.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/ticket-routing.yml) |
-| View `ticket-skill-classifier.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ticket-skill-classifier.agent.yml) |
-| Download `ticket-skill-classifier.agent.yml` | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/ticket-skill-classifier.agent.yml) |
-| Routing table guide | [ROUTING-TABLE.md](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ROUTING-TABLE.md) |
-| Download `Test-RoutingTable.ps1` | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/Test-RoutingTable.ps1) |
+| Download `ticket-skill-classifier.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/ticket-skill-classifier.agent.yml) |
+| Download the **Ticket Routing: Engineers and Settings** KB article (paste into your portal) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/kb-articles/ticket-routing-engineers-and-settings.txt) |
+| Download the **Ticket Routing: Skills** KB article (paste into your portal) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/kb-articles/ticket-routing-skills.txt) |
+| Download `engineers-template.csv` (to build the table in Excel) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/engineers-template.csv) |
+| Download `skills-template.csv` | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/skills-template.csv) |
+| Download `Test-RoutingTable.ps1` (checks your table before you publish) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/Test-RoutingTable.ps1) |
+| Routing table guide (columns, settings, publishing) | [ROUTING-TABLE.md](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ROUTING-TABLE.md) |
 | All files in this automation | [automationai/ticket-routing](https://github.com/cloudradial/Automations/tree/main/automationai/ticket-routing) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/ticket-routing) |
 
@@ -47,12 +50,13 @@ Tie-break: least-open-tickets.
 
 | File | Type | Role |
 |---|---|---|
-| [`ticket-routing.yml`](ticket-routing.yml) | `automationsWorkflow` | The workflow: Read → Pick the skill (Agent node) → Find, pick, assign and note. **Generated** from `src/`. |
-| [`ticket-skill-classifier.agent.yml`](ticket-skill-classifier.agent.yml) | `automationsAgent` | The classifier the Agent node runs (slug `ticket-skill-classifier`). No extensions. |
-| [`ROUTING-TABLE.md`](ROUTING-TABLE.md) | Guide | How to fill in and publish the routing table, and every setting. |
-| [`skills-template.csv`](skills-template.csv), [`engineers-template.csv`](engineers-template.csv) | Templates | Starting points for the two tables. |
-| [`Test-RoutingTable.ps1`](Test-RoutingTable.ps1) | Script | Checks your table before you publish it, with the workflow's own parser. **Generated** from `src/`. |
-| [`src/`](src/) | Source | The step scripts, the PSA calls, the build script and the mock test harness. Edit these, not the generated files. |
+| [`ticket-routing.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ticket-routing.yml) | `automationsWorkflow` | The workflow: Read → Pick the skill (Agent node) → Find, pick, assign and note. **Generated** from `src/`. |
+| [`ticket-skill-classifier.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ticket-skill-classifier.agent.yml) | `automationsAgent` | The classifier the Agent node runs (slug `ticket-skill-classifier`). No extensions. |
+| [`ROUTING-TABLE.md`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ROUTING-TABLE.md) | Guide | How to fill in and publish the routing table, and every setting. |
+| [`kb-articles/`](https://github.com/cloudradial/Automations/tree/main/automationai/ticket-routing/kb-articles) | KB article templates | The two routing articles, ready to paste into your own company in the portal. **Generated** from the CSV templates. |
+| [`skills-template.csv`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/skills-template.csv), [`engineers-template.csv`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/engineers-template.csv) | Templates | Starting points for the two tables. |
+| [`Test-RoutingTable.ps1`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/Test-RoutingTable.ps1) | Script | Checks your table before you publish it, with the workflow's own parser. **Generated** from `src/`. |
+| [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/ticket-routing/src) | Source | The step scripts, the PSA calls, the build script and the mock test harness. Edit these, not the generated files. |
 
 ## Supported PSAs
 
@@ -71,10 +75,10 @@ The workflow calls each PSA's API directly from its script steps, using the **sa
 
 ## Install
 
-1. On **Agents → Custom → Import**, upload [`ticket-skill-classifier.agent.yml`](ticket-skill-classifier.agent.yml).
-2. On **Workflows → Import**, upload [`ticket-routing.yml`](ticket-routing.yml).
+1. On **Agents → Custom → Import**, upload [`ticket-skill-classifier.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ticket-skill-classifier.agent.yml).
+2. On **Workflows → Import**, upload [`ticket-routing.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ticket-routing.yml).
 3. Add the [secrets](#secrets) to your runner's Key Vault.
-4. Publish your routing table as two KB articles in your own (MSP) company. See [ROUTING-TABLE.md](ROUTING-TABLE.md), and check it first with `Test-RoutingTable.ps1`.
+4. Publish your routing table as two KB articles in your own (MSP) company. Start from the two [KB article templates](#files-always-the-latest-version) in the Files table: create each article with the subject shown, paste the file in as plain text, and replace the sample engineers and PSA ids with yours. See [ROUTING-TABLE.md](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ROUTING-TABLE.md), and check it first with `Test-RoutingTable.ps1`.
 5. **Publish** the workflow and **deploy** it to that runner.
 6. Turn on the webhook under **Properties → Webhook**, which mints the URL and secret, then redeploy.
 7. Wire the ServiceAI Action (below).
@@ -122,7 +126,7 @@ The explicit `confirm` false keeps it a preview even when `liveAssign` is on.
 | `skillsArticle` | `Ticket Routing: Skills` | Subject of the skills article |
 | `engineersArticle` | `Ticket Routing: Engineers and Settings` | Subject of the engineers and settings article |
 
-Routing settings (`tieBreak`, `respectMaxOpen`, `noMatch`, `fallbackEngineer`, `minConfidence`) live in the engineers article. See [ROUTING-TABLE.md](ROUTING-TABLE.md#settings).
+Routing settings (`tieBreak`, `respectMaxOpen`, `noMatch`, `fallbackEngineer`, `minConfidence`, `liveAssign`) live in the engineers article. See [ROUTING-TABLE.md](https://github.com/cloudradial/Automations/blob/main/automationai/ticket-routing/ROUTING-TABLE.md#settings).
 
 ## Secrets
 

@@ -112,4 +112,11 @@ const cli = read('Test-RoutingTable.cli.ps1').replace('#@@ROUTING_TABLE@@\n', ()
 if (cli.includes('@@ROUTING_TABLE@@')) throw new Error('marker not replaced');
 fs.writeFileSync(path.join(root, 'Test-RoutingTable.ps1'), '﻿' + cli.replace(/\n/g, '\r\n'));
 
+// The two KB article templates are the CSV templates plus the default settings, ready to paste.
+const csv = (f) => fs.readFileSync(path.join(root, f), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n').trimEnd() + '\n';
+const settings = ['tieBreak: least-open-tickets', 'respectMaxOpen: yes', 'noMatch: leave-unassigned', 'fallbackEngineer:', 'minConfidence: 0.7', 'liveAssign: no'];
+fs.mkdirSync(path.join(root, 'kb-articles'), { recursive: true });
+fs.writeFileSync(path.join(root, 'kb-articles', 'ticket-routing-engineers-and-settings.txt'), ['[Settings]', ...settings, '', '[Engineers]', ''].join('\n') + csv('engineers-template.csv'));
+fs.writeFileSync(path.join(root, 'kb-articles', 'ticket-routing-skills.txt'), '[Skills]\n' + csv('skills-template.csv'));
+
 console.log('ticket-routing.yml', out.length, 'bytes | Test-RoutingTable.ps1', cli.length, 'bytes');

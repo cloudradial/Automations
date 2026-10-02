@@ -273,6 +273,10 @@ ConvertTo-PastedHtml (@('[Skills]') + $skillsCsv) | Set-Content (Join-Path $tmp 
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $tmp 'eng.html')','$(Join-Path $tmp 'skills.html')'; exit `$LASTEXITCODE" 2>&1
 Check 'validator reads article HTML and fails a bad setting' ($LASTEXITCODE -eq 1 -and ($v -join "`n") -match "tieBreak 'busiest'" -and ($v -join "`n") -match 'Engineers named: 5; engineers table: 5') ($v -join ' / ')
 
+$kb = Join-Path $here '..\kb-articles'
+$v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $kb 'ticket-routing-engineers-and-settings.txt')','$(Join-Path $kb 'ticket-routing-skills.txt')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1
+Check 'shipped KB article templates pass the validator' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Engineers named: 3; engineers table: 3' -and ($v -join "`n") -match 'liveAssign=no') ($v -join ' / ')
+
 Remove-Item -Recurse -Force $tmp
 "`n$global:Pass passed, $global:Fail failed"
 if ($global:Fail) { exit 1 }

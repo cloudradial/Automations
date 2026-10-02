@@ -15,9 +15,11 @@ If the AI isn't confident enough, or no engineer matches, the **noMatch** settin
 
 | File | What it is |
 |---|---|
-| [`skills-template.csv`](skills-template.csv) | Which engineer does which skill and role. One row per skill, role and engineer. |
-| [`engineers-template.csv`](engineers-template.csv) | One row per engineer, with the ids your PSA uses for them. |
-| [`Test-RoutingTable.ps1`](Test-RoutingTable.ps1) | Checks your table before you publish it. It's generated from the workflow's own parser, so it reads the table exactly the way the workflow does. |
+| [`kb-articles/ticket-routing-engineers-and-settings.txt`](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/kb-articles/ticket-routing-engineers-and-settings.txt) | The **Ticket Routing: Engineers and Settings** article, ready to paste: settings, then the engineers table. |
+| [`kb-articles/ticket-routing-skills.txt`](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/kb-articles/ticket-routing-skills.txt) | The **Ticket Routing: Skills** article, ready to paste. |
+| [`skills-template.csv`](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/skills-template.csv) | Which engineer does which skill and role. One row per skill, role and engineer. |
+| [`engineers-template.csv`](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/engineers-template.csv) | One row per engineer, with the ids your PSA uses for them. |
+| [`Test-RoutingTable.ps1`](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/ticket-routing/Test-RoutingTable.ps1) | Checks your table before you publish it. It's generated from the workflow's own parser, so it reads the table exactly the way the workflow does. |
 
 ## Skills table
 
@@ -75,7 +77,7 @@ Put these at the top of the engineers article, one per line, under a `[Settings]
 
 ## Publishing it as KB articles
 
-Create two KB articles in **your own (MSP) company** in CloudRadial:
+Create two KB articles in **your own (MSP) company** in CloudRadial. The quickest start is to paste the two files in [`kb-articles/`](https://github.com/cloudradial/Automations/tree/main/automationai/ticket-routing/kb-articles) and edit them. They look like this:
 
 **Ticket Routing: Engineers and Settings**
 

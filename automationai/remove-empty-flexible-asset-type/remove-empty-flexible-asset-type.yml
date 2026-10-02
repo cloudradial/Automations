@@ -1,0 +1,113 @@
+automationsWorkflow: 1
+name: Remove Empty Flexible Asset Type
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        y: 100
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Run inputs
+      type: powershell-script
+      position:
+        x: 300
+        y: 100
+      properties:
+        script: |
+          # === NODE: Run inputs ===
+          # Reads the run input and writes the agent's request. The CloudRadial portal has no way to
+          # delete a flexible asset type, so this workflow asks the CloudRadial UCP Assistant to do it
+          # through the API - only when no company has a row in the type.
+          #   typeName - the flexible asset type to remove (default "ScalePad Assets", the single type
+          #              older ScalePad to CloudRadial Sync versions wrote to)
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          $in = $null
+          try { $in = Get-NodeInput } catch { }
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+
+          $typeName = ([string](Get-Prop $in 'typeName')).Trim()
+          if (-not $typeName) { $typeName = 'ScalePad Assets' }
+          if ($typeName.Length -gt 200 -or $typeName -match "[`r`n]") { throw "typeName must be a single flexible asset type name (200 characters or fewer)." }
+          $quoted = $typeName.Replace("'", "''")
+
+          $request = "Remove the CloudRadial flexible asset type named exactly '$typeName' (OData filter: name eq '$quoted'), but only if no company has any flexible asset in it. Follow the steps in your goal."
+          Set-NodeOutput ([ordered]@{
+              request = $request; typeName = $typeName
+              message = "Run inputs: remove the flexible asset type '$typeName' if it is empty."
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        # No binding: this step receives the run's Trigger input (empty is fine - the default applies).
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {"typeName": "ScalePad Assets"}
+    - id: node-agent
+      name: Remove the type if empty
+      type: agent
+      position:
+        x: 520
+        y: 100
+      properties:
+        # Runs the CloudRadial UCP Assistant (import cloudradial-ucp/ 0.1.4 or later first - it needs
+        # the cloudradial-v2-compliance extension). The goal limits this run to one delete, and only
+        # of an empty type; autoApprove false makes that delete wait in the Inbox for approval.
+        agentSlug: cloudradial-ucp-assistant
+        goal: |
+          Write one short sentence before each tool call, and never send an empty message.
+
+          Remove ONE CloudRadial flexible asset type, named exactly as in the request, and only if it
+          is empty. Use only the flexible asset tools (cr_list_flexible_asset_type,
+          cr_list_flexible_asset, cr_list_flexible_asset_field, cr_delete_flexible_asset_type). Never
+          call any other create, update, patch or delete tool, and never delete a flexible asset,
+          a field, or a different type.
+
+          1. Find the type: cr_list_flexible_asset_type with the OData filter from the request
+             (name eq '...'). If there is no match, stop and say there is nothing to remove. If
+             there is more than one match, stop and list their ids - do not choose one.
+          2. Check it is empty in EVERY company: cr_list_flexible_asset with filter
+             flexibleAssetTypeId eq <id> and select id,companyId. If it returns any row, stop: do
+             not delete. Report how many rows each companyId still has, and say to run the ScalePad
+             to CloudRadial Sync for those companies first (it moves rows to a type per kind of
+             device), then run this workflow again.
+          3. Only when step 2 returned no rows: call cr_delete_flexible_asset_type with that id.
+             If the delete is refused, report the exact error and stop - do not try another way.
+          4. After a delete, call cr_list_flexible_asset_type with the same filter once more to
+             confirm the type is gone.
+
+          Finish with a plain answer: the type name and id, the rows found, and whether it was
+          deleted, would be deleted (dry run), was left in place, or the delete failed and why.
+          Put the delete (done or proposed) in actions.
+        allowedExtensions:
+          - cloudradial-v2-compliance
+        model: ""
+        timeoutSeconds: 600
+        # false = the delete waits in the Inbox until you approve it.
+        autoApprove: false
+        # Pre-bound to the Run inputs step - nothing to map after import.
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}"}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 740
+        y: 100
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

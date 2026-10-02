@@ -21,7 +21,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 |---|---|
 | [`add-cc-to-ticket/`](add-cc-to-ticket/) | Workflow |
 | [`certificate-expiration-report/`](certificate-expiration-report/) | Workflow |
-| [`cloudradial-ucp/`](cloudradial-ucp/) | Agent (run by Portal Lookup) |
+| [`cloudradial-ucp/`](cloudradial-ucp/) | Agent (run by Portal Lookup and Remove Empty Flexible Asset Type) |
 | [`deliver-result/`](deliver-result/) | Agent (a reusable delivery step other workflows call) |
 | [`domain-expiration-report/`](domain-expiration-report/) | Workflow |
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Workflow (no AI) + optional agent and agent workflow |
@@ -33,6 +33,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`password-reset-triage/`](password-reset-triage/) | Workflow (ServiceAI triage) |
 | [`patch-compliance/`](patch-compliance/) | Workflow (runs the RMM Agent) |
 | [`portal-lookup/`](portal-lookup/) | Workflow (runs the UCP Assistant) |
+| [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Workflow (runs the UCP Assistant; deletes one empty flexible asset type) |
 | [`rmm-agent/`](rmm-agent/) | Agent (run by Patch Compliance and RMM Auto-Remediation) |
 | [`rmm-auto-remediation/`](rmm-auto-remediation/) | Workflow (runs the RMM Agent) |
 | [`scalepad-cloudradial-alignment/`](scalepad-cloudradial-alignment/) | Agent + workflow + Knowledge (optional review before a Sync) |

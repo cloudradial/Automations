@@ -31,7 +31,7 @@ It runs the [CloudRadial UCP Assistant](../cloudradial-ucp/) agent with a read-o
 ## Install / run
 
 1. Import the agent first: [`cloudradial-ucp/`](../cloudradial-ucp/) on **Agents → Custom → Import** (slug `cloudradial-ucp-assistant`).
-2. Make sure the first-party extensions `cloudradial-v2-companies` (which also carries the user tools) and `cloudradial-v2-endpoints` are installed and connected.
+2. Make sure the first-party extensions `cloudradial-v2-companies` (which also carries the user tools) and `cloudradial-v2-endpoints` are installed and connected. The agent (0.1.4 and later) also requires `cloudradial-v2-compliance`, which this read-only briefing doesn't use.
 3. On **Workflows → Import**, upload `portal-lookup.yml`, then **Publish** and **deploy** it to your runner.
 4. Run it from **Test** or the Run dialog. Leave the Trigger input empty for a portal-wide snapshot, or send one of the inputs below.
 

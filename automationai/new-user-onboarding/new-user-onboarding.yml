@@ -36,7 +36,7 @@ definition:
               companyTenantId = 'Microsoft 365 tenant'; requestedBy = 'Requested by (email)'; requestedByName = 'Requested by'
               requestedByOfficeId = 'Requester Microsoft 365 id'; requestedByPsaId = 'Requester PSA contact'; requestedByIsAdmin = 'Requester is a portal admin'
               firstName = 'First name'; lastName = 'Last name'; department = 'Department'; jobTitle = 'Job title'
-              officeLocation = 'Office location'; startDate = 'Start date'; mirrorFromUser = 'Mirror access from'
+              managerEmail = 'Manager'; officeLocation = 'Office location'; startDate = 'Start date'; mirrorFromUser = 'Mirror access from'
               software = 'Software'; needsM365License = 'Needs a Microsoft 365 licence'; m365License = 'Microsoft 365 licence'
               securityGroups = 'Security groups'; vpnRequired = 'VPN required'; otherAdditions = 'Other access'
               needsEmail = 'Needs an email account'; email = 'Email address'; mailGroups = 'Mail groups'
@@ -56,9 +56,13 @@ definition:
           $briefing = "New starter request from the CloudRadial 'Add a New User' form.`n" + ($lines -join "`n") +
               $(if ($missing.Count) { "`nNot answered: $($missing -join ', ')." } else { '' })
 
+          # confirm (or approvedToWrite) must be true for the ticket note to be posted. psa overrides the PSA-Type secret.
+          $confirm = @('true', 'yes', 'y', '1') -contains ([string]$(if ($null -ne (Get-Prop $in 'confirm')) { Get-Prop $in 'confirm' } else { Get-Prop $in 'approvedToWrite' })).Trim().ToLowerInvariant()
+          $psa = ([string](Get-Prop $in 'psa')).Trim(); if ($psa.StartsWith('@')) { $psa = '' }
+
           Set-NodeOutput ([ordered]@{
               briefing = $briefing; starter = $name; startDate = [string]$fields['startDate']; ticketId = [string]$fields['ticketId']
-              hasStartDate = [bool]$fields['startDate']; fields = $fields
+              hasStartDate = [bool]$fields['startDate']; fields = $fields; confirm = $confirm; psa = $psa
               message = "Request read for $(if ($name) { $name } else { 'an unnamed starter' })$(if (-not $fields['startDate']) { ' - no start date, so intake will report it as blocked' })."
           })
         timeoutSeconds: 60
@@ -67,9 +71,11 @@ definition:
         parameters: []
         aiExtensions: []
         testInput: |-
-          {"source":"cloudradial-form","form":"Add a New User","ticketId":"12345","companyName":"Contoso","requestedBy":"manager@contoso.com","requestedByName":"Pat Manager","requestedByIsAdmin":"true","firstName":"Sam","lastName":"Starter","department":"Sales","jobTitle":"Account Executive","startDate":"2026-10-12","mirrorFromUser":"alex@contoso.com","needsM365License":"Yes","needsEmail":"Yes","computerSource":"New","newComputerType":"Laptop","deskPhone":"No"}
+          {"source":"cloudradial-form","form":"Add a New User","ticketId":"12345","companyName":"Contoso","requestedBy":"manager@contoso.com","requestedByName":"Pat Manager","requestedByIsAdmin":"true","firstName":"Sam","lastName":"Starter","department":"Sales","jobTitle":"Account Executive","managerEmail":"manager@contoso.com","startDate":"2026-10-12","mirrorFromUser":"alex@contoso.com","needsM365License":"Yes","needsEmail":"Yes","computerSource":"New","newComputerType":"Laptop","deskPhone":"No"}
     # --- Stages: each Agent node runs the new-user-onboarding agent for one stage. It reads the
     # --- briefing and the previous stage's output (context), and stops early when a starter is blocked.
+    # --- No stage calls the PSA. The last step (Note the ticket) writes to the PSA from PowerShell,
+    # --- so the same workflow works with ConnectWise, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
     - id: node-intake
       name: Intake
       type: agent
@@ -81,9 +87,11 @@ definition:
         goal: |
           Stage: intake. From the briefing, establish each starter's full name, start date, role,
           department, company, who raised the request, whose access to mirror, and the ticket number.
-          Check the requester is approved to request starters for this client. If there's no start
-          date, report the starter as blocked and go no further.
-        allowedExtensions: [connectwise-manage, cloudradial-v2-companies, microsoft-entra-id]
+          Check the requester is approved to request starters for this client, from the requester
+          fields in the briefing (CloudRadial sets them, so they can't be faked by a form answer) and
+          the client's CloudRadial users. If there's no start date, report the starter as blocked and
+          go no further.
+        allowedExtensions: [cloudradial-v2-companies, microsoft-entra-id]
         model: ""
         timeoutSeconds: 900
         autoApprove: false
@@ -98,9 +106,11 @@ definition:
         agentSlug: new-user-onboarding
         goal: |
           Stage: procurement. Using the intake result in your context, work out what has to be
-          bought (computer, phone, software, other equipment) and raise quote requests - never buy.
+          bought (computer, phone, software, other equipment) - never buy. You have no tools in this
+          stage. List each quote request under the starter's awaitingHuman as "Quote: <item> - <why
+          and any spec from the form>". The last step adds them to the ticket for whoever orders.
           If intake reported the starter blocked, do nothing and pass the block on.
-        allowedExtensions: [connectwise-manage]
+        allowedExtensions: []
         model: ""
         timeoutSeconds: 900
         autoApprove: false
@@ -136,7 +146,7 @@ definition:
           access plan in your context. Hand the first credential over only through the configured
           1Password vault - stop rather than send it by email or chat. Never change an existing user.
           If an earlier stage reported the starter blocked, do nothing and pass the block on.
-        allowedExtensions: [microsoft-entra-id, microsoft-365, 1password-business, connectwise-manage]
+        allowedExtensions: [microsoft-entra-id, microsoft-365, 1password-business]
         model: ""
         timeoutSeconds: 1800
         # false = every account, licence and group change waits for approval in the Inbox.
@@ -169,19 +179,245 @@ definition:
         agentSlug: new-user-onboarding
         goal: |
           Stage: verify. Check what actually exists now - account, licence, mailbox, groups, portal
-          user, courses, quote tickets - and report each starter as ready or not, with what's done,
-          what's waiting on a human, and what was skipped. Report what you verified, not what was
-          attempted. Add a note to the ticket with the result.
-        allowedExtensions: [microsoft-entra-id, microsoft-365, cloudradial-v2-companies, cloudradial-v2-training, connectwise-manage, microsoft-teams]
+          user, courses - and report each starter as ready or not, with what's done, what's waiting
+          on a human (keep the "Quote:" items from procurement), and what was skipped. Report what you
+          verified, not what was attempted. Don't write to the ticket: the next step posts your
+          result to it.
+        allowedExtensions: [microsoft-entra-id, microsoft-365, cloudradial-v2-companies, cloudradial-v2-training, microsoft-teams]
         model: ""
         timeoutSeconds: 900
         autoApprove: false
         inputBindingsJson: '{"stage":"verify","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-portal.output }}"}'
+    - id: node-note
+      name: Note the ticket
+      type: powershell-script
+      position:
+        x: 1540
+        y: 200
+      properties:
+        script: |
+          # === NODE: Note the ticket ===
+          # Turns the Verify result (plus quote requests and anything needing approval) into one
+          # internal note, and posts it to the form's ticket in the PSA named by the psa input or
+          # the PSA-Type secret. Posts only when the run input had confirm true; otherwise it just
+          # returns internal_note.
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function List { param($v) return @($v | Where-Object { $null -ne $_ -and [string]$_ -ne '' }) }
+          # An Agent node's output may be the result object, JSON text, or the result wrapped in
+          # output/result/response. Unwrap until it looks like the agent's output schema.
+          function Get-AgentResult { param($v)
+              for ($i = 0; $i -lt 4; $i++) {
+                  if ($v -is [string]) { $t = $v.Trim(); if ($t.StartsWith('{')) { try { $v = $t | ConvertFrom-Json } catch { return $v } } else { return $v } }
+                  if ($null -eq $v) { return $null }
+                  if ($null -ne (Get-Prop $v 'starters') -or $null -ne (Get-Prop $v 'summary')) { return $v }
+                  $next = $null; foreach ($k in @('output', 'result', 'response')) { $x = Get-Prop $v $k; if ($null -ne $x) { $next = $x; break } }
+                  if ($null -eq $next) { return $v }
+                  $v = $next
+              }
+              return $v
+          }
+
+          # >>> src/psa.ps1 (generated by src/build.js; edit the source, not this block)
+          # ---------- PSA calls (see reference/build-kit/PSA.md for the source of each one) ----------
+          # Taken from Ticket Routing's psa.ps1, trimmed to what onboarding needs: connect and add an
+          # internal note. Uses the same Key Vault secret names as each PSA's catalog extension.
+          function Get-PsaSecret { param([string]$n) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue }
+          function Get-PsaProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function Get-PsaPath { param($o, [string]$path) foreach ($n in $path -split '\.') { $o = Get-PsaProp $o $n; if ($null -eq $o) { return $null } }; return $o }
+
+          $script:PsaSecrets = @{
+              connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')
+              autotask    = @('Autotask-ApiUrl', 'Autotask-ApiIntegrationCode', 'Autotask-Username', 'Autotask-Secret')
+              halopsa     = @('Halo-ApiUrl', 'Halo-ClientId', 'Halo-ClientSecret')
+              kaseyabms   = @('KaseyaBMS-ApiUrl', 'KaseyaBMS-Username', 'KaseyaBMS-Password', 'KaseyaBMS-CompanyName')
+              syncro      = @('Syncro-ApiUrl', 'Syncro-ApiKey')
+              zendesk     = @('Zendesk-BaseUrl', 'Zendesk-Email', 'Zendesk-ApiToken')
+          }
+          $script:PsaConn = $null
+          $script:AtPicklists = $null
+
+          # Which PSA: the run's psa input, then the PSA-Type secret, then ConnectWise when its secrets are
+          # set (so runners set up before PSA-Type existed keep working). '' means none is configured.
+          function Get-PsaType {
+              param([string]$Requested)
+              $v = $Requested; if ([string]::IsNullOrWhiteSpace($v) -or $v.StartsWith('@')) { $v = Get-PsaSecret 'PSA-Type' }
+              if ([string]::IsNullOrWhiteSpace($v)) { if (Get-PsaSecret 'CW-ApiUrl') { return 'connectwise' }; return '' }
+              $v = $v.Trim().ToLowerInvariant()
+              $alias = @{ 'cw' = 'connectwise'; 'connectwise-manage' = 'connectwise'; 'connectwise psa' = 'connectwise'; 'autotask-psa' = 'autotask'; 'halo' = 'halopsa'; 'halo-psa' = 'halopsa'; 'kaseya' = 'kaseyabms'; 'kaseya-bms' = 'kaseyabms'; 'zendesk-ticketing' = 'zendesk' }
+              if ($alias.ContainsKey($v)) { $v = $alias[$v] }
+              if (-not $script:PsaSecrets.ContainsKey($v)) { throw "PSA '$v' isn't supported. Use one of: $(($script:PsaSecrets.Keys | Sort-Object) -join ', ')." }
+              return $v
+          }
+
+          function Connect-Psa {
+              param([string]$Psa)
+              if (-not $script:PsaSecrets.ContainsKey($Psa)) { throw "PSA '$Psa' isn't one of: $(($script:PsaSecrets.Keys | Sort-Object) -join ', ')." }
+              $v = @{}; $missing = @()
+              foreach ($n in $script:PsaSecrets[$Psa]) { $v[$n] = Get-PsaSecret $n; if ([string]::IsNullOrWhiteSpace($v[$n])) { $missing += $n } }
+              if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+              $json = 'application/json'
+              switch ($Psa) {
+                  'connectwise' {
+                      $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['CW-CompanyID'])+$($v['CW-PublicKey']):$($v['CW-PrivateKey'])"))
+                      $c = @{ Base = $v['CW-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Basic $b"; clientId = $v['CW-ClientId']; Accept = $json } }
+                  }
+                  'autotask' {
+                      $c = @{ Base = ($v['Autotask-ApiUrl'].TrimEnd('/') -replace '/atservicesrest/v1\.0$', '') + '/atservicesrest/v1.0'
+                          Headers = @{ ApiIntegrationCode = $v['Autotask-ApiIntegrationCode']; UserName = $v['Autotask-Username']; Secret = $v['Autotask-Secret']; Accept = $json } }
+                  }
+                  'halopsa' {
+                      $base = $v['Halo-ApiUrl'].TrimEnd('/') -replace '/api$', ''
+                      $form = "grant_type=client_credentials&client_id=$([uri]::EscapeDataString($v['Halo-ClientId']))&client_secret=$([uri]::EscapeDataString($v['Halo-ClientSecret']))&scope=all"
+                      $tok = $null
+                      try { $tok = Invoke-RestMethod -Method POST -Uri "$base/auth/token" -Body $form -ContentType 'application/x-www-form-urlencoded' }
+                      catch {
+                          # Some instances run a separate auth server; /api/authinfo names it.
+                          $info = Invoke-RestMethod -Method GET -Uri "$base/api/authinfo"
+                          $authUrl = [string](Get-PsaProp $info 'auth_url'); if (-not $authUrl) { throw }
+                          $tok = Invoke-RestMethod -Method POST -Uri "$($authUrl.TrimEnd('/'))/token" -Body $form -ContentType 'application/x-www-form-urlencoded'
+                      }
+                      $c = @{ Base = "$base/api"; Headers = @{ Authorization = "Bearer $(Get-PsaProp $tok 'access_token')"; Accept = $json } }
+                  }
+                  'kaseyabms' {
+                      $base = $v['KaseyaBMS-ApiUrl'].TrimEnd('/')
+                      $r = Invoke-RestMethod -Method POST -Uri "$base/v2/security/authenticate" -Form @{ UserName = $v['KaseyaBMS-Username']; Password = $v['KaseyaBMS-Password']; Tenant = $v['KaseyaBMS-CompanyName']; GrantType = 'password' }
+                      $token = Get-PsaPath $r 'Result.AccessToken'; if (-not $token) { $token = Get-PsaPath $r 'result.accessToken' }
+                      if (-not $token) { throw 'Kaseya BMS sign-in returned no Result.AccessToken. Check the KaseyaBMS-* secrets.' }
+                      $c = @{ Base = "$base/v2"; Headers = @{ Authorization = "Bearer $token"; Accept = $json } }
+                  }
+                  'syncro' { $c = @{ Base = $v['Syncro-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Bearer $($v['Syncro-ApiKey'])"; Accept = $json } } }
+                  'zendesk' {
+                      $base = $v['Zendesk-BaseUrl'].TrimEnd('/'); if ($base -notmatch '/api/v2$') { $base += '/api/v2' }
+                      $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['Zendesk-Email'])/token:$($v['Zendesk-ApiToken'])"))
+                      $c = @{ Base = $base; Headers = @{ Authorization = "Basic $b"; Accept = $json } }
+                  }
+              }
+              $c.Psa = $Psa
+              $script:PsaConn = $c
+              return $c
+          }
+
+          function Invoke-Psa {
+              param([string]$Method, [string]$Path, $Body = $null)
+              $p = @{ Method = $Method; Uri = "$($script:PsaConn.Base)$Path"; Headers = $script:PsaConn.Headers }
+              if ($null -ne $Body) { $p.Body = ($Body | ConvertTo-Json -Depth 10 -Compress -AsArray:($Body -is [array])); $p.ContentType = 'application/json' }
+              return Invoke-RestMethod @p
+          }
+
+          # Autotask note picklists are per tenant: match on the label, never a hard-coded number.
+          function Get-AtPicklist {
+              param([string]$Entity, [string]$Field)
+              if ($null -eq $script:AtPicklists) { $script:AtPicklists = @{} }
+              if (-not $script:AtPicklists.ContainsKey($Entity)) { $script:AtPicklists[$Entity] = @(Get-PsaProp (Invoke-Psa GET "/$Entity/entityInformation/fields") 'fields') }
+              $f = @($script:AtPicklists[$Entity] | Where-Object { [string](Get-PsaProp $_ 'name') -eq $Field }) | Select-Object -First 1
+              return @(Get-PsaProp $f 'picklistValues' | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'isActive') -ne $false })
+          }
+          function Select-AtValue {
+              param($Values, [string[]]$Patterns)
+              foreach ($p in $Patterns) {
+                  $hit = @($Values | Where-Object { [string](Get-PsaProp $_ 'label') -match $p }) | Select-Object -First 1
+                  if ($hit) { return (Get-PsaProp $hit 'value') }
+              }
+              return $null
+          }
+
+          # Adds an internal (technician-only) note. Throws when the PSA rejects it.
+          function Add-PsaNote {
+              param([string]$Id, [string]$Text, [string]$Title = 'Note')
+              switch ($script:PsaConn.Psa) {
+                  'connectwise' { $null = Invoke-Psa POST "/service/tickets/$Id/notes" @{ text = $Text; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false } }
+                  'autotask' {
+                      $pub = Get-PsaSecret 'Autotask-NotePublishId'
+                      if (-not $pub) { $pub = Select-AtValue (Get-AtPicklist 'TicketNotes' 'publish') @('^Internal Only$', 'Internal') }
+                      $type = Get-PsaSecret 'Autotask-NoteTypeId'
+                      if (-not $type) { $vals = @(Get-AtPicklist 'TicketNotes' 'noteType' | Where-Object { [string](Get-PsaProp $_ 'value') -ne '13' -and [string](Get-PsaProp $_ 'label') -notmatch 'Workflow' }); $type = Select-AtValue $vals @('Internal', 'Task Detail', 'Detail', '.') }
+                      if ($null -eq $pub -or $null -eq $type) { throw 'Could not find the Autotask note publish and type values. Set the Autotask-NotePublishId and Autotask-NoteTypeId secrets.' }
+                      $null = Invoke-Psa POST "/Tickets/$Id/Notes" @{ ticketID = [long]$Id; title = $Title; description = $Text; noteType = [int]$type; publish = [int]$pub }
+                  }
+                  'halopsa' {
+                      $outcome = Get-PsaSecret 'Halo-NoteOutcomeId'; if (-not $outcome) { $outcome = 7 }
+                      $null = Invoke-Psa POST '/Actions' @(@{ ticket_id = [long]$Id; note = $Text; hiddenfromuser = $true; outcome_id = [int]$outcome })
+                  }
+                  'kaseyabms' {
+                      $type = Get-PsaSecret 'KaseyaBMS-NoteTypeId'
+                      if (-not $type) { throw 'Kaseya BMS notes need a note type id. Set the KaseyaBMS-NoteTypeId secret.' }
+                      $null = Invoke-Psa POST "/servicedesk/tickets/$Id/notes" @{ Details = $Text; IsInternal = $true; NoteDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); TypeId = [int]$type }
+                  }
+                  'syncro' { $null = Invoke-Psa POST "/tickets/$Id/comment" @{ subject = $Title; body = $Text; hidden = $true; do_not_email = $true } }
+                  'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ comment = @{ body = $Text; public = $false } } } }
+              }
+          }
+
+          # Display names for messages.
+          $script:PsaNames = @{ connectwise = 'ConnectWise'; autotask = 'Autotask'; halopsa = 'HaloPSA'; kaseyabms = 'Kaseya BMS'; syncro = 'Syncro'; zendesk = 'Zendesk' }
+          # <<< src/psa.ps1
+
+          $in = Get-NodeInput
+          $req = Get-Prop $in 'request'
+          $verify = Get-AgentResult (Get-Prop $in 'verify')
+          $access = Get-AgentResult (Get-Prop $in 'access')
+          $ticketId = [string](Get-Prop $req 'ticketId')
+          $confirm = [bool](Get-Prop $req 'confirm')
+          $warnings = @()
+
+          $lines = @("New user onboarding (agent workflow) for $(if ([string](Get-Prop $req 'starter')) { Get-Prop $req 'starter' } else { 'the new starter' }).", "Run: $((Get-Date).ToString('yyyy-MM-dd HH:mm K'))")
+          if ($verify -is [string]) { $lines += ''; $lines += $verify }
+          elseif ($null -eq $verify) { $lines += ''; $lines += 'The Verify stage returned nothing, so the result is unknown. Check the run.' }
+          else {
+              if ([string](Get-Prop $verify 'summary')) { $lines += ''; $lines += [string](Get-Prop $verify 'summary') }
+              foreach ($st in @(List (Get-Prop $verify 'starters'))) {
+                  $lines += ''; $lines += "$(Get-Prop $st 'name'): $(if ([bool](Get-Prop $st 'ready')) { 'ready' } else { 'not ready yet' })$(if ([string](Get-Prop $st 'startDate')) { " (starts $(Get-Prop $st 'startDate'))" })"
+                  foreach ($sec in @(@('done', 'Done'), @('awaitingHuman', 'Waiting on a person'), @('skipped', 'Skipped'))) {
+                      $items = @(List (Get-Prop $st $sec[0])); if ($items.Count) { $lines += "$($sec[1]):"; $lines += @($items | ForEach-Object { " - $_" }) }
+                  }
+              }
+              $blocked = @(List (Get-Prop $verify 'blocked')); if ($blocked.Count) { $lines += ''; $lines += 'Blocked:'; $lines += @($blocked | ForEach-Object { " - $_" }) }
+          }
+          # needsApproval: from Verify, else from the access plan (Verify may not repeat it).
+          $approve = @(); foreach ($src in @($verify, $access)) { if ($null -ne $src -and $src -isnot [string]) { $approve = @(List (Get-Prop $src 'needsApproval')); if ($approve.Count) { break } } }
+          if ($approve.Count) {
+              $lines += ''; $lines += 'Needs approval by name before anyone adds it:'
+              $lines += @($approve | ForEach-Object { if ($_ -is [string]) { " - $_" } else { " - $(Get-Prop $_ 'starter'): $(Get-Prop $_ 'item') (held by $(Get-Prop $_ 'heldBy'); $(Get-Prop $_ 'whyFlagged'))" } })
+          }
+          $internal = $lines -join "`n"
+
+          $posted = $false; $psaName = ''
+          if (-not $confirm) { $warnings += 'Preview only (confirm was not true), so the note was not posted.' }
+          elseif ($ticketId -notmatch '^\d+$') { $warnings += 'The request has no ticket id, so the note was not posted. Paste internal_note into the ticket.' }
+          else {
+              $psaType = ''; $psaErr = ''
+              try { $psaType = Get-PsaType ([string](Get-Prop $req 'psa')) } catch { $psaErr = $_.Exception.Message }
+              if ($psaErr) { $warnings += "$psaErr The note was not posted to ticket $ticketId." }
+              elseif ($psaType -eq '') { $warnings += "No PSA is set up (add the PSA-Type secret and that PSA's secrets), so the note was not posted to ticket $ticketId." }
+              else {
+                  $psaName = $script:PsaNames[$psaType]
+                  try { $null = Connect-Psa $psaType; Add-PsaNote $ticketId $internal -Title 'New user onboarding'; $posted = $true }
+                  catch { $warnings += "Couldn't post the note to $psaName ticket ${ticketId}: $($_.Exception.Message)" }
+              }
+          }
+
+          Set-NodeOutput ([ordered]@{
+              status = $(if ($posted) { 'posted' } elseif (-not $confirm) { 'preview' } else { 'not_posted' })
+              ticket_id = $ticketId; psa = $psaName; internal_note = $internal; warnings = $warnings
+              message = $(if ($posted) { "Posted the onboarding result to $psaName ticket $ticketId." } else { "The onboarding result wasn't posted to the ticket: $($warnings -join ' ')" })
+          })
+        timeoutSeconds: 300
+        retryCount: 0
+        parameters:
+          - name: request
+            expression: '{{ nodes.node-inputs.output }}'
+          - name: access
+            expression: '{{ nodes.node-access.output }}'
+          - name: verify
+            expression: '{{ nodes.node-verify.output }}'
+        aiExtensions: []
     - id: end
       name: End
       type: end
       position:
-        x: 1540
+        x: 1720
         y: 200
   connections:
     - source: start
@@ -206,6 +442,9 @@ definition:
       target: node-verify
       sourceHandle: null
     - source: node-verify
+      target: node-note
+      sourceHandle: null
+    - source: node-note
       target: end
       sourceHandle: null
   startActivityId: start

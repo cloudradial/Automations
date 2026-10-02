@@ -11,7 +11,7 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 1. Gets a Microsoft Graph app-only token for the **client's** tenant.
 2. Reads `GET /security/secureScores?$top=1` and every `secureScoreControlProfiles` (paged), dropping deprecated controls.
 3. Maps each control to an assessment question (Compliant when its current score meets its max), sorted by category then rank.
-4. Skips if an assessment with the same title already exists for the company, then **`POST /v2/assessment`** → builds the xlsx in memory → **`POST /v2/assessment/upload`** (multipart).
+4. Skips if an assessment with the same title already exists for the company. Otherwise it builds the xlsx in memory and sends it to **`POST /v2/assessment/upload`** (multipart) with `assessmentId` 0, which creates the assessment. It then finds the new `assessmentId` by title.
 
 ## Install / run
 
@@ -29,11 +29,35 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 
 - `companyId` — the CloudRadial company the assessment is created under (required).
 - `tenantId` — the **client's** Entra tenant id to pull Secure Score from (required).
-- `assessmentTitle` — optional; the date is appended, and that title is the idempotency key.
+- `assessmentTitle` — optional; ` - M/d/yy` is appended (the portal's run naming, e.g. `Microsoft Secure Score - 10/2/26`), and that title is the idempotency key.
 - `mode` — `apply` (default) writes; `plan` previews the counts without creating anything.
 
 ## Notes
 
-- **Idempotent by title:** a same-titled assessment for the company is skipped, so re-runs don't duplicate. (Change `assessmentTitle` for a fresh snapshot.)
-- The `POST /v2/assessment` create endpoint is undocumented-but-functional; `POST /v2/assessment/upload` is the multipart xlsx import. Both are exercised here directly — the agent-style `cloudradial-v2-compliance` extension (0.2.2) wraps the create for other uses, but the upload is file-based so this workflow does it in PowerShell.
+- **Idempotent by title:** a same-titled assessment for the company (ignoring case and surrounding spaces) is skipped, so re-runs don't duplicate. Change `assessmentTitle` for a fresh snapshot. If the company's assessments can't be listed, the run stops with an error instead of risking a duplicate.
+- **The upload creates the assessment.** The v2 API has no create route: `POST /v2/assessment` returns 404 Not Found (seen live on 2026-10-02). Like the portal's Import Assessment dialog, `POST /v2/assessment/upload` takes a `data` part `{"name":"<title>","assessmentId":0,"type":30,"companyId":<id>}` plus the xlsx, creates the assessment titled by `name`, and returns 204 with no body.
+- **Finding the new id.** The run lists `GET /v2/odata/assessment?$filter=companyId eq <id>` (no `$select`, which has returned 500) and matches the title, retrying after 3 and 10 seconds. If it still isn't listed, the run reports `created` without an `assessmentId` and says to check Compliance > Assessments.
+- **Uploaded as a run (`type: 30`).** The type codes are undocumented; from live data on 2026-10-02: 10 = template, 20 = assessment, 30 = run. A `type: 0` upload creates an assessment the API lists but the portal never shows.
+- **No description.** The upload sets `dateConducted` to the upload date and `category` to "Import", and can't set a description.
 - **Requires:** AutomationAI + the CloudRadial API secrets + an Entra app with `SecurityEvents.Read.All`. No custom extension needed.
+
+## Tested (mocked Graph and CloudRadial APIs, 2026-10-02)
+
+`test.ps1` runs the workflow's PowerShell node in strict mode, as on the runner, against mocked Graph and CloudRadial APIs, with `POST /v2/assessment` mocked as 404. Five scenarios:
+
+- **plan:** previews without writing.
+- **apply:** sends only the upload and returns the new `assessmentId`.
+- **Duplicate title:** skipped.
+- **New assessment not listed yet:** retried, then reported without an id.
+- **Assessment list fails:** stops before any write.
+
+Graph's last page of control profiles has no `@odata.nextLink`. The previous version read that property directly, which throws in strict mode.
+
+The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live (assessment 159 on Westgate Tech Services imported all its questions and answers); inline strings were never tried against the importer.
+
+## Files
+
+| File | What |
+|---|---|
+| [`secure-score-assessment.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/secure-score-assessment/secure-score-assessment.yml) | The workflow export to import. |
+| [`test.ps1`](https://github.com/cloudradial/Automations/blob/main/automationai/secure-score-assessment/test.ps1) | Mocked strict-mode test of the PowerShell node: `pwsh -NoProfile -File test.ps1`. |

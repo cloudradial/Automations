@@ -41,11 +41,12 @@ function Get-LabelScore { param([string]$key, [string]$label, $overrides)
 }
 function Get-Text { param($v) if ($null -eq $v) { return '' }; if ($v -is [string]) { return $v }; $t = Get-P $v 'text' (Get-P $v 'comment' (Get-P $v 'value' '')); return [string]$t }
 function New-XlsxBytes {
-    # Minimal Office Open XML workbook: one sheet, inline strings, header row + data rows.
+    # Minimal Office Open XML workbook: one sheet named Assessment, shared strings, header + rows.
     param([string[]]$Header, [object[]]$Rows)
     Add-Type -AssemblyName System.IO.Compression
-    $esc = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
+    $clean = { param($s) [System.Security.SecurityElement]::Escape(([string]$s -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')) }
     $colName = { param([int]$n) $s = ''; $n++; while ($n -gt 0) { $m = ($n - 1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n - 1) / 26) }; $s }
+    $strings = New-Object System.Collections.Generic.List[string]; $index = @{}
     $sb = New-Object System.Text.StringBuilder
     $null = $sb.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
     $all = @(, $Header) + $Rows
@@ -56,17 +57,27 @@ function New-XlsxBytes {
             $ref = (& $colName $c) + ($r + 1)
             $val = $row[$c]
             if ($val -is [int] -or $val -is [long] -or $val -is [double]) { $null = $sb.Append("<c r=""$ref""><v>$val</v></c>") }
-            elseif (-not [string]::IsNullOrEmpty([string]$val)) { $null = $sb.Append("<c r=""$ref"" t=""inlineStr""><is><t xml:space=""preserve"">$(& $esc $val)</t></is></c>") }
+            elseif (-not [string]::IsNullOrEmpty([string]$val)) {
+                $sv = [string]$val
+                if (-not $index.ContainsKey($sv)) { $index[$sv] = $strings.Count; $strings.Add($sv) }
+                $null = $sb.Append("<c r=""$ref"" t=""s""><v>$($index[$sv])</v></c>")
+            }
         }
         $null = $sb.Append('</row>')
     }
     $null = $sb.Append('</sheetData></worksheet>')
+    $sst = New-Object System.Text.StringBuilder
+    $null = $sst.Append("<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?><sst xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" count=""$($strings.Count)"" uniqueCount=""$($strings.Count)"">")
+    foreach ($sv in $strings) { $null = $sst.Append("<si><t xml:space=""preserve"">$(& $clean $sv)</t></si>") }
+    $null = $sst.Append('</sst>')
     $files = [ordered]@{
-        '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
+        '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'
         '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
         'xl/workbook.xml'            = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>'
-        'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+        'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
+        'xl/styles.xml'              = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
         'xl/worksheets/sheet1.xml'   = $sb.ToString()
+        'xl/sharedStrings.xml'       = $sst.ToString()
     }
     $ms = New-Object System.IO.MemoryStream
     $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
@@ -125,13 +136,32 @@ else {
         } catch { $assessDiag = "ScalePad returned no assessments for client $spClientId, and the all-clients check failed: $($_.Exception.Message)" }
     }
 
+    # No $select here: "$select=assessmentId,title" has returned HTTP 500 live.
+    function Get-CrAssessments {
+        $rows = $null; $lastErr = ''
+        foreach ($path in @("/v2/odata/assessment?`$filter=companyId eq $companyId", '/v2/odata/assessment')) {
+            try { $rows = @(Get-CrAll $path | Where-Object { [int](Get-P $_ 'companyId' $companyId) -eq $companyId -and (Get-P $_ 'isDeleted' $false) -ne $true }); break } catch { $lastErr = $_.Exception.Message }
+        }
+        if ($null -eq $rows) { throw $lastErr }
+        return , $rows
+    }
+    function Get-AssessTitle { param($a) ([string](Get-P $a 'title' (Get-P $a 'name' ''))).Trim() }
+    # The upload returns 204 with no body, so the new assessment is found by its title.
+    function Find-CrAssessmentId { param([string]$Title)
+        foreach ($wait in @(0, 3, 10)) {
+            if ($wait) { Start-Sleep -Seconds $wait }
+            try { $rows = Get-CrAssessments } catch { continue }
+            $hit = @($rows | Where-Object { (Get-AssessTitle $_) -ieq $Title } | Sort-Object { [int](Get-P $_ 'assessmentId' 0) } -Descending)
+            if ($hit.Count) { return [int](Get-P $hit[0] 'assessmentId' 0) }
+        }
+        return 0
+    }
+
     $crTitles = New-Object System.Collections.Generic.HashSet[string]
     $crAssess = $null
-    foreach ($path in @("/v2/odata/assessment?`$filter=companyId eq $companyId&`$select=assessmentId,title", "/v2/odata/assessment?`$filter=companyId eq $companyId", '/v2/odata/assessment')) {
-        try { $crAssess = @(Get-CrAll $path | Where-Object { [int](Get-P $_ 'companyId' $companyId) -eq $companyId }); break } catch { $lastAssessErr = $_.Exception.Message }
-    }
-    if ($null -eq $crAssess) { Warn "Couldn't list CloudRadial assessments to check for ones already imported ($lastAssessErr) - assessments were not imported this run to avoid duplicates."; $crAssess = @(); $assessReadFailed = $true } else { $assessReadFailed = $false }
-    foreach ($a in $crAssess) { $null = $crTitles.Add(([string](Get-P $a 'title' (Get-P $a 'name' ''))).ToLowerInvariant()) }
+    try { $crAssess = Get-CrAssessments; $assessReadFailed = $false }
+    catch { Warn "Couldn't list CloudRadial assessments to check for ones already imported ($($_.Exception.Message)) - assessments were not imported this run to avoid duplicates."; $crAssess = @(); $assessReadFailed = $true }
+    foreach ($a in $crAssess) { $null = $crTitles.Add((Get-AssessTitle $a).ToLowerInvariant()) }
 
     $scoreUse = @{}
     foreach ($s in $list) {
@@ -176,15 +206,17 @@ else {
         $item = [ordered]@{ title = $title; action = 'import'; questions = $rows.Count; scalePadScore = Get-P $s 'overall_score' }
         if ($apply -and -not $assessReadFailed) {
             try {
-                $desc = "Imported from ScalePad Lifecycle Manager. $([string](Get-P $full 'description' ''))".Trim()
-                $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId = $companyId; title = $title; category = 'ScalePad'; description = $desc })
-                $aid = Get-P $created 'assessmentId' (Get-P $created 'id')
-                if (-not $aid) { throw 'CloudRadial did not return an assessmentId.' }
+                # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's
+                # Import Assessment dialog, the upload creates the assessment when assessmentId is 0,
+                # titled by `name`. type 30 is a run; type 0 creates a row the portal never shows.
                 $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-                $data = (@{ name = $title; assessmentId = [int]$aid; type = 0; companyId = $companyId } | ConvertTo-Json -Compress)
+                $data = ([ordered]@{ name = $title; assessmentId = 0; type = 30; companyId = $companyId } | ConvertTo-Json -Compress)
                 $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName ('scalepad-' + $spId + '.xlsx')
-                $item.assessmentId = [int]$aid
+                $null = $crTitles.Add($title.ToLowerInvariant())
                 $counts.imported++
+                $aid = Find-CrAssessmentId $title
+                if ($aid -gt 0) { $item.assessmentId = $aid }
+                else { Warn "Assessment '$title' was uploaded, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; a re-run skips it once it's there." }
             }
             catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Assessment '$title' failed: $($_.Exception.Message)" }
         }

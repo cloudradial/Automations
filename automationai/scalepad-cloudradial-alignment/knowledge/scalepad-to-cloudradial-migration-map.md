@@ -60,7 +60,7 @@ Everything below is reachable through the ScalePad API — no exports or files. 
 | Initiatives | Planner items, `productType = 1`, `scheduledQuarter` = Nth upcoming quarter (`-1` = completed) | `POST` / `PATCH /v2/product` | n/a |
 | Initiative budget | Priced Planner items — one-time → `projectUnitPrice`, recurring → `monthlyUnitPrice` | same | n/a |
 | Contracts | Planner items (or `service` + `serviceinstall`) | `/v2/product` | Partial |
-| Assessments | CloudRadial assessment | `POST /v2/assessment` then `POST /v2/assessment/upload` (Excel) | Its own scoring model |
+| Assessments | CloudRadial assessment | `POST /v2/assessment/upload` (Excel, `assessmentId` 0 creates it) | Its own scoring model |
 | Other hardware — `NETWORK`, `MOBILE`, `IMAGING`, and devices with no serial | **Flexible asset** — one type per kind of device (*Network Devices*, *Mobile Devices*, *Printers & Imaging*, …) | `POST /v2/flexible-asset-type` (with fields), `POST /v2/flexible-asset`, `PATCH /v2/flexible-asset/{id}` | ❌ Display only |
 | SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | ✅ Certificate / Domain Expiration |
 | QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item` | n/a |
@@ -114,8 +114,8 @@ Skip a product that's already on that endpoint (same name and publisher). Large 
 
 CloudRadial imports assessments only from Excel (support KB 360052746791, *Importing Assessments*). The file can be built in memory by the workflow — no storage needed.
 
-1. Create the assessment: `POST /v2/assessment` with `companyId`, `title`, `category`, `description` → `assessmentId`. (Not in the published v2 spec, but used by the Microsoft Security Assessment workflow.)
-2. Upload the questions: `POST /v2/assessment/upload`, multipart — part `data` = `{ name, assessmentId, type, companyId }` JSON, part `file` = the `.xlsx` (content type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`). **[verify]** the meaning of `type` (0 is used).
+1. Create the assessment by uploading it: `POST /v2/assessment/upload`, multipart — part `data` = `{"name":"<title>","assessmentId":0,"type":30,"companyId":<id>}` JSON, part `file` = the `.xlsx` (content type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`). With `assessmentId` 0 it creates the assessment titled by `name` and returns 204 with no body. There is no create route: `POST /v2/assessment` returns 404 (seen live on 2026-10-02). The upload sets `dateConducted` to the upload date and `category` to "Import", and can't set a description. **Send `type: 30`.** The type codes are undocumented; from live data: 10 = template, 20 = assessment, 30 = run (the portal titles runs `<assessment> - M/d/yy`). A `type: 0` upload creates a row the portal never lists.
+2. Find the new `assessmentId`: list `GET /v2/odata/assessment?$filter=companyId eq <id>` (no `$select`, which has returned 500) and match the title, retrying a few times.
 
 | CloudRadial column | From ScalePad |
 |---|---|

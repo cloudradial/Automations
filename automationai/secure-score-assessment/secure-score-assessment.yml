@@ -1,6 +1,6 @@
 automationsWorkflow: 1
 name: "Turn Microsoft Secure Score into a Client Assessment"
-description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, creates the assessment and uploads it - all in one deterministic PowerShell node. Send {"companyId":9,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
+description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, and creates the assessment by uploading it - all in one deterministic PowerShell node. Send {"companyId":9,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
 definition:
   schemaVersion: 1
   activities:
@@ -109,34 +109,51 @@ definition:
               return $out.ToArray()
           }
           function New-XlsxBytes {
-              param([string[]]$Header,[object[]]$Rows)
+              # Minimal Office Open XML workbook: one sheet named Assessment, shared strings, header + rows.
+              param([string[]]$Header, [object[]]$Rows)
               Add-Type -AssemblyName System.IO.Compression
-              $esc = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
-              $colName = { param([int]$n) $s=''; $n++; while ($n -gt 0) { $m = ($n-1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n-1)/26) }; $s }
+              $clean = { param($s) [System.Security.SecurityElement]::Escape(([string]$s -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')) }
+              $colName = { param([int]$n) $s = ''; $n++; while ($n -gt 0) { $m = ($n - 1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n - 1) / 26) }; $s }
+              $strings = New-Object System.Collections.Generic.List[string]; $index = @{}
               $sb = New-Object System.Text.StringBuilder
               $null = $sb.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
               $all = @(, $Header) + $Rows
               for ($r = 0; $r -lt $all.Count; $r++) {
-                  $null = $sb.Append("<row r=""$($r+1)"">")
+                  $null = $sb.Append("<row r=""$($r + 1)"">")
                   $row = @($all[$r])
                   for ($c = 0; $c -lt $row.Count; $c++) {
-                      $ref = (& $colName $c) + ($r+1); $val = $row[$c]
+                      $ref = (& $colName $c) + ($r + 1)
+                      $val = $row[$c]
                       if ($val -is [int] -or $val -is [long] -or $val -is [double]) { $null = $sb.Append("<c r=""$ref""><v>$val</v></c>") }
-                      elseif (-not [string]::IsNullOrEmpty([string]$val)) { $null = $sb.Append("<c r=""$ref"" t=""inlineStr""><is><t xml:space=""preserve"">$(& $esc $val)</t></is></c>") }
+                      elseif (-not [string]::IsNullOrEmpty([string]$val)) {
+                          $sv = [string]$val
+                          if (-not $index.ContainsKey($sv)) { $index[$sv] = $strings.Count; $strings.Add($sv) }
+                          $null = $sb.Append("<c r=""$ref"" t=""s""><v>$($index[$sv])</v></c>")
+                      }
                   }
                   $null = $sb.Append('</row>')
               }
               $null = $sb.Append('</sheetData></worksheet>')
+              $sst = New-Object System.Text.StringBuilder
+              $null = $sst.Append("<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?><sst xmlns=""http://schemas.openxmlformats.org/spreadsheetml/2006/main"" count=""$($strings.Count)"" uniqueCount=""$($strings.Count)"">")
+              foreach ($sv in $strings) { $null = $sst.Append("<si><t xml:space=""preserve"">$(& $clean $sv)</t></si>") }
+              $null = $sst.Append('</sst>')
               $files = [ordered]@{
-                  '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
+                  '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'
                   '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
                   'xl/workbook.xml'            = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>'
-                  'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+                  'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
+                  'xl/styles.xml'              = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
                   'xl/worksheets/sheet1.xml'   = $sb.ToString()
+                  'xl/sharedStrings.xml'       = $sst.ToString()
               }
               $ms = New-Object System.IO.MemoryStream
               $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
-              foreach ($k in $files.Keys) { $entry = $zip.CreateEntry($k); $w = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding($false))); $w.Write($files[$k]); $w.Dispose() }
+              foreach ($k in $files.Keys) {
+                  $entry = $zip.CreateEntry($k)
+                  $w = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding($false)))
+                  $w.Write($files[$k]); $w.Dispose()
+              }
               $zip.Dispose()
               return , $ms.ToArray()
           }
@@ -151,8 +168,8 @@ definition:
           $tenantCur = [double]$score.currentScore; $tenantMax = [double]$score.maxScore
           $lookup = @{}; foreach ($cs in @($score.controlScores)) { $lookup[[string]$cs.controlName] = $cs.score }
           $profiles = @(); $uri = 'https://graph.microsoft.com/v1.0/security/secureScoreControlProfiles'
-          while ($uri) { $r = Invoke-RestMethod -Uri $uri -Headers $gh; $profiles += @($r.value); $uri = $r.'@odata.nextLink' }
-          $active = @($profiles | Where-Object { -not $_.deprecated })
+          while ($uri) { $r = Invoke-RestMethod -Uri $uri -Headers $gh; $profiles += @(Get-Prop $r 'value'); $uri = Get-Prop $r '@odata.nextLink' }
+          $active = @($profiles | Where-Object { $null -ne $_ -and -not (Get-Prop $_ 'deprecated') })
           if ($active.Count -eq 0) { throw 'No active Secure Score control profiles returned.' }
 
           # ---- build the 15-column assessment rows ----
@@ -186,13 +203,16 @@ definition:
               ))
           }
 
-          $titleFinal = "$title ($(Get-Date -Format 'yyyy-MM-dd'))"
+          $titleFinal = "$title - " + (Get-Date).ToString('M/d/yy', [System.Globalization.CultureInfo]::InvariantCulture)   # the portal's run naming
           $summary = "$($rows.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
 
-          # ---- duplicate check ----
-          $existing = @(); $dupe = $false
-          try { $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { }
-          foreach ($a in $existing) { if (([string](Get-Prop $a 'title')) -eq $titleFinal) { $dupe = $true } }
+          # ---- duplicate check (no $select: it has returned HTTP 500 live) ----
+          function Get-CompanyAssessments { @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId" | Where-Object { (Get-Prop $_ 'isDeleted') -ne $true }) }
+          function Test-TitleMatch { param($a) ([string](Get-Prop $a 'title')).Trim() -ieq $titleFinal }
+          $existing = @()
+          try { $existing = @(Get-CompanyAssessments) }
+          catch { $m = "Couldn't list this company's assessments, so nothing was created (to avoid a duplicate). $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+          $dupe = @($existing | Where-Object { Test-TitleMatch $_ }).Count -gt 0
 
           if ($dupe) {
               Set-NodeOutput ([ordered]@{ status='skipped'; message="An assessment titled '$titleFinal' already exists for companyId $companyId - not re-created."; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
@@ -201,14 +221,27 @@ definition:
               Set-NodeOutput ([ordered]@{ status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
           }
           else {
-              $desc = "Imported from Microsoft Secure Score on $(Get-Date -Format 'yyyy-MM-dd'). Tenant score $tenantCur / $tenantMax."
-              $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId=[int]$companyId; title=$titleFinal; category='Security'; description=$desc })
-              $aid = Get-Prop $created 'assessmentId'; if (-not $aid) { $aid = Get-Prop $created 'id' }
-              if (-not $aid) { throw 'CloudRadial did not return an assessmentId from POST /v2/assessment.' }
+              # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's Import
+              # Assessment dialog, the upload creates the assessment when assessmentId is 0, titled by `name`.
+              # type 30 is a run; type 0 creates a row the portal never shows.
               $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-              $data = (@{ name = $titleFinal; assessmentId = [int]$aid; type = 0; companyId = [int]$companyId } | ConvertTo-Json -Compress)
-              $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx'
-              Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=[int]$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 30; companyId = [int]$companyId } | ConvertTo-Json -Compress)
+              try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
+              catch { $m = "The assessment upload failed, so nothing was created: $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+              # The upload returns 204 with no body; find the new assessment by title.
+              $aid = 0
+              foreach ($wait in @(0, 3, 10)) {
+                  if ($wait) { Start-Sleep -Seconds $wait }
+                  try { $found = @(Get-CompanyAssessments) } catch { continue }
+                  $hit = @($found | Where-Object { Test-TitleMatch $_ } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending)
+                  if ($hit.Count) { $aid = [int](Get-Prop $hit[0] 'assessmentId'); break }
+              }
+              if ($aid -gt 0) {
+                  Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+              }
+              else {
+                  Set-NodeOutput ([ordered]@{ status='created'; message="Uploaded assessment '$titleFinal' with $($rows.Count) questions, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; a re-run skips it once it's there. $summary"; assessmentId=$null; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+              }
           }
         timeoutSeconds: 600
         retryCount: 0

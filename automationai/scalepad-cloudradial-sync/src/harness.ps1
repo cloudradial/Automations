@@ -7,7 +7,10 @@ $secrets = @{ 'ScalePad-ApiUrl' = 'https://sp.test'; 'ScalePad-ApiKey' = 'k'; 'C
 function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText, $ErrorAction) $secrets[$Name] }
 function Get-NodeInput { Get-Content $InFile -Raw | ConvertFrom-Json }
 function Set-NodeOutput { param($o) $o | ConvertTo-Json -Depth 30 | Set-Content $OutFile }
-function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName) $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes); '{"ok":true}' }
+$global:MockAssessments = New-Object System.Collections.ArrayList
+if ($env:ASSESS_EXISTS) { $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = $env:ASSESS_EXISTS; isDeleted = $false }) }
+# Like the live route: assessmentId 0 creates the assessment titled by "name" and returns 204 with no body.
+function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName) $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes); $d = $DataJson | ConvertFrom-Json; if ($Path -eq '/v2/assessment/upload' -and $d.assessmentId -eq 0 -and $d.type -eq 30 -and -not $env:ASSESS_LAG) { $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 700 + $global:MockAssessments.Count; companyId = $d.companyId; title = $d.name; isDeleted = $false }) }; '' }
 function Send-ArchiveUpload { param($ArchiveId, $FilePath, $FileName) if ($ArchiveId -le 0) { throw 'HTTP 400: Sequence contains no elements.' }; $null = $global:MockWrites.Add("UPLOAD archive=$ArchiveId file=$FileName") }
 function Invoke-WebRequest { param($Method, $Uri, $Headers, $OutFile) [IO.File]::WriteAllBytes($OutFile, [byte[]](37, 80, 68, 70)); $null = $global:MockWrites.Add("DOWNLOAD $Uri") }
 
@@ -80,7 +83,7 @@ function Invoke-RestMethod {
         if ($u.AbsolutePath -eq '/v2/endpoint') { return [pscustomobject]@{ companyEndpointId = 9000 + $global:MockWrites.Count } }
         if ($u.AbsolutePath -eq '/v2/flexible-asset-type') { $global:FaTypeN = 1 + [int](Get-Variable -Name FaTypeN -Scope Global -ValueOnly -ErrorAction SilentlyContinue); return [pscustomobject]@{ id = 60 + $global:FaTypeN } }
         if ($env:FAIL_FAPATCH -and $u.AbsolutePath -like '/v2/flexible-asset/*') { throw 'HTTP 400: bad patch' }
-        if ($u.AbsolutePath -eq '/v2/assessment') { return [pscustomobject]@{ assessmentId = 555 } }
+        if ($u.AbsolutePath -eq '/v2/assessment') { throw 'HTTP 404: Not Found' }   # live 2026-10-02: there is no create route
         if ($env:ARCH_EMPTY -and $u.AbsolutePath -eq '/api/beta/archive') { $global:ArchMade = $true; return $null }
         if ($u.AbsolutePath -eq '/api/beta/archive') { return [pscustomobject]@{ id = 77; companyId = 9; name = 'ScalePad QBR History'; inboundAddress = 'contoso-qbr@archive.cloudradial.test' } }
         return [pscustomobject]@{ ok = $true }
@@ -105,7 +108,7 @@ function Invoke-RestMethod {
         '^/v2/odata/flexibleasset\?' { if ($env:FA_EXISTS -and $p -notmatch 'flexibleAssetTypeId eq 41') { return [pscustomobject]@{ value = @() } }; if ($env:FA_EXISTS) { return [pscustomobject]@{ value = @([pscustomobject]@{ id = 501; companyId = 9; flexibleAssetTypeId = 41; traitsJson = '{"name":"Draytek 2865","type":"Router","scalepad-id":"h4","model":"old"}' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/archiveitem' { if ($env:ARCH_HAS) { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportItemId = 1; subject = 'ScalePad - Q2 2026 QBR (2026-06-30).pdf' }, [pscustomobject]@{ companyReportItemId = 3; subject = 'ScalePad sync report'; text = 'old report' }, [pscustomobject]@{ companyReportItemId = 2; subject = 'Meeting - Q2 2026 QBR (2026-06-30)'; text = '<h2>Q2 2026 QBR</h2><p>old notes</p>' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/article' { if ($env:ART_EXISTS) { return [pscustomobject]@{ value = @([pscustomobject]@{ articleId = 555; subject = 'ScalePad sync report' }) } }; return [pscustomobject]@{ value = @() } }
-        '^/v2/odata/assessment' { return [pscustomobject]@{ value = @() } }
+        '^/v2/odata/assessment' { if ($p -match '\$select') { throw 'HTTP 500: Internal Server Error' }; if ($p -match '\$skip=[1-9]') { return [pscustomobject]@{ value = @() } }; return [pscustomobject]@{ value = @($global:MockAssessments) } }
         '^/v2/odata/product' { if ($env:PRODUCT_SELECT_FAIL -and $p -match 'summary') { throw 'HTTP 400: Could not find a property named summary' }; if ($env:PRODUCT_STORE) { return [pscustomobject]@{ value = @(Get-ProductStore) } }; return [pscustomobject]@{ value = @([pscustomobject]@{ productId = 301; subject = 'ScalePad Initiative - Workstation Replacement Q1'; status = 'InProgress' }, [pscustomobject]@{ productId = 302; subject = 'ScalePad Insight - Backups healthy'; status = 'Proposed' }) } }
         '^/api/beta/archive\?' { if ($env:ARCH_EMPTY -and (Get-Variable -Name ArchMade -Scope Global -ErrorAction SilentlyContinue)) { return @([pscustomobject]@{ id = 86; companyId = 9; name = 'ScalePad QBR History' }, [pscustomobject]@{ id = 87; companyId = 9; name = 'ScalePad Migration' }) }; return @() }
         default { throw "unmocked CR GET $p" }

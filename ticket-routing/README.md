@@ -179,7 +179,7 @@ Plus:
 1. Run `Test-RoutingTable.ps1` on your tables until it reports no errors.
 2. In AutomationAI, open the workflow's **Test** run and send `{"ticketId":"<a test ticket>","confirm":"false"}`. The first step's Test Input has a sample. Check `assignee`, `candidates` and `internal_note`.
 3. Send the same with `"confirm":"true"` against a test ticket, and check the assignee and the internal note in the PSA.
-4. Wire the ServiceAI Triage Action with `liveAssign: no`, create a test ticket, and check **Action Runs** and the run history. Check that ServiceAI's own triage update afterwards doesn't clear the assignee once you switch `liveAssign: yes`.
+4. Wire the ServiceAI Triage Action with `liveAssign: no`, create a test ticket, and check **Action Runs** and the run history. After the first live assignment (`liveAssign: yes`), check the assignee is still set once ServiceAI has finished triage.
 
 ### For developers
 

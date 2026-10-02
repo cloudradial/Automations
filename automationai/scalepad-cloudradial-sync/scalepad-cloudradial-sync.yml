@@ -2854,13 +2854,32 @@ definition:
                           } catch { $assessDiag = "ScalePad returned no assessments for client $spClientId, and the all-clients check failed: $($_.Exception.Message)" }
                       }
 
+                      # No $select here: "$select=assessmentId,title" has returned HTTP 500 live.
+                      function Get-CrAssessments {
+                          $rows = $null; $lastErr = ''
+                          foreach ($path in @("/v2/odata/assessment?`$filter=companyId eq $companyId", '/v2/odata/assessment')) {
+                              try { $rows = @(Get-CrAll $path | Where-Object { [int](Get-P $_ 'companyId' $companyId) -eq $companyId -and (Get-P $_ 'isDeleted' $false) -ne $true }); break } catch { $lastErr = $_.Exception.Message }
+                          }
+                          if ($null -eq $rows) { throw $lastErr }
+                          return , $rows
+                      }
+                      function Get-AssessTitle { param($a) ([string](Get-P $a 'title' (Get-P $a 'name' ''))).Trim() }
+                      # The upload returns 204 with no body, so the new assessment is found by its title.
+                      function Find-CrAssessmentId { param([string]$Title)
+                          foreach ($wait in @(0, 3, 10)) {
+                              if ($wait) { Start-Sleep -Seconds $wait }
+                              try { $rows = Get-CrAssessments } catch { continue }
+                              $hit = @($rows | Where-Object { (Get-AssessTitle $_) -ieq $Title } | Sort-Object { [int](Get-P $_ 'assessmentId' 0) } -Descending)
+                              if ($hit.Count) { return [int](Get-P $hit[0] 'assessmentId' 0) }
+                          }
+                          return 0
+                      }
+
                       $crTitles = New-Object System.Collections.Generic.HashSet[string]
                       $crAssess = $null
-                      foreach ($path in @("/v2/odata/assessment?`$filter=companyId eq $companyId&`$select=assessmentId,title", "/v2/odata/assessment?`$filter=companyId eq $companyId", '/v2/odata/assessment')) {
-                          try { $crAssess = @(Get-CrAll $path | Where-Object { [int](Get-P $_ 'companyId' $companyId) -eq $companyId }); break } catch { $lastAssessErr = $_.Exception.Message }
-                      }
-                      if ($null -eq $crAssess) { Warn "Couldn't list CloudRadial assessments to check for ones already imported ($lastAssessErr) - assessments were not imported this run to avoid duplicates."; $crAssess = @(); $assessReadFailed = $true } else { $assessReadFailed = $false }
-                      foreach ($a in $crAssess) { $null = $crTitles.Add(([string](Get-P $a 'title' (Get-P $a 'name' ''))).ToLowerInvariant()) }
+                      try { $crAssess = Get-CrAssessments; $assessReadFailed = $false }
+                      catch { Warn "Couldn't list CloudRadial assessments to check for ones already imported ($($_.Exception.Message)) - assessments were not imported this run to avoid duplicates."; $crAssess = @(); $assessReadFailed = $true }
+                      foreach ($a in $crAssess) { $null = $crTitles.Add((Get-AssessTitle $a).ToLowerInvariant()) }
 
                       $scoreUse = @{}
                       foreach ($s in $list) {
@@ -2905,15 +2924,17 @@ definition:
                           $item = [ordered]@{ title = $title; action = 'import'; questions = $rows.Count; scalePadScore = Get-P $s 'overall_score' }
                           if ($apply -and -not $assessReadFailed) {
                               try {
-                                  $desc = "Imported from ScalePad Lifecycle Manager. $([string](Get-P $full 'description' ''))".Trim()
-                                  $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId = $companyId; title = $title; category = 'ScalePad'; description = $desc })
-                                  $aid = Get-P $created 'assessmentId' (Get-P $created 'id')
-                                  if (-not $aid) { throw 'CloudRadial did not return an assessmentId.' }
+                                  # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's
+                                  # Import Assessment dialog, the upload creates the assessment when assessmentId is 0,
+                                  # titled by `name`. It can't set a description or category.
                                   $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-                                  $data = (@{ name = $title; assessmentId = [int]$aid; type = 0; companyId = $companyId } | ConvertTo-Json -Compress)
+                                  $data = ([ordered]@{ name = $title; assessmentId = 0; type = 0; companyId = $companyId } | ConvertTo-Json -Compress)
                                   $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName ('scalepad-' + $spId + '.xlsx')
-                                  $item.assessmentId = [int]$aid
+                                  $null = $crTitles.Add($title.ToLowerInvariant())
                                   $counts.imported++
+                                  $aid = Find-CrAssessmentId $title
+                                  if ($aid -gt 0) { $item.assessmentId = $aid }
+                                  else { Warn "Assessment '$title' was uploaded, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; a re-run skips it once it's there." }
                               }
                               catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Assessment '$title' failed: $($_.Exception.Message)" }
                           }

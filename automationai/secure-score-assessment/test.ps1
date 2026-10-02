@@ -29,9 +29,9 @@ foreach ($name in $scenarios.Keys) {
     $global:Writes = New-Object System.Collections.ArrayList
     $global:Assess = New-Object System.Collections.ArrayList
     $global:Sc = $sc
-    $today = Get-Date -Format 'yyyy-MM-dd'
-    if ($sc.Contains('existing')) { $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = "microsoft secure score ($today) "; isDeleted = $false }) }
-    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 601; companyId = 9; title = "Microsoft Secure Score ($today)"; isDeleted = $true })
+    $today = (Get-Date).ToString('M/d/yy', [System.Globalization.CultureInfo]::InvariantCulture)
+    if ($sc.Contains('existing')) { $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = "microsoft secure score - $today "; isDeleted = $false }) }
+    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 601; companyId = 9; title = "Microsoft Secure Score - $today"; isDeleted = $true })
 
     function global:Get-NodeInput { $global:Sc.input }
     function global:Set-NodeOutput { param($o) $global:Out = $o }
@@ -41,7 +41,7 @@ foreach ($name in $scenarios.Keys) {
     function global:Send-CrMultipartMock { param($Path, $DataJson, $FileBytes, $FileName)
         $null = $global:Writes.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length)")
         $d = $DataJson | ConvertFrom-Json
-        if ($Path -eq '/v2/assessment/upload' -and $d.assessmentId -eq 0 -and -not $global:Sc.Contains('lag')) { $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 700; companyId = $d.companyId; title = $d.name; isDeleted = $false }) }
+        if ($Path -eq '/v2/assessment/upload' -and $d.assessmentId -eq 0 -and $d.type -eq 30 -and -not $global:Sc.Contains('lag')) { $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 700; companyId = $d.companyId; title = $d.name; isDeleted = $false }) }
         ''
     }
     function global:Invoke-RestMethod { param($Uri, $Method = 'GET', $Headers, $Body, $ContentType)

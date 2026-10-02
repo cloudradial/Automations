@@ -29,15 +29,16 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 
 - `companyId` — the CloudRadial company the assessment is created under (required).
 - `tenantId` — the **client's** Entra tenant id to pull Secure Score from (required).
-- `assessmentTitle` — optional; the date is appended, and that title is the idempotency key.
+- `assessmentTitle` — optional; ` - M/d/yy` is appended (the portal's run naming, e.g. `Microsoft Secure Score - 10/2/26`), and that title is the idempotency key.
 - `mode` — `apply` (default) writes; `plan` previews the counts without creating anything.
 
 ## Notes
 
 - **Idempotent by title:** a same-titled assessment for the company (ignoring case and surrounding spaces) is skipped, so re-runs don't duplicate. Change `assessmentTitle` for a fresh snapshot. If the company's assessments can't be listed, the run stops with an error instead of risking a duplicate.
-- **The upload creates the assessment.** The v2 API has no create route: `POST /v2/assessment` returns 404 Not Found (seen live on 2026-10-02). Like the portal's Import Assessment dialog, `POST /v2/assessment/upload` takes a `data` part `{"name":"<title>","assessmentId":0,"type":0,"companyId":<id>}` plus the xlsx, creates the assessment titled by `name`, and returns 204 with no body.
+- **The upload creates the assessment.** The v2 API has no create route: `POST /v2/assessment` returns 404 Not Found (seen live on 2026-10-02). Like the portal's Import Assessment dialog, `POST /v2/assessment/upload` takes a `data` part `{"name":"<title>","assessmentId":0,"type":30,"companyId":<id>}` plus the xlsx, creates the assessment titled by `name`, and returns 204 with no body.
 - **Finding the new id.** The run lists `GET /v2/odata/assessment?$filter=companyId eq <id>` (no `$select`, which has returned 500) and matches the title, retrying after 3 and 10 seconds. If it still isn't listed, the run reports `created` without an `assessmentId` and says to check Compliance > Assessments.
-- **No description or category.** The upload can't set them, so the assessment has neither.
+- **Uploaded as a run (`type: 30`).** The type codes are undocumented; from live data on 2026-10-02: 10 = template, 20 = assessment, 30 = run. A `type: 0` upload creates an assessment the API lists but the portal never shows.
+- **No description.** The upload sets `dateConducted` to the upload date and `category` to "Import", and can't set a description.
 - **Requires:** AutomationAI + the CloudRadial API secrets + an Entra app with `SecurityEvents.Read.All`. No custom extension needed.
 
 ## Tested (mocked Graph and CloudRadial APIs, 2026-10-02)

@@ -1,0 +1,8 @@
+{
+  "name": "scalepad-cloudradial-sync-build",
+  "private": true,
+  "description": "Builds and tests the scalepad-cloudradial-sync workflow export from its PowerShell source. Not an extension.",
+  "devDependencies": {
+    "js-yaml": "^5.4.2"
+  }
+}

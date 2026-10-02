@@ -215,6 +215,32 @@ function Get-CrArchive {
     return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
 }
 function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
+# Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.
+# If the portal's API refuses one of those fields in $select, read as before: every card then counts as changed.
+function Get-CrCards { param([int]$CompanyId)
+    $cards = @{}
+    $rows = $null
+    try { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status,summary,body,projectUnits,projectUnitPrice,monthlyUnits,monthlyUnitPrice,productType,scheduledQuarter,quarterOffset") }
+    catch { $rows = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId&`$select=productId,subject,status") }
+    foreach ($p in $rows) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+    return $cards
+}
+function ConvertTo-ComparableText { param($s) return (([string]$s) -replace '<[^>]+>', ' ' -replace '&[a-z#0-9]+;', ' ' -replace '\s+', ' ').Trim().ToLowerInvariant() }
+# The subset of $Fields whose value differs from the card's. A field the card doesn't carry counts as changed.
+function Get-ChangedFields { param($Existing, [hashtable]$Fields)
+    $changed = @{}
+    foreach ($k in $Fields.Keys) {
+        $new = $Fields[$k]
+        $has = if ($Existing -is [System.Collections.IDictionary]) { $Existing.Contains($k) } else { $null -ne $Existing -and $null -ne $Existing.PSObject.Properties[$k] }
+        if (-not $has) { $changed[$k] = $new; continue }
+        $cur = Get-P $Existing $k
+        $same = if ($new -is [int] -or $new -is [long] -or $new -is [double] -or $new -is [decimal]) {
+            $n = 0.0; [double]::TryParse([string]$cur, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and [Math]::Abs($n - [double]$new) -lt 0.005
+        } elseif ($new -is [bool]) { [string]$cur -eq [string]$new } else { (ConvertTo-ComparableText $cur) -eq (ConvertTo-ComparableText $new) }
+        if (-not $same) { $changed[$k] = $new }
+    }
+    return $changed
+}
 
 $mode = [string](Get-P $ctx 'mode' 'plan')
 if ($mode -notin @('plan', 'apply')) { $mode = 'plan' }

@@ -13,7 +13,7 @@ $results = ConvertTo-Dict (Get-P $ctx 'results')
 $settings = Get-P $ctx 'settings'
 $companyId = [int](Get-P $ctx 'companyId')
 $spClientId = [string](Get-P $ctx 'scalePadClientId')
-$counts = [ordered]@{ insights = 0; active = 0; toCreate = 0; toUpdate = 0; created = 0; updated = 0; closed = 0; reopened = 0; errors = 0 }
+$counts = [ordered]@{ insights = 0; active = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; closed = 0; reopened = 0; errors = 0 }
 $items = New-Object System.Collections.ArrayList
 $table = New-Object System.Collections.ArrayList
 $PriorityMap = @{ high = 1; medium = 0; low = -1 }
@@ -23,8 +23,7 @@ if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
     $results[$phase] = [ordered]@{ ran = $false }
 }
 else {
-    $cards = @{}
-    foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject,status")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+    $cards = Get-CrCards $companyId
     function Test-CardCompleted { param($card) $st = [string](Get-P $card 'status' ''); return ($st -eq '40' -or $st -match '(?i)^completed$') }
 
     # The insights list takes only a client filter (no paging parameters).
@@ -75,12 +74,15 @@ else {
 
         $existing = $cards[$subject.ToLowerInvariant()]
         if ($null -ne $existing) {
+            # Text only: keep whatever status/priority the partner has set since; write only what changed.
+            $fix = Get-ChangedFields $existing @{ summary = $summary; body = $body }
+            $reopen = Test-CardCompleted $existing   # the insight is back - reopen as Proposed
+            if ($reopen) { $fix.status = 0 }
+            if ($fix.Count -eq 0) { $counts.unchanged++; continue }
             $counts.toUpdate++
-            $null = $items.Add(@{ subject = $subject; action = 'update'; affected = $affected })
+            $null = $items.Add(@{ subject = $subject; action = $(if ($reopen) { 'reopen' } else { 'update' }); affected = $affected; fields = @($fix.Keys | Sort-Object) })
             if ($apply) {
-                # Text only: keep whatever status/priority the partner has set since.
-                $fix = @{ summary = $summary; body = $body }
-                if (Test-CardCompleted $existing) { $fix.status = 0; $counts.reopened++ }   # the insight is back - reopen as Proposed
+                if ($reopen) { $counts.reopened++ }
                 try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $fix); $counts.updated++ }
                 catch { $counts.errors++; Warn "Update failed for '$subject': $($_.Exception.Message)" }
             }
@@ -103,4 +105,4 @@ else {
 $ctx.results = $results
 $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
 $c = $counts
-Set-NodeOutput @{ status = 'ok'; message = "Insights: $($c.insights) in ScalePad, $($c.active) with affected assets; $(if ($apply) { "$($c.created) Planner cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" })$(if ($c.closed) { ", $($c.closed) closed as resolved" })$(if ($c.reopened) { ", $($c.reopened) reopened" }), $($c.errors) errors."; ctx = $ctx }
+Set-NodeOutput @{ status = 'ok'; message = "Insights: $($c.insights) in ScalePad, $($c.active) with affected assets; $(if ($apply) { "$($c.created) Planner cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" })$(if ($c.closed) { ", $($c.closed) closed as resolved" })$(if ($c.reopened) { ", $($c.reopened) reopened" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }

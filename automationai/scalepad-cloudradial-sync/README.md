@@ -83,7 +83,7 @@ Every phase is idempotent: re-running updates or skips what's already there. No 
    - **Preview first:** `{"mode": "plan"}`, counts per company and phase, nothing written.
    - **One company:** `{"companyId": 9}` · **a few:** `{"companyIds": [9, 12]}` · **pair a client whose names differ:** `{"companyId": 9, "scalePadClientId": "<ScalePad id>"}`.
 4. **Clean up duplicate software (only if needed).** An early version could write a company's ScalePad software twice. `{"companyId": 20, "cleanupDuplicateSoftware": true}` lists the extra copies; `{"companyId": 20, "cleanupDuplicateSoftware": true, "mode": "apply", "confirmCleanup": true}` deletes them. It only looks at records the Sync wrote (ScalePad's all-caps categories or the Sync's comment), keeps the oldest copy of each device + product + version, and never touches RMM software.
-5. **Check the result.** The report step lists each company and where its migration report was written.
+5. **Check the result.** The report step lists each company and where its migration report was written. A company whose migration step failed is listed under `failedCompanies` with its error, and the message gives the `companyIds` input to retry just those companies. If every matched company fails, the report step fails too, so the run shows as Failed in History.
 6. Schedule it as a **Routine** to keep CloudRadial current. The webhook ships disabled, enable it only if something else triggers the sync.
 
 ## Run inputs

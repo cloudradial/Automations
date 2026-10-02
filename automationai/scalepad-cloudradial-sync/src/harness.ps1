@@ -45,6 +45,17 @@ $sp = @{
     '/lifecycle-manager/v1/deliverables'                 = @{ data = @(@{ id = 'dl1'; name = 'Q2 2026 QBR'; created_at = '2026-06-30T00:00:00Z' }); next_cursor = $null }
 }
 $cursorCall = @{}
+# PRODUCT_STORE=<file>: Planner cards persist across harness runs (POST adds, PATCH applies ops), so a re-run can be checked.
+function Get-ProductStore {
+    if (Test-Path $env:PRODUCT_STORE) { return @(Get-Content $env:PRODUCT_STORE -Raw | ConvertFrom-Json) }
+    return @([pscustomobject]@{ productId = 301; subject = 'ScalePad Initiative - Workstation Replacement Q1'; status = 'InProgress' }, [pscustomobject]@{ productId = 302; subject = 'ScalePad Insight - Backups healthy'; status = 'Proposed' })
+}
+function Update-ProductStore { param([string]$Method, [string]$Path, [string]$Body)
+    $rows = @(Get-ProductStore)
+    if ($Method -eq 'POST') { $o = $Body | ConvertFrom-Json; $o | Add-Member -NotePropertyName productId -NotePropertyValue (400 + $rows.Count) -Force; $rows += $o }
+    else { $id = [int]($Path -replace '.*/', ''); $row = @($rows | Where-Object { $_.productId -eq $id })[0]; foreach ($op in @($Body | ConvertFrom-Json)) { $row | Add-Member -NotePropertyName ($op.path.TrimStart('/')) -NotePropertyValue $op.value -Force } }
+    ConvertTo-Json -InputObject @($rows) -Depth 10 | Set-Content $env:PRODUCT_STORE
+}
 function Start-Sleep { param($Seconds) $null = $global:MockWrites.Add("sleep $Seconds") }
 function Invoke-RestMethod {
     param($Method, $Uri, $Headers, $Body, $ContentType)
@@ -65,6 +76,7 @@ function Invoke-RestMethod {
     if ($env:ARCHIVEITEM_DUMP -and $u.AbsolutePath -eq '/v2/archiveitem') { Add-Content $env:ARCHIVEITEM_DUMP ($Body + '<<END>>') }
     if ($Method -in @('POST', 'PATCH', 'PUT', 'DELETE')) {
         $null = $global:MockWrites.Add("$Method $($u.PathAndQuery) $Body".Substring(0, [Math]::Min(420, "$Method $($u.PathAndQuery) $Body".Length)))
+        if ($env:PRODUCT_STORE -and $u.AbsolutePath -match '^/v2/product(/\d+)?$') { Update-ProductStore $Method $u.AbsolutePath $Body }
         if ($u.AbsolutePath -eq '/v2/endpoint') { return [pscustomobject]@{ companyEndpointId = 9000 + $global:MockWrites.Count } }
         if ($u.AbsolutePath -eq '/v2/flexible-asset-type') { $global:FaTypeN = 1 + [int](Get-Variable -Name FaTypeN -Scope Global -ValueOnly -ErrorAction SilentlyContinue); return [pscustomobject]@{ id = 60 + $global:FaTypeN } }
         if ($env:FAIL_FAPATCH -and $u.AbsolutePath -like '/v2/flexible-asset/*') { throw 'HTTP 400: bad patch' }
@@ -94,7 +106,7 @@ function Invoke-RestMethod {
         '^/v2/odata/archiveitem' { if ($env:ARCH_HAS) { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportItemId = 1; subject = 'ScalePad - Q2 2026 QBR (2026-06-30).pdf' }, [pscustomobject]@{ companyReportItemId = 3; subject = 'ScalePad sync report'; text = 'old report' }, [pscustomobject]@{ companyReportItemId = 2; subject = 'Meeting - Q2 2026 QBR (2026-06-30)'; text = '<h2>Q2 2026 QBR</h2><p>old notes</p>' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/article' { if ($env:ART_EXISTS) { return [pscustomobject]@{ value = @([pscustomobject]@{ articleId = 555; subject = 'ScalePad sync report' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/assessment' { return [pscustomobject]@{ value = @() } }
-        '^/v2/odata/product' { return [pscustomobject]@{ value = @([pscustomobject]@{ productId = 301; subject = 'ScalePad Initiative - Workstation Replacement Q1'; status = 'InProgress' }, [pscustomobject]@{ productId = 302; subject = 'ScalePad Insight - Backups healthy'; status = 'Proposed' }) } }
+        '^/v2/odata/product' { if ($env:PRODUCT_SELECT_FAIL -and $p -match 'summary') { throw 'HTTP 400: Could not find a property named summary' }; if ($env:PRODUCT_STORE) { return [pscustomobject]@{ value = @(Get-ProductStore) } }; return [pscustomobject]@{ value = @([pscustomobject]@{ productId = 301; subject = 'ScalePad Initiative - Workstation Replacement Q1'; status = 'InProgress' }, [pscustomobject]@{ productId = 302; subject = 'ScalePad Insight - Backups healthy'; status = 'Proposed' }) } }
         '^/api/beta/archive\?' { if ($env:ARCH_EMPTY -and (Get-Variable -Name ArchMade -Scope Global -ErrorAction SilentlyContinue)) { return @([pscustomobject]@{ id = 86; companyId = 9; name = 'ScalePad QBR History' }, [pscustomobject]@{ id = 87; companyId = 9; name = 'ScalePad Migration' }) }; return @() }
         default { throw "unmocked CR GET $p" }
     }

@@ -9,7 +9,7 @@ $results = ConvertTo-Dict (Get-P $ctx 'results')
 $settings = Get-P $ctx 'settings'
 $companyId = [int](Get-P $ctx 'companyId')
 $spClientId = [string](Get-P $ctx 'scalePadClientId')
-$counts = [ordered]@{ initiatives = 0; contracts = 0; toCreate = 0; toUpdate = 0; created = 0; updated = 0; errors = 0 }
+$counts = [ordered]@{ initiatives = 0; contracts = 0; toCreate = 0; toUpdate = 0; unchanged = 0; created = 0; updated = 0; errors = 0 }
 $items = New-Object System.Collections.ArrayList
 $currencies = New-Object System.Collections.Generic.HashSet[string]
 
@@ -32,11 +32,13 @@ function ConvertTo-Html { param($s) return [System.Net.WebUtility]::HtmlEncode([
 function Save-Card { param([string]$Subject, [hashtable]$Fields, [string]$Kind)
     $existing = $cards[$Subject.ToLowerInvariant()]
     if ($null -ne $existing) {
+        # Keep whatever status and priority the partner has set since the card was created; write only what changed.
+        $upd = @{}; foreach ($k in $Fields.Keys) { if ($k -notin @('status', 'priority')) { $upd[$k] = $Fields[$k] } }
+        $upd = Get-ChangedFields $existing $upd
+        if ($upd.Count -eq 0) { $counts.unchanged++; return }
         $counts.toUpdate++
-        $null = $items.Add(@{ kind = $Kind; subject = $Subject; action = 'update'; productId = Get-P $existing 'productId' })
+        $null = $items.Add(@{ kind = $Kind; subject = $Subject; action = 'update'; productId = Get-P $existing 'productId'; fields = @($upd.Keys | Sort-Object) })
         if ($apply) {
-            # Keep whatever status and priority the partner has set since the card was created.
-            $upd = @{}; foreach ($k in $Fields.Keys) { if ($k -notin @('status', 'priority')) { $upd[$k] = $Fields[$k] } }
             try { $null = Invoke-Cr -Method PATCH -Path "/v2/product/$(Get-P $existing 'productId')" -Body (New-PatchOps $upd); $counts.updated++ }
             catch { $counts.errors++; Warn "Update failed for '$Subject': $($_.Exception.Message)" }
         }
@@ -56,8 +58,7 @@ if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
     $results[$phase] = [ordered]@{ ran = $false }
 }
 else {
-    $cards = @{}
-    foreach ($p in @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId&`$select=productId,subject")) { $cards[([string](Get-P $p 'subject')).ToLowerInvariant()] = $p }
+    $cards = Get-CrCards $companyId
 
     # --- Initiatives ---
     $inits = @(Get-SpAll '/lifecycle-manager/v2/initiatives' @{ 'filter[client.id]' = "eq:$spClientId"; include_unscheduled = 'true' })
@@ -132,4 +133,4 @@ else {
 $ctx.results = $results
 $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
 $c = $counts
-Set-NodeOutput @{ status = 'ok'; message = "Roadmap: $($c.initiatives) initiatives and $($c.contracts) contracts; $(if ($apply) { "$($c.created) cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" }), $($c.errors) errors."; ctx = $ctx }
+Set-NodeOutput @{ status = 'ok'; message = "Roadmap: $($c.initiatives) initiatives and $($c.contracts) contracts; $(if ($apply) { "$($c.created) cards created, $($c.updated) updated" } else { "$($c.toCreate) cards to create, $($c.toUpdate) to update" }), $($c.unchanged) unchanged, $($c.errors) errors."; ctx = $ctx }

@@ -99,13 +99,13 @@ $r = Get-P $results 'roadmap.counts'
 if ($r) {
     $act = if ($apply) { "Created $(Get-P $r 'created') cards and updated $(Get-P $r 'updated')." } else { "Would create $(Get-P $r 'toCreate') cards and update $(Get-P $r 'toUpdate')." }
     $null = $lines.Add("Roadmap: $(Get-P $r 'initiatives') initiatives and $(Get-P $r 'contracts') contracts. $act")
-    $null = $rows.Add(@('Roadmap and budget', "$(Get-P $r 'initiatives') initiatives, $(Get-P $r 'contracts') contracts", $act, "$(Get-P $r 'errors') errors"))
+    $null = $rows.Add(@('Roadmap and budget', "$(Get-P $r 'initiatives') initiatives, $(Get-P $r 'contracts') contracts", $act, "$(Get-P $r 'unchanged' 0) unchanged, $(Get-P $r 'errors') errors"))
 }
 $ins = Get-P $results 'insights.counts'
 if ($ins) {
     $act = if ($apply) { "Created $(Get-P $ins 'created') Planner cards, updated $(Get-P $ins 'updated'), closed $(Get-P $ins 'closed' 0) resolved." } else { "Would create $(Get-P $ins 'toCreate') Planner cards and update $(Get-P $ins 'toUpdate')." }
     $null = $lines.Add("Insights: $(Get-P $ins 'insights') in ScalePad, $(Get-P $ins 'active') with affected assets. $act")
-    $null = $rows.Add(@('Insights and recommendations', "$(Get-P $ins 'insights') insights, $(Get-P $ins 'active') with affected assets", $act, "$(Get-P $ins 'errors') errors"))
+    $null = $rows.Add(@('Insights and recommendations', "$(Get-P $ins 'insights') insights, $(Get-P $ins 'active') with affected assets", $act, "$(Get-P $ins 'unchanged' 0) unchanged, $(Get-P $ins 'errors') errors"))
 }
 $mn = Get-P $results 'meetings.counts'
 if ($mn) {

@@ -2926,9 +2926,9 @@ definition:
                               try {
                                   # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's
                                   # Import Assessment dialog, the upload creates the assessment when assessmentId is 0,
-                                  # titled by `name`. It can't set a description or category.
+                                  # titled by `name`. type 30 is a run; type 0 creates a row the portal never shows.
                                   $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-                                  $data = ([ordered]@{ name = $title; assessmentId = 0; type = 0; companyId = $companyId } | ConvertTo-Json -Compress)
+                                  $data = ([ordered]@{ name = $title; assessmentId = 0; type = 30; companyId = $companyId } | ConvertTo-Json -Compress)
                                   $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName ('scalepad-' + $spId + '.xlsx')
                                   $null = $crTitles.Add($title.ToLowerInvariant())
                                   $counts.imported++

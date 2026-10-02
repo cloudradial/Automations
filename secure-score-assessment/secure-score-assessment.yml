@@ -186,7 +186,7 @@ definition:
               ))
           }
 
-          $titleFinal = "$title ($(Get-Date -Format 'yyyy-MM-dd'))"
+          $titleFinal = "$title - " + (Get-Date).ToString('M/d/yy', [System.Globalization.CultureInfo]::InvariantCulture)   # the portal's run naming
           $summary = "$($rows.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
 
           # ---- duplicate check (no $select: it has returned HTTP 500 live) ----
@@ -206,9 +206,9 @@ definition:
           else {
               # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's Import
               # Assessment dialog, the upload creates the assessment when assessmentId is 0, titled by `name`.
-              # It can't set a description or category.
+              # type 30 is a run; type 0 creates a row the portal never shows.
               $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 0; companyId = [int]$companyId } | ConvertTo-Json -Compress)
+              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 30; companyId = [int]$companyId } | ConvertTo-Json -Compress)
               try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
               catch { $m = "The assessment upload failed, so nothing was created: $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
               # The upload returns 204 with no body; find the new assessment by title.

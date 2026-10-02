@@ -53,6 +53,8 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 
 Graph's last page of control profiles has no `@odata.nextLink`. The previous version read that property directly, which throws in strict mode.
 
+The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live (assessment 159 on Westgate Tech Services imported all its questions and answers); inline strings were never tried against the importer.
+
 ## Files
 
 | File | What |

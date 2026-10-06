@@ -8,9 +8,23 @@ function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText, $
 function Get-NodeInput { Get-Content $InFile -Raw | ConvertFrom-Json }
 function Set-NodeOutput { param($o) $o | ConvertTo-Json -Depth 30 | Set-Content $OutFile }
 $global:MockAssessments = New-Object System.Collections.ArrayList
-if ($env:ASSESS_EXISTS) { $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = $env:ASSESS_EXISTS; isDeleted = $false }) }
-# Like the live route: assessmentId 0 creates the assessment titled by "name" and returns 204 with no body.
-function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName) $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes); $d = $DataJson | ConvertFrom-Json; if ($Path -eq '/v2/assessment/upload' -and $d.assessmentId -eq 0 -and $d.type -eq 30 -and -not $env:ASSESS_LAG) { $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 700 + $global:MockAssessments.Count; companyId = $d.companyId; title = $d.name; isDeleted = $false }) }; '' }
+# ASSESS_EXISTS = title of a type 20 assessment already in CloudRadial; ASSESS_MODIFIED = its dateModified.
+# A type 30 row (a run) and a type 0 row with the same title are always present and must never be matched.
+if ($env:ASSESS_EXISTS) {
+    $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = $env:ASSESS_EXISTS; type = 20; isDeleted = $false; dateModified = $(if ($env:ASSESS_MODIFIED) { $env:ASSESS_MODIFIED } else { '2026-09-01T00:00:00Z' }) })
+    $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 601; companyId = 9; title = $env:ASSESS_EXISTS; type = 30; isDeleted = $false; dateModified = '2026-01-01T00:00:00Z' })
+}
+$null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 602; companyId = 9; title = 'ScalePad - Security Baseline'; type = 0; isDeleted = $false; dateModified = '2026-01-01T00:00:00Z' })
+# Like the live route (204, no body): assessmentId 0 with type 20 creates an assessment titled by "name";
+# an existing assessmentId replaces its answers in place. A non-20 type creates nothing the step can find.
+function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName)
+    $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes)
+    $d = $DataJson | ConvertFrom-Json
+    if ($Path -ne '/v2/assessment/upload' -or $d.type -ne 20) { return '' }
+    if ($d.assessmentId -eq 0) { if (-not $env:ASSESS_LAG) { $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 700 + $global:MockAssessments.Count; companyId = $d.companyId; title = $d.name; type = 20; isDeleted = $false; dateModified = '2026-10-06T00:00:00Z' }) } }
+    else { $row = @($global:MockAssessments | Where-Object { $_.assessmentId -eq $d.assessmentId })[0]; if (-not $row) { throw 'HTTP 400: no such assessment' }; $row.dateModified = '2026-10-06T00:00:00Z' }
+    ''
+}
 function Send-ArchiveUpload { param($ArchiveId, $FilePath, $FileName) if ($ArchiveId -le 0) { throw 'HTTP 400: Sequence contains no elements.' }; $null = $global:MockWrites.Add("UPLOAD archive=$ArchiveId file=$FileName") }
 function Invoke-WebRequest { param($Method, $Uri, $Headers, $OutFile) [IO.File]::WriteAllBytes($OutFile, [byte[]](37, 80, 68, 70)); $null = $global:MockWrites.Add("DOWNLOAD $Uri") }
 
@@ -28,7 +42,7 @@ $sp = @{
             @{ hardware_asset = @{ serial_number = 'SNLT680001'; name = 'Contoso-LT68' }; product = @{ name = 'Google Chrome' }; publisher = @{ name = 'Google' }; version = @{ display = '129.0.6668.90' } },
             @{ hardware_asset = @{ serial_number = 'SNDT010002'; name = 'Contoso-DT01' }; product = @{ name = 'Adobe Acrobat' }; publisher = @{ name = 'Adobe' }; version = @{ display = '24.3' } }); next_cursor = $null }
     '/lifecycle-manager/v1/assessments/criteria/labels'  = @{ data = @(@{ type_key = 'yn'; assessment_criterion_labels = @(@{ label_key = 'yes'; label = 'Yes' }, @{ label_key = 'partial'; label = 'Partially' }, @{ label_key = 'no'; label = 'No' }, @{ label_key = 'na'; label = 'Not Applicable' }) }) }
-    '/lifecycle-manager/v1/assessments'                  = @{ data = @(@{ id = 'as1'; title = 'Security Baseline'; evaluated_at = '2026-08-01T00:00:00Z'; overall_score = 72 }); next_cursor = $null }
+    '/lifecycle-manager/v1/assessments'                  = @{ data = @(@{ id = 'as0'; title = 'Security Baseline'; evaluated_at = '2026-02-01T00:00:00Z'; overall_score = 55 }, @{ id = 'as1'; title = 'Security Baseline'; evaluated_at = '2026-08-01T00:00:00Z'; overall_score = 72 }); next_cursor = $null }
     '/lifecycle-manager/v1/assessments/as1'              = @{ assessment = @{ description = 'Annual baseline'; category_list = @(
                 @{ title = 'Access Control'; question_list = @(
                         @{ title = 'MFA enforced for all users?'; description = 'Checks MFA.'; remediation_tips = 'Enable conditional access. Then audit.'; scoring_instructions = 'Yes if 100%.'; criteria_list = @(@{ label_key = 'yes'; display_label = 'Yes'; is_selected = $false }, @{ label_key = 'no'; display_label = 'No'; is_selected = $true }); public_comment = @{ text = 'Two admins lack MFA' }; linked_initiatives = @(@{ initiative_name = 'MFA Rollout' }) },

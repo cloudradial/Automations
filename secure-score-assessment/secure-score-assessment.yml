@@ -1,6 +1,6 @@
 automationsWorkflow: 1
 name: "Turn Microsoft Secure Score into a Client Assessment"
-description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, and creates the assessment by uploading it - all in one deterministic PowerShell node. Send {"companyId":123,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
+description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, and creates the client''s assessment or refreshes its answers in place (create runs from it in the portal) - all in one deterministic PowerShell node. Send {"companyId":123,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
 definition:
   schemaVersion: 1
   activities:
@@ -99,8 +99,8 @@ definition:
               return $text
           }
 
-          # ---- assessment template (51-col) + a 15-col working subset ----
-          $Columns = @('Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Partner Notes')
+          # ---- assessment template (51-col) + a 16-col working subset ----
+          $Columns = @('Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Partner Notes','Update Key')
           $TemplateColumns = @('Partner Notes','Monthly Unit Cost','Project Unit Cost','Psa Board','Psa Item','Psa Status','Psa Category','Psa Sub Type','Psa Type','Psa Priority','Psa Source','Psa Estimated Time','Email List','Teams Webhook','Slack Webhook','Flow Webhook','Json Webhook','Script','Checklist','Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Monthly Units','Monthly Unit Price','Project Units','Project Unit Price','Control Type','Likelihood','Risk','Risk Cost','Risk Impact','Owner','Updated by','Update Key','Content Update Key','Note Compliant','Note Partially Compliant','Note NA','Note Missing','Note Not Compliant')
           function ConvertTo-TemplateRows { param([object[]]$Rows)
               $idx = @{}; for ($i = 0; $i -lt $Columns.Count; $i++) { $idx[$Columns[$i]] = $i }
@@ -172,7 +172,15 @@ definition:
           $active = @($profiles | Where-Object { $null -ne $_ -and -not (Get-Prop $_ 'deprecated') })
           if ($active.Count -eq 0) { throw 'No active Secure Score control profiles returned.' }
 
-          # ---- build the 15-column assessment rows ----
+          # ---- build the assessment rows ----
+          # The workbook's per-question Update Key: CloudRadial matches questions by it when a file is
+          # re-uploaded into an assessment (live, 2026-10-06). It is derived from the Secure Score control
+          # id, which never changes, so a control keeps its question even when Microsoft rewords it.
+          function Get-QuestionKey { param([string]$Id)
+              $b = [System.Security.Cryptography.MD5]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("cloudradial/secure-score-assessment/$Id"))
+              $b[7] = ($b[7] -band 0x0f) -bor 0x30; $b[8] = ($b[8] -band 0x3f) -bor 0x80
+              return ([guid]::new([byte[]]$b)).ToString()
+          }
           $catOrder = @{ 'Identity'=1; 'Device'=2; 'Apps'=3; 'Data'=4; 'Infrastructure'=5 }
           $sorted = $active | Sort-Object @(
               @{ Expression = { $k=[string]$_.controlCategory; if ($catOrder.ContainsKey($k)) { $catOrder[$k] } else { 99 } } },
@@ -199,49 +207,51 @@ definition:
                   "Service: $($c.service) | Score impact: $pct% | Points: $cur / $max", 'List',
                   $answer, $txt, 'Compliant,Partially Compliant+,N/A=,Missing*,Not Compliant-', $flag, '',
                   'Review this control in the Microsoft 365 Defender portal under Secure Score.',
-                  $remSum, $rem, "Microsoft Secure Score - $($c.service)", ''
+                  $remSum, $rem, "Microsoft Secure Score - $($c.service)", '', (Get-QuestionKey ([string]$c.id))
               ))
           }
-
-          $titleFinal = "$title - " + (Get-Date).ToString('M/d/yy', [System.Globalization.CultureInfo]::InvariantCulture)   # the portal's run naming
           $summary = "$($rows.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
+          $runNote = "To record today's snapshot, open it under Compliance > Assessments and click Run - runs can't be created through the API."
 
-          # ---- duplicate check (no $select: it has returned HTTP 500 live) ----
+          # ---- find this company's assessment (no $select: it has returned HTTP 500 live) ----
+          # The portal lists only type 20 rows (assessments). Type 30 rows are runs, linked to their assessment
+          # by a shared updateKey that an upload can't set, so only type 20 is matched here.
           function Get-CompanyAssessments { @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId" | Where-Object { (Get-Prop $_ 'isDeleted') -ne $true }) }
-          function Test-TitleMatch { param($a) ([string](Get-Prop $a 'title')).Trim() -ieq $titleFinal }
-          $existing = @()
-          try { $existing = @(Get-CompanyAssessments) }
-          catch { $m = "Couldn't list this company's assessments, so nothing was created (to avoid a duplicate). $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
-          $dupe = @($existing | Where-Object { Test-TitleMatch $_ }).Count -gt 0
+          function Find-Assessment { param($Rows) @($Rows | Where-Object { ([string](Get-Prop $_ 'title')).Trim() -ieq $title -and [int](Get-Prop $_ 'type') -eq 20 } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending) | Select-Object -First 1 }
+          $existing = $null
+          try { $existing = Find-Assessment (Get-CompanyAssessments) }
+          catch { $m = "Couldn't list this company's assessments, so nothing was written (to avoid a duplicate). $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+          $existingId = if ($existing) { [int](Get-Prop $existing 'assessmentId') } else { 0 }
+          $base = [ordered]@{ controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" }
 
-          if ($dupe) {
-              Set-NodeOutput ([ordered]@{ status='skipped'; message="An assessment titled '$titleFinal' already exists for companyId $companyId - not re-created."; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
-          }
-          elseif ($mode -eq 'plan') {
-              Set-NodeOutput ([ordered]@{ status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+          if ($mode -eq 'plan') {
+              $m = if ($existingId) { "DRY RUN - would refresh the answers in '$title' (assessmentId $existingId) with $($rows.Count) questions. $summary" } else { "DRY RUN - would create '$title' with $($rows.Count) questions. $summary" }
+              $o = [ordered]@{ status='plan'; message=$m; assessmentId=$(if ($existingId) { $existingId } else { $null }) }; foreach ($k in $base.Keys) { $o[$k] = $base[$k] }; Set-NodeOutput $o
           }
           else {
               # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's Import
-              # Assessment dialog, the upload creates the assessment when assessmentId is 0, titled by `name`.
-              # type 30 is a run; type 0 creates a row the portal never shows.
+              # Assessment dialog, the upload creates a type 20 assessment when assessmentId is 0, titled by `name`,
+              # and replaces the answers in place when it is an existing id (questions matched by Update Key).
               $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 30; companyId = [int]$companyId } | ConvertTo-Json -Compress)
-              try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
-              catch { $m = "The assessment upload failed, so nothing was created: $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
-              # The upload returns 204 with no body; find the new assessment by title.
-              $aid = 0
-              foreach ($wait in @(0, 3, 10)) {
-                  if ($wait) { Start-Sleep -Seconds $wait }
-                  try { $found = @(Get-CompanyAssessments) } catch { continue }
-                  $hit = @($found | Where-Object { Test-TitleMatch $_ } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending)
-                  if ($hit.Count) { $aid = [int](Get-Prop $hit[0] 'assessmentId'); break }
-              }
-              if ($aid -gt 0) {
-                  Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+              $data = ([ordered]@{ name = $title; assessmentId = $existingId; type = 20; companyId = [int]$companyId } | ConvertTo-Json -Compress)
+              try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName ('secure-score-' + (Get-Date).ToUniversalTime().ToString('yyyyMMdd') + '.xlsx') }
+              catch { $m = "The assessment upload failed, so nothing was written: $($_.Exception.Message)"; Set-NodeOutput @{ status='error'; message=$m }; throw $m }
+              if ($existingId) {
+                  $o = [ordered]@{ status='refreshed'; message="Updated the answers in '$title' (assessmentId $existingId) with $($rows.Count) questions. $summary $runNote"; assessmentId=$existingId }
               }
               else {
-                  Set-NodeOutput ([ordered]@{ status='created'; message="Uploaded assessment '$titleFinal' with $($rows.Count) questions, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; a re-run skips it once it's there. $summary"; assessmentId=$null; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+                  # The upload returns 204 with no body; find the new assessment by title.
+                  $aid = 0
+                  foreach ($wait in @(0, 3, 10)) {
+                      if ($wait) { Start-Sleep -Seconds $wait }
+                      try { $hit = Find-Assessment (Get-CompanyAssessments) } catch { continue }
+                      if ($hit) { $aid = [int](Get-Prop $hit 'assessmentId'); break }
+                  }
+                  $o = if ($aid -gt 0) { [ordered]@{ status='created'; message="Created '$title' (assessmentId $aid) with $($rows.Count) questions. $summary $runNote"; assessmentId=$aid } }
+                       else { [ordered]@{ status='created'; message="Uploaded '$title' with $($rows.Count) questions, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; the next run refreshes it once it's there. $summary"; assessmentId=$null } }
               }
+              foreach ($k in $base.Keys) { $o[$k] = $base[$k] }
+              Set-NodeOutput $o
           }
         timeoutSeconds: 600
         retryCount: 0

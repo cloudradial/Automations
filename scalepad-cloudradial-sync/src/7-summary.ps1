@@ -91,9 +91,11 @@ if ($s) {
 }
 $a = Get-P $results 'assessments.counts'
 if ($a) {
-    $act = if ($apply) { "Imported $(Get-P $a 'imported')." } else { "Would import $(Get-P $a 'toImport')." }
-    $null = $lines.Add("Assessments: $(Get-P $a 'scalePadAssessments') in ScalePad, $(Get-P $a 'alreadyInCloudRadial') already imported. $act ($(Get-P $a 'questions') questions).")
-    $null = $rows.Add(@('Assessments', "$(Get-P $a 'scalePadAssessments') in ScalePad ($(Get-P $a 'questions') questions)", $act, "$(Get-P $a 'alreadyInCloudRadial') already imported, $(Get-P $a 'errors') errors"))
+    $act = if ($apply) { "Imported $(Get-P $a 'imported' 0), refreshed $(Get-P $a 'refreshed' 0)." } else { "Would import $(Get-P $a 'toImport' 0), refresh $(Get-P $a 'toRefresh' 0)." }
+    $null = $lines.Add("Assessments: $(Get-P $a 'scalePadAssessments') in ScalePad, $(Get-P $a 'alreadyInCloudRadial') already up to date. $act ($(Get-P $a 'questions') questions).")
+    $null = $rows.Add(@('Assessments', "$(Get-P $a 'scalePadAssessments') in ScalePad ($(Get-P $a 'questions') questions)", $act, "$(Get-P $a 'alreadyInCloudRadial') already up to date, $(Get-P $a 'olderEvaluations' 0) older evaluations not kept, $(Get-P $a 'errors') errors"))
+    $changed = [int](Get-P $a 'imported' 0) + [int](Get-P $a 'refreshed' 0)
+    if ($apply -and $changed -gt 0) { $null = $attention.Add("Assessments: $changed imported or refreshed. To record a dated run, open each one under Compliance > Assessments and click Run - runs can't be created through the API.") }
 }
 $r = Get-P $results 'roadmap.counts'
 if ($r) {

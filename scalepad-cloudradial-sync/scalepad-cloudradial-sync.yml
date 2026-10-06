@@ -2738,10 +2738,10 @@ definition:
                   $settings = Get-P $ctx 'settings'
                   $companyId = [int](Get-P $ctx 'companyId')
                   $spClientId = [string](Get-P $ctx 'scalePadClientId')
-                  $counts = [ordered]@{ scalePadAssessments = 0; alreadyInCloudRadial = 0; toImport = 0; imported = 0; questions = 0; errors = 0 }
+                  $counts = [ordered]@{ scalePadAssessments = 0; olderEvaluations = 0; alreadyInCloudRadial = 0; toImport = 0; toRefresh = 0; imported = 0; refreshed = 0; questions = 0; errors = 0 }
                   $items = New-Object System.Collections.ArrayList
 
-                  $Columns = @('Category', 'Question', 'Order', 'Explanation', 'Type', 'Answer', 'Text Answer', 'Responses', 'Is Flagged', 'Notes', 'Evaluation', 'Remediation Summary', 'Remediation', 'Reference', 'Partner Notes')
+                  $Columns = @('Category', 'Question', 'Order', 'Explanation', 'Type', 'Answer', 'Text Answer', 'Responses', 'Is Flagged', 'Notes', 'Evaluation', 'Remediation Summary', 'Remediation', 'Reference', 'Partner Notes', 'Update Key')
                   # The official blank template (radials.io/blankassessment): sheet "Assessment", these 51
                   # headers in this order. The workbook is written in exactly this shape so it imports whether
                   # CloudRadial reads columns by name or by position; columns we don't fill stay empty.
@@ -2875,37 +2875,63 @@ definition:
                           return , $rows
                       }
                       function Get-AssessTitle { param($a) ([string](Get-P $a 'title' (Get-P $a 'name' ''))).Trim() }
-                      # The upload returns 204 with no body, so the new assessment is found by its title.
+                      # The portal lists only type 20 rows (assessments). Type 30 rows are runs, linked to their
+                      # assessment by a shared updateKey that an upload can't set, so only type 20 is matched here.
+                      function Find-CrAssessment { param($Rows, [string]$Title)
+                          @($Rows | Where-Object { (Get-AssessTitle $_) -ieq $Title -and [int](Get-P $_ 'type' -1) -eq 20 } | Sort-Object { [int](Get-P $_ 'assessmentId' 0) } -Descending) | Select-Object -First 1
+                      }
+                      # The upload returns 204 with no body, so a new assessment is found by its title.
                       function Find-CrAssessmentId { param([string]$Title)
                           foreach ($wait in @(0, 3, 10)) {
                               if ($wait) { Start-Sleep -Seconds $wait }
-                              try { $rows = Get-CrAssessments } catch { continue }
-                              $hit = @($rows | Where-Object { (Get-AssessTitle $_) -ieq $Title } | Sort-Object { [int](Get-P $_ 'assessmentId' 0) } -Descending)
-                              if ($hit.Count) { return [int](Get-P $hit[0] 'assessmentId' 0) }
+                              try { $hit = Find-CrAssessment (Get-CrAssessments) $Title } catch { continue }
+                              if ($hit) { return [int](Get-P $hit 'assessmentId' 0) }
                           }
                           return 0
                       }
+                      function ConvertTo-Utc { param($v)
+                          if ($v -is [datetime]) { return $v.ToUniversalTime() }
+                          if ($v -is [datetimeoffset]) { return $v.UtcDateTime }
+                          $d = [datetimeoffset]::MinValue
+                          if (-not (Test-Blank $v) -and [datetimeoffset]::TryParse([string]$v, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) { return $d.UtcDateTime }
+                          return $null
+                      }
+                      # The workbook's per-question Update Key: CloudRadial matches questions by it when a file is
+                      # re-uploaded into an assessment (live, 2026-10-06). It is derived from the assessment, category
+                      # and question text, which stay the same across evaluations of one ScalePad template.
+                      function Get-QuestionKey { param([string]$Text)
+                          $b = [System.Security.Cryptography.MD5]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("cloudradial/scalepad-cloudradial-sync/$($Text.Trim().ToLowerInvariant())"))
+                          $b[7] = ($b[7] -band 0x0f) -bor 0x30; $b[8] = ($b[8] -band 0x3f) -bor 0x80
+                          return ([guid]::new([byte[]]$b)).ToString()
+                      }
 
-                      $crTitles = New-Object System.Collections.Generic.HashSet[string]
                       $crAssess = $null
                       try { $crAssess = Get-CrAssessments; $assessReadFailed = $false }
                       catch { Warn "Couldn't list CloudRadial assessments to check for ones already imported ($($_.Exception.Message)) - assessments were not imported this run to avoid duplicates."; $crAssess = @(); $assessReadFailed = $true }
-                      foreach ($a in $crAssess) { $null = $crTitles.Add((Get-AssessTitle $a).ToLowerInvariant()) }
 
+                      # One CloudRadial assessment per ScalePad assessment title, holding its newest evaluation.
+                      $seenTitles = New-Object System.Collections.Generic.HashSet[string]
                       $scoreUse = @{}
-                      foreach ($s in $list) {
+                      foreach ($s in @($list | Sort-Object { $t = ConvertTo-Utc (Get-P $_ 'evaluated_at'); if ($t) { $t } else { [datetime]::MinValue } } -Descending)) {
                           $spId = [string](Get-P $s 'id')
-                          $title = 'ScalePad - ' + [string](Get-P $s 'title' 'Assessment')
+                          $title = 'ScalePad - ' + ([string](Get-P $s 'title' 'Assessment')).Trim()
                           $evaluated = Format-Day (Get-P $s 'evaluated_at')
-                          if ($evaluated) { $title = "$title ($evaluated)" }
-                          if ($crTitles.Contains($title.ToLowerInvariant())) { $counts.alreadyInCloudRadial++; $null = $items.Add(@{ title = $title; action = 'skip'; reason = 'already in CloudRadial' }); continue }
+                          if (-not $seenTitles.Add($title.ToLowerInvariant())) { $counts.olderEvaluations++; $null = $items.Add(@{ title = $title; evaluated = $evaluated; action = 'skip'; reason = 'an older evaluation - the assessment holds the newest one' }); continue }
+                          $existing = Find-CrAssessment $crAssess $title
+                          if ($existing) {
+                              # Up to date when CloudRadial last changed it after ScalePad last changed the evaluation.
+                              $crTime = ConvertTo-Utc (Get-P $existing 'dateModified' (Get-P $existing 'dateCreated'))
+                              $spTime = ConvertTo-Utc (Get-P $s 'updated_at' (Get-P $s 'evaluated_at'))
+                              if ($crTime -and $spTime -and $crTime -ge $spTime) { $counts.alreadyInCloudRadial++; $null = $items.Add(@{ title = $title; evaluated = $evaluated; action = 'skip'; reason = 'already up to date in CloudRadial'; assessmentId = [int](Get-P $existing 'assessmentId' 0) }); continue }
+                          }
 
                           $full = Get-P (Get-SpOne "/lifecycle-manager/v1/assessments/$spId") 'assessment'
                           $rows = New-Object System.Collections.ArrayList
                           $catNo = 0
                           foreach ($cat in @(Get-P $full 'category_list' @())) {
                               $catNo++
-                              $catTitle = '{0}. {1}' -f $catNo, [string](Get-P $cat 'title' 'General')
+                              $catRaw = [string](Get-P $cat 'title' 'General')
+                              $catTitle = '{0}. {1}' -f $catNo, $catRaw
                               $order = 0
                               foreach ($qn in @(Get-P $cat 'question_list' @())) {
                                   $order += 10
@@ -2926,26 +2952,33 @@ definition:
                                           $catTitle, [string](Get-P $qn 'title' ''), $order, [string](Get-P $qn 'description' ''), 'List',
                                           $answer, $ScoreText[$answer], ($responses -join ','), $(if ($answer -eq -2) { 'Yes' } else { 'No' }),
                                           (Get-Text (Get-P $qn 'public_comment')), [string](Get-P $qn 'scoring_instructions' ''), $summary, $tips,
-                                          $(if ($refs) { "Linked initiatives: $refs" } else { '' }), (Get-Text (Get-P $qn 'internal_comments'))))
+                                          $(if ($refs) { "Linked initiatives: $refs" } else { '' }), (Get-Text (Get-P $qn 'internal_comments')),
+                                          (Get-QuestionKey "$title|$catRaw|$([string](Get-P $qn 'title' ''))")))
                               }
                           }
                           $counts.questions += $rows.Count
                           if ($rows.Count -eq 0) { $null = $items.Add(@{ title = $title; action = 'skip'; reason = 'no questions' }); continue }
-                          $counts.toImport++
-                          $item = [ordered]@{ title = $title; action = 'import'; questions = $rows.Count; scalePadScore = Get-P $s 'overall_score' }
+                          $existingId = if ($existing) { [int](Get-P $existing 'assessmentId' 0) } else { 0 }
+                          if ($existingId) { $counts.toRefresh++ } else { $counts.toImport++ }
+                          $item = [ordered]@{ title = $title; evaluated = $evaluated; action = $(if ($existingId) { 'refresh' } else { 'import' }); questions = $rows.Count; scalePadScore = Get-P $s 'overall_score' }
+                          if ($existingId) { $item.assessmentId = $existingId }
                           if ($apply -and -not $assessReadFailed) {
                               try {
                                   # The v2 API has no create route (POST /v2/assessment returns 404). Like the portal's
-                                  # Import Assessment dialog, the upload creates the assessment when assessmentId is 0,
-                                  # titled by `name`. type 30 is a run; type 0 creates a row the portal never shows.
+                                  # Import Assessment dialog, the upload creates a type 20 assessment when assessmentId is 0,
+                                  # titled by `name`, and replaces the answers in place when it is an existing id (questions
+                                  # matched by Update Key). Runs can't be created through the API: a person creates one from
+                                  # the assessment in the portal, and it copies the current answers.
                                   $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-                                  $data = ([ordered]@{ name = $title; assessmentId = 0; type = 30; companyId = $companyId } | ConvertTo-Json -Compress)
+                                  $data = ([ordered]@{ name = $title; assessmentId = $existingId; type = 20; companyId = $companyId } | ConvertTo-Json -Compress)
                                   $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName ('scalepad-' + $spId + '.xlsx')
-                                  $null = $crTitles.Add($title.ToLowerInvariant())
-                                  $counts.imported++
-                                  $aid = Find-CrAssessmentId $title
-                                  if ($aid -gt 0) { $item.assessmentId = $aid }
-                                  else { Warn "Assessment '$title' was uploaded, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; a re-run skips it once it's there." }
+                                  if ($existingId) { $counts.refreshed++ }
+                                  else {
+                                      $counts.imported++
+                                      $aid = Find-CrAssessmentId $title
+                                      if ($aid -gt 0) { $item.assessmentId = $aid }
+                                      else { Warn "Assessment '$title' was uploaded, but it didn't appear in this company's assessment list yet. Check Compliance > Assessments; the next run refreshes it once it's there." }
+                                  }
                               }
                               catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Assessment '$title' failed: $($_.Exception.Message)" }
                           }
@@ -2957,7 +2990,7 @@ definition:
                   $ctx.results = $results
                   $ctx.warnings = @(@(Get-P $ctx 'warnings' @()) + @($warnings))
                   $c = $counts
-                  Set-SyncOutput @{ status = 'ok'; message = "Assessments: $($c.scalePadAssessments) in ScalePad, $($c.alreadyInCloudRadial) already in CloudRadial, $(if ($apply) { "$($c.imported) imported" } else { "$($c.toImport) to import" }) ($($c.questions) questions), $($c.errors) errors."; ctx = $ctx }
+                  Set-SyncOutput @{ status = 'ok'; message = "Assessments: $($c.scalePadAssessments) in ScalePad ($($c.olderEvaluations) older evaluations), $($c.alreadyInCloudRadial) up to date in CloudRadial, $(if ($apply) { "$($c.imported) imported, $($c.refreshed) refreshed" } else { "$($c.toImport) to import, $($c.toRefresh) to refresh" }) ($($c.questions) questions), $($c.errors) errors."; ctx = $ctx }
                   }
                   catch {
                       $stepErr = $_.Exception.Message
@@ -5271,9 +5304,11 @@ definition:
                       }
                       $a = Get-P $results 'assessments.counts'
                       if ($a) {
-                          $act = if ($apply) { "Imported $(Get-P $a 'imported')." } else { "Would import $(Get-P $a 'toImport')." }
-                          $null = $lines.Add("Assessments: $(Get-P $a 'scalePadAssessments') in ScalePad, $(Get-P $a 'alreadyInCloudRadial') already imported. $act ($(Get-P $a 'questions') questions).")
-                          $null = $rows.Add(@('Assessments', "$(Get-P $a 'scalePadAssessments') in ScalePad ($(Get-P $a 'questions') questions)", $act, "$(Get-P $a 'alreadyInCloudRadial') already imported, $(Get-P $a 'errors') errors"))
+                          $act = if ($apply) { "Imported $(Get-P $a 'imported' 0), refreshed $(Get-P $a 'refreshed' 0)." } else { "Would import $(Get-P $a 'toImport' 0), refresh $(Get-P $a 'toRefresh' 0)." }
+                          $null = $lines.Add("Assessments: $(Get-P $a 'scalePadAssessments') in ScalePad, $(Get-P $a 'alreadyInCloudRadial') already up to date. $act ($(Get-P $a 'questions') questions).")
+                          $null = $rows.Add(@('Assessments', "$(Get-P $a 'scalePadAssessments') in ScalePad ($(Get-P $a 'questions') questions)", $act, "$(Get-P $a 'alreadyInCloudRadial') already up to date, $(Get-P $a 'olderEvaluations' 0) older evaluations not kept, $(Get-P $a 'errors') errors"))
+                          $changed = [int](Get-P $a 'imported' 0) + [int](Get-P $a 'refreshed' 0)
+                          if ($apply -and $changed -gt 0) { $null = $attention.Add("Assessments: $changed imported or refreshed. To record a dated run, open each one under Compliance > Assessments and click Run - runs can't be created through the API.") }
                       }
                       $r = Get-P $results 'roadmap.counts'
                       if ($r) {

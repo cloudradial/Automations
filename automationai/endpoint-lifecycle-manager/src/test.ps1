@@ -44,7 +44,8 @@ function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
     throw "unmocked GET $u"
 }
 Set-StrictMode -Version Latest   # as on the runner
-. "$PSScriptRoot\elm.ps1"
+# Run it in a child scope, as the runner does: $script: variables set in elm.ps1 aren't visible there.
+& ([scriptblock]::Create((Get-Content -Raw "$PSScriptRoot\elm.ps1")))
 Set-StrictMode -Off
 $o = $global:Out
 $o.message

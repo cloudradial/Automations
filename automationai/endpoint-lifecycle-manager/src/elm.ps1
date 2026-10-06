@@ -278,8 +278,9 @@ foreach ($c in $CompanyIds) { if ($null -eq $knownCompanies -or $knownCompanies.
 # ---- 2. one card per company and category ----
 $results = New-Object System.Collections.ArrayList
 function Add-Result { param($cid, $cat, $prio, $action, $prodId, $n, $note, $estimate = $null) $null = $results.Add([ordered]@{ companyId = [string]$cid; category = $cat; priority = $prio; action = $action; productId = [string]$prodId; deviceCount = $n; note = $note; estimatedPrice = $estimate })
-    if ($null -ne $estimate) { $script:estimatedTotal += $estimate } }   # only cards that were written (or would be, in plan mode)
-$estimatedTotal = 0.0
+    if ($null -ne $estimate) { $state.estimatedTotal += $estimate } }   # only cards that were written (or would be, in plan mode)
+# Run-wide totals live in one table: the runner runs this script in a child scope, where $script: variables are not ours.
+$state = @{ estimatedTotal = 0.0; optionalDropped = $false }
 function Send-Patch { param($id, $fields)
     $ops = @($fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = "/$($_.Key)"; value = $_.Value } })
     try { $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $ops -ContentType 'application/json-patch+json' }
@@ -288,10 +289,9 @@ function Send-Patch { param($id, $fields)
         $core = @($ops | Where-Object { $_.path -notin @('/notes', '/productType', '/scheduledQuarter', '/quarterOffset') })
         if ($core.Count -eq $ops.Count) { throw }
         $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $core -ContentType 'application/json-patch+json'
-        $script:optionalDropped = $true
+        $state.optionalDropped = $true
     }
 }
-$optionalDropped = $false
 foreach ($oc in @($orphanedBy.Keys | Sort-Object)) { Add-Result $oc '' '' 'skipped' '' $orphanedBy[$oc] "Company $oc has been deleted, so its $(if ($orphanedBy[$oc] -eq 1) { 'leftover endpoint was' } else { "$($orphanedBy[$oc]) leftover endpoints were" }) skipped and no cards were written." }
 
 foreach ($cid in @($companiesInScope | Sort-Object)) {
@@ -380,7 +380,7 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                     try { $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body }
                     catch {
                         foreach ($k in @('notes', 'productType', 'scheduledQuarter', 'quarterOffset')) { $body.Remove($k) }
-                        $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body; $optionalDropped = $true
+                        $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body; $state.optionalDropped = $true
                     }
                     # POST replies { success, message, data = { productId, ... } }.
                     $newId = [string](Get-Prop $new 'productId'); if (-not $newId) { $newId = [string](Get-Prop (Get-Prop $new 'data') 'productId') }
@@ -397,9 +397,9 @@ $scope = if ($CompanyIds.Count) { "companies $($CompanyIds -join ', ')" } else {
 $verb = if ($Apply) { '' } else { ' (plan - nothing written)' }
 $out = [ordered]@{ status = $(if ($counts.errors) { 'completed_with_errors' } else { 'ok' }); mode = $Mode }
 foreach ($k in $counts.Keys) { $out[$k] = $counts[$k] }
-$out.optionalFieldsDropped = $optionalDropped
+$out.optionalFieldsDropped = $state.optionalDropped
 $out.pricingApplied = ($null -ne $Pricing)
-if ($null -ne $Pricing) { $out.estimatedTotal = [math]::Round($estimatedTotal, 2) }
+if ($null -ne $Pricing) { $out.estimatedTotal = [math]::Round($state.estimatedTotal, 2) }
 $out.warnings = @($warnings)
 $out.results = @($results)
 $out.message = "Endpoint LifeCycle Manager$verb for $scope : $($counts.evaluated) computers evaluated, $($counts.flaggedEndpoints) on cards, $($counts.excludedNonComputer) non-computers excluded$(if ($counts.orphanedEndpoints) { ", $($counts.orphanedEndpoints) skipped from deleted companies" }). Cards: $($counts.cardsCreated) created, $($counts.cardsUpdated) updated, $($counts.cardsCompleted) closed, $($counts.errors) errors."

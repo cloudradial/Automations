@@ -27,6 +27,8 @@ execFileSync(process.execPath, [join(__dirname, "build-purejs-server.mjs")], {
 // 2. Assemble the .plugin zip.
 const INCLUDE = [
   ".claude-plugin",
+  ".codex-plugin",
+  ".codex-mcp.json",
   ".mcp.json",
   "DEPLOYMENT.md",
   "README.md",

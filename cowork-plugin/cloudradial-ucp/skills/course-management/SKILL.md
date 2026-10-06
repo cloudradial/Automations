@@ -70,6 +70,9 @@ Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `c
 ### course_enrollment
 Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `status`, `score`, `dateCompleted`.
 
+### course_lesson_history
+Per-lesson progress for one user: which lessons they finished and their score. Composite key: `courseId`, `applicationUserId` (a string), `courseLessonId`. Create body requires `companyId`, `courseId`, `applicationUserId`, `courseLessonId`, `completedScore`. List with `list_resources` and `filter: "courseId eq 372"` (add `and applicationUserId eq '<id>'` for one user). Use it to answer "which lesson did Sam stop at" or to record lesson completions migrated from another training tool.
+
 ## Example Calls
 
 **List courses for a company:** Call `list_resources` with `resource_type: "course"`, `filter: "companyId eq 42"`.
@@ -79,6 +82,10 @@ Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `co
 **Note:** Use `list_resources` with `filter: "courseId eq X"` to get course details and lessons. The `get_resource` operation for courses may return incomplete data (known API quirk).
 
 **Check enrollments for a company:** Call `list_resources` with `resource_type: "course_enrollment"`, `filter: "companyId eq 42"`.
+
+**See where each user is in a course:** Call `list_resources` with `resource_type: "course_lesson_history"`, `filter: "courseId eq 372"`, then match `courseLessonId` against the course's lessons.
+
+**Record a lesson as completed:** Call `create_resource` with `resource_type: "course_lesson_history"` and `data: { companyId, courseId, applicationUserId, courseLessonId, completedScore }`. Confirm with the user first; this changes their training records.
 
 ## API Reference
 

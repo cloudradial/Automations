@@ -15451,6 +15451,9 @@ var StdioServerTransport = class {
   }
 };
 
+// src/tools.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+
 // src/keyring-safe.ts
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -15721,6 +15724,25 @@ var RESOURCE_MAP = {
   course_lesson_history: { odataPath: "courselessonhistory", itemPath: "courselessonhistory", idParam: "" }
   // Composite key
 };
+async function callApiMultipart(path, dataJson, file) {
+  const { authHeader, baseUrl } = getAuthContext();
+  const form = new FormData();
+  form.append("data", new Blob([dataJson], { type: "application/json" }));
+  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
+  const resp = await fetch(new URL(path, baseUrl).toString(), {
+    method: "POST",
+    headers: { Authorization: authHeader, Accept: "application/json" },
+    body: form
+  });
+  const text = await resp.text();
+  let data = text;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}: ${text.slice(0, 500)}`);
+  return { status: resp.status, data };
+}
 async function callApi(method, path, query, body) {
   const { authHeader, baseUrl } = getAuthContext();
   const url = new URL(path, baseUrl);
@@ -15757,6 +15779,182 @@ async function callApi(method, path, query, body) {
 }
 function escapeODataString(value) {
   return value.toLowerCase().replace(/'/g, "''");
+}
+
+// src/xlsx.ts
+var ASSESSMENT_COLUMNS = [
+  "Partner Notes",
+  "Monthly Unit Cost",
+  "Project Unit Cost",
+  "Psa Board",
+  "Psa Item",
+  "Psa Status",
+  "Psa Category",
+  "Psa Sub Type",
+  "Psa Type",
+  "Psa Priority",
+  "Psa Source",
+  "Psa Estimated Time",
+  "Email List",
+  "Teams Webhook",
+  "Slack Webhook",
+  "Flow Webhook",
+  "Json Webhook",
+  "Script",
+  "Checklist",
+  "Category",
+  "Question",
+  "Order",
+  "Explanation",
+  "Type",
+  "Answer",
+  "Text Answer",
+  "Responses",
+  "Is Flagged",
+  "Notes",
+  "Evaluation",
+  "Remediation Summary",
+  "Remediation",
+  "Reference",
+  "Monthly Units",
+  "Monthly Unit Price",
+  "Project Units",
+  "Project Unit Price",
+  "Control Type",
+  "Likelihood",
+  "Risk",
+  "Risk Cost",
+  "Risk Impact",
+  "Owner",
+  "Updated by",
+  "Update Key",
+  "Content Update Key",
+  "Note Compliant",
+  "Note Partially Compliant",
+  "Note NA",
+  "Note Missing",
+  "Note Not Compliant"
+];
+var CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 4294967295;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 255] ^ c >>> 8;
+  return (c ^ 4294967295) >>> 0;
+}
+function zipStored(files) {
+  const enc = new TextEncoder();
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const data = enc.encode(f.data);
+    const crc = crc32(data);
+    const local = new Uint8Array(30 + name.length + data.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 67324752, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 2048, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, name.length, true);
+    local.set(name, 30);
+    local.set(data, 30 + name.length);
+    const central = new Uint8Array(46 + name.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 33639248, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 2048, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true);
+    central.set(name, 46);
+    locals.push(local);
+    centrals.push(central);
+    offset += local.length;
+  }
+  const centralSize = centrals.reduce((s, c) => s + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 101010256, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  const out = new Uint8Array(offset + centralSize + 22);
+  let p = 0;
+  for (const l of locals) {
+    out.set(l, p);
+    p += l.length;
+  }
+  for (const c of centrals) {
+    out.set(c, p);
+    p += c.length;
+  }
+  out.set(end, p);
+  return out;
+}
+function esc2(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function colName(n) {
+  let s = "";
+  n++;
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+function buildAssessmentXlsx(questions) {
+  const cols = ASSESSMENT_COLUMNS;
+  const lookup = new Map(cols.map((c) => [c.toLowerCase().replace(/\s+/g, ""), c]));
+  const rows = [cols.slice()];
+  questions.forEach((q, i) => {
+    const row = new Array(cols.length).fill("");
+    for (const [k, v] of Object.entries(q)) {
+      const col = lookup.get(k.toLowerCase().replace(/\s+/g, ""));
+      if (!col) throw new Error(`Question ${i + 1}: unknown column "${k}". Valid columns: ${cols.join(", ")}`);
+      row[cols.indexOf(col)] = v === void 0 || v === null ? "" : String(v);
+    }
+    if (!row[cols.indexOf("Category")] || !row[cols.indexOf("Question")]) {
+      throw new Error(`Question ${i + 1}: "Category" and "Question" are required.`);
+    }
+    rows.push(row);
+  });
+  let sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+  rows.forEach((r, ri) => {
+    sheet += `<row r="${ri + 1}">`;
+    r.forEach((v, ci) => {
+      if (v === "") return;
+      const ref = colName(ci) + (ri + 1);
+      sheet += /^-?\d+(\.\d+)?$/.test(v) && ri > 0 ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc2(v)}</t></is></c>`;
+    });
+    sheet += "</row>";
+  });
+  sheet += "</sheetData></worksheet>";
+  return zipStored([
+    { name: "[Content_Types].xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+    { name: "_rels/.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: "xl/workbook.xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+    { name: "xl/_rels/workbook.xml.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
+    { name: "xl/worksheets/sheet1.xml", data: sheet }
+  ]);
 }
 
 // src/tools.ts
@@ -16289,6 +16487,79 @@ var tools = [
       const userId = requireStr(args, "user_id");
       const result = await callApi("GET", `/v2/courseenrollment/course/${courseId}/user/${encodeURIComponent(userId)}`);
       return result.data;
+    }
+  },
+  {
+    name: "assessment_import",
+    description: "Create a CloudRadial assessment for a company and fill it with questions, the way the portal's Excel import does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Explanation, Remediation, Order}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from an existing template assessment, optionally duplicated per server/endpoint/user with `apply_to`). Creates the assessment first (POST /v2/assessment) unless `assessment_id` is given, then uploads (POST /v2/assessment/upload) or imports the template (POST /v2/assessment/import-template). Returns {assessmentId, questions, source}. This writes to the portal: confirm the company and title with the user first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        company_id: { type: "integer", description: "Company the assessment belongs to" },
+        title: { type: "string", description: "Assessment title (required when creating)" },
+        category: { type: "string", description: "Assessment category when creating. Default 'Security'." },
+        description: { type: "string", description: "Assessment description when creating" },
+        assessment_id: { type: "integer", description: "Existing assessment to add questions to. Omit to create a new one." },
+        questions: { type: "array", items: { type: "object" }, description: "Questions keyed by template column name. Category and Question are required on each." },
+        file_path: { type: "string", description: "Path to a local .xlsx in the CloudRadial assessment template layout" },
+        template_id: { type: "integer", description: "Template assessment to copy questions from" },
+        apply_to: { type: "string", enum: ["server", "endpoint", "user"], description: "With template_id: duplicate questions per matching item" },
+        type: { type: "integer", description: "Upload type sent in the data part. Default 0, as the Secure Score workflow uses." }
+      },
+      required: ["company_id"]
+    },
+    handler: async (args) => {
+      const companyId = Number(requireStr(args, "company_id"));
+      const questions = Array.isArray(args.questions) ? args.questions : void 0;
+      const filePath = str(args, "file_path");
+      const templateId = args.template_id === void 0 || args.template_id === null ? void 0 : Number(args.template_id);
+      const sources = [questions, filePath, templateId].filter((s) => s !== void 0);
+      if (sources.length !== 1) throw new Error("Give exactly one of: questions, file_path, template_id.");
+      if (questions && questions.length === 0) throw new Error("questions is empty.");
+      let assessmentId = args.assessment_id === void 0 || args.assessment_id === null ? void 0 : Number(args.assessment_id);
+      const title = str(args, "title");
+      if (assessmentId === void 0) {
+        if (!title) throw new Error("title is required when creating a new assessment.");
+        const created = await callApi("POST", "/v2/assessment", void 0, {
+          companyId,
+          title,
+          category: str(args, "category") || "Security",
+          description: str(args, "description") || ""
+        });
+        if (created.status >= 300) throw new Error(`Creating the assessment failed (HTTP ${created.status}): ${JSON.stringify(created.data).slice(0, 300)}`);
+        const d = created.data;
+        const id = d && (d.assessmentId ?? d.id);
+        if (id === void 0 || id === null) throw new Error(`CloudRadial did not return an assessmentId: ${JSON.stringify(created.data).slice(0, 300)}`);
+        assessmentId = Number(id);
+      }
+      if (templateId !== void 0) {
+        const body = { assessmentId, templateId };
+        if (str(args, "apply_to")) body.applyTo = str(args, "apply_to");
+        const r2 = await callApi("POST", "/v2/assessment/import-template", void 0, body);
+        if (r2.status >= 300) throw new Error(`Template import failed (HTTP ${r2.status}): ${JSON.stringify(r2.data).slice(0, 300)}`);
+        return { assessmentId, source: `template ${templateId}`, result: r2.data };
+      }
+      let bytes;
+      let count;
+      if (questions) {
+        bytes = buildAssessmentXlsx(questions);
+        count = questions.length;
+      } else {
+        if (!/\.xlsx$/i.test(filePath)) throw new Error("file_path must be an .xlsx file.");
+        bytes = new Uint8Array(readFileSync2(filePath));
+      }
+      const data = JSON.stringify({
+        name: title || `Assessment ${assessmentId}`,
+        assessmentId,
+        type: args.type === void 0 ? 0 : Number(args.type),
+        companyId
+      });
+      const r = await callApiMultipart("/v2/assessment/upload", data, {
+        bytes,
+        name: "assessment.xlsx",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      });
+      return { assessmentId, questions: count, source: questions ? "questions" : filePath, result: r.data };
     }
   },
   {

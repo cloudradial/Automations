@@ -58,6 +58,31 @@ export interface ApiResult {
   data: unknown;
 }
 
+/**
+ * POST a multipart/form-data request: a JSON `data` part plus one file part.
+ * Used by the assessment upload (POST /v2/assessment/upload). Throws on a non-2xx status.
+ */
+export async function callApiMultipart(
+  path: string,
+  dataJson: string,
+  file: { bytes: Uint8Array; name: string; contentType: string }
+): Promise<ApiResult> {
+  const { authHeader, baseUrl } = getAuthContext();
+  const form = new FormData();
+  form.append("data", new Blob([dataJson], { type: "application/json" }));
+  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
+  const resp = await fetch(new URL(path, baseUrl).toString(), {
+    method: "POST",
+    headers: { Authorization: authHeader, Accept: "application/json" },
+    body: form,
+  });
+  const text = await resp.text();
+  let data: unknown = text;
+  try { data = text ? JSON.parse(text) : null; } catch { /* keep text */ }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}: ${text.slice(0, 500)}`);
+  return { status: resp.status, data };
+}
+
 export async function callApi(
   method: string,
   path: string,

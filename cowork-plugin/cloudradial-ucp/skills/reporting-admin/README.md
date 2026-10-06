@@ -1,6 +1,6 @@
 # Reporting & Admin
 
-> Archives, certificates, company groups, quickstarts, media, replacement tokens, and raw API access — all from a chat prompt.
+> Archives, certificates, company groups, quickstarts, media, replacement tokens, and raw API access, all from a chat prompt.
 
 **Say this:**
 
@@ -27,7 +27,7 @@ Show me Acme Corp's archived reports
 
 - **`archive_item` uses a composite key** — requires both `archive_id` (folder) and `id` (item).
 - **Tokens here are replacement tokens** (`@SupportPhone` and the like), not API keys. A company token overrides the partner-level one of the same name.
-- **`raw_api_call` is the escape hatch** — for anything the other tools don't cover.
+- **`raw_api_call` is the escape hatch** for anything the other tools don't cover.
 
 ## Related skills
 

@@ -55,7 +55,7 @@ Immediately after the intro, call `AskUserQuestion` (header **"Get started"**, s
 |---|---|
 | **Set up credentials now (Recommended)** | Proceed straight to Step 1 (status check) — this is the primary install path. |
 | **Show me example commands** | Paste the three category cards from the README's "What you can do" (🔎 / 📝 / 🔧), each with 3–4 sample prompts. Then re-display this tour menu so they can keep exploring. |
-| **List all skills** | Show the skill table from the README ("Skills") — name + one-line description for each. Then re-display this tour menu. |
+| **List all skills** | Show the skill table from the README ("Skills"): name and one-line description for each. Then re-display this tour menu. |
 | **List all 17 MCP tools** | Show the tool table from the README ("MCP tools (17)") — name + one-line purpose. Then re-display this tour menu. |
 
 If the user types something free-form instead of picking, just do what they asked (the `Other` choice is always implicit). If they want to bail entirely, that's fine — don't push.

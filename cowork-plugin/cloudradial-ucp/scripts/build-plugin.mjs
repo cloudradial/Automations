@@ -19,6 +19,9 @@ const PLUGIN_ROOT = resolve(__dirname, "..");
 const REPO_ROOT = resolve(PLUGIN_ROOT, "..");
 const MCP_PKG = join(REPO_ROOT, "cloudradial-ucp-mcp");
 
+// 0. Copy the prompt catalog (PROMPTS.md) into the Claude and Codex READMEs.
+execFileSync(process.execPath, [join(__dirname, "sync-prompts.mjs")], { stdio: "inherit" });
+
 // 1. Build (and commit-refresh) the pure-JS server bundle into ./server.
 execFileSync(process.execPath, [join(__dirname, "build-purejs-server.mjs")], {
   stdio: "inherit",

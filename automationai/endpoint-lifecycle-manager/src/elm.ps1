@@ -277,7 +277,7 @@ foreach ($c in $CompanyIds) { if ($null -eq $knownCompanies -or $knownCompanies.
 
 # ---- 2. one card per company and category ----
 $results = New-Object System.Collections.ArrayList
-function Add-Result { param($cid, $cat, $prio, $action, $prodId, $n, $note, $estimate = $null) $null = $results.Add([ordered]@{ companyId = [string]$cid; category = $cat; priority = $prio; action = $action; productId = [string]$prodId; deviceCount = $n; note = $note; estimatedPrice = $estimate })
+function Add-Result { param($cid, $cat, $prio, $action, $prodId, $n, $note, $estimate = $null, $breakdown = $null) $null = $results.Add([ordered]@{ companyId = [string]$cid; category = $cat; priority = $prio; action = $action; productId = [string]$prodId; deviceCount = $n; note = $note; estimatedPrice = $estimate; priceBreakdown = $breakdown })
     if ($null -ne $estimate) { $state.estimatedTotal += $estimate } }   # only cards that were written (or would be, in plan mode)
 # Run-wide totals live in one table: the runner runs this script in a child scope, where $script: variables are not ours.
 $state = @{ estimatedTotal = 0.0; optionalDropped = $false }
@@ -339,11 +339,12 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                 $null = $sb.Append("<h4>$tr</h4><ul>"); foreach ($d in $inTier) { $null = $sb.Append("<li>$($d.line)</li>") }; $null = $sb.Append('</ul>')
             }
             # Pricing: replacement cards are priced from the approved models; the rest get the labour note.
-            $priceFields = $null; $priceHtml = ''; $priceNote = ''; $estimate = $null
+            $priceFields = $null; $priceHtml = ''; $priceNote = ''; $estimate = $null; $breakdown = $null
             if ($null -ne $Pricing -and $cat -ne 'Needs data') {
                 if ($cat -in @('Replace', 'Plan replacement')) {
                     if ($Pricing.models.Count) {
                         $est = Get-ReplacementEstimate $devices; $estimate = $est.total
+                        $breakdown = @($est.lines | ForEach-Object { [System.Net.WebUtility]::HtmlDecode($_) })   # plain text for the run output, so plan runs show it
                         $priceFields = [ordered]@{ projectUnits = $(if ($est.total -gt 0) { 1 } else { 0 }); projectUnitPrice = $est.total; isShowPrice = $Pricing.showToClient }
                         if ($null -ne $est.cost) { $priceFields.projectUnitCost = $est.cost }
                         $totalTxt = if ($est.priced) { "Estimated replacement cost: $(Format-Money $est.total) for $($est.priced) $(if ($est.priced -eq 1) { 'computer' } else { 'computers' })$(if ($est.unpriced) { ", with $($est.unpriced) not priced" })." } else { 'No approved model is set for these computers yet, so there is no estimate.' }
@@ -369,7 +370,7 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                 if ($reopen) { $fields.status = $(if ($OnRoadmap) { 20 } else { 0 }) } elseif ($OnRoadmap) { $fields.status = 20 }
                 if ($Apply) { Send-Patch $id $fields }
                 $counts.cardsUpdated++
-                Add-Result $cid $cat $top $(if ($reopen) { 'reopened' } else { 'updated' }) $id $n $summary $estimate
+                Add-Result $cid $cat $top $(if ($reopen) { 'reopened' } else { 'updated' }) $id $n $summary $estimate $breakdown
             }
             else {
                 $newId = ''
@@ -386,7 +387,7 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
                     $newId = [string](Get-Prop $new 'productId'); if (-not $newId) { $newId = [string](Get-Prop (Get-Prop $new 'data') 'productId') }
                 }
                 $counts.cardsCreated++
-                Add-Result $cid $cat $top 'created' $newId $n $summary $estimate
+                Add-Result $cid $cat $top 'created' $newId $n $summary $estimate $breakdown
             }
         }
         catch { $counts.errors++; Add-Result $cid $cat '' 'error' $(if ($card) { Get-Prop $card 'productId' }) $devices.Count $_.Exception.Message }

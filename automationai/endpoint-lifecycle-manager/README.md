@@ -104,7 +104,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
 - **The run output reports:**
   - `pricingApplied`
   - `estimatedTotal`, across the cards written
-  - each card's `estimatedPrice`
+  - each card's `estimatedPrice` and `priceBreakdown` (which model each computer was priced at, and which weren't priced), so a `plan` run shows the pricing before anything is written
   - any `warnings`, for example a model with no valid price
 
 Reading the pricing from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows can read Knowledge.

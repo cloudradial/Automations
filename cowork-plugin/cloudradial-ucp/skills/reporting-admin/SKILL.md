@@ -1,11 +1,12 @@
 ---
 name: reporting-admin
 description: >
-  Access CloudRadial archives, certificates, company groups, media files, API tokens,
-  and raw API calls. Use when the user says "archived reports", "certificates",
-  "company groups", "media files", "API tokens", "manage tokens", "raw API call",
+  Access CloudRadial archives, certificates, company groups, media files, quickstarts,
+  replacement tokens, and raw API calls. Use when the user says "archived reports",
+  "certificates", "company groups", "media files", "tokens", "company tokens",
+  "replacement tokens", "set the @SupportPhone token", "manage tokens", "raw API call",
   "quickstart guides", "bulk export", "cross-company report", or needs to access
-  archive items, certificates, company groupings, media management, token administration,
+  archive items, certificates, company groupings, media management, token values,
   or make advanced raw API calls not covered by other skills.
 metadata:
   version: "1.0.0"
@@ -37,7 +38,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
 | `delete_resource` | Delete by ID | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, create, or revoke API tokens | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
@@ -74,13 +75,13 @@ Certificates tracked in the portal. Key fields: `certificateId`, `companyId`, `n
 Logical groupings of companies. Key fields: `companyGroupId`, `name`, `description`.
 
 ### quickstart
-Quickstart guides available in the portal. Key fields: `quickstartId`, `name`, `description`.
+Quickstart guides on a company's portal home page. Key fields: `quickstartId`, `companyId`, `subject` (NOT `name`), `description`, `category`, `body` (HTML), `icon`, `iconColor`, `datePublished`, `isText`. Creating one requires `companyId`, `subject`, `description`, `category`, `icon`, `iconColor`, `datePublished` and `isText`.
 
 ### media
-Media files (images, documents) stored in the portal. Key fields: `mediaId`, `name`, `contentType`, `url`.
+Media files (images, documents) stored in the portal. Key fields: `mediaId`, `originalName`, `contentType`, `url`. Create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }`; `width` and `height` are required, so use 0 for non-images.
 
 ### token
-API tokens for CloudRadial access. Managed through the `manage_tokens` operation.
+**Replacement tokens**, not API keys: the named values (like `@SupportPhone`) that portal forms, articles and automations fill in. A token lives at partner level (`companyId` 0) or on one company, and a company token overrides the partner token of the same name. Manage them with `manage_tokens`. Token names are case-sensitive.
 
 ## Example Calls
 
@@ -98,13 +99,17 @@ API tokens for CloudRadial access. Managed through the `manage_tokens` operation
 
 ### Token Management
 
-The `manage_tokens` tool handles API token lifecycle.
+The `manage_tokens` tool reads and writes replacement tokens. Leave `company_id` out (or 0) for partner-level tokens.
 
-**List all tokens:** Call `manage_tokens` with `action: "list"`.
+**List partner-level tokens:** Call `manage_tokens` with `action: "list"`.
 
-**Create a new token:** Call `manage_tokens` with `action: "create"`, `data: { name: "My Token" }`.
+**List one company's tokens:** Call `manage_tokens` with `action: "list"`, `company_id: 42`.
 
-**Revoke a token:** Call `manage_tokens` with `action: "revoke"`, `token_id: "123"`.
+**Set a token (creates or updates):** Call `manage_tokens` with `action: "create"`, `company_id: 42`, `token_name: "SupportPhone"`, `value: "555-0100"`. Confirm the value with the user first: every form, article and automation using `@SupportPhone` for that company changes.
+
+**Delete a token:** Call `manage_tokens` with `action: "revoke"`, `company_id: 42`, `token_name: "SupportPhone"`. The partner-level token of the same name, if any, applies again.
+
+**Never create a token whose name matches a predefined token** such as `UserEmail`, `CompanyName` or `TicketId`. The predefined value always wins.
 
 ### Raw API Calls
 

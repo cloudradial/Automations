@@ -41,7 +41,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
 | `delete_resource` | Delete by ID | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, create, or revoke API tokens | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
@@ -210,6 +210,31 @@ This is the standard onboarding track for new client companies. Each session has
 - User adoption check: Count users, review login activity
 - Endpoint coverage: Count endpoints vs. known device count
 - Course enrollments: `list_resources?resource_type=course_enrollment&filter=companyId eq <id>`
+
+## What the API can set up, and what stays in the portal
+
+When you walk a session, do the API items for the user (after confirming each write) and hand the portal items back as a short to-do list. Never claim to have done a portal-only item.
+
+| Area | Through the plugin | How | Portal only |
+|---|---|---|---|
+| Company | Create, rename, territory, account manager, PSA ids | `create_resource` / `update_resource` `company` (create needs `name`) | Logo, colors and theme. The API returns `portalLogoUrl` for auditing but doesn't set branding. |
+| Company groups | Create groups, add or remove companies | `company_group`, `company_group_company` | |
+| Users | Create, update, remove portal users | `user` (create needs `companyId`, `email`, `firstName`, `lastName`) | Security roles, invitations, SSO |
+| Integrations | Read what's synced | `company_overview`, `list_resources` | Connecting the PSA, Microsoft 365, RMM and other integrations |
+| Service catalog | Create request forms and their questions | `catalog`, `catalog_question` (see content-management) | Approval workflows and automations attached to a form; end-to-end ticket test |
+| Knowledge base | Create, update, publish articles | `article` | |
+| Menus | Create and order menu tiles | `menu` | |
+| Quickstarts | Create home-page quickstart guides | `quickstart` (see reporting-admin) | |
+| Media | Upload images and documents | `media` (base64 `data`) | Using an uploaded image as the portal logo |
+| Replacement tokens | Set partner-level or company tokens (`@SupportPhone`) | `manage_tokens` | |
+| Training | Create courses and lessons, enroll users, record completions | `course`, `course_lesson`, `course_enrollment`, `course_lesson_history` | |
+| Assessments | Create an assessment and load its questions | `assessment_import` | Running the assessment with the client |
+| Flexible assets | Create types, fields and records | `flexible_asset_type`, `flexible_asset_field`, `flexible_asset` | |
+| Endpoints | Read devices, set custom properties, refresh warranty | `endpoint`, `endpoint_update_warranty`, custom properties | Deploying the agent |
+| Services, domains, certificates | Create and update | `service`, `service_install`, `domain`, `certificate` | |
+| Planner and roadmap | Create and update Planner cards | `product` (see client-deliverable, endpoint-lifecycle-cards) | |
+| Feedback | Read and analyze | `feedback` | Turning on the feedback widget and CSAT surveys |
+| Archives | Read archived reports | `archive_item` | Scheduling report delivery |
 
 ---
 

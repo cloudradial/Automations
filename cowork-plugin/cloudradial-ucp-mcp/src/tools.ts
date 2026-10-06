@@ -1,4 +1,6 @@
-import { callApi, RESOURCE_MAP, escapeODataString } from "./cloudradial-client.js";
+import { readFileSync } from "node:fs";
+import { callApi, callApiMultipart, RESOURCE_MAP, escapeODataString } from "./cloudradial-client.js";
+import { buildAssessmentXlsx } from "./xlsx.js";
 import {
   clearKeychain,
   getStatus,
@@ -504,37 +506,51 @@ export const tools: ToolDefinition[] = [
 
   {
     name: "manage_tokens",
-    description: "Manage CloudRadial API tokens. action = list | get | create | revoke.",
+    description:
+      "Manage CloudRadial replacement tokens: the named values (like @SupportPhone) that portal forms, articles and automations fill in. " +
+      "These are NOT API keys. Tokens live at partner level (company_id 0, the default) or on one company (company_id > 0), and a company token overrides the partner token of the same name. " +
+      "action = list | get | create (creates or updates; needs token_name and value) | revoke (deletes).",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["list", "get", "create", "revoke"] },
-        token_id: { type: "string", description: "Required for get and revoke" },
-        data: { type: "object", description: "Token body for create" },
+        company_id: { type: "integer", description: "0 = partner-level token (default); >0 = that company's token" },
+        token_name: { type: "string", description: "Token name, case-sensitive. Required for get, create and revoke." },
+        value: { type: "string", description: "Token value for create (empty string allowed as a placeholder)" },
+        type: { type: "string", description: "Optional token type for create: None, String or Automation" },
+        token_id: { type: "string", description: "Deprecated alias for token_name" },
+        data: { type: "object", description: "Deprecated: raw body {companyId, token, value, type} for create" },
       },
       required: ["action"],
     },
     handler: async (args) => {
       const action = requireStr(args, "action");
+      const companyId = args.company_id === undefined || args.company_id === null ? "0" : String(Number(args.company_id));
+      const nameOf = () => {
+        const n = str(args, "token_name") || str(args, "token_id");
+        if (!n) throw new Error("token_name is required for this action.");
+        return encodeURIComponent(n);
+      };
       switch (action) {
         case "list": {
-          const result = await callApi("GET", "/v2/token");
+          const result = await callApi("GET", "/v2/token", { companyId });
           return result.data;
         }
         case "get": {
-          const tokenId = requireStr(args, "token_id");
-          const result = await callApi("GET", `/v2/token/${tokenId}`);
+          const result = await callApi("GET", `/v2/token/${nameOf()}`, { companyId });
           return result.data;
         }
         case "create": {
-          const data = (args.data as Record<string, unknown>) || {};
-          const result = await callApi("POST", "/v2/token", undefined, data);
+          const raw = args.data as Record<string, unknown> | undefined;
+          const body = raw && !str(args, "token_name")
+            ? raw
+            : { companyId: Number(companyId), token: decodeURIComponent(nameOf()), value: str(args, "value") ?? "", ...(str(args, "type") ? { type: str(args, "type") } : {}) };
+          const result = await callApi("POST", "/v2/token", undefined, body);
           return result.data;
         }
         case "revoke": {
-          const tokenId = requireStr(args, "token_id");
-          const result = await callApi("DELETE", `/v2/token/${tokenId}`);
-          return result.data ?? { revoked: true };
+          const result = await callApi("DELETE", `/v2/token/${nameOf()}`, { companyId });
+          return result.data ?? { deleted: true };
         }
         default:
           throw new Error("action must be one of: list, get, create, revoke");
@@ -610,6 +626,80 @@ export const tools: ToolDefinition[] = [
       const userId = requireStr(args, "user_id");
       const result = await callApi("GET", `/v2/courseenrollment/course/${courseId}/user/${encodeURIComponent(userId)}`);
       return result.data;
+    },
+  },
+
+  {
+    name: "assessment_import",
+    description:
+      "Create a CloudRadial assessment for a company and fill it with questions, the way the portal's Excel import does. " +
+      "Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Explanation, Remediation, Order}), " +
+      "`file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from an existing template assessment, optionally duplicated per server/endpoint/user with `apply_to`). " +
+      "Creates the assessment first (POST /v2/assessment) unless `assessment_id` is given, then uploads (POST /v2/assessment/upload) or imports the template (POST /v2/assessment/import-template). " +
+      "Returns {assessmentId, questions, source}. This writes to the portal: confirm the company and title with the user first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        company_id:    { type: "integer", description: "Company the assessment belongs to" },
+        title:         { type: "string", description: "Assessment title (required when creating)" },
+        category:      { type: "string", description: "Assessment category when creating. Default 'Security'." },
+        description:   { type: "string", description: "Assessment description when creating" },
+        assessment_id: { type: "integer", description: "Existing assessment to add questions to. Omit to create a new one." },
+        questions:     { type: "array", items: { type: "object" }, description: "Questions keyed by template column name. Category and Question are required on each." },
+        file_path:     { type: "string", description: "Path to a local .xlsx in the CloudRadial assessment template layout" },
+        template_id:   { type: "integer", description: "Template assessment to copy questions from" },
+        apply_to:      { type: "string", enum: ["server", "endpoint", "user"], description: "With template_id: duplicate questions per matching item" },
+        type:          { type: "integer", description: "Upload type sent in the data part. Default 0, as the Secure Score workflow uses." },
+      },
+      required: ["company_id"],
+    },
+    handler: async (args) => {
+      const companyId = Number(requireStr(args, "company_id"));
+      const questions = Array.isArray(args.questions) ? (args.questions as Record<string, unknown>[]) : undefined;
+      const filePath = str(args, "file_path");
+      const templateId = args.template_id === undefined || args.template_id === null ? undefined : Number(args.template_id);
+      const sources = [questions, filePath, templateId].filter((s) => s !== undefined);
+      if (sources.length !== 1) throw new Error("Give exactly one of: questions, file_path, template_id.");
+      if (questions && questions.length === 0) throw new Error("questions is empty.");
+
+      let assessmentId = args.assessment_id === undefined || args.assessment_id === null ? undefined : Number(args.assessment_id);
+      const title = str(args, "title");
+      if (assessmentId === undefined) {
+        if (!title) throw new Error("title is required when creating a new assessment.");
+        const created = await callApi("POST", "/v2/assessment", undefined, {
+          companyId, title, category: str(args, "category") || "Security", description: str(args, "description") || "",
+        });
+        if (created.status >= 300) throw new Error(`Creating the assessment failed (HTTP ${created.status}): ${JSON.stringify(created.data).slice(0, 300)}`);
+        const d = created.data as Record<string, unknown> | null;
+        const id = d && (d.assessmentId ?? d.id);
+        if (id === undefined || id === null) throw new Error(`CloudRadial did not return an assessmentId: ${JSON.stringify(created.data).slice(0, 300)}`);
+        assessmentId = Number(id);
+      }
+
+      if (templateId !== undefined) {
+        const body: Record<string, unknown> = { assessmentId, templateId };
+        if (str(args, "apply_to")) body.applyTo = str(args, "apply_to");
+        const r = await callApi("POST", "/v2/assessment/import-template", undefined, body);
+        if (r.status >= 300) throw new Error(`Template import failed (HTTP ${r.status}): ${JSON.stringify(r.data).slice(0, 300)}`);
+        return { assessmentId, source: `template ${templateId}`, result: r.data };
+      }
+
+      let bytes: Uint8Array;
+      let count: number | undefined;
+      if (questions) {
+        bytes = buildAssessmentXlsx(questions);
+        count = questions.length;
+      } else {
+        if (!/\.xlsx$/i.test(filePath!)) throw new Error("file_path must be an .xlsx file.");
+        bytes = new Uint8Array(readFileSync(filePath!));
+      }
+      const data = JSON.stringify({
+        name: title || `Assessment ${assessmentId}`, assessmentId, type: args.type === undefined ? 0 : Number(args.type), companyId,
+      });
+      const r = await callApiMultipart("/v2/assessment/upload", data, {
+        bytes, name: "assessment.xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      return { assessmentId, questions: count, source: questions ? "questions" : filePath, result: r.data };
     },
   },
 

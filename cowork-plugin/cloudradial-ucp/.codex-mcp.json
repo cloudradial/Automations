@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cloudradial-ucp": {
+      "command": "node",
+      "args": ["./server/index.mjs"]
+    }
+  }
+}

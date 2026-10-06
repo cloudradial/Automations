@@ -36,7 +36,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
 | `delete_resource` | Delete by ID | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, create, or revoke API tokens | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
@@ -70,6 +70,9 @@ Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `c
 ### course_enrollment
 Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `status`, `score`, `dateCompleted`.
 
+### course_lesson_history
+Per-lesson progress for one user: which lessons they finished and their score. Composite key: `courseId`, `applicationUserId` (a string), `courseLessonId`. Create body requires `companyId`, `courseId`, `applicationUserId`, `courseLessonId`, `completedScore`. List with `list_resources` and `filter: "courseId eq 372"` (add `and applicationUserId eq '<id>'` for one user). Use it to answer "which lesson did Sam stop at" or to record lesson completions migrated from another training tool.
+
 ## Example Calls
 
 **List courses for a company:** Call `list_resources` with `resource_type: "course"`, `filter: "companyId eq 42"`.
@@ -79,6 +82,10 @@ Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `co
 **Note:** Use `list_resources` with `filter: "courseId eq X"` to get course details and lessons. The `get_resource` operation for courses may return incomplete data (known API quirk).
 
 **Check enrollments for a company:** Call `list_resources` with `resource_type: "course_enrollment"`, `filter: "companyId eq 42"`.
+
+**See where each user is in a course:** Call `list_resources` with `resource_type: "course_lesson_history"`, `filter: "courseId eq 372"`, then match `courseLessonId` against the course's lessons.
+
+**Record a lesson as completed:** Call `create_resource` with `resource_type: "course_lesson_history"` and `data: { companyId, courseId, applicationUserId, courseLessonId, completedScore }`. Confirm with the user first; this changes their training records.
 
 ## API Reference
 

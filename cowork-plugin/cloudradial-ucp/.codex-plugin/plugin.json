@@ -1,0 +1,40 @@
+{
+  "name": "cloudradial-ucp",
+  "version": "2.4.0",
+  "description": "Connect Codex to a CloudRadial UCP Portal through a local MCP server and CloudRadial-specific skills.",
+  "author": {
+    "name": "Nick Westgate"
+  },
+  "homepage": "https://github.com/cloudradial/Automations/tree/main/codex-plugin",
+  "repository": "https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp",
+  "license": "MIT",
+  "keywords": [
+    "cloudradial",
+    "ucp",
+    "mcp",
+    "portal",
+    "automation"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-mcp.json",
+  "interface": {
+    "displayName": "CloudRadial UCP",
+    "shortDescription": "Use CloudRadial portal data and actions in Codex.",
+    "longDescription": "CloudRadial UCP adds a local MCP server and task-specific skills for setup, portal setup and lookup, companies, users, content, service catalog, courses, assessments and compliance exports, endpoints and refresh cards, services and domains, client deliverables, feedback, and reporting.",
+    "developerName": "Nick Westgate",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/cloudradial/Automations/tree/main/codex-plugin",
+    "defaultPrompt": [
+      "Set up CloudRadial",
+      "Look up a CloudRadial company",
+      "Create CloudRadial portal content"
+    ],
+    "brandColor": "#1F7A8C",
+    "screenshots": []
+  }
+}

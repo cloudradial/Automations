@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/secure-score-assessment) |
 | Marketplace listing | [AAI-00001](https://automations.cloudradial.com/marketplace/AAI-00001) |
 
-> **Draft (2026-10-06):** the workflow creates and refreshes the assessment, but CloudRadial's API can't create a **run** (a dated snapshot). After each run of this workflow, a person opens the assessment under **Compliance > Assessments** and clicks **Run**. The run copies the assessment's current answers. This stays a draft until CloudRadial offers a way to create a run.
+> **Draft (2026-10-06):** the workflow creates and refreshes the assessment, but CloudRadial's API can't create a **run** (a dated snapshot). After each run of this workflow, a person opens the assessment under **Compliance > Assessments** and clicks **Run**. The run copies the assessment's current answers. This stays a draft until CloudRadial offers a way to create a run (filed as AAI-125).
 
 ## How it works
 
@@ -60,6 +60,7 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
   - A `type: 0` upload is listed by the API but never shown.
 - **Runs are created in the portal.** The portal's Run button uses the portal's own API, which refuses API keys (HTTP 401). The v2 API has no run endpoint.
 - **Update Keys.** CloudRadial matches questions by the workbook's per-question **Update Key** when a file is re-uploaded into an assessment (verified live). Each key is derived from the Secure Score control id, so a control keeps its question even when Microsoft rewords it.
+- **Retired controls.** Untested: what a re-upload does with a question that is missing from the new workbook. The upload probably adds and updates questions without deleting any, so the old question would stay with its old answer. A control Microsoft retires (now filtered out as deprecated) would then keep its last answer in the assessment until someone deletes it in the portal.
 - **No create route.** `POST /v2/assessment` returns 404 Not Found (seen live on 2026-10-02). Like the portal's Import Assessment dialog, the upload takes a `data` part `{"name":"<title>","assessmentId":<0 or existing id>,"type":20,"companyId":<id>}` plus the xlsx, and returns 204 with no body.
 - **Finding a new id.** The run lists `GET /v2/odata/assessment?$filter=companyId eq <id>` (no `$select`, which has returned 500) and matches the title and type, retrying after 3 and 10 seconds. If the new assessment still isn't listed, the run reports `created` without an `assessmentId`, and the next run refreshes it once it appears.
 - **No description.** The upload can't set one, and sets `category` to "Import".

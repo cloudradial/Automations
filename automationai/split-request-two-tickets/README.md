@@ -8,19 +8,26 @@ One portal form or triaged ticket becomes a service ticket written to your stand
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import in this order.** A workflow can't find its agent until the agent is imported.
+
+1. Import the **Split Request Classifier** agent, [`split-request-classifier.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml), on **Agents → Custom → Import**.
+2. Import [`split-request-service-quote.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-service-quote.yml) on **Workflows → Import**.
+
+**Optional:** [`split-request-two-tickets.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) on **Workflows → Import**, with no agent needed. See How it works for when to use it.
+
 | What | Link |
 |---|---|
-| View `split-request-service-quote.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-service-quote.yml) |
+| View `split-request-service-quote.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-service-quote.yml) |
 | Download `split-request-service-quote.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/split-request-service-quote.yml) |
-| View `split-request-classifier.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml) |
+| View `split-request-classifier.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml) |
 | Download `split-request-classifier.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml) |
-| View `split-request-two-tickets.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) |
+| View `split-request-two-tickets.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) |
 | Download `split-request-two-tickets.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) |
-| View `knowledge/service-ticket-standards.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) |
-| Download `knowledge/service-ticket-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) |
-| View `knowledge/quote-request-standards.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/quote-request-standards.md) |
+| View `knowledge/quote-request-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/quote-request-standards.md) |
 | Download `knowledge/quote-request-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/quote-request-standards.md) |
-| View `knowledge/standard-catalog.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/standard-catalog.md) |
+| View `knowledge/service-ticket-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) |
+| Download `knowledge/service-ticket-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) |
+| View `knowledge/standard-catalog.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/standard-catalog.md) |
 | Download `knowledge/standard-catalog.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/split-request-two-tickets/knowledge/standard-catalog.md) |
 | All files in this automation | [automationai/split-request-two-tickets](https://github.com/cloudradial/Automations/tree/main/automationai/split-request-two-tickets) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/split-request-two-tickets) |
@@ -33,12 +40,12 @@ Turns one intake, a CloudRadial form submission or a ticket being triaged in Ser
 
 | File | Type | Role |
 |---|---|---|
-| [`split-request-service-quote.yml`](split-request-service-quote.yml) | `automationsWorkflow` | **Use this one.** Two nodes: *Classify the request* (agent) → *Split into service + quote tickets* (PowerShell, creates the ConnectWise tickets, notes, and closes a ServiceAI source ticket). |
-| [`split-request-classifier.agent.yml`](split-request-classifier.agent.yml) | `automationsAgent` | The classifier (slug `split-request-classifier`, v0.2.2). Decides buy vs do, writes both tickets to your standards, lists missing information, cites the standards it used. Calls no PSA tools. |
-| [`knowledge/service-ticket-standards.md`](knowledge/service-ticket-standards.md) | Knowledge | Summary patterns, description layout, priority, type and subtype. |
-| [`knowledge/quote-request-standards.md`](knowledge/quote-request-standards.md) | Knowledge | What counts as a purchase, quote summary and layout, required information. |
-| [`knowledge/standard-catalog.md`](knowledge/standard-catalog.md) | Knowledge | Standard hardware, peripherals, phones and licences; role defaults; items that need approval. |
-| [`split-request-two-tickets.yml`](split-request-two-tickets.yml) | `automationsWorkflow` | *Legacy:* Split Request — Support + Quote (new user + new PC only). Superseded by the Service + Quote workflow; see the end of this page. |
+| [`split-request-service-quote.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-service-quote.yml) | `automationsWorkflow` | **Use this one.** Two nodes: *Classify the request* (agent) → *Split into service + quote tickets* (PowerShell, creates the ConnectWise tickets, notes, and closes a ServiceAI source ticket). |
+| [`split-request-classifier.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-classifier.agent.yml) | `automationsAgent` | The classifier (slug `split-request-classifier`, v0.2.2). Decides buy vs do, writes both tickets to your standards, lists missing information, cites the standards it used. Calls no PSA tools. |
+| [`knowledge/service-ticket-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/service-ticket-standards.md) | Knowledge | Summary patterns, description layout, priority, type and subtype. |
+| [`knowledge/quote-request-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/quote-request-standards.md) | Knowledge | What counts as a purchase, quote summary and layout, required information. |
+| [`knowledge/standard-catalog.md`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/knowledge/standard-catalog.md) | Knowledge | Standard hardware, peripherals, phones and licences; role defaults; items that need approval. |
+| [`split-request-two-tickets.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/split-request-two-tickets/split-request-two-tickets.yml) | `automationsWorkflow` | *Legacy:* Split Request — Support + Quote (new user + new PC only). Superseded by the Service + Quote workflow; see the end of this page. |
 
 ## How the pieces share the work
 

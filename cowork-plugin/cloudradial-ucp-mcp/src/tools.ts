@@ -506,37 +506,51 @@ export const tools: ToolDefinition[] = [
 
   {
     name: "manage_tokens",
-    description: "Manage CloudRadial API tokens. action = list | get | create | revoke.",
+    description:
+      "Manage CloudRadial replacement tokens: the named values (like @SupportPhone) that portal forms, articles and automations fill in. " +
+      "These are NOT API keys. Tokens live at partner level (company_id 0, the default) or on one company (company_id > 0), and a company token overrides the partner token of the same name. " +
+      "action = list | get | create (creates or updates; needs token_name and value) | revoke (deletes).",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["list", "get", "create", "revoke"] },
-        token_id: { type: "string", description: "Required for get and revoke" },
-        data: { type: "object", description: "Token body for create" },
+        company_id: { type: "integer", description: "0 = partner-level token (default); >0 = that company's token" },
+        token_name: { type: "string", description: "Token name, case-sensitive. Required for get, create and revoke." },
+        value: { type: "string", description: "Token value for create (empty string allowed as a placeholder)" },
+        type: { type: "string", description: "Optional token type for create: None, String or Automation" },
+        token_id: { type: "string", description: "Deprecated alias for token_name" },
+        data: { type: "object", description: "Deprecated: raw body {companyId, token, value, type} for create" },
       },
       required: ["action"],
     },
     handler: async (args) => {
       const action = requireStr(args, "action");
+      const companyId = args.company_id === undefined || args.company_id === null ? "0" : String(Number(args.company_id));
+      const nameOf = () => {
+        const n = str(args, "token_name") || str(args, "token_id");
+        if (!n) throw new Error("token_name is required for this action.");
+        return encodeURIComponent(n);
+      };
       switch (action) {
         case "list": {
-          const result = await callApi("GET", "/v2/token");
+          const result = await callApi("GET", "/v2/token", { companyId });
           return result.data;
         }
         case "get": {
-          const tokenId = requireStr(args, "token_id");
-          const result = await callApi("GET", `/v2/token/${tokenId}`);
+          const result = await callApi("GET", `/v2/token/${nameOf()}`, { companyId });
           return result.data;
         }
         case "create": {
-          const data = (args.data as Record<string, unknown>) || {};
-          const result = await callApi("POST", "/v2/token", undefined, data);
+          const raw = args.data as Record<string, unknown> | undefined;
+          const body = raw && !str(args, "token_name")
+            ? raw
+            : { companyId: Number(companyId), token: decodeURIComponent(nameOf()), value: str(args, "value") ?? "", ...(str(args, "type") ? { type: str(args, "type") } : {}) };
+          const result = await callApi("POST", "/v2/token", undefined, body);
           return result.data;
         }
         case "revoke": {
-          const tokenId = requireStr(args, "token_id");
-          const result = await callApi("DELETE", `/v2/token/${tokenId}`);
-          return result.data ?? { revoked: true };
+          const result = await callApi("DELETE", `/v2/token/${nameOf()}`, { companyId });
+          return result.data ?? { deleted: true };
         }
         default:
           throw new Error("action must be one of: list, get, create, revoke");

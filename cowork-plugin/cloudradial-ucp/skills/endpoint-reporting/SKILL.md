@@ -36,7 +36,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
 | `delete_resource` | Delete by ID | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, create, or revoke API tokens | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |

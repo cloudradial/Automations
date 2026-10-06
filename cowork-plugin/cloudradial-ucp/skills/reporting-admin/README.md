@@ -1,6 +1,6 @@
 # Reporting & Admin
 
-> Archives, certificates, company groups, API tokens, and raw API access — all from a chat prompt.
+> Archives, certificates, company groups, quickstarts, media, replacement tokens, and raw API access — all from a chat prompt.
 
 **Say this:**
 
@@ -18,15 +18,16 @@ Show me Acme Corp's archived reports
 |---|---|
 | `Show me Acme Corp's archived reports` | List of archive items sorted by date |
 | `Which of Contoso's certificates expire in 30 days?` | Filtered certificate list with expiration dates |
-| `List my CloudRadial API tokens` | Active tokens with creation dates |
-| `Create a new API token called 'production'` | New token generated (save it immediately) |
+| `List Contoso's replacement tokens` | Every @Token value set for Contoso, and the partner-level ones it inherits |
+| `Set Contoso's SupportPhone token to 555-0100` | The token every form, article and automation for Contoso uses |
+| `Add a quickstart to Contoso's home page on connecting to the VPN` | A published quickstart guide |
 | `Hit /v2/odata/company/$count via the API directly` | Raw API response for advanced use cases |
 
 ## Good to know
 
 - **`archive_item` uses a composite key** — requires both `archive_id` (folder) and `id` (item).
-- **Tokens are sensitive** — record created tokens immediately; they won't be shown again.
-- **`raw_api_call` is the escape hatch** — for anything the other 16 tools don't cover.
+- **Tokens here are replacement tokens** (`@SupportPhone` and the like), not API keys. A company token overrides the partner-level one of the same name.
+- **`raw_api_call` is the escape hatch** — for anything the other tools don't cover.
 
 ## Related skills
 

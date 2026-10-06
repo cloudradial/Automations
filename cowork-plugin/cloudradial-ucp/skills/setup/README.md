@@ -17,7 +17,7 @@ Setup the CloudRadial Plugin
 | Say this | What you get |
 |---|---|
 | `Setup the CloudRadial Plugin` | Guided key entry, validation, and storage |
-| `Tour the plugin` | Overview of all 11 skills and what they do |
+| `Tour the plugin` | Overview of every skill and what it does |
 | `Is the CloudRadial plugin configured?` | Quick status check (never reveals the keys) |
 | `Clear my CloudRadial credentials` | Wipes keys from the OS keychain |
 

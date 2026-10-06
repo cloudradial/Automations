@@ -81,7 +81,8 @@ definition:
               for ($i = 1; $i -le 6; $i++) {
                   try {
                       $a = @{ Uri = $url; Method = $Method; Headers = $headers; ContentType = $ContentType }
-                      if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 }) }
+                      # Non-ASCII (curly apostrophes in Mac names, currency symbols) is sent as \u escapes, so the body's text encoding can't garble it.
+                      if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 -EscapeHandling EscapeNonAscii }) }
                       return Invoke-RestMethod @a
                   }
                   catch {

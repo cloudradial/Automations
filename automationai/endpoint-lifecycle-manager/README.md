@@ -59,7 +59,55 @@ All optional. Send them as the run's Trigger input or the Routine input.
 | `closeEmptyCards` | `true` | Close a card when its category has no computers left. |
 | `scheduleOnRoadmap` | `false` | Put cards on the Planner roadmap by urgency (Critical and High, Human review and Needs data in the next quarter; Medium the one after; Low the third). |
 
+| `pricing` | none | Your approved models and labour rate, so replacement cards carry an estimated cost. See [Pricing the cards](#pricing-the-cards). |
+
 Example: `{"companyIds": "1,4", "mode": "plan"}`
+
+## Pricing the cards
+
+Every MSP has its own approved models and rates, so cards carry no prices until you add a `pricing` object to the run or Routine input. Without it, prices aren't touched, including any you've typed on cards yourself.
+
+```json
+{
+  "mode": "plan",
+  "pricing": {
+    "currency": "USD",
+    "hourlyRate": 150,
+    "showPriceToClient": false,
+    "models": {
+      "Windows laptop":  { "model": "Dell Latitude 7450", "price": 1450, "cost": 1180 },
+      "Windows desktop": { "model": "Dell OptiPlex 7020", "price": 1050, "cost": 850 },
+      "Mac laptop":      { "model": "MacBook Air 13 M4", "price": 1299, "cost": 1150 },
+      "Mac desktop":     { "model": "Mac mini M4", "price": 799, "cost": 700 }
+    }
+  }
+}
+```
+
+- **Replace and Plan replacement cards are priced** from the approved model for each computer's type:
+  - The card's project price is the total.
+  - `cost` (optional) fills the card's project cost.
+  - The internal note has the breakdown, for example "12 × Dell Latitude 7450 (Windows laptop) at $1,450 = $17,400".
+- **How device type is decided,** in this order:
+  - **Mac model name:** MacBook is a laptop; iMac, Mac mini, Mac Studio and Mac Pro are desktops.
+  - **The endpoint's enclosure.**
+  - **A battery:** a computer that reports one is a laptop.
+  
+  Add a `"Windows"` or `"Mac"` entry as a fallback for computers whose type isn't recorded. Computers with no matching model are listed as not priced and left out of the total.
+- **Upgrade in place, Retain, Human review and Virtual machines cards get no flat price.** What they need depends on each machine. Instead, the card says:
+  - labour is billed at your `hourlyRate`
+  - parts, software and licences will be quoted once a technician has checked each device
+  
+  Needs data cards get no cost line.
+- **Clients don't see prices** unless you set `showPriceToClient` to `true`. That turns on the card's Show price option and adds an Estimated cost section to the card body. Either way, the cards stay hidden from clients until you publish them.
+- **`currency` only sets the symbol:** `USD`, `CAD`, `AUD` and `NZD` show $, `GBP` shows £, and `EUR` shows €. CloudRadial stores only the number, so use your portal's currency.
+- **The run output reports:**
+  - `pricingApplied`
+  - `estimatedTotal`, across the cards written
+  - each card's `estimatedPrice`
+  - any `warnings`, for example a model with no valid price
+
+Reading the pricing from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows can read Knowledge.
 
 ## What it does
 

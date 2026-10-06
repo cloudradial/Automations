@@ -9,13 +9,14 @@ function Set-NodeOutput { param($o) $global:Out = $o }
 function Start-Sleep { param($Seconds) }
 $eps = @(
     @{ companyId = 1; name = "Alex's MacBook Air"; os = 'macOS 11.6'; manufacturer = 'Apple'; model = 'MacBook Air'; serialNumber = 'SN0001' },
-    @{ companyId = 1; name = 'DESKTOP-0001'; os = 'Windows 11 Pro'; manufacturer = 'Dell'; model = 'Precision 5570'; serialNumber = 'SN0002'; manufacturedDate = '2022-06-22T00:00:00Z'; expirationDate = '2025-06-24T00:00:00Z'; memory = 34359738368 },
+    @{ companyId = 1; name = 'DESKTOP-0001'; os = 'Windows 11 Pro'; manufacturer = 'Dell'; model = 'Precision 5570'; serialNumber = 'SN0002'; enclosure = 'Desktop'; manufacturedDate = '2022-06-22T00:00:00Z'; expirationDate = '2025-06-24T00:00:00Z'; memory = 34359738368 },
     @{ companyId = 1; name = "Sam's MacBook Pro"; os = 'macOS'; manufacturer = 'Apple' },
     @{ companyId = 1; name = 'CON-SERVER'; os = 'Windows Server 2016'; isServer = $true; expirationDate = '2020-03-01T00:00:00Z' },
     @{ companyId = 1; name = 'win-10-test'; os = 'Windows 10 Pro'; isVirtual = $true; memory = 0 },
     @{ companyId = 1; name = 'OK-LAPTOP'; os = 'Windows 11 Pro'; manufacturedDate = '2025-01-10T00:00:00Z'; expirationDate = '2028-01-10T00:00:00Z'; memory = 17179869184 },
     @{ companyId = 1; name = 'Draytek'; os = '' },
     @{ companyId = 2; name = 'OLD-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2017-01-01T00:00:00Z' },
+    @{ companyId = 2; name = 'OLD-LAPTOP'; os = 'Windows 10 Pro'; manufacturedDate = '2018-03-01T00:00:00Z'; enclosure = '10' },
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(
@@ -47,7 +48,7 @@ Set-StrictMode -Version Latest   # as on the runner
 Set-StrictMode -Off
 $o = $global:Out
 $o.message
-"optionalFieldsDropped: $($o.optionalFieldsDropped)"
-foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | $($r.note)" }
+"optionalFieldsDropped: $($o.optionalFieldsDropped) | pricingApplied: $($o.pricingApplied) | estimatedTotal: $(if ($o.Contains('estimatedTotal')) { $o.estimatedTotal }) | warnings: $(@($o.warnings) -join ' / ')"
+foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)" }
 "--- writes"
 foreach ($w in $global:Writes) { "  " + $w.Substring(0, [Math]::Min(260, $w.Length)) }

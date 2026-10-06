@@ -1,0 +1,8 @@
+{
+  "name": "microsoft-security-assessment-build",
+  "private": true,
+  "description": "Builds and tests the microsoft-security-assessment workflow export from its PowerShell source. Not an extension.",
+  "devDependencies": {
+    "js-yaml": "^5.4.2"
+  }
+}

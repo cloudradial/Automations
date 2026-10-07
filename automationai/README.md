@@ -35,6 +35,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`patch-compliance/`](patch-compliance/) | Workflow (runs the RMM Agent) |
 | [`portal-lookup/`](portal-lookup/) | Workflow (runs the UCP Assistant) |
 | [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Workflow (runs the UCP Assistant; deletes one empty flexible asset type) |
+| [`risky-signin-response/`](risky-signin-response/) | Workflow (no AI; hourly Routine, blocks only confirmed accounts) |
 | [`rmm-agent/`](rmm-agent/) | Agent (run by Patch Compliance and RMM Auto-Remediation) |
 | [`rmm-auto-remediation/`](rmm-auto-remediation/) | Workflow (runs the RMM Agent) |
 | [`role-change-mover/`](role-change-mover/) | Workflow (no AI; previews, then applies on confirm) + department map KB template |

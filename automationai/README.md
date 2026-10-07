@@ -34,6 +34,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`password-reset-triage/`](password-reset-triage/) | Workflow (ServiceAI triage) |
 | [`patch-compliance/`](patch-compliance/) | Workflow (runs the RMM Agent) |
 | [`portal-lookup/`](portal-lookup/) | Workflow (runs the UCP Assistant) |
+| [`qbr-data-pack/`](qbr-data-pack/) | Workflow (no AI, per-company QBR numbers on one internal Planner card) |
 | [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Workflow (runs the UCP Assistant; deletes one empty flexible asset type) |
 | [`rmm-agent/`](rmm-agent/) | Agent (run by Patch Compliance and RMM Auto-Remediation) |
 | [`rmm-auto-remediation/`](rmm-auto-remediation/) | Workflow (runs the RMM Agent) |

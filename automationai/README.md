@@ -29,6 +29,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`feedback-csat-report/`](feedback-csat-report/) | Workflow |
 | [`knowbe4/`](knowbe4/) | Workflow |
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Workflow (no AI; Microsoft 365 security review into a CloudRadial assessment) |
+| [`new-client-onboarding/`](new-client-onboarding/) | Workflow (no AI; CloudRadial company + PSA checklist ticket, Microsoft 365 baseline preview) |
 | [`new-user-onboarding/`](new-user-onboarding/) | Agent + workflow + form-to-webhook reference (in testing) |
 | [`password-reset/`](password-reset/) | Workflow (self-service) |
 | [`password-reset-triage/`](password-reset-triage/) | Workflow (ServiceAI triage) |

@@ -4,6 +4,9 @@
 # methods to clear. Accepts a flat {key:value} body (portal form webhook, ServiceAI Action, manual run),
 # the CloudRadial {Ticket:{Questions:[...]},Company:{...}} shape, or either one wrapped in {trigger:...}.
 # A value CloudRadial left as a literal @token (for example "@targetUpn") counts as not given.
+# Input, as in Password Reset: the step's "trigger" parameter is bound to {{ nodes.trigger.output }}, so
+# Get-NodeInput returns {trigger: <webhook body>} and the body is unwrapped below. A manual run's input
+# without the wrapper is read as the body itself.
 # This step makes no calls. The checks run in the next step.
 $ErrorActionPreference = 'Stop'
 

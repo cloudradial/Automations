@@ -17,6 +17,8 @@ $yml = Join-Path $PSScriptRoot '..\mfa-reset.yml'
 $js = "const y=(()=>{try{return require('js-yaml')}catch{return require(process.env.JS_YAML_PATH)}})();const d=y.load(require('fs').readFileSync(process.argv[1],'utf8'));const o={};for(const a of d.definition.activities){if(a.type==='powershell-script')o[a.id]=a.properties.script;}console.log(JSON.stringify(o));"
 $Steps = (& $node -e $js $yml) | ConvertFrom-Json -AsHashtable
 Check 'workflow has parse, verify and reset steps' ($Steps.Contains('parse') -and $Steps.Contains('verify') -and $Steps.Contains('reset'))
+$TParams = (& $node -e "const y=(()=>{try{return require('js-yaml')}catch{return require(process.env.JS_YAML_PATH)}})();const d=y.load(require('fs').readFileSync(process.argv[1],'utf8'));console.log(JSON.stringify(d.definition.activities.filter(a=>a.type==='powershell-script').map(a=>({id:a.id,p:a.properties.parameters}))))" $yml) | ConvertFrom-Json
+Check 'first step binds trigger = {{ nodes.trigger.output }} (Password Reset pattern); later steps unbound' ((@($TParams | Where-Object { $_.id -eq 'parse' })[0].p | ConvertTo-Json -Compress) -eq '{"name":"trigger","expression":"{{ nodes.trigger.output }}"}' -and -not @($TParams | Where-Object { $_.id -ne 'parse' -and @($_.p).Count }).Count) ($TParams | ConvertTo-Json -Compress -Depth 5)
 
 # ---- runner mocks ----
 $global:NodeIn = $null; $global:NodeOut = $null
@@ -31,9 +33,13 @@ function Invoke-Step {
     return @{ out = $o; error = $err }
 }
 # parse -> verify -> reset, each step reading the previous step's output (no bindings).
+# By default the body arrives the way the runner hands it over with the "trigger" parameter bound
+# ({trigger: <body>}, as in Password Reset); -Manual passes it unwrapped, like a manual Run input.
 function Invoke-Flow {
-    param($Body)
-    $p = Invoke-Step 'parse' ($Body | ConvertTo-Json -Depth 8 | ConvertFrom-Json)
+    param($Body, [switch]$Manual)
+    $TIn = $Body | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    if (-not $Manual) { $TIn = @{ trigger = $TIn } }
+    $p = Invoke-Step 'parse' $TIn
     if ($p.error) { return @{ stage = 'parse'; r = $p } }
     $v = Invoke-Step 'verify' $p.out
     if ($v.error) { return @{ stage = 'verify'; r = $v } }
@@ -209,6 +215,26 @@ Check 'proxy: smtp proxy address match passes' ($f.r.out.status -eq 'pending_con
 Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $f = Invoke-Flow (New-TBody @{ submittedByUpn = '@UserEmail'; userOfficeId = '@UserOfficeId'; dry_run = $true })
 Check 'identity: literal @tokens -> rejected identity-unverified' ($f.r.out.status -eq 'rejected' -and $f.r.out.category -eq 'identity-unverified') "$($f.r.out.status) $($f.r.out.category)"
+# Stricter than Password Reset: a sent object id that doesn't match is refused, even when the email matches.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ userOfficeId = 'u2'; issue_tap = $true })
+Check 'object id: mismatch with matching email -> rejected identity-mismatch' ($f.r.out.status -eq 'rejected' -and $f.r.out.category -eq 'identity-mismatch' -and $f.r.out.internal_note -like '*Entra object id u2*' -and @(Get-TGraphWrites).Count -eq 0 -and -not @(Get-Calls 'GET' "$TG/users/u1/authentication/methods").Count) "$($f.r.out.status) $($f.r.out.category)"
+Check 'object id: mismatch -> internal note on the ticket' (@(Get-Calls 'POST' "$TCW/service/tickets/777/notes").Count -eq 1)
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ userOfficeId = ''; dry_run = $true })
+Check 'object id blank: falls back to the email match' ($f.r.out.status -eq 'pending_confirmation' -and @($f.r.out.actions | Where-Object { $_ -like '*matched on email address*' }).Count -eq 1) "$($f.r.out.status) $($f.r.out.category)"
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ userOfficeId = '@UserOfficeId'; dry_run = $true })
+Check 'object id literal @token: counts as blank, email match used' ($f.r.out.status -eq 'pending_confirmation' -and @($f.r.out.actions | Where-Object { $_ -like '*matched on email address*' }).Count -eq 1) "$($f.r.out.status) $($f.r.out.category)"
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ submittedByUpn = 'alex.wilber@contoso.com'; userOfficeId = ''; dry_run = $true })
+Check 'object id blank: email of another person -> rejected' ($f.r.out.status -eq 'rejected' -and $f.r.out.category -eq 'identity-mismatch')
+# Manual run: input without the trigger wrapper.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ dry_run = $true }) -Manual
+Check 'manual run: unwrapped input works' ($f.r.out.status -eq 'pending_confirmation') "$($f.r.out.status) $($f.r.error)"
+$p = Invoke-Step 'parse' @{ trigger = '{"submittedByUpn":"megan.bowen@contoso.com","dry_run":"true"}' }
+Check 'trigger as a JSON string is parsed' (-not $p.error -and $p.out.upn -eq 'megan.bowen@contoso.com' -and $p.out.dry_run -eq $true) $p.error
 
 # ---- 7. Safety gates ----
 $TGates = @(

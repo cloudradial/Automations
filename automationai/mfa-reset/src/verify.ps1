@@ -2,8 +2,9 @@
 # Gates, in order. Any one that fails ends the reset with status rejected; the next step records why
 # in the internal ticket note. Nothing is changed in this step.
 #   1. Tenant: a companyTenantId sent by the portal must be the tenant this runner's app signs in to.
-#   2. Ownership: the TRUSTED submitter (@UserOfficeId, else @UserEmail) must be the target account:
-#      exact object-id match, else a match on the target's UPN, mail or any SMTP proxy address.
+#   2. Ownership: the TRUSTED submitter must be the target account. When @UserOfficeId is sent, only an
+#      exact object-id match passes (a mismatch is refused). Only when it is blank does @UserEmail
+#      have to match the target's UPN, mail or an SMTP proxy address.
 #   3. Disabled: a disabled account is not reset (possible offboarding or a hold).
 #   4. Privileged: the target holds no Entra directory role, directly, through a role-assignable
 #      group, or as a PIM-eligible assignment. Admins go through a technician.
@@ -72,8 +73,12 @@ if (-not $submitter -and -not $officeId) {
     return
 }
 $isOwner = $false; $how = ''
-if ($officeId -and $officeId.Trim().ToLowerInvariant() -eq $userId.Trim().ToLowerInvariant()) { $isOwner = $true; $how = 'Entra object id' }
-if (-not $isOwner -and $submitter) {
+# Stricter than Password Reset: when the portal sent an object id, only an exact id match passes.
+# The email match is used only when no object id was sent.
+if ($officeId) {
+    if ($officeId.Trim().ToLowerInvariant() -eq $userId.Trim().ToLowerInvariant()) { $isOwner = $true; $how = 'Entra object id' }
+}
+elseif ($submitter) {
     $ids = New-Object System.Collections.Generic.List[string]
     $ids.Add($upn); $mail = [string](Get-MfaProp $user 'mail'); if ($mail) { $ids.Add($mail) }
     foreach ($pa in @(Get-MfaProp $user 'proxyAddresses')) { if ([string]$pa -match '^(?i)smtp:(.+)$') { $ids.Add($Matches[1]) } }
@@ -81,7 +86,7 @@ if (-not $isOwner -and $submitter) {
     foreach ($i in $ids) { if ($i.Trim().ToLowerInvariant() -eq $sn) { $isOwner = $true; $how = 'email address'; break } }
 }
 if (-not $isOwner) {
-    Deny-Mfa $state 'identity-mismatch' "MFA reset DENIED: submitter '$(if ($submitter) { $submitter } else { $officeId })' asked to reset the sign-in methods of '$upn', a different account. Possible misuse; please review. Nothing was changed." 'You can only reset the sign-in methods on your own account. If someone else needs a reset, please contact the service desk.'
+    Deny-Mfa $state 'identity-mismatch' "MFA reset DENIED: submitter '$(if ($submitter) { $submitter } else { $officeId })'$(if ($officeId) { " (Entra object id $officeId, account object id $userId)" }) asked to reset the sign-in methods of '$upn', a different account. Possible misuse; please review. Nothing was changed." 'You can only reset the sign-in methods on your own account. If someone else needs a reset, please contact the service desk.'
     return
 }
 Add-MfaList $state 'actions' "Verified the requester owns the account (matched on $how)"

@@ -18,12 +18,14 @@ These links point at the `main` branch, so they always open the current version.
 
 ## How it works
 
-Three steps, no AI. It has the same shape and the same ownership gate as [Password Reset](../password-reset/).
+Three steps, no AI. It has the same shape as [Password Reset](../password-reset/), with a stricter ownership gate.
 
 1. **Read the request.** Reads the submitter from the portal's trusted tokens (`@UserEmail` and `@UserOfficeId`), plus the account to reset. When no account is named, the account is the submitter's own. Accepts a flat body (portal form, ServiceAI Action, manual run) or the CloudRadial `{Ticket:{Questions}, Company}` shape. A value left as a literal `@token` counts as not given.
+
+   **How the body arrives:** the same pattern as Password Reset. The step has a `trigger` parameter bound to `{{ nodes.trigger.output }}`, so a webhook run hands it `{trigger: <body>}` and the step unwraps it. A manual run's input without that wrapper is read as the body itself. Because the binding needs a value, a manual run must have non-empty input: use the first step's Test Input.
 2. **Check the requester and the account.** Changes nothing. Every check fails closed (`status: rejected`):
    1. **Tenant.** If the portal sends `@CompanyTenantId`, it must be the Microsoft 365 tenant this runner's app signs in to.
-   2. **Ownership.** The submitter must be the account: an exact Entra object id match (`@UserOfficeId`), otherwise a match on the account's UPN, mail or any SMTP proxy address (`@UserEmail`). These tokens come from the signed-in portal session, and a form answer can't override them. With neither token present, the request is refused.
+   2. **Ownership.** The submitter must be the account. **When `@UserOfficeId` is sent, only an exact Entra object id match passes**, and a mismatch is refused even if the email matches. Only when it is blank (or a literal `@token`) does `@UserEmail` have to match the account's UPN, mail or an SMTP proxy address. This is stricter than Password Reset, which falls back to the email match on an id mismatch, because clearing MFA is the higher-risk change. These tokens come from the signed-in portal session, and a form answer can't override them. With neither token present, the request is refused.
    3. **Disabled.** A disabled account isn't reset (it may be offboarding or on hold).
    4. **Admin roles.** The account must hold no Entra directory role: not directly, not through a role-assignable group, and not as an eligible (PIM) assignment. Admins go through a technician.
    5. **Risk.** An account Identity Protection marks as at risk, compromised or high risk isn't reset, because clearing MFA would let an attacker enroll their own device. When the tenant or the app can't read risk (no Entra ID P2, or no permission), this check is skipped with a warning.
@@ -82,7 +84,7 @@ When a required permission is missing, the step stops before changing anything w
 | Field | Required | Meaning |
 |---|---|---|
 | `submittedByUpn` | Yes (or `userOfficeId`) | **Map it to `@UserEmail`.** The signed-in submitter. Never a form question. |
-| `userOfficeId` | Recommended | **Map it to `@UserOfficeId`.** The submitter's Entra object id, for the exact id match. |
+| `userOfficeId` | Recommended | **Map it to `@UserOfficeId`.** The submitter's Entra object id. When sent, it must equal the account's object id exactly; the email match is used only when it is blank. |
 | `userPrincipalName` | No | The account to reset. Blank means the submitter's own account, which is the usual case. |
 | `companyTenantId` | Recommended | `@CompanyTenantId`. When set, the run is refused unless it matches this runner's Microsoft 365 tenant. |
 | `ticketId` | Recommended | `@TicketId`. The ticket that gets the internal note. |

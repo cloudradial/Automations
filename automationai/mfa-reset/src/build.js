@@ -32,7 +32,12 @@ const testInput = JSON.stringify({
   dry_run: true,
 }, null, 2);
 
-function psStep({ id, name, x, script, test }) {
+// params: [[name, expression]]. The first step binds the webhook body the way Password Reset does
+// (parameter "trigger" = {{ nodes.trigger.output }}); later steps read the previous step's output.
+function psStep({ id, name, x, script, test, params }) {
+  const p = params && params.length
+    ? 'parameters:\n' + params.map(([n, e]) => `      - name: ${n}\n        expression: '${e.replace(/'/g, "''")}'\n`).join('')
+    : 'parameters: []\n';
   let s = `  - id: ${id}
     name: ${name}
     type: powershell-script
@@ -44,8 +49,7 @@ function psStep({ id, name, x, script, test }) {
 ${block(script, '        ')}
       timeoutSeconds: 300
       retryCount: 0
-      parameters: []
-      aiExtensions: []
+      ${p}      aiExtensions: []
 `;
   if (test) s += `      testInput: |-\n${block(test, '        ')}\n`;
   return s;
@@ -68,7 +72,7 @@ definition:
     properties:
       # Enable the webhook in Properties after import; AutomationAI issues the URL and secret.
       webhookEnabled: false
-${psStep({ id: 'parse', name: 'Read the request', x: 280, script: read('parse.ps1'), test: testInput })}${psStep({ id: 'verify', name: 'Check the requester and account', x: 460, script: read('verify.ps1') })}${psStep({ id: 'reset', name: 'Clear MFA and record it', x: 640, script: read('reset.ps1') })}  - id: end
+${psStep({ id: 'parse', name: 'Read the request', x: 280, script: read('parse.ps1'), test: testInput, params: [['trigger', '{{ nodes.trigger.output }}']] })}${psStep({ id: 'verify', name: 'Check the requester and account', x: 460, script: read('verify.ps1') })}${psStep({ id: 'reset', name: 'Clear MFA and record it', x: 640, script: read('reset.ps1') })}  - id: end
     name: End
     type: end
     position:

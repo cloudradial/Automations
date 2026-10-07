@@ -28,6 +28,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`endpoint-names-token/`](endpoint-names-token/) | Workflow |
 | [`feedback-csat-report/`](feedback-csat-report/) | Workflow |
 | [`knowbe4/`](knowbe4/) | Workflow |
+| [`license-reclamation/`](license-reclamation/) | Workflow (monthly, read-only Microsoft 365 licence review to a Planner card) |
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Workflow (no AI; Microsoft 365 security review into a CloudRadial assessment) |
 | [`new-user-onboarding/`](new-user-onboarding/) | Agent + workflow + form-to-webhook reference (in testing) |
 | [`password-reset/`](password-reset/) | Workflow (self-service) |

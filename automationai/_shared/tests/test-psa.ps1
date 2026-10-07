@@ -194,6 +194,33 @@ Invoke-WithLib @('psa.ps1') {
     Check 'priority hint must be known' ($m -match 'critical, high, medium, low') $m
 }
 
+# --- ConnectWise conditions: the exact query strings sent ---
+Reset-Mock $S['connectwise'].Clone() {
+    param($c, $n)
+    if ($c.Uri -like '*/company/companies?conditions=name%3D*') { return @() }
+    if ($c.Uri -like '*/company/companies?conditions=name%20contains*') { return @([pscustomobject]@{ id = 44; name = 'Contoso "East" Ltd' }) }
+    if ($c.Uri -like '*/service/tickets/count*') { return [pscustomobject]@{ count = 3 } }
+    if ($c.Uri -like '*/service/tickets?conditions=*') { return @([pscustomobject]@{ id = 1; dateEntered = '2026-09-30T12:00:00Z' }) }
+    return $null
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'connectwise'
+    $co = @(Find-PsaCompany -Name 'Contoso')
+    $calls = @(Get-Calls 'GET' '*/company/companies*')
+    Check 'connectwise: Find-PsaCompany exact condition sent in full' ($calls.Count -eq 2 -and $calls[0].Uri -ceq "$CW/company/companies?conditions=name%3D%22Contoso%22%20and%20deletedFlag%3Dfalse&pageSize=25") (Show-Calls)
+    Check 'connectwise: Find-PsaCompany falls back to contains' ($calls[1].Uri -ceq "$CW/company/companies?conditions=name%20contains%20%22Contoso%22%20and%20deletedFlag%3Dfalse&pageSize=25" -and $co.Count -eq 1 -and $co[0].id -eq '44') (Show-Calls)
+    $Mock.Calls.Clear()
+    $null = @(Find-PsaCompany -Name 'Contoso "East"')
+    Check 'connectwise: quotes in a name are escaped inside the condition' ((@(Get-Calls 'GET' '*/company/companies*')[0]).Uri -ceq "$CW/company/companies?conditions=name%3D%22Contoso%20%5C%22East%5C%22%22%20and%20deletedFlag%3Dfalse&pageSize=25") (Show-Calls)
+    $Mock.Calls.Clear()
+    $null = Get-PsaOpenCount 'jlee'
+    Check 'connectwise: Get-PsaOpenCount condition sent in full' ((Get-LastCall).Uri -ceq "$CW/service/tickets/count?conditions=owner%2Fidentifier%3D%22jlee%22%20and%20closedFlag%3Dfalse") (Get-LastCall).Uri
+    $null = Get-PsaOpenCount '7'
+    Check 'connectwise: numeric owner id is unquoted' ((Get-LastCall).Uri -ceq "$CW/service/tickets/count?conditions=owner%2Fid%3D7%20and%20closedFlag%3Dfalse") (Get-LastCall).Uri
+    $null = Get-PsaLastAssigned 'jlee'
+    Check 'connectwise: Get-PsaLastAssigned condition sent in full' ((Get-LastCall).Uri -ceq "$CW/service/tickets?conditions=owner%2Fidentifier%3D%22jlee%22&orderBy=dateEntered%20desc&pageSize=1&fields=id,dateEntered") (Get-LastCall).Uri
+}
+
 # --- retries and errors ---
 Reset-Mock $S['zendesk'].Clone() {
     param($c, $n)

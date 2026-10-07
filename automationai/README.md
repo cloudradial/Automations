@@ -37,6 +37,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Workflow (runs the UCP Assistant; deletes one empty flexible asset type) |
 | [`rmm-agent/`](rmm-agent/) | Agent (run by Patch Compliance and RMM Auto-Remediation) |
 | [`rmm-auto-remediation/`](rmm-auto-remediation/) | Workflow (runs the RMM Agent) |
+| [`role-change-mover/`](role-change-mover/) | Workflow (no AI; previews, then applies on confirm) + department map KB template |
 | [`scalepad-cloudradial-alignment/`](scalepad-cloudradial-alignment/) | Agent + workflow + Knowledge (optional review before a Sync) |
 | [`scalepad-cloudradial-sync/`](scalepad-cloudradial-sync/) | Workflow |
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Agent + workflows + Knowledge |

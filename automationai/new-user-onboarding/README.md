@@ -10,17 +10,25 @@ This folder has two ways to onboard. The agent workflow below plans and verifies
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import in this order.** A workflow can't find its agent until the agent is imported.
+
+1. Import the **New User Onboarding** agent, [`new-user-onboarding.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml), on **Agents → Custom → Import**.
+2. Import [`new-user-onboarding.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.yml) on **Workflows → Import**.
+
+**Optional:** [`new-user-onboarding-direct.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding-direct.yml) on **Workflows → Import**, with no agent needed. See How it works for when to use it.
+
 | What | Link |
 |---|---|
-| View `new-user-onboarding.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) |
+| View `new-user-onboarding.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.yml) |
+| Download `new-user-onboarding.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/new-user-onboarding.yml) |
+| View `new-user-onboarding.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) |
 | Download `new-user-onboarding.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) |
-| View `form-webhook-mapping.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
-| Download `form-webhook-mapping.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
-| View `new-user-onboarding-direct.yml` (no-AI workflow, see [below](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding#direct-workflow-create-a-new-hires-accounts-straight-from-the-form)) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding-direct.yml) |
+| View `new-user-onboarding-direct.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding-direct.yml) |
 | Download `new-user-onboarding-direct.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/new-user-onboarding/new-user-onboarding-direct.yml) |
-| Source for the PSA steps and the tests (`src/`, see [PSA](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding#psa-both-workflows)) | [GitHub](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding/src) |
+| View `form-webhook-mapping.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md) |
 | All files in this automation | [automationai/new-user-onboarding](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/new-user-onboarding) |
+| Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding/src) |
 
 ## How it works
 
@@ -37,10 +45,10 @@ Day One** playbook runs the same stages.
 
 | File | Type | Role |
 |---|---|---|
-| [`form-webhook-mapping.md`](form-webhook-mapping.md) | Reference | How the CloudRadial *Add a New User* form maps, question by question, to the webhook JSON that starts the Day One playbook. |
-| [`new-user-onboarding.agent.yml`](new-user-onboarding.agent.yml) | `automationsAgent` | The brain. Refuses privileged or sensitive group copies, purchases, changes to existing users and insecure credential handoff; reports what it verified, not what it attempted. Publish it → slug `new-user-onboarding`. |
-| [`new-user-onboarding.yml`](new-user-onboarding.yml) | `automationsWorkflow` | **Read the request** (turns the webhook body into the briefing and drops unanswered `@token` values) → six Agent nodes, one per stage → **Note the ticket** (posts the result to the PSA ticket). Each stage gets the briefing and the previous stage's output as `context`, and passes a block on instead of acting. No Agent node calls the PSA, so the workflow works with any of the six PSAs. |
-| [`src/`](src/) | Source and tests | `psa.ps1` holds the PSA calls both workflows use, and `build.js` pastes it into their PowerShell steps. `test.js` runs the strict-mode tests. Edit `psa.ps1`, never the block between the `src/psa.ps1` markers in a `.yml`. |
+| [`form-webhook-mapping.md`](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md) | Reference | How the CloudRadial *Add a New User* form maps, question by question, to the webhook JSON that starts the Day One playbook. |
+| [`new-user-onboarding.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.agent.yml) | `automationsAgent` | The brain. Refuses privileged or sensitive group copies, purchases, changes to existing users and insecure credential handoff; reports what it verified, not what it attempted. Publish it → slug `new-user-onboarding`. |
+| [`new-user-onboarding.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/new-user-onboarding.yml) | `automationsWorkflow` | **Read the request** (turns the webhook body into the briefing and drops unanswered `@token` values) → six Agent nodes, one per stage → **Note the ticket** (posts the result to the PSA ticket). Each stage gets the briefing and the previous stage's output as `context`, and passes a block on instead of acting. No Agent node calls the PSA, so the workflow works with any of the six PSAs. |
+| [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/new-user-onboarding/src) | Source and tests | `psa.ps1` holds the PSA calls both workflows use, and `build.js` pastes it into their PowerShell steps. `test.js` runs the strict-mode tests. Edit `psa.ps1`, never the block between the `src/psa.ps1` markers in a `.yml`. |
 
 ## Install / run
 
@@ -49,7 +57,7 @@ Day One** playbook runs the same stages.
 3. For the ticket note, add `PSA-Type` and your PSA's secrets to the runner's Key Vault (see [PSA](#psa-both-workflows)), and deploy to that runner.
 4. Set the agent variables: `credentialVault` (the 1Password vault for credential handoff — the agent stops rather than falling back to email or chat without it), `defaultLicenceSku`, `sensitiveGroupPatterns`, `hardwareBufferDays`, and `rmmPlatform` if the playbook checks device readiness.
 5. On **Workflows → Import**, upload `new-user-onboarding.yml`. Enable the webhook under **Properties → Webhook**, then **Publish** and **deploy** it to your runner.
-6. Point the *Add a New User* form's Webhook activity at the workflow's webhook URL, with the secret in the `X-Crauto-Webhook-Secret` header. The Content is the JSON in [form-webhook-mapping.md](form-webhook-mapping.md). Make the form changes it lists (Field IDs, the Manager question, the Security Groups and licence choices) in the package source, not in a client portal.
+6. Point the *Add a New User* form's Webhook activity at the workflow's webhook URL, with the secret in the `X-Crauto-Webhook-Secret` header. The Content is the JSON in [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/automationai/new-user-onboarding/form-webhook-mapping.md). Make the form changes it lists (Field IDs, the Manager question, the Security Groups and licence choices) in the package source, not in a client portal.
 7. To test without the form, run the workflow from **Test** with a request body as the Trigger input. The **Read the request** node has a sample.
 8. The ticket note is posted only when the request has `"confirm": "true"`. Without it, **Note the ticket** returns the note as `internal_note` and posts nothing. Add `"confirm": "true"` to the form's Content once you trust the runs.
 
@@ -111,7 +119,6 @@ None of these notes has been posted to a real PSA from these workflows yet. The 
 
 The change applies to **every** workflow that uses this agent (the New User Onboarding - Day One playbook and any workflow that calls it). Keep the repo copy on `true`, so a fresh install always starts in preview.
 
-
 ## Direct workflow: Create a New Hire's Accounts Straight From the Form
 
 A submitted Add a New User form becomes a Microsoft 365 account with its licence, mailbox, groups and portal login, and the ticket gets a note of everything done. It checks the tenant first and never touches an existing account or grants admin access.
@@ -152,7 +159,6 @@ No extensions. Every call is made from PowerShell with runner Key Vault secrets.
 | `Onboarding-UsageLocation` | No | Two-letter country code for new accounts, because the form doesn't ask for one. Without it, `US` is used. |
 
 The Microsoft 365 app needs these Graph application permissions: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
-
 
 ### Setup
 

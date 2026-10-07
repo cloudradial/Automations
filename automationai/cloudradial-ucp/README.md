@@ -8,10 +8,29 @@ Look up, audit and update companies, users, devices, services and tokens in plai
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import** [`cloudradial-ucp.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/cloudradial-ucp/cloudradial-ucp.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
+
+- [Add Many Client Companies at Once](https://github.com/cloudradial/Automations/tree/main/automationai/add-companies-to-portal)
+- [Add Many KB Articles at Once](https://github.com/cloudradial/Automations/tree/main/automationai/bulk-create-kb-articles)
+- [Add Many Training Courses at Once](https://github.com/cloudradial/Automations/tree/main/automationai/bulk-create-training-courses)
+- [Load Your Request Forms into Any Portal](https://github.com/cloudradial/Automations/tree/main/automationai/import-service-catalog)
+- [Bring IT Glue Documentation into the Portal](https://github.com/cloudradial/Automations/tree/main/automationai/itglue-to-flexible-assets)
+- [Onboard Many Portal Users at Once](https://github.com/cloudradial/Automations/tree/main/automationai/onboard-users-to-portal)
+- [Walk Into Every Client Call Prepared](https://github.com/cloudradial/Automations/tree/main/automationai/portal-lookup)
+- [Remove a Flexible Asset Type You No Longer Use](https://github.com/cloudradial/Automations/tree/main/automationai/remove-empty-flexible-asset-type)
+
 | What | Link |
 |---|---|
 | View `cloudradial-ucp.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/cloudradial-ucp/cloudradial-ucp.agent.yml) |
 | Download `cloudradial-ucp.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/cloudradial-ucp/cloudradial-ucp.agent.yml) |
+| Used by | [Add Many Client Companies at Once](https://github.com/cloudradial/Automations/tree/main/automationai/add-companies-to-portal) |
+| Used by | [Add Many KB Articles at Once](https://github.com/cloudradial/Automations/tree/main/automationai/bulk-create-kb-articles) |
+| Used by | [Add Many Training Courses at Once](https://github.com/cloudradial/Automations/tree/main/automationai/bulk-create-training-courses) |
+| Used by | [Load Your Request Forms into Any Portal](https://github.com/cloudradial/Automations/tree/main/automationai/import-service-catalog) |
+| Used by | [Bring IT Glue Documentation into the Portal](https://github.com/cloudradial/Automations/tree/main/automationai/itglue-to-flexible-assets) |
+| Used by | [Onboard Many Portal Users at Once](https://github.com/cloudradial/Automations/tree/main/automationai/onboard-users-to-portal) |
+| Used by | [Walk Into Every Client Call Prepared](https://github.com/cloudradial/Automations/tree/main/automationai/portal-lookup) |
+| Used by | [Remove a Flexible Asset Type You No Longer Use](https://github.com/cloudradial/Automations/tree/main/automationai/remove-empty-flexible-asset-type) |
 | All files in this automation | [automationai/cloudradial-ucp](https://github.com/cloudradial/Automations/tree/main/automationai/cloudradial-ucp) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/cloudradial-ucp) |
 | Marketplace listing | [AAI-00031](https://automations.cloudradial.com/marketplace/AAI-00031) |
@@ -27,8 +46,8 @@ A general-purpose CloudRadial **AutomationAI agent**, the platform-native analog
 In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-ucp-assistant`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies` (which also carries the user tools), `cloudradial-v2-endpoints`, `cloudradial-v2-services`, `cloudradial-v2-tokens`, `cloudradial-v2-compliance` (assessments, certificates and flexible assets, added in 0.1.4).
 
 Run it interactively in the **AI Playground**, or from a workflow that gives it a goal. Two workflows run it:
-- [Portal Lookup](../portal-lookup/), a read-only briefing.
-- [Remove Empty Flexible Asset Type](../remove-empty-flexible-asset-type/), which deletes one empty type and waits for your approval first.
+- [Portal Lookup](https://github.com/cloudradial/Automations/tree/main/automationai/portal-lookup), a read-only briefing.
+- [Remove Empty Flexible Asset Type](https://github.com/cloudradial/Automations/tree/main/automationai/remove-empty-flexible-asset-type), which deletes one empty type and waits for your approval first.
 
 Pass a `request` (a question, an audit/report ask, or a change to make) and optionally a `companyName` to focus on one company.
 

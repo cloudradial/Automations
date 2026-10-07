@@ -8,17 +8,21 @@ Optional. When ScalePad data is messy, it matches clients and plans the move so 
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import in this order.** A workflow can't find its agent until the agent is imported.
+
+1. Import the **ScalePad to CloudRadial Alignment** agent, [`scalepad-cloudradial-alignment.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml), on **Agents → Custom → Import**.
+2. Import [`scalepad-cloudradial-alignment.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) on **Workflows → Import**.
+
 | What | Link |
 |---|---|
-| View `scalepad-cloudradial-alignment.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) |
-| Download `scalepad-cloudradial-alignment.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) |
-| View `scalepad-cloudradial-alignment.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) |
+| View `scalepad-cloudradial-alignment.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) |
 | Download `scalepad-cloudradial-alignment.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) |
-| View `knowledge/scalepad-to-cloudradial-migration-map.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) |
+| View `scalepad-cloudradial-alignment.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) |
+| Download `scalepad-cloudradial-alignment.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) |
+| View `knowledge/scalepad-to-cloudradial-migration-map.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) |
 | Download `knowledge/scalepad-to-cloudradial-migration-map.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) |
 | All files in this automation | [automationai/scalepad-cloudradial-alignment](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-alignment) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/scalepad-cloudradial-alignment) |
-| Works with | [Move Off ScalePad Without Losing Your Data](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync) |
 
 ## How it works
 
@@ -34,9 +38,9 @@ It needs the `lifecycle-manager` (ScalePad) extension at **1.2.0 or later**: 1.0
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-alignment.agent.yml`](scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.7). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
-| [`scalepad-cloudradial-alignment.yml`](scalepad-cloudradial-alignment.yml) | `automationsWorkflow` | **Command: align.** One agent node, `autoApprove: false` (you approve each write). Static goal — the agent reads `mode`/`phase`/company from its input bag. |
-| [`knowledge/scalepad-to-cloudradial-migration-map.md`](knowledge/scalepad-to-cloudradial-migration-map.md) | Knowledge | Section-by-section map (ScalePad → CloudRadial home → API/import route → policy-evaluable?), the endpoint field map, and the guardrails. Upload to Knowledge and ground the workflow's agent node on it. |
+| [`scalepad-cloudradial-alignment.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.7). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
+| [`scalepad-cloudradial-alignment.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) | `automationsWorkflow` | **Command: align.** One agent node, `autoApprove: false` (you approve each write). Static goal — the agent reads `mode`/`phase`/company from its input bag. |
+| [`knowledge/scalepad-to-cloudradial-migration-map.md`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) | Knowledge | Section-by-section map (ScalePad → CloudRadial home → API/import route → policy-evaluable?), the endpoint field map, and the guardrails. Upload to Knowledge and ground the workflow's agent node on it. |
 
 ## Install / run
 

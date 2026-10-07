@@ -42,7 +42,9 @@ Composite-key resources need extra args on `get_resource` / `update_resource` / 
 
 Some single-item endpoints are scoped by company: `catalog_question`, `course_lesson`, `course_lesson_history`, `domain`, `user`, `application_user` and `token`. Pass `company_id`, or let the tool look it up (all but `course_lesson_history` and `token`).
 
-What the API can't do, so the tools refuse with a reason: update or delete an `assessment` (use `assessment_import`), update or delete a `flexible_asset_field`, delete a `course_enrollment`, or PUT a `flexible_asset`, `flexible_asset_type` or `course_enrollment`. `get_resource` reads `assessment` and `course_enrollment` through OData by id. To update a `flexible_asset`, pass the complete traits object as `data.traits`; keys you leave out are removed.
+What the API can't do, so the tools refuse with a reason: update or delete an `assessment` (use `assessment_import`), update or delete a `flexible_asset_field`, delete a `course_enrollment`, or PUT a `flexible_asset`, `flexible_asset_type` or `course_enrollment`. `get_resource` reads `assessment` and `course_enrollment` through OData by id. To update a `flexible_asset`, pass the traits to change as `data.traits`. The API only lets you replace traits the asset already has; traits you leave out are kept.
+
+`list_resources` and `user_lookup` select every User field except `supportPin` by default: any `/v2/odata/user` read that includes `supportPin` returns HTTP 500. `get_resource` on one user still returns it.
 
 ## Tests
 
@@ -51,6 +53,14 @@ npm test
 ```
 
 Runs the tools against a mocked CloudRadial API (no keys or network needed) and checks that no skill file is cut off or corrupted.
+
+To check the tools against a real tenant, use a demo or test company only. Set `CLOUDRADIAL_PUBLIC_KEY`, `CLOUDRADIAL_PRIVATE_KEY` (and `CLOUDRADIAL_BASE_URL` outside the US), plus `LIVE_COMPANY_ID` and `LIVE_COMPANY_NAME`, then:
+
+```bash
+npm run test:live
+```
+
+It stops unless the company's name matches `LIVE_COMPANY_NAME`. It reads and writes catalog questions, users, endpoint custom properties, flexible assets and Planner items in that company, putting back or deleting what it changes. It leaves one assessment, "Plugin live check (create)", because the API can't delete assessments; later runs reuse it.
 
 ## Install
 

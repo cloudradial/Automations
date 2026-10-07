@@ -1792,7 +1792,7 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `psaKey`: integer [int64]
 - `psaSiteKey`: integer [int64]
 - `psaChildAccountKey`: integer [int64]
-- `supportPin`: string (nullable)
+- `supportPin`: string (nullable). Selecting it on `/v2/odata/user` returns HTTP 500 (live, 2026-10-07); read it from `GET /v2/user/{id}`.
 - `company`: Company
 
 ### UserRequest

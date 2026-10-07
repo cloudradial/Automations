@@ -59,13 +59,25 @@ const ODATA_KEY: Record<string, { set: string; key: string; quoted?: boolean }> 
   course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" },
 };
 
-/** First OData row whose key equals `id`, or undefined. */
-async function odataByKey(resourceType: string, id: string): Promise<Record<string, unknown> | undefined> {
+// /v2/odata/user answers HTTP 500 whenever supportPin is in the row (live, 2026-10-07:
+// every other field reads fine on its own), so user reads select every field but
+// supportPin, and not the `company` navigation property, unless the caller chooses.
+const USER_SELECT =
+  "userId,email,firstName,lastName,userName,phoneNumber,companyId,displayName,department,title,country," +
+  "streetAddress,city,state,postalCode,mobilePhone,isDeleted,dateCreated,dateModified,psaKey,psaSiteKey," +
+  "psaChildAccountKey";
+
+/** First OData row whose key equals `id`, or undefined. `select` limits the fields read. */
+async function odataByKey(resourceType: string, id: string, select?: string): Promise<Record<string, unknown> | undefined> {
   const k = ODATA_KEY[resourceType];
   if (!k) return undefined;
   if (!k.quoted && !/^\d+$/.test(id)) throw new Error(`${resourceType} id must be a number, got "${id}"`);
   const value = k.quoted ? `'${id.replace(/'/g, "''")}'` : id;
-  const r = await callApi("GET", `/v2/odata/${k.set}`, { $filter: `${k.key} eq ${value}`, $top: "1" });
+  const r = await callApi("GET", `/v2/odata/${k.set}`, {
+    $filter: `${k.key} eq ${value}`,
+    $top: "1",
+    $select: select ?? (k.set === "user" ? USER_SELECT : undefined),
+  });
   const rows = (r.data as { value?: unknown })?.value ?? r.data;
   return Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
 }
@@ -86,7 +98,7 @@ async function itemCompanyQuery(
   if (given !== undefined && given !== "") return { companyId: given };
   if (id && ODATA_KEY[resourceType]) {
     try {
-      const row = await odataByKey(resourceType, id);
+      const row = await odataByKey(resourceType, id, `${ODATA_KEY[resourceType].key},companyId`);
       if (row && row.companyId !== undefined && row.companyId !== null) return { companyId: String(row.companyId) };
     } catch {
       // Fall through: the item call itself reports the real error.
@@ -326,7 +338,7 @@ export const tools: ToolDefinition[] = [
       // with explicit `top` (max 200) and walk pages via `skip`.
       const query: Record<string, string | undefined> = {
         $filter: str(args, "filter"),
-        $select: str(args, "select"),
+        $select: str(args, "select") ?? (resourceType === "user" ? USER_SELECT : undefined),
         $orderby: str(args, "orderby"),
         $top: str(args, "top") ?? "100",
         $skip: str(args, "skip"),
@@ -467,7 +479,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "update_resource",
     description:
-      "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the complete traits object as data.traits (keys left out are removed). company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
+      "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the traits to change as data.traits; only traits the asset already has can be changed, and traits left out are kept. company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
     inputSchema: {
       type: "object",
       properties: {
@@ -498,10 +510,18 @@ export const tools: ToolDefinition[] = [
       if (blocked) throw new Error(blocked);
 
       let data = (args.data as Record<string, unknown>) || {};
-      // flexible_asset stores its values as a JSON string in traitsJson.
+      // flexible_asset traits can only be changed one existing trait at a time
+      // (live, 2026-10-07): replacing /traitsJson or the whole /traits object is
+      // refused. So each key becomes its own replace op on /traits/<key>.
+      const extraOps: { op: string; path: string; value: unknown }[] = [];
       if (resourceType === "flexible_asset" && data.traits !== undefined) {
         const { traits, ...rest } = data;
-        data = { ...rest, traitsJson: typeof traits === "string" ? traits : JSON.stringify(traits) };
+        const t = typeof traits === "string" ? JSON.parse(traits) : traits;
+        if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error("data.traits must be an object of trait name to value");
+        for (const [key, value] of Object.entries(t as Record<string, unknown>)) {
+          extraOps.push({ op: "replace", path: `/traits/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`, value });
+        }
+        data = rest;
       }
 
       let path: string;
@@ -535,11 +555,14 @@ export const tools: ToolDefinition[] = [
       // PUT (full replace) is sent through as-is.
       const body =
         method === "PATCH"
-          ? Object.entries(data).map(([key, value]) => ({
-              op: "replace",
-              path: `/${key}`,
-              value,
-            }))
+          ? [
+              ...Object.entries(data).map(([key, value]) => ({
+                op: "replace",
+                path: `/${key}`,
+                value,
+              })),
+              ...extraOps,
+            ]
           : data;
       const result = await callApi(method, path, query, body);
       return result.data ?? { updated: true };
@@ -639,6 +662,7 @@ export const tools: ToolDefinition[] = [
       const result = await callApi("GET", "/v2/odata/user", {
         $filter: filters.join(" and "),
         $top: top,
+        $select: USER_SELECT,
       });
       // Unwrap OData envelope so callers get a clean array.
       return (result.data as { value?: unknown })?.value ?? result.data;

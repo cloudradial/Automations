@@ -15728,7 +15728,7 @@ var RESOURCE_MAP = {
 async function callApiMultipart(path, dataJson, file) {
   const { authHeader, baseUrl } = getAuthContext();
   const form = new FormData();
-  form.append("data", new Blob([dataJson], { type: "application/json" }));
+  form.append("data", dataJson);
   form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
   const resp = await fetch(new URL(path, baseUrl).toString(), {
     method: "POST",
@@ -15782,7 +15782,9 @@ async function callApi(method, path, query, body) {
 var CloudRadialApiError = class extends Error {
   constructor(method, path, status, body) {
     const b = body;
-    const detail = b && typeof b === "object" && (b.message || b.error || b.title) && String(b.message || b.error || b.title) || (body === null || body === void 0 || body === "" ? "(empty response)" : typeof body === "string" ? body : JSON.stringify(body));
+    const text = (v) => v && typeof v === "object" ? String(v.message ?? JSON.stringify(v)) : String(v);
+    const first = b && typeof b === "object" ? b.message || b.error || b.title : void 0;
+    const detail = first ? text(first) : body === null || body === void 0 || body === "" ? "(empty response)" : typeof body === "string" ? body : JSON.stringify(body);
     const errors = b && typeof b === "object" && b.errors ? ` ${JSON.stringify(b.errors).slice(0, 300)}` : "";
     super(`CloudRadial API ${method} ${path} failed (HTTP ${status}): ${String(detail).slice(0, 300)}${errors}`);
     this.method = method;
@@ -15797,6 +15799,7 @@ function escapeODataString(value) {
 }
 
 // src/xlsx.ts
+import { createHash } from "node:crypto";
 var ASSESSMENT_COLUMNS = [
   "Partner Notes",
   "Monthly Unit Cost",
@@ -15936,8 +15939,27 @@ function colName(n) {
   }
   return s;
 }
+var SCORE_TEXT = {
+  "2": "Compliant",
+  "1": "Partially Compliant",
+  "0": "N/A",
+  "-1": "Missing answer",
+  "-2": "Not compliant"
+};
+var DEFAULT_RESPONSES = "Yes,Partially+,Not Applicable=,Unanswered*,No-";
+var GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function toUpdateKey(key) {
+  const k = key.trim();
+  if (GUID.test(k)) return k.toLowerCase();
+  const b = createHash("md5").update(`cloudradial-ucp/assessment-import/${k.toLowerCase()}`, "utf8").digest();
+  b[6] = b[6] & 15 | 48;
+  b[8] = b[8] & 63 | 128;
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
 function buildAssessmentXlsx(questions) {
   const cols = ASSESSMENT_COLUMNS;
+  const at = (c) => cols.indexOf(c);
   const lookup = new Map(cols.map((c) => [c.toLowerCase().replace(/\s+/g, ""), c]));
   const rows = [cols.slice()];
   questions.forEach((q, i) => {
@@ -15945,30 +15967,51 @@ function buildAssessmentXlsx(questions) {
     for (const [k, v] of Object.entries(q)) {
       const col = lookup.get(k.toLowerCase().replace(/\s+/g, ""));
       if (!col) throw new Error(`Question ${i + 1}: unknown column "${k}". Valid columns: ${cols.join(", ")}`);
-      row[cols.indexOf(col)] = v === void 0 || v === null ? "" : String(v);
+      row[at(col)] = v === void 0 || v === null ? "" : String(v);
     }
-    if (!row[cols.indexOf("Category")] || !row[cols.indexOf("Question")]) {
+    if (!row[at("Category")] || !row[at("Question")]) {
       throw new Error(`Question ${i + 1}: "Category" and "Question" are required.`);
     }
+    if (!row[at("Order")]) row[at("Order")] = String((i + 1) * 10);
+    if (!row[at("Type")]) row[at("Type")] = "List";
+    if (!row[at("Responses")] && row[at("Type")] === "List") row[at("Responses")] = DEFAULT_RESPONSES;
+    if (!row[at("Answer")]) row[at("Answer")] = "-1";
+    if (!row[at("Text Answer")] && SCORE_TEXT[row[at("Answer")]]) row[at("Text Answer")] = SCORE_TEXT[row[at("Answer")]];
+    if (!row[at("Is Flagged")]) row[at("Is Flagged")] = row[at("Answer")] === "-2" ? "Yes" : "No";
+    if (row[at("Update Key")]) row[at("Update Key")] = toUpdateKey(row[at("Update Key")]);
     rows.push(row);
   });
+  const strings = [];
+  const index = /* @__PURE__ */ new Map();
+  const sid = (s) => {
+    let n = index.get(s);
+    if (n === void 0) {
+      n = strings.length;
+      strings.push(s);
+      index.set(s, n);
+    }
+    return n;
+  };
   let sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
   rows.forEach((r, ri) => {
     sheet += `<row r="${ri + 1}">`;
     r.forEach((v, ci) => {
       if (v === "") return;
       const ref = colName(ci) + (ri + 1);
-      sheet += /^-?\d+(\.\d+)?$/.test(v) && ri > 0 ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc2(v)}</t></is></c>`;
+      sheet += /^-?\d+(\.\d+)?$/.test(v) && ri > 0 ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="s"><v>${sid(v)}</v></c>`;
     });
     sheet += "</row>";
   });
   sheet += "</sheetData></worksheet>";
+  const sst = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${strings.length}" uniqueCount="${strings.length}">` + strings.map((s) => `<si><t xml:space="preserve">${esc2(s)}</t></si>`).join("") + "</sst>";
   return zipStored([
-    { name: "[Content_Types].xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+    { name: "[Content_Types].xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
     { name: "_rels/.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
     { name: "xl/workbook.xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>' },
-    { name: "xl/_rels/workbook.xml.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
-    { name: "xl/worksheets/sheet1.xml", data: sheet }
+    { name: "xl/_rels/workbook.xml.rels", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: "xl/worksheets/sheet1.xml", data: sheet },
+    { name: "xl/sharedStrings.xml", data: sst },
+    { name: "xl/styles.xml", data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>' }
   ]);
 }
 
@@ -16003,12 +16046,17 @@ var ODATA_KEY = {
   assessment: { set: "assessment", key: "assessmentId" },
   course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" }
 };
-async function odataByKey(resourceType, id) {
+var USER_SELECT = "userId,email,firstName,lastName,userName,phoneNumber,companyId,displayName,department,title,country,streetAddress,city,state,postalCode,mobilePhone,isDeleted,dateCreated,dateModified,psaKey,psaSiteKey,psaChildAccountKey";
+async function odataByKey(resourceType, id, select) {
   const k = ODATA_KEY[resourceType];
   if (!k) return void 0;
   if (!k.quoted && !/^\d+$/.test(id)) throw new Error(`${resourceType} id must be a number, got "${id}"`);
   const value = k.quoted ? `'${id.replace(/'/g, "''")}'` : id;
-  const r = await callApi("GET", `/v2/odata/${k.set}`, { $filter: `${k.key} eq ${value}`, $top: "1" });
+  const r = await callApi("GET", `/v2/odata/${k.set}`, {
+    $filter: `${k.key} eq ${value}`,
+    $top: "1",
+    $select: select ?? (k.set === "user" ? USER_SELECT : void 0)
+  });
   const rows = r.data?.value ?? r.data;
   return Array.isArray(rows) ? rows[0] : void 0;
 }
@@ -16018,7 +16066,7 @@ async function itemCompanyQuery(resourceType, args, id) {
   if (given !== void 0 && given !== "") return { companyId: given };
   if (id && ODATA_KEY[resourceType]) {
     try {
-      const row = await odataByKey(resourceType, id);
+      const row = await odataByKey(resourceType, id, `${ODATA_KEY[resourceType].key},companyId`);
       if (row && row.companyId !== void 0 && row.companyId !== null) return { companyId: String(row.companyId) };
     } catch {
     }
@@ -16221,7 +16269,7 @@ var tools = [
       }
       const query = {
         $filter: str(args, "filter"),
-        $select: str(args, "select"),
+        $select: str(args, "select") ?? (resourceType === "user" ? USER_SELECT : void 0),
         $orderby: str(args, "orderby"),
         $top: str(args, "top") ?? "100",
         $skip: str(args, "skip"),
@@ -16352,7 +16400,7 @@ var tools = [
   },
   {
     name: "update_resource",
-    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the complete traits object as data.traits (keys left out are removed). company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
+    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the traits to change as data.traits; only traits the asset already has can be changed, and traits left out are kept. company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16381,9 +16429,15 @@ var tools = [
       const blocked = NOT_IN_API[resourceType]?.[method.toLowerCase()];
       if (blocked) throw new Error(blocked);
       let data = args.data || {};
+      const extraOps = [];
       if (resourceType === "flexible_asset" && data.traits !== void 0) {
         const { traits, ...rest } = data;
-        data = { ...rest, traitsJson: typeof traits === "string" ? traits : JSON.stringify(traits) };
+        const t = typeof traits === "string" ? JSON.parse(traits) : traits;
+        if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error("data.traits must be an object of trait name to value");
+        for (const [key, value] of Object.entries(t)) {
+          extraOps.push({ op: "replace", path: `/traits/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`, value });
+        }
+        data = rest;
       }
       let path;
       let itemId;
@@ -16409,11 +16463,14 @@ var tools = [
         path = `/v2/${config2.itemPath}/${itemId}`;
       }
       const query = await itemCompanyQuery(resourceType, args, itemId);
-      const body = method === "PATCH" ? Object.entries(data).map(([key, value]) => ({
-        op: "replace",
-        path: `/${key}`,
-        value
-      })) : data;
+      const body = method === "PATCH" ? [
+        ...Object.entries(data).map(([key, value]) => ({
+          op: "replace",
+          path: `/${key}`,
+          value
+        })),
+        ...extraOps
+      ] : data;
       const result = await callApi(method, path, query, body);
       return result.data ?? { updated: true };
     }
@@ -16502,7 +16559,8 @@ var tools = [
       }
       const result = await callApi("GET", "/v2/odata/user", {
         $filter: filters.join(" and "),
-        $top: top
+        $top: top,
+        $select: USER_SELECT
       });
       return result.data?.value ?? result.data;
     }

@@ -1,5 +1,6 @@
 // Mock-fetch tests for the generic and custom tools. Run with `npm test`.
 import { tools } from "../src/tools.js";
+import { buildAssessmentXlsx, toUpdateKey } from "../src/xlsx.js";
 
 process.env.CLOUDRADIAL_PUBLIC_KEY = "test-public";
 process.env.CLOUDRADIAL_PRIVATE_KEY = "test-private";
@@ -74,8 +75,24 @@ r = await run("update_resource", { resource_type: "assessment", id: "9", data: {
 check("assessment update points to assessment_import", !r.ok && /assessment_import/.test(r.error!), r.error);
 
 r = await run("update_resource", { resource_type: "flexible_asset", id: "9", data: { traits: { name: "Core switch", ip: "10.0.0.1" } } });
-check("flexible_asset traits -> traitsJson", r.ok && last().url.pathname === "/v2/flexible-asset/9" &&
-  JSON.stringify(last().body) === JSON.stringify([{ op: "replace", path: "/traitsJson", value: JSON.stringify({ name: "Core switch", ip: "10.0.0.1" }) }]), JSON.stringify(last().body));
+check("flexible_asset traits -> one op per trait", r.ok && last().url.pathname === "/v2/flexible-asset/9" &&
+  JSON.stringify(last().body) === JSON.stringify([
+    { op: "replace", path: "/traits/name", value: "Core switch" },
+    { op: "replace", path: "/traits/ip", value: "10.0.0.1" },
+  ]), JSON.stringify(last().body));
+
+// --- users are read with a $select (a full row returns HTTP 500 live) ------------
+route = () => ({ status: 200, json: { value: [] } });
+r = await run("list_resources", { resource_type: "user", filter: "companyId eq 9" });
+const sel = last().url.searchParams.get("$select") ?? "";
+check("user list leaves out supportPin and the company nav", r.ok && sel.startsWith("userId,email,") && !sel.split(",").includes("company") && !sel.includes("supportPin"), sel);
+r = await run("list_resources", { resource_type: "user", select: "userId" });
+check("caller's user $select wins", r.ok && last().url.searchParams.get("$select") === "userId");
+r = await run("user_lookup", { email: "pat@contoso.com" });
+check("user_lookup selects scalar fields", r.ok && (last().url.searchParams.get("$select") ?? "").startsWith("userId,email,"));
+route = () => ({ status: 400, json: { error: { code: "", message: "Could not find a property named 'manager'" } } });
+r = await run("list_resources", { resource_type: "user", select: "manager" });
+check("OData error object shows its message", !r.ok && /Could not find a property/.test(r.error!), r.error);
 
 // --- companyId scoping (AAI-126) -------------------------------------------------
 route = (c) => c.url.pathname.startsWith("/v2/odata/")
@@ -138,6 +155,21 @@ r = await run("assessment_import", { company_id: 9, template_id: 4, title: "X" }
 check("template without assessment_id is refused", !r.ok && /needs assessment_id/.test(r.error!) && calls.length === 0, r.error);
 r = await run("assessment_import", { company_id: 9, title: "X", questions: qs, type: 0 });
 check("type 0 refused", !r.ok && calls.length === 0, r.error);
+
+// --- assessment workbook matches the layout the upload accepts live ---------------
+const xlsx = new TextDecoder().decode(buildAssessmentXlsx([
+  { Category: "Identity", Question: "MFA enforced?", Answer: -2 },
+  { Category: "Identity", Question: "SSPR enabled?" },
+]));
+check("workbook has sharedStrings and styles parts", xlsx.includes("xl/sharedStrings.xml") && xlsx.includes("xl/styles.xml") && !xlsx.includes("inlineStr"));
+check("workbook fills Type/Responses/Text Answer/Is Flagged/Order",
+  ["List", "Yes,Partially+,Not Applicable=,Unanswered*,No-", "Not compliant", "Missing answer", ">Yes<", ">No<"].every((s) => xlsx.includes(s)) &&
+  /<c r="V2"><v>10<\/v><\/c>/.test(xlsx) && /<c r="V3"><v>20<\/v><\/c>/.test(xlsx), "Order is column V");
+
+const g1 = toUpdateKey("mfa-enforced");
+check("non-GUID Update Key becomes a stable v3 GUID", /^[0-9a-f]{8}-[0-9a-f]{4}-3[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(g1) && toUpdateKey(" MFA-Enforced ") === g1 && toUpdateKey("other") !== g1, g1);
+check("GUID Update Key is kept", toUpdateKey("6F1C2D3E-0000-4000-8000-123456789ABC") === "6f1c2d3e-0000-4000-8000-123456789abc");
+check("workbook writes the GUID key", new TextDecoder().decode(buildAssessmentXlsx([{ Category: "A", Question: "B", "Update Key": "mfa-enforced" }])).includes(g1));
 
 // --- company_overview unwraps OData lists ------------------------------------------
 route = (c) => c.url.pathname.endsWith("$count") ? { status: 200, text: "4" }

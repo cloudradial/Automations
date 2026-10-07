@@ -102,8 +102,8 @@ Don't pass `select` when listing assessments; it returns HTTP 500.
 Custom flexible assets used for tracking compliance data, configurations, or any structured data. Key
 fields: `id` (the asset's ID), `companyId`, `flexibleAssetTypeId`, `name`, `resourceUrl`, `traitsJson`
 (the field values as a JSON string). To update the values, call `update_resource` with
-`data: { traits: { ...the complete traits object... } }`; keys you leave out are removed, so read the
-asset and merge first.
+`data: { traits: { "<trait name>": "<new value>" } }`. Only traits the asset already has can be
+changed (the API refuses new ones), and traits you leave out are kept.
 
 ### flexible_asset_type
 Definitions for flexible asset types. Key fields: `id` (the type's ID), `name`, `description`, `icon`,

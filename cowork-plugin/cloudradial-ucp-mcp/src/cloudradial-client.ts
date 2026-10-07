@@ -69,7 +69,9 @@ export async function callApiMultipart(
 ): Promise<ApiResult> {
   const { authHeader, baseUrl } = getAuthContext();
   const form = new FormData();
-  form.append("data", new Blob([dataJson], { type: "application/json" }));
+  // A plain string field: appending a Blob makes it a file part named "blob",
+  // and the upload answers 400 "Invalid form data." (live, 2026-10-07).
+  form.append("data", dataJson);
   form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
   const resp = await fetch(new URL(path, baseUrl).toString(), {
     method: "POST",
@@ -155,9 +157,13 @@ export class CloudRadialApiError extends Error {
     public readonly body: unknown
   ) {
     const b = body as { message?: unknown; error?: unknown; title?: unknown; errors?: unknown } | null;
-    const detail =
-      (b && typeof b === "object" && (b.message || b.error || b.title) && String(b.message || b.error || b.title)) ||
-      (body === null || body === undefined || body === "" ? "(empty response)" : typeof body === "string" ? body : JSON.stringify(body));
+    // OData errors nest as { error: { code, message } }.
+    const text = (v: unknown): string =>
+      v && typeof v === "object" ? String((v as { message?: unknown }).message ?? JSON.stringify(v)) : String(v);
+    const first = b && typeof b === "object" ? b.message || b.error || b.title : undefined;
+    const detail = first
+      ? text(first)
+      : body === null || body === undefined || body === "" ? "(empty response)" : typeof body === "string" ? body : JSON.stringify(body);
     const errors = b && typeof b === "object" && b.errors ? ` ${JSON.stringify(b.errors).slice(0, 300)}` : "";
     super(`CloudRadial API ${method} ${path} failed (HTTP ${status}): ${String(detail).slice(0, 300)}${errors}`);
     this.name = "CloudRadialApiError";

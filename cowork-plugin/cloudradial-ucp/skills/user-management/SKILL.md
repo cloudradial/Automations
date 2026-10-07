@@ -90,7 +90,7 @@ List users with full OData filtering support. Better than user_lookup for bulk q
 
 ### User fields
 
-The `user` entity has `userId` (a string), `email`, `firstName`, `lastName`, `displayName`, `userName`, `companyId`, `title` (job title), `department`, `phoneNumber`, `mobilePhone`, address fields, `psaKey`, `supportPin`, `dateCreated` and `dateModified`.
+The `user` entity has `userId` (a string), `email`, `firstName`, `lastName`, `displayName`, `userName`, `companyId`, `title` (job title), `department`, `phoneNumber`, `mobilePhone`, address fields, `psaKey`, `supportPin`, `dateCreated` and `dateModified`. Lists leave out `supportPin`: selecting it on `/v2/odata/user` returns HTTP 500, so `list_resources` and `user_lookup` select every other field by default. To read one user's `supportPin`, call `get_resource` with `resource_type: "user"`.
 
 **There is no `role` field, and no last-login date.** Portal security roles are managed in the portal and the API doesn't return them. On create and update the API also accepts flags it doesn't read back, including `isPartnerAdminUser` (partner admin), `isLoginDisabled`, `isShowInDirectory`, `priorityStatus` (0 or 10) and the digest and direct-message opt-ins. When the user asks about roles or admin access, say the API can't list them and point them to the portal.
 

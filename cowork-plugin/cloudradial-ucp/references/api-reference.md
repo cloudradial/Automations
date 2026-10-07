@@ -4,6 +4,17 @@ Base URL: https://api.us.cloudradial.com
 Auth: HTTP Basic (public key = username, private key = password)
 OpenAPI: 3.0.1
 
+## Using this reference with the plugin
+
+- **Creates:** a `*Request` schema's **REQUIRED** fields are what `create_resource` must send (for example `ArticleRequest`: `body`, `companyId`, `datePublished`, `subject`). Entity schemas (no `Request` suffix) give the field names to use in OData `filter`, `select` and `orderby`.
+- **Updates:** `update_resource` sends PATCH by default and turns `data` into a JSON Patch document, so only the fields you pass change. `method: "PUT"` sends the whole `*Request` body and clears anything you leave out.
+- **Errors:** every HTTP 4xx/5xx comes back as a tool error.
+- **Lists:** OData lists stop at 200 rows with no next-page link. Page with `top`/`skip` until a page is shorter than `top`.
+- **Enums:** OData returns enum fields as names (`enclosure: "Desktop"`), while writes take the integer codes listed under Enumerations.
+- **Assessments:** there is no `POST /v2/assessment` and no question-level API. Create or refresh with `assessment_import`. `type` is 10 template, 20 assessment (the only type the portal lists), 30 run. Don't `$select` on `/v2/odata/assessment`; it returns HTTP 500.
+- **Endpoint custom properties:** `EndpointCustomProperty` keys on `companyEndpointId` and has no `companyId`. Single-property calls go by serial number and property name.
+- **Tickets:** the API has no ticket endpoints.
+
 ## Schemas
 
 ### ArchiveItem
@@ -1781,6 +1792,7 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `psaKey`: integer [int64]
 - `psaSiteKey`: integer [int64]
 - `psaChildAccountKey`: integer [int64]
+- `supportPin`: string (nullable). Selecting it on `/v2/odata/user` returns HTTP 500 (live, 2026-10-07); read it from `GET /v2/user/{id}`.
 - `company`: Company
 
 ### UserRequest
@@ -1827,10 +1839,11 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `psaKey`: integer [int64] — PSA Key identifier for the user
 - `psaSiteKey`: integer [int64] — PSA Site Key identifier for the user
 - `psaChildAccountKey`: integer [int64] — PSA Child Account Key identifier for the user
+- `supportPin`: string (nullable) — Support PIN used to verify the user's identity over the phone
 
 ## Enumerations
 
-Integer enum types surfaced by the API. Values are the accepted `int32` codes; the API does not expose symbolic names for them. Fields typed as one of these (e.g. `Catalog.catalogUsage: CatalogType`) accept only these values.
+Integer enum types surfaced by the API. Values are the accepted `int32` codes on write; the spec does not list symbolic names for them, but OData reads return the names (for example `EnclosureType` reads back as `"Desktop"`, `Windows11Status` as `"Installed"`, `"Capable"` or `"Unknown"`). Fields typed as one of these (e.g. `Catalog.catalogUsage: CatalogType`) accept only these values.
 
 - `ApplicationUserPriorityType`: 0, 10
 - `CatalogQuestionType`: 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 999

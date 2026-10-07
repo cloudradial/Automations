@@ -31,10 +31,10 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
-| `get_resource` | Retrieve one resource by ID | `resource_type`, `id` |
+| `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
-| `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID | `resource_type`, `id` |
+| `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
+| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -44,7 +44,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200; walk through larger pages by incrementing `skip`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -52,23 +52,26 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 - Courses use `name` (not `title`).
 - `archive_item` composite key — pass `archive_id` and `id`.
 - `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
 
 - **"credentials not configured"** → defer to the `setup` skill.
 - **401/403 from CloudRadial** → stored credentials are invalid. Run `setup` to rotate.
-- **404** → resource not found, verify the ID.
+- **404** → resource not found. Verify the ID, and for `catalog_question`, `course_lesson`, `domain`, `user`, `application_user` and `token` pass `company_id`.
+- Every HTTP 4xx/5xx comes back as a tool error, not as data. Read the message and fix the call instead of retrying it unchanged.
 
 ## Resource Types
 
 ### course
-Training course containers. Key fields: `courseId`, `companyId`, `name` (NOT `title`), `description` (HTML), `shortDescription`, `category`, `estimatedTime`, `isRequired`, `passScore`, `validMonths`, `enrollmentCount`, `completionCount`.
+Training course containers. Key fields: `courseId`, `companyId`, `name` (NOT `title`), `description` (HTML), `shortDescription`, `category`, `estimatedTime` (integer, minutes), `isRequired`, `passScore` (percentage), `validMonths` (0 = never expires), `enrollmentCount`, `completionCount`. Creating one requires `companyId`, `name`, `description`, `shortDescription`, `category` and `estimatedTime`.
 
 ### course_lesson
-Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `companyId`, `title`, `overview`, `text` (HTML body content), `category`, `order`.
+Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `companyId`, `title`, `overview`, `text` (HTML body content), `category`, `order`. Creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`. Pass `company_id` to `get_resource`, `update_resource` and `delete_resource` for a lesson (the tool looks it up if you leave it out).
 
 ### course_enrollment
-Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `status`, `score`, `dateCompleted`.
+Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `currentLessonId`, `dateEnrolled`, `dateLastAccess`, `isCompleted`, `dateCompleted`, `isExpired`, `daysSinceEnrollment`. There is no status or score field: use `isCompleted` and `dateCompleted`. Create with `courseId` and `userId`. `get_resource` works by `courseEnrollmentId`; the API can't delete an enrollment.
 
 ### course_lesson_history
 Per-lesson progress for one user: which lessons they finished and their score. Composite key: `courseId`, `applicationUserId` (a string), `courseLessonId`. Create body requires `companyId`, `courseId`, `applicationUserId`, `courseLessonId`, `completedScore`. List with `list_resources` and `filter: "courseId eq 372"` (add `and applicationUserId eq '<id>'` for one user). Use it to answer "which lesson did Sam stop at" or to record lesson completions migrated from another training tool.
@@ -104,9 +107,9 @@ For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references
 
 Building a course is a two-step process: create the course container, then create each lesson inside it.
 
-1. **Create the course.** Call `create_resource` with `resource_type: "course"` and `data: { companyId: 42, name: "Course Name Here", description: "<p>HTML course overview shown to learners</p>", category: "Security", estimatedTime: "30 minutes", isRequired: false, passScore: 80 }`. The response includes the new `courseId`.
+1. **Create the course.** Call `create_resource` with `resource_type: "course"` and `data: { companyId: 42, name: "Course Name Here", shortDescription: "One-line summary shown on the course card", description: "<p>HTML course overview shown to learners</p>", category: "Security", estimatedTime: 30, isRequired: false, passScore: 80 }`. `estimatedTime` is a whole number of minutes. The response includes the new `courseId`.
 
-2. **Create each lesson** in order. Call `create_resource` with `resource_type: "course_lesson"` and `data: { courseId: 999, companyId: 42, title: "Lesson 1: Introduction", overview: "Brief summary of this lesson", text: "<p>Full HTML lesson content goes here.</p>", order: 1 }`.
+2. **Create each lesson** in order. Call `create_resource` with `resource_type: "course_lesson"` and `data: { courseId: 999, companyId: 42, title: "Lesson 1: Introduction", overview: "Brief summary of this lesson", category: "Security", text: "<p>Full HTML lesson content goes here.</p>", order: 1 }`.
 
 3. **Repeat** for each lesson, incrementing the `order` field (2, 3, 4...).
 
@@ -116,4 +119,16 @@ Building a course is a two-step process: create the course container, then creat
 
 ### Build a Course from a Document
 
-1. 
+1. If the user provides a markdown or text document, convert it to HTML sections
+2. Split into logical lessons (one per major heading or topic)
+3. Create the course container (with `shortDescription` and an integer `estimatedTime`)
+4. Create each lesson with the HTML content, a `category` and an `overview`, maintaining logical ordering
+5. Add a Final Exam lesson at the end if the course requires assessment
+
+### Enrollment Analysis
+
+1. List enrollments for a company or specific course
+2. Group by progress: completed (`isCompleted` true), in progress (not completed but has a `dateLastAccess`), not started, and expired (`isExpired` true)
+3. Calculate completion rates
+4. Identify users who haven't started required courses
+5. Present as an actionable summary

@@ -38,16 +38,18 @@ company at a time unless the user asks for several; group flagged endpoints by `
 ## Read the endpoints
 
 `list_resources` `endpoint`, filtered `companyId eq {id}`, selecting the native fields below.
-Page with `skip` (100/page) until exhausted. Custom properties are usually empty; read
-`endpoint_custom_property` only if present. Use present data at face value.
+Page with `top` and `skip` until a page comes back shorter than `top` (there's no next-page
+link). Custom properties are usually empty; if you need them, list `endpoint_custom_property`
+with `filter: "companyEndpointId eq <id> or companyEndpointId eq <id> ..."` (it has no
+`companyId`). Use present data at face value.
 
 | Field | Use |
 |---|---|
 | `manufacturedDate` | age basis (fallback `biosDate`, then `cpuDate` — mark estimated) |
 | `expirationDate` | warranty end |
 | `os`, `osVersion` | operating system |
-| `windows11Readiness` | positive-only Win11 signal ("Installed"/"Capable") |
-| `isssd` | SSD (true) vs HDD (false) — the field name is lowercase `isssd` |
+| `windows11Readiness` | positive-only Win11 signal. `Windows11Status` enum (spec values 1, 2, -1, -2); OData returns the name, so match `Installed` / `Capable` |
+| `isSSD` | SSD (true) vs HDD (false) |
 | `memory` | RAM in bytes (÷ 1073741824 for GB; 0 = unknown) |
 | `isServer`, `isVirtual` | routing flags |
 | `serialNumber`, `manufacturer`, `model`, `userName` | display / identity |
@@ -119,11 +121,12 @@ All writes go through `create_resource` / `update_resource` on `resource_type: "
   selecting `productId,subject,body`. Find this skill's card for the category by subject
   `Endpoint Hardware Refresh - <Category>` or by the body marker
   `Refresh Plan Card: company <companyId> / <Category>`. If found → `update_resource`
-  (`method: "PATCH"`, replace subject, body, summary, category, productCategoryId, priority).
+  (PATCH is the default; send only subject, body, summary, category, productCategoryId, priority).
   Otherwise → `create_resource`. Never more than one card per (company, category); never
   invent productIds; never overwrite generic/catalog cards like "Laptop Refresh".
 - **Create fields:** `companyId`, `subject`, `category` (the plannerCategory name, default
-  `Efficiency`), `productCategoryId` (default `7`), `datePublished`, `body`, `summary`,
+  `Efficiency`), `productCategoryId` (the ID used by existing `Efficiency` cards for that company;
+  `7` in a stock portal), `datePublished`, `body`, `summary`,
   `isRequired` (false), `isShowPrice` (false), `isClientVisible` (false), `priority` (int).
   Subject = `Endpoint Hardware Refresh - <Category>`.
 - **`datePublished` must be a quoted ISO 8601 string**, e.g. `"2026-08-14T00:00:00Z"` — never a

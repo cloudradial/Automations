@@ -1,34 +1,37 @@
 # Assessment Export — API Details
 
 Concrete query patterns for the `cloudradial-ucp` MCP server. All OData params are passed **without**
-the leading `$` (the server adds it). Default page `top=100`, max `200`.
+the leading `$` (the server adds it). Default page `top=100`, max `200`. The API returns no next-page
+link: keep paging until a page comes back shorter than `top`.
 
-## 1. Count completed assessments (all companies)
+Assessment rows use `title` (not `name`), `dateConducted` (not `dateCompleted`) and `totalScore`,
+`maxScore`, `compliantScore`, `partialScore` (nullable numbers; blank until the assessment is scored). There is no `score`
+field. `type` is 10 for a template, 20 for an assessment (the only type the portal lists) and 30 for
+a run. `status` is a plain integer with undocumented codes, so don't filter on it server-side.
+
+**Never pass `select` on `assessment`:** `$select=assessmentId,title` returned HTTP 500 in live
+testing. Pull whole rows and keep the fields you need.
+
+## 1. Count completed runs (all companies)
 
 ```
 count_resources
   resource_type: "assessment"
-  filter: "dateCompleted ne null"
+  filter: "type eq 30 and dateConducted ne null"
 ```
 
-If `dateCompleted ne null` is rejected, fall back to:
+If the date filter is rejected, count `type eq 30` and drop rows without `dateConducted` after
+listing them. For the portal's view (one row per assessment), use `type eq 20` instead.
 
-```
-count_resources
-  resource_type: "assessment"
-  filter: "status eq 'Completed'"
-```
-
-## 2. List completed assessments across every company (paged)
+## 2. List completed runs across every company (paged)
 
 Page 1:
 
 ```
 list_resources
   resource_type: "assessment"
-  filter: "dateCompleted ne null"
-  select: "assessmentId,companyId,name,status,score,dateCompleted"
-  orderby: "dateCompleted desc"
+  filter: "type eq 30 and dateConducted ne null"
+  orderby: "dateConducted desc"
   top: 200
 ```
 
@@ -38,12 +41,10 @@ Do **not** add a `companyId` filter — omitting it is what makes the result spa
 
 ## 3. Scope to a date range (e.g. this quarter)
 
-```
-filter: "dateCompleted ge 2026-04-01T00:00:00Z and dateCompleted le 2026-06-30T23:59:59Z"
-```
-
-Combine with a status/non-null check as needed. If the API rejects combined filters, pull the
-`orderby dateCompleted desc` set and filter client-side.
+Add a date range to the filter, for example
+`type eq 30 and dateConducted ge 2026-04-01T00:00:00Z and dateConducted le 2026-06-30T23:59:59Z`.
+If the API rejects the combined filter, pull the `orderby: "dateConducted desc"` set and filter
+client-side, stopping once rows fall before the start of the range.
 
 ## 4. Build the companyId -> name map
 
@@ -58,31 +59,15 @@ Page with `skip` as above. For a single known customer instead:
 
 ```
 search_companies
-  name: "Effortless Office"
+  name: "Contoso"
 ```
 
-## 5. Probe for question-level detail
+## 5. Question-level detail
 
-The `assessment` list resource is summary-level only. To look for per-question data, inspect the
-raw API. Start broad and read the returned shape before depending on it:
-
-```
-raw_api_call
-  method: "GET"
-  path: "/v2/odata/assessment"
-  query: { "$top": 1 }
-```
-
-Then probe run/question-oriented paths that may exist in the portal's API surface (names vary by
-version — inspect what each returns; a 404 means that path is not available):
-
-```
-raw_api_call  method: "GET"  path: "/v2/odata/assessmentRun"        query: { "$top": 1 }
-raw_api_call  method: "GET"  path: "/v2/odata/assessmentQuestion"   query: { "$top": 1 }
-```
-
-If none return question/response/score fields, question-level data is not available via the API in
-this portal — use the portal per-run Excel export or Word report instead, and say so.
+The API has no question-level data. Its metadata has no assessment question, answer or run entity
+(`/v2/odata/assessmentRun` and `/v2/odata/assessmentQuestion` don't exist), and `assessment` rows
+are summary-level only. For per-question responses, use the portal's per-run Excel export or Word
+report, and say so.
 
 ## 6. Scoring reference (for gap counting)
 
@@ -90,9 +75,7 @@ this portal — use the portal per-run Excel export or Word report instead, and 
 
 ## Notes / caveats
 
-- Exact `raw_api_call` paths and whether a question-level endpoint exists were not live-verified
-  when this skill was written; the summary `assessment` resource fields are documented and reliable.
-  Probe with `raw_api_call` and adapt to what the portal actually returns.
+- The `type` codes come from live data, not the API documentation.
 - Public API/developer docs: https://developers.cloudradial.com
 - Portal reporting reference:
   https://support.cloudradial.com/hc/en-us/articles/360054632252-Running-and-Using-Assessment-Reports

@@ -26,7 +26,7 @@ Which of Contoso's devices are out of warranty?
 
 - **Warranty refresh is async** — `endpoint_update_warranty` triggers a background fetch; new dates appear minutes later.
 - **The warranty tool needs the serial number**, not the endpoint ID. Claude looks up the serial first if needed.
-- **`lastSeen` matters** — devices that haven't checked in recently may have stale data.
+- **`lastCheckIn` matters** — devices that haven't checked in recently may have stale data.
 
 ## Related skills
 

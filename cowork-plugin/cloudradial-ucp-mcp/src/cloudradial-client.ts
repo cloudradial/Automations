@@ -45,7 +45,7 @@ export const RESOURCE_MAP: Record<string, ResourceConfig> = {
   flexible_asset_type:      { odataPath: "flexibleassettype",      itemPath: "flexible-asset-type",    idParam: "id" },
   flexible_asset_field:     { odataPath: "flexibleassetfield",     itemPath: "flexible-asset-field",   idParam: "id" },
   endpoint_application:     { odataPath: "endpointapplication",    itemPath: "endpointapplication",    idParam: "id" },
-  endpoint_custom_property: { odataPath: "endpointcustomproperty", itemPath: "",                       idParam: "" },
+  endpoint_custom_property: { odataPath: "endpointcustomproperty", itemPath: "endpoint",               idParam: "" },                // Keyed by serial_number + property_name
   media:                    { odataPath: "media",                  itemPath: "media",                  idParam: "id" },
   token:                    { odataPath: "token",                  itemPath: "token",                  idParam: "tokenName" },
   application_user:         { odataPath: "",                       itemPath: "applicationuser",        idParam: "id" },              // No OData listing
@@ -140,7 +140,28 @@ export async function callApi(
     data = text === "" ? null : isNaN(num) ? text : num;
   }
 
+  // A 4xx/5xx used to come back as ordinary data, so a 404 read like a result
+  // and delete/warranty/complete reported success on an empty error body.
+  if (!resp.ok) throw new CloudRadialApiError(method, path, resp.status, data);
   return { status: resp.status, data };
+}
+
+/** Thrown by callApi on any non-2xx response. `status` lets a caller treat e.g. 404 as "none". */
+export class CloudRadialApiError extends Error {
+  constructor(
+    public readonly method: string,
+    public readonly path: string,
+    public readonly status: number,
+    public readonly body: unknown
+  ) {
+    const b = body as { message?: unknown; error?: unknown; title?: unknown; errors?: unknown } | null;
+    const detail =
+      (b && typeof b === "object" && (b.message || b.error || b.title) && String(b.message || b.error || b.title)) ||
+      (body === null || body === undefined || body === "" ? "(empty response)" : typeof body === "string" ? body : JSON.stringify(body));
+    const errors = b && typeof b === "object" && b.errors ? ` ${JSON.stringify(b.errors).slice(0, 300)}` : "";
+    super(`CloudRadial API ${method} ${path} failed (HTTP ${status}): ${String(detail).slice(0, 300)}${errors}`);
+    this.name = "CloudRadialApiError";
+  }
 }
 
 export function escapeODataString(value: string): string {

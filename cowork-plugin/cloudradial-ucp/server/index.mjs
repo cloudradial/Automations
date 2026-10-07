@@ -15714,7 +15714,8 @@ var RESOURCE_MAP = {
   flexible_asset_type: { odataPath: "flexibleassettype", itemPath: "flexible-asset-type", idParam: "id" },
   flexible_asset_field: { odataPath: "flexibleassetfield", itemPath: "flexible-asset-field", idParam: "id" },
   endpoint_application: { odataPath: "endpointapplication", itemPath: "endpointapplication", idParam: "id" },
-  endpoint_custom_property: { odataPath: "endpointcustomproperty", itemPath: "", idParam: "" },
+  endpoint_custom_property: { odataPath: "endpointcustomproperty", itemPath: "endpoint", idParam: "" },
+  // Keyed by serial_number + property_name
   media: { odataPath: "media", itemPath: "media", idParam: "id" },
   token: { odataPath: "token", itemPath: "token", idParam: "tokenName" },
   application_user: { odataPath: "", itemPath: "applicationuser", idParam: "id" },
@@ -15775,8 +15776,22 @@ async function callApi(method, path, query, body) {
     const num = Number(text);
     data = text === "" ? null : isNaN(num) ? text : num;
   }
+  if (!resp.ok) throw new CloudRadialApiError(method, path, resp.status, data);
   return { status: resp.status, data };
 }
+var CloudRadialApiError = class extends Error {
+  constructor(method, path, status, body) {
+    const b = body;
+    const detail = b && typeof b === "object" && (b.message || b.error || b.title) && String(b.message || b.error || b.title) || (body === null || body === void 0 || body === "" ? "(empty response)" : typeof body === "string" ? body : JSON.stringify(body));
+    const errors = b && typeof b === "object" && b.errors ? ` ${JSON.stringify(b.errors).slice(0, 300)}` : "";
+    super(`CloudRadial API ${method} ${path} failed (HTTP ${status}): ${String(detail).slice(0, 300)}${errors}`);
+    this.method = method;
+    this.path = path;
+    this.status = status;
+    this.body = body;
+    this.name = "CloudRadialApiError";
+  }
+};
 function escapeODataString(value) {
   return value.toLowerCase().replace(/'/g, "''");
 }
@@ -15978,27 +15993,66 @@ var COMPANY_SCOPED = /* @__PURE__ */ new Set([
   "application_user",
   "token"
 ]);
+var ODATA_KEY = {
+  catalog_question: { set: "catalogquestion", key: "companyCatalogQuestionId" },
+  course_lesson: { set: "courselesson", key: "courseLessonId" },
+  domain: { set: "domain", key: "companyDomainId" },
+  user: { set: "user", key: "userId", quoted: true },
+  application_user: { set: "user", key: "userId", quoted: true },
+  // No single-item GET in the API: get_resource reads these through OData.
+  assessment: { set: "assessment", key: "assessmentId" },
+  course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" }
+};
+async function odataByKey(resourceType, id) {
+  const k = ODATA_KEY[resourceType];
+  if (!k) return void 0;
+  if (!k.quoted && !/^\d+$/.test(id)) throw new Error(`${resourceType} id must be a number, got "${id}"`);
+  const value = k.quoted ? `'${id.replace(/'/g, "''")}'` : id;
+  const r = await callApi("GET", `/v2/odata/${k.set}`, { $filter: `${k.key} eq ${value}`, $top: "1" });
+  const rows = r.data?.value ?? r.data;
+  return Array.isArray(rows) ? rows[0] : void 0;
+}
 async function itemCompanyQuery(resourceType, args, id) {
   if (!COMPANY_SCOPED.has(resourceType)) return void 0;
   const given = str(args, "company_id");
   if (given !== void 0 && given !== "") return { companyId: given };
-  if (resourceType === "catalog_question" && id && /^\d+$/.test(id)) {
-    const r = await callApi("GET", "/v2/odata/catalogquestion", {
-      $filter: `companyCatalogQuestionId eq ${id}`,
-      $select: "companyId",
-      $top: "1"
-    });
-    const rows = r.data?.value ?? r.data;
-    const first = Array.isArray(rows) ? rows[0] : void 0;
-    if (first && first.companyId !== void 0 && first.companyId !== null) {
-      return { companyId: String(first.companyId) };
+  if (id && ODATA_KEY[resourceType]) {
+    try {
+      const row = await odataByKey(resourceType, id);
+      if (row && row.companyId !== void 0 && row.companyId !== null) return { companyId: String(row.companyId) };
+    } catch {
     }
   }
   return void 0;
 }
+function customPropertyPath(args, withName) {
+  const serial = encodeURIComponent(requireStr(args, "serial_number"));
+  if (!withName) return `/v2/endpoint/${serial}/custom-property`;
+  const name = str(args, "property_name") || str(args, "id");
+  if (!name) throw new Error("Missing required parameter: property_name");
+  return `/v2/endpoint/${serial}/custom-property/${encodeURIComponent(name)}`;
+}
+var NOT_IN_API = {
+  flexible_asset: { put: "flexible_asset has no PUT; use PATCH (the default)." },
+  flexible_asset_type: { put: "flexible_asset_type has no PUT; use PATCH (the default)." },
+  flexible_asset_field: {
+    put: "The API can't update a flexible_asset_field. Create a new field instead.",
+    patch: "The API can't update a flexible_asset_field. Create a new field instead.",
+    delete: "The API can't delete a flexible_asset_field."
+  },
+  course_enrollment: {
+    put: "course_enrollment has no PUT; use PATCH (the default).",
+    delete: "The API can't delete a course enrollment."
+  }
+};
+var ASSESSMENT_HINT = "Assessments have no single-item write API. Create or refresh one with assessment_import; read one with get_resource or list_resources.";
 var COMPANY_ID_PARAM = {
   type: "string",
-  description: "Company the item belongs to, sent as ?companyId=. Needed by catalog_question, course_lesson, course_lesson_history, domain, user, application_user and token (catalog_question looks it up if omitted). For company_group_company it is the path key instead."
+  description: "Company the item belongs to, sent as ?companyId=. Used by catalog_question, course_lesson, course_lesson_history, domain, user, application_user and token; looked up automatically if omitted (except course_lesson_history and token). For company_group_company it is the path key instead."
+};
+var CUSTOM_PROPERTY_PARAMS = {
+  serial_number: { type: "string", description: "endpoint_custom_property: the endpoint's serial number" },
+  property_name: { type: "string", description: "endpoint_custom_property: the property name" }
 };
 function requireResource(args) {
   const resourceType = requireStr(args, "resource_type");
@@ -16132,17 +16186,14 @@ var tools = [
           $top: "5"
         })
       ]);
-      if (company.status !== 200) {
-        throw new Error(`Company ${companyId} lookup failed (status ${company.status})`);
-      }
       return {
         company: company.data,
         counts: {
           userCount: users.data,
           endpointCount: endpoints.data
         },
-        recentArticles: articles.data,
-        recentFeedback: feedback.data
+        recentArticles: articles.data?.value ?? articles.data,
+        recentFeedback: feedback.data?.value ?? feedback.data
       };
     }
   },
@@ -16208,7 +16259,7 @@ var tools = [
   },
   {
     name: "get_resource",
-    description: "Retrieve a single resource by ID. Composite-key types: archive_item needs archive_id + id; service_install needs endpoint_id + service_id; company_group_company needs company_group_id + company_id; course_lesson_history needs course_id + application_user_id + course_lesson_id.",
+    description: "Retrieve a single resource by ID. Composite-key types: archive_item needs archive_id + id; service_install needs endpoint_id + service_id; company_group_company needs company_group_id + company_id; course_lesson_history needs course_id + application_user_id + course_lesson_id; endpoint_custom_property needs serial_number + property_name. assessment and course_enrollment are read through OData by id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16221,7 +16272,8 @@ var tools = [
         company_id: COMPANY_ID_PARAM,
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
-        course_lesson_id: { type: "string", description: "Required for course_lesson_history" }
+        course_lesson_id: { type: "string", description: "Required for course_lesson_history" },
+        ...CUSTOM_PROPERTY_PARAMS
       },
       required: ["resource_type"]
     },
@@ -16249,8 +16301,19 @@ var tools = [
         const courseId = requireStr(args, "course_id");
         const auId = requireStr(args, "application_user_id");
         const lessonId = requireStr(args, "course_lesson_id");
-        const result2 = await callApi("GET", `/v2/courselessonhistory/${courseId}/${auId}/${lessonId}`);
+        const query2 = await itemCompanyQuery(resourceType, args);
+        const result2 = await callApi("GET", `/v2/courselessonhistory/${courseId}/${auId}/${lessonId}`, query2);
         return result2.data;
+      }
+      if (resourceType === "endpoint_custom_property") {
+        const result2 = await callApi("GET", customPropertyPath(args, true));
+        return result2.data;
+      }
+      if (resourceType === "assessment" || resourceType === "course_enrollment") {
+        const id2 = requireStr(args, "id");
+        const row = await odataByKey(resourceType, id2);
+        if (!row) throw new Error(`${resourceType} ${id2} not found`);
+        return row;
       }
       if (!config2.itemPath) {
         throw new Error(`get_resource is not supported for ${resourceType}`);
@@ -16263,19 +16326,25 @@ var tools = [
   },
   {
     name: "create_resource",
-    description: "Create a new resource. `data` is the resource body sent to CloudRadial.",
+    description: "Create a new resource. `data` is the resource body sent to CloudRadial; include every field the API requires for that type (e.g. article: subject, body, companyId, datePublished). endpoint_custom_property needs serial_number, with data {name, value, dataType}. Assessments are created with assessment_import, not here.",
     inputSchema: {
       type: "object",
       properties: {
         resource_type: { type: "string", enum: RESOURCE_TYPES },
-        data: { type: "object", description: "Resource fields (e.g. {subject, content, companyId} for an article)" }
+        data: { type: "object", description: "Resource fields (e.g. {subject, body, companyId, datePublished} for an article)" },
+        serial_number: CUSTOM_PROPERTY_PARAMS.serial_number
       },
       required: ["resource_type", "data"]
     },
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
-      if (!config2.itemPath && !config2.createPath) throw new Error(`create is not supported for ${resourceType}`);
       const data = args.data || {};
+      if (resourceType === "assessment") throw new Error(ASSESSMENT_HINT);
+      if (resourceType === "endpoint_custom_property") {
+        const result2 = await callApi("POST", customPropertyPath(args, false), void 0, data);
+        return result2.data;
+      }
+      if (!config2.itemPath && !config2.createPath) throw new Error(`create is not supported for ${resourceType}`);
       const createPath = config2.createPath || config2.itemPath;
       const result = await callApi("POST", `/v2/${createPath}`, void 0, data);
       return result.data;
@@ -16283,31 +16352,39 @@ var tools = [
   },
   {
     name: "update_resource",
-    description: "Update a resource by ID. method=PUT (full replace) or PATCH (partial). Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id). company_group_company is create/delete-only \u2014 use create_resource / delete_resource.",
+    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the complete traits object as data.traits (keys left out are removed). company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
     inputSchema: {
       type: "object",
       properties: {
         resource_type: { type: "string", enum: RESOURCE_TYPES },
         id: { type: "string" },
-        method: { type: "string", enum: ["PUT", "PATCH"], default: "PUT" },
+        method: { type: "string", enum: ["PATCH", "PUT"], default: "PATCH" },
         data: { type: "object", description: "Fields to update" },
         archive_id: { type: "string", description: "Required for archive_item" },
         endpoint_id: { type: "string", description: "Required for service_install (id = serviceId)" },
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
-        company_id: COMPANY_ID_PARAM
+        company_id: COMPANY_ID_PARAM,
+        ...CUSTOM_PROPERTY_PARAMS
       },
       required: ["resource_type", "data"]
     },
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
+      if (resourceType === "assessment") throw new Error(ASSESSMENT_HINT);
       if (!config2.itemPath) throw new Error(`update is not supported for ${resourceType}`);
-      const method = (str(args, "method") || "PUT").toUpperCase();
+      const method = (str(args, "method") || "PATCH").toUpperCase();
       if (!["PUT", "PATCH"].includes(method)) {
-        throw new Error("method must be PUT or PATCH");
+        throw new Error("method must be PATCH or PUT");
       }
-      const data = args.data || {};
+      const blocked = NOT_IN_API[resourceType]?.[method.toLowerCase()];
+      if (blocked) throw new Error(blocked);
+      let data = args.data || {};
+      if (resourceType === "flexible_asset" && data.traits !== void 0) {
+        const { traits, ...rest } = data;
+        data = { ...rest, traitsJson: typeof traits === "string" ? traits : JSON.stringify(traits) };
+      }
       let path;
       let itemId;
       if (resourceType === "archive_item") {
@@ -16323,6 +16400,8 @@ var tools = [
         const auId = requireStr(args, "application_user_id");
         const lessonId = str(args, "course_lesson_id") || requireStr(args, "id");
         path = `/v2/courselessonhistory/${courseId}/${auId}/${lessonId}`;
+      } else if (resourceType === "endpoint_custom_property") {
+        path = customPropertyPath(args, true);
       } else if (resourceType === "company_group_company") {
         throw new Error("company_group_company has no update endpoint \u2014 use create_resource or delete_resource");
       } else {
@@ -16336,12 +16415,12 @@ var tools = [
         value
       })) : data;
       const result = await callApi(method, path, query, body);
-      return result.data;
+      return result.data ?? { updated: true };
     }
   },
   {
     name: "delete_resource",
-    description: "Delete a resource by ID. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), company_group_company (company_group_id + company_id), course_lesson_history (course_id + application_user_id + course_lesson_id).",
+    description: "Delete a resource by ID. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), company_group_company (company_group_id + company_id), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). Not possible in the API: assessment, course_enrollment and flexible_asset_field deletes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16353,13 +16432,17 @@ var tools = [
         company_id: COMPANY_ID_PARAM,
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
-        course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" }
+        course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
+        ...CUSTOM_PROPERTY_PARAMS
       },
       required: ["resource_type"]
     },
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
+      if (resourceType === "assessment") throw new Error("The API can't delete an assessment; remove it in the portal.");
       if (!config2.itemPath) throw new Error(`delete is not supported for ${resourceType}`);
+      const blocked = NOT_IN_API[resourceType]?.delete;
+      if (blocked) throw new Error(blocked);
       let path;
       let itemId;
       if (resourceType === "archive_item") {
@@ -16379,11 +16462,13 @@ var tools = [
         const auId = requireStr(args, "application_user_id");
         const lessonId = str(args, "course_lesson_id") || requireStr(args, "id");
         path = `/v2/courselessonhistory/${courseId}/${auId}/${lessonId}`;
+      } else if (resourceType === "endpoint_custom_property") {
+        path = customPropertyPath(args, true);
       } else {
         itemId = requireStr(args, "id");
         path = `/v2/${config2.itemPath}/${itemId}`;
       }
-      const query = await itemCompanyQuery(resourceType, args, itemId);
+      const query = resourceType === "company_group_company" ? void 0 : await itemCompanyQuery(resourceType, args, itemId);
       const result = await callApi("DELETE", path, query);
       return result.data ?? { deleted: true };
     }
@@ -16531,26 +16616,29 @@ var tools = [
     handler: async (args) => {
       const courseId = requireStr(args, "course_id");
       const userId = requireStr(args, "user_id");
-      const result = await callApi("GET", `/v2/courseenrollment/course/${courseId}/user/${encodeURIComponent(userId)}`);
-      return result.data;
+      try {
+        const result = await callApi("GET", `/v2/courseenrollment/course/${courseId}/user/${encodeURIComponent(userId)}`);
+        return result.data;
+      } catch (err) {
+        if (err instanceof CloudRadialApiError && err.status === 404) return null;
+        throw err;
+      }
     }
   },
   {
     name: "assessment_import",
-    description: "Create a CloudRadial assessment for a company and fill it with questions, the way the portal's Excel import does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Explanation, Remediation, Order}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from an existing template assessment, optionally duplicated per server/endpoint/user with `apply_to`). Creates the assessment first (POST /v2/assessment) unless `assessment_id` is given, then uploads (POST /v2/assessment/upload) or imports the template (POST /v2/assessment/import-template). Returns {assessmentId, questions, source}. This writes to the portal: confirm the company and title with the user first.",
+    description: "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`). Without `assessment_id`, the upload creates a new assessment (the API has no other create) and the tool finds its id by title. With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
     inputSchema: {
       type: "object",
       properties: {
         company_id: { type: "integer", description: "Company the assessment belongs to" },
-        title: { type: "string", description: "Assessment title (required when creating)" },
-        category: { type: "string", description: "Assessment category when creating. Default 'Security'." },
-        description: { type: "string", description: "Assessment description when creating" },
-        assessment_id: { type: "integer", description: "Existing assessment to add questions to. Omit to create a new one." },
-        questions: { type: "array", items: { type: "object" }, description: "Questions keyed by template column name. Category and Question are required on each." },
+        title: { type: "string", description: "Assessment title. Required when creating; used to find the new assessment's id." },
+        assessment_id: { type: "integer", description: "Existing assessment to refresh in place. Omit to create a new one. Required with template_id." },
+        questions: { type: "array", items: { type: "object" }, description: "Questions keyed by template column name. Category and Question are required on each; set Update Key to make re-imports update in place." },
         file_path: { type: "string", description: "Path to a local .xlsx in the CloudRadial assessment template layout" },
-        template_id: { type: "integer", description: "Template assessment to copy questions from" },
+        template_id: { type: "integer", description: "Template assessment to copy questions from (needs assessment_id)" },
         apply_to: { type: "string", enum: ["server", "endpoint", "user"], description: "With template_id: duplicate questions per matching item" },
-        type: { type: "integer", description: "Upload type sent in the data part. Default 0, as the Secure Score workflow uses." }
+        type: { type: "integer", description: "Upload type. Default 20 (an assessment, the only type the portal lists). 10 = template. Never 0: it creates a row the portal doesn't show." }
       },
       required: ["company_id"]
     },
@@ -16562,29 +16650,25 @@ var tools = [
       const sources = [questions, filePath, templateId].filter((s) => s !== void 0);
       if (sources.length !== 1) throw new Error("Give exactly one of: questions, file_path, template_id.");
       if (questions && questions.length === 0) throw new Error("questions is empty.");
-      let assessmentId = args.assessment_id === void 0 || args.assessment_id === null ? void 0 : Number(args.assessment_id);
-      const title = str(args, "title");
-      if (assessmentId === void 0) {
-        if (!title) throw new Error("title is required when creating a new assessment.");
-        const created = await callApi("POST", "/v2/assessment", void 0, {
-          companyId,
-          title,
-          category: str(args, "category") || "Security",
-          description: str(args, "description") || ""
-        });
-        if (created.status >= 300) throw new Error(`Creating the assessment failed (HTTP ${created.status}): ${JSON.stringify(created.data).slice(0, 300)}`);
-        const d = created.data;
-        const id = d && (d.assessmentId ?? d.id);
-        if (id === void 0 || id === null) throw new Error(`CloudRadial did not return an assessmentId: ${JSON.stringify(created.data).slice(0, 300)}`);
-        assessmentId = Number(id);
-      }
+      const existingId = args.assessment_id === void 0 || args.assessment_id === null ? void 0 : Number(args.assessment_id);
       if (templateId !== void 0) {
-        const body = { assessmentId, templateId };
+        if (existingId === void 0) {
+          throw new Error("template_id needs assessment_id. Create the assessment first (import its questions with `questions` or `file_path`, or create it in the portal).");
+        }
+        const body = { assessmentId: existingId, templateId };
         if (str(args, "apply_to")) body.applyTo = str(args, "apply_to");
         const r2 = await callApi("POST", "/v2/assessment/import-template", void 0, body);
-        if (r2.status >= 300) throw new Error(`Template import failed (HTTP ${r2.status}): ${JSON.stringify(r2.data).slice(0, 300)}`);
-        return { assessmentId, source: `template ${templateId}`, result: r2.data };
+        return { assessmentId: existingId, created: false, source: `template ${templateId}`, result: r2.data };
       }
+      let title = str(args, "title");
+      if (existingId === void 0 && !title) throw new Error("title is required when creating a new assessment.");
+      if (existingId !== void 0 && !title) {
+        const row = await odataByKey("assessment", String(existingId));
+        if (!row) throw new Error(`Assessment ${existingId} not found.`);
+        title = String(row.title ?? "");
+      }
+      const type = args.type === void 0 || args.type === null ? 20 : Number(args.type);
+      if (type === 0) throw new Error("type 0 creates an assessment the portal never lists. Use 20 (assessment) or 10 (template).");
       let bytes;
       let count;
       if (questions) {
@@ -16594,18 +16678,30 @@ var tools = [
         if (!/\.xlsx$/i.test(filePath)) throw new Error("file_path must be an .xlsx file.");
         bytes = new Uint8Array(readFileSync2(filePath));
       }
-      const data = JSON.stringify({
-        name: title || `Assessment ${assessmentId}`,
-        assessmentId,
-        type: args.type === void 0 ? 0 : Number(args.type),
-        companyId
-      });
+      const data = JSON.stringify({ name: title, assessmentId: existingId ?? 0, type, companyId });
       const r = await callApiMultipart("/v2/assessment/upload", data, {
         bytes,
         name: "assessment.xlsx",
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       });
-      return { assessmentId, questions: count, source: questions ? "questions" : filePath, result: r.data };
+      const source = questions ? "questions" : filePath;
+      if (existingId !== void 0) return { assessmentId: existingId, created: false, questions: count, source, result: r.data };
+      const list = await callApi("GET", "/v2/odata/assessment", {
+        $filter: `companyId eq ${companyId}`,
+        $orderby: "assessmentId desc",
+        $top: "200"
+      });
+      const rows = list.data?.value ?? list.data;
+      const hit = (Array.isArray(rows) ? rows : []).find(
+        (a) => String(a.title ?? "").toLowerCase() === title.toLowerCase() && Number(a.type) === type
+      );
+      return {
+        assessmentId: hit ? Number(hit.assessmentId) : null,
+        created: true,
+        questions: count,
+        source,
+        ...hit ? {} : { note: "Uploaded, but the new assessment isn't in this company's list yet. Look it up by title shortly." }
+      };
     }
   },
   {

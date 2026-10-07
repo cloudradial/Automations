@@ -36,10 +36,10 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
-| `get_resource` | Retrieve one resource by ID | `resource_type`, `id` |
+| `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
-| `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID | `resource_type`, `id` |
+| `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
+| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -49,7 +49,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200; walk through larger pages by incrementing `skip`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -57,12 +57,15 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 - Courses use `name` (not `title`).
 - `archive_item` composite key — pass `archive_id` and `id`.
 - `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
 
 - **"credentials not configured"** → defer to the `setup` skill.
 - **401/403 from CloudRadial** → stored credentials are invalid. Run `setup` to rotate.
-- **404** → resource not found, verify the ID.
+- **404** → resource not found. Verify the ID, and for `catalog_question`, `course_lesson`, `domain`, `user`, `application_user` and `token` pass `company_id`.
+- Every HTTP 4xx/5xx comes back as a tool error, not as data. Read the message and fix the call instead of retrying it unchanged.
 
 ## API Reference
 
@@ -85,13 +88,13 @@ CloudRadial follows the **Land, Onboard, Manage, Grow** (LOMG) lifecycle. Every 
 
 1. Pull the company overview: call `company_overview` with `company_id: "<id>"`.
 
-2. Count key resources:
-   - Users → `count_resources?resource_type=user&filter=companyId eq <id>`
-   - Endpoints → `count_resources?resource_type=endpoint&filter=companyId eq <id>`
-   - Articles → `count_resources?resource_type=article&filter=companyId eq <id>`
-   - Courses → `count_resources?resource_type=course&filter=companyId eq <id>`
-   - Assessments → `count_resources?resource_type=assessment&filter=companyId eq <id>`
-   - Feedback → `count_resources?resource_type=feedback&filter=companyId eq <id>`
+2. Count key resources. Call `count_resources` once per type with `filter: "companyId eq <id>"`:
+   - Users → `resource_type: "user"`
+   - Endpoints → `resource_type: "endpoint"`
+   - Articles → `resource_type: "article"`
+   - Courses → `resource_type: "course"`
+   - Assessments → `resource_type: "assessment"`, `filter: "companyId eq <id> and type eq 20"` (type 20 is an assessment; 10 is a template and 30 a run)
+   - Feedback → `resource_type: "feedback"`
 
 3. Classify:
    - **0 endpoints + 0 articles** = Land
@@ -119,10 +122,11 @@ This is the standard onboarding track for new client companies. Each session has
 - [ ] Portal URL shared with partner's internal team
 
 **API actions to check/verify:**
-- Search for the company: `search_companies?name=<name>`
-- Check user count: `count_resources?resource_type=user&filter=companyId eq <id>`
-- Check endpoint count: `count_resources?resource_type=endpoint&filter=companyId eq <id>`
-- Review company details: `company_overview?company_id=<id>`
+- Search for the company: call `search_companies` with `name: "<name>"`
+- Check user count: call `count_resources` with `resource_type: "user"`, `filter: "companyId eq <id>"`
+- Check endpoint count: call `count_resources` with `resource_type: "endpoint"`, `filter: "companyId eq <id>"`
+- Review company details: call `company_overview` with `company_id: "<id>"`
+- Branding (logo, colors) can't be read or set through the API: check it in the portal
 
 ### Session 2: Ticketing & Service Desk
 
@@ -137,9 +141,9 @@ This is the standard onboarding track for new client companies. Each session has
 - [ ] Quick links or shortcuts configured for common actions
 
 **API actions:**
-- List catalogs: `list_resources?resource_type=catalog&filter=companyId eq <id>`
-- List catalog questions: `list_resources?resource_type=catalog_question&filter=companyId eq <id>`
-- Check services: `list_resources?resource_type=service&filter=companyId eq <id>`
+- List catalogs: call `list_resources` with `resource_type: "catalog"`, `filter: "companyId eq <id>"`
+- List catalog questions: call `list_resources` with `resource_type: "catalog_question"`, `filter: "companyId eq <id>"`
+- Check services: call `list_resources` with `resource_type: "service"`, `filter: "companyId eq <id>"`
 
 **Content to seed:**
 - Service catalog items for: password reset, new user request, hardware request, software request, general support
@@ -158,8 +162,8 @@ This is the standard onboarding track for new client companies. Each session has
 - [ ] Quickstart guides configured for new user onboarding
 
 **API actions:**
-- List articles: `list_resources?resource_type=article&filter=companyId eq <id>`
-- List menus: `list_resources?resource_type=menu&filter=companyId eq <id>`
+- List articles: call `list_resources` with `resource_type: "article"`, `filter: "companyId eq <id>"`
+- List menus: call `list_resources` with `resource_type: "menu"`, `filter: "companyId eq <id>"`
 - Create articles: Use `create_resource` with `resource_type: "article"` (see content-management skill)
 
 **Content to seed (common KB articles):**
@@ -187,10 +191,10 @@ This is the standard onboarding track for new client companies. Each session has
 - [ ] GAP analysis tools configured (security posture, compliance)
 
 **API actions:**
-- Review endpoints: `list_resources?resource_type=endpoint&filter=companyId eq <id>`
-- Check feedback: `list_resources?resource_type=feedback&filter=companyId eq <id>`
-- Review assessments: `list_resources?resource_type=assessment&filter=companyId eq <id>`
-- Check archives: `list_resources?resource_type=archive_item&filter=companyId eq <id>`
+- Review endpoints: call `list_resources` with `resource_type: "endpoint"`, `filter: "companyId eq <id>"`
+- Check feedback: call `list_resources` with `resource_type: "feedback"`, `filter: "companyId eq <id>"`
+- Review assessments: call `list_resources` with `resource_type: "assessment"`, `filter: "companyId eq <id> and type eq 20"` (no `select`; it returns HTTP 500 on assessments)
+- Check archives: call `list_resources` with `resource_type: "archive_item"`, `filter: "companyId eq <id>"`
 
 ### Session 5: Account Management Handoff
 
@@ -209,7 +213,7 @@ This is the standard onboarding track for new client companies. Each session has
 - Full content audit: List articles, catalogs, menus, courses, assessments
 - User adoption check: Count users, review login activity
 - Endpoint coverage: Count endpoints vs. known device count
-- Course enrollments: `list_resources?resource_type=course_enrollment&filter=companyId eq <id>`
+- Course enrollments: call `list_resources` with `resource_type: "course_enrollment"`, `filter: "companyId eq <id>"`
 
 ## What the API can set up, and what stays in the portal
 
@@ -217,12 +221,12 @@ When you walk a session, do the API items for the user (after confirming each wr
 
 | Area | Through the plugin | How | Portal only |
 |---|---|---|---|
-| Company | Create, rename, territory, account manager, PSA ids | `create_resource` / `update_resource` `company` (create needs `name`) | Logo, colors and theme. The API returns `portalLogoUrl` for auditing but doesn't set branding. |
+| Company | Create, rename, territory, account manager, PSA ids | `create_resource` / `update_resource` `company` (create needs `name`) | Logo, colors, theme and messaging settings. The API neither returns nor sets branding. |
 | Company groups | Create groups, add or remove companies | `company_group`, `company_group_company` | |
 | Users | Create, update, remove portal users | `user` (create needs `companyId`, `email`, `firstName`, `lastName`) | Security roles, invitations, SSO |
 | Integrations | Read what's synced | `company_overview`, `list_resources` | Connecting the PSA, Microsoft 365, RMM and other integrations |
 | Service catalog | Create request forms and their questions | `catalog`, `catalog_question` (see content-management) | Approval workflows and automations attached to a form; end-to-end ticket test |
-| Knowledge base | Create, update, publish articles | `article` | |
+| Knowledge base | Create and update articles (create needs `companyId`, `subject`, `body`, `datePublished`) | `article` | |
 | Menus | Create and order menu tiles | `menu` | |
 | Quickstarts | Create home-page quickstart guides | `quickstart` (see reporting-admin) | |
 | Media | Upload images and documents | `media` (base64 `data`) | Using an uploaded image as the portal logo |
@@ -230,7 +234,7 @@ When you walk a session, do the API items for the user (after confirming each wr
 | Training | Create courses and lessons, enroll users, record completions | `course`, `course_lesson`, `course_enrollment`, `course_lesson_history` | |
 | Assessments | Create an assessment and load its questions | `assessment_import` | Running the assessment with the client |
 | Flexible assets | Create types, fields and records | `flexible_asset_type`, `flexible_asset_field`, `flexible_asset` | |
-| Endpoints | Read devices, set custom properties, refresh warranty | `endpoint`, `endpoint_update_warranty`, custom properties | Deploying the agent |
+| Endpoints | Read devices, set custom properties, refresh warranty | `endpoint`, `endpoint_update_warranty`, `create_resource` / `update_resource` `endpoint_custom_property` (by `serial_number` + `property_name`) | Deploying the agent |
 | Services, domains, certificates | Create and update | `service`, `service_install`, `domain`, `certificate` | |
 | Planner and roadmap | Create and update Planner cards | `product` (see client-deliverable, endpoint-lifecycle-cards) | |
 | Feedback | Read and analyze | `feedback` | Turning on the feedback widget and CSAT surveys |
@@ -324,11 +328,12 @@ These are the most common challenges that drive partners to CloudRadial. Each ma
 
 ## Content Seeding Workflows
 
+
 ### Seed Articles for a New Company
 
 1. Identify the company and confirm companyId
 2. Check existing articles to avoid duplicates
-3. Create articles as drafts (isPublished: false) — call `create_resource` with:
+3. Draft each article and review it with the partner first. The API has no draft or `isPublished` flag, so an article is live once created. Then call `create_resource` with:
    ```
    resource_type: "article"
    data: {
@@ -336,32 +341,62 @@ These are the most common challenges that drive partners to CloudRadial. Each ma
      subject: "Article Subject Here",
      body: "<p>HTML article content</p>",
      category: "Category Name",
-     isPublished: false
+     datePublished: "<today, ISO 8601>"
    }
    ```
-4. Review drafts with the partner before publishing
-5. Publish by updating `isPublished: true`
+   `companyId`, `subject`, `body` and `datePublished` are required.
+4. To change an article later, call `update_resource` with only the fields to change (PATCH is the default)
 
 ### Seed a Training Course
 
 1. Create the course container:
-   ```javascript
-   // create_resource with resource_type: "course"
-   // Key fields: name, description (HTML), category, companyId, estimatedTime, isRequired, passScore
+   ```
+   create_resource with resource_type: "course"
+   Required: companyId, name, description (HTML), shortDescription, category, estimatedTime (integer minutes)
+   Optional: isRequired, passScore, validMonths
    ```
 2. Create lessons in order:
-   ```javascript
-   // create_resource with resource_type: "course_lesson"
-   // Key fields: courseId, title, overview, text (HTML body), order, companyId
+   ```
+   create_resource with resource_type: "course_lesson"
+   Required: companyId, courseId, title, overview, category, text (HTML body)
+   Optional: order
    ```
 3. Final Exam lesson is a stub — quiz mechanics handled by the platform
 
 ### Seed a Service Catalog
 
 1. Create catalog items:
-   ```javascript
-   // create_resource with resource_type: "catalog"
-   // Key fields: name, description, companyId
    ```
+   create_resource with resource_type: "catalog"
+   Required: companyId, subject (the item's name), category
+   Optional: description, shortDescription, thankYou, isNeedsApproval
+   ```
+   Leave the PSA routing fields (`psaBoard`, `psaType`, `psaItem` and so on) empty unless the partner gives you the exact values.
 2. Add catalog questions for each item:
-   ```java
+   ```
+   create_resource with resource_type: "catalog_question"
+   Required: companyCatalogId, companyId, label, order
+   Optional: type, isRequired, jsonId, options, placeholder
+   ```
+   Copy `type` from an existing question of the same kind; the API doesn't publish names for the codes (see content-management).
+
+### Set Endpoint Custom Properties
+
+1. Find the endpoint's `serialNumber` with `list_resources` / `resource_type: "endpoint"`
+2. Call `create_resource` with `resource_type: "endpoint_custom_property"`, `serial_number: "<serial>"`, `data: { name: "AssetTag", value: "CON-0042", dataType: "String" }`. The API doesn't list the allowed `dataType` values, so copy one from an existing property where you can
+3. To change it later, call `update_resource` with `resource_type: "endpoint_custom_property"`, `serial_number`, `property_name` and `data: { value }`
+
+---
+
+## Implementation Readiness Check
+
+Before any implementation session, run a quick readiness check:
+
+1. Pull company overview with `company_overview`
+2. Count users, endpoints, articles, catalogs, courses, assessments (`type eq 20`) and feedback with `count_resources`
+3. List recent articles (are they being created?)
+4. List recent feedback (are users engaged?)
+5. Check service catalog (is ticketing configured?)
+6. Assess LOMG stage
+7. Identify which implementation session they're on based on what's complete vs. missing
+8. Present findings and recommend next steps, listing portal-only items (branding, integrations, roles) as checks for the partner to do in the portal

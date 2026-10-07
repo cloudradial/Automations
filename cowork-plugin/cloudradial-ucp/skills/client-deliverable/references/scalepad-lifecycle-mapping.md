@@ -5,7 +5,7 @@ deliverable PDF into CloudRadial data: Planner roadmap, priced budget, and — t
 ScalePad hides from the portal — the **asset/EOL data written onto the actual
 endpoints** via the API.
 
-This reference was written against a real export (`Deliverable-KMCO Group Ltd`, 213
+This reference was written against a real export (a UK client's deliverable, shown here as `Deliverable-Contoso Ltd`, 213
 users, 45 assets, GBP). Field names and section shapes below are from that document.
 Not every ScalePad export carries every section — this one had **no DMI/maturity page
 and no Microsoft-licenses page**, it is a hardware-lifecycle + budget deliverable. For
@@ -45,35 +45,36 @@ If a row still can't be resolved from text, render that one page to an image to 
 
 ### Roadmap initiatives → Planner items
 
-One `product` per initiative. From the KMCO export:
+One `product` per initiative. From the Contoso example export:
 
-| ScalePad field | Planner (`product`) field | KMCO example |
+| ScalePad field | Planner (`product`) field | Example |
 |---|---|---|
 | Initiative name | `subject` | `Workstation Replacement Q1` |
 | Narrative paragraph | `body` (prepend to the asset table) | "…workstations that have reached the end of their useful life…" |
-| Status `PROPOSED` / `OPEN` | `status` string | `Proposed` / `In_Progress` (see `planner-item-schema.md`) |
+| Status `PROPOSED` / `OPEN` | `status` (integer enum) | `0` Proposed / `30` In_Progress (see `planner-item-schema.md`) |
 | Quarter (Q1 2026) | `productType: 2` + `estimatedStartDate`/`estimatedEndDate` at quarter bounds | Q1 → `2026-01-01`…`2026-03-31` |
 | Investment (£6,775.00) | `projectUnits: 1`, `projectUnitPrice: 6775` | one-time |
 | Asset count (5 assets) | length of the `body` table | 5 |
 
-Set `isClientVisible: true` and `isShowPrice: true` or the client sees nothing.
+Set `isClientVisible: true` and `isShowPrice: true` or the client sees nothing. Every create also
+needs `companyId`, `productCategoryId`, `category`, `summary`, `datePublished` and `isRequired`.
 
 ### Budget → Planner items
 
-- **Hardware** lines (one asset each, e.g. `KMCO-LT46 … £1,000.00`) → Planner items in a
-  `Hardware Refresh` category, one-time `projectUnitPrice`. In KMCO every workstation is
+- **Hardware** lines (one asset each, e.g. `CON-LT46 … £1,000.00`) → Planner items in a
+  `Hardware Refresh` category, one-time `projectUnitPrice`. In the example every workstation is
   budgeted at £1,000.
 - **Initiatives** lines repeat the roadmap initiatives — map them once, do not
   double-count.
-- **Contracts** lines (`KMC001 Elevate Support … Active … £11,375.04`, M365, Exchange
-  Online, etc.) → Planner items with `monthlyUnitPrice`, `status: "Completed"` and
+- **Contracts** lines (`CON001 Elevate Support … Active … £11,375.04`, M365, Exchange
+  Online, etc.) → Planner items with `monthlyUnitPrice`, `status: 40` (Completed) and
   `currentlyInstalled: true` so they read as active spend, not proposals. Where ScalePad
   shows an annual figure, divide to a monthly equivalent or place the full amount in the
   renewal quarter, and state which convention you used in `body`.
-- The **Overdue** bucket (KMCO: 13 workstations, £13,000) → `productType: 0` (Not
+- The **Overdue** bucket (example: 13 workstations, £13,000) → `productType: 0` (Not
   Scheduled): recognised budget, no agreed date.
 - The stacked budget **chart** does not reproduce — CloudRadial has no multi-year budget
-  chart. Say so; report the quarter totals instead (KMCO: Q1 £27,670 · Q2 £27,709 ·
+  chart. Say so; report the quarter totals instead (example: Q1 £27,670 · Q2 £27,709 ·
   Q3 £24,709 · Q4 £18,649 · Q1'27 £17,498 · Overdue £13,000).
 
 ## Endpoint sync — the part ScalePad keeps in the PDF
@@ -94,11 +95,11 @@ date. Write `expirationDate` yourself.
 | ScalePad column | `Endpoint` field | Notes |
 |---|---|---|
 | Serial Number (`PF2LY0BX`) | `serialNumber` | **Match key.** Skip rows with no serial |
-| Name (`KMCO-LT04`) | `name` (required), `machineName` | |
+| Name (`CON-LT04`) | `name` (required), `machineName` | |
 | Manufacturer (`Lenovo`) | `manufacturer` | |
 | Model (`E15 Gen 4 … Type 21ED`) | `model` | |
 | EOL (`2024-03-02`) | `expirationDate` | The high-value write |
-| Purchased (`29/07/2021`) | — no native purchase field | Store as a custom property (e.g. `ScalePad Purchase Date`) or leave; do **not** shoehorn into `manufacturedDate` |
+| Purchased (`29/07/2021`) | — no native purchase field | Store as a custom property (`create_resource` `endpoint_custom_property`, `serial_number`, `data: { name: "ScalePad Purchase Date", value: "2021-07-29", dataType: "Date" }`) or leave; do **not** shoehorn into `manufacturedDate` |
 | Age (`3.5`) | — derived, do not write | CloudRadial derives age from `cpuDate`/`biosDate` |
 
 ### Match, then update or create
@@ -111,7 +112,7 @@ For each asset row **that has a serial**:
 2. **If found → enrich, don't clobber.** Read the row first. Only write fields the portal
    is missing (almost always `expirationDate`; add `manufacturer`/`model` only if blank —
    never overwrite RMM-supplied values with ScalePad's). Use the shipped tool:
-   `update_resource` `endpoint`, `method: "PATCH"`, `id: {companyEndpointId}`,
+   `update_resource` `endpoint` (PATCH is the default), `id: {companyEndpointId}`,
    `data: { "expirationDate": "2024-03-02" }`. (`update_resource` addresses endpoints by
    their internal `companyEndpointId` at `/v2/endpoint/id/{id}` and converts the partial
    object to a JSON-Patch document for you.) To address by serial directly instead, use
@@ -122,15 +123,18 @@ For each asset row **that has a serial**:
    `name`, `platformType` (`EndpointPlatformType`), `enclosure` (`EnclosureType`),
    `isWindowsDefenderRunning`, `lastOSUpdate`, `lastCheckIn`. You must synthesize those.
    Recommended: only the operator's call — confirm before bulk-creating, tag created rows
-   (`tagNumber` or a custom property `Source = ScalePad`) so they are distinguishable from
+   (`tagNumber`, or a custom property `Source = ScalePad` written with `create_resource`
+   `endpoint_custom_property` and the new row's `serial_number`) so they are distinguishable from
    RMM-managed endpoints, and set `lastCheckIn`/`lastOSUpdate` to the extract date, not a
-   fake recent one. Look up the integer for laptop `enclosure` and Windows `platformType`
-   in the **Enumerations** section of `${CLAUDE_PLUGIN_ROOT}/references/api-reference.md`
-   and confirm it against a real endpoint in the portal before writing — this file does not hard-code
-   those codes because the API exposes the values without names.
+   fake recent one. `enclosure` and `platformType` are integer enums on write, and the spec
+   lists their values without names (see **Enumerations** in
+   `${CLAUDE_PLUGIN_ROOT}/references/api-reference.md`). OData returns these enums as names
+   (`enclosure: "Laptop"`), so you can't read the integer off an existing endpoint. Ask the
+   operator to confirm the codes, or create one test endpoint and check which name it reads
+   back as, before bulk-creating — this file does not hard-code those codes.
 
-Rows **without a serial** (KMCO had several: `KMCO-LT52`, `KMCO-LT48`, `KMCO-LT50`,
-`KMCO-LT43/44/45`) cannot be safely matched or created. Leave them out of the sync and
+Rows **without a serial** (the example had several: `CON-LT52`, `CON-LT48`, `CON-LT50`,
+`CON-LT43/44/45`) cannot be safely matched or created. Leave them out of the sync and
 render `Not reported` in the report `body` table. Never invent a serial to force a match.
 
 ### Order of operations

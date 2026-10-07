@@ -67,7 +67,9 @@ thresholds are an open design item, not a shipped feature.
 
 `POST /api/assessments/run` clones the assessment and its answers into a frozen
 `Assessment_Run` row, stamps `dateConducted`, and computes `dateNextDue` from
-`scheduleInterval`.
+`scheduleInterval`. That is the portal's own API, which refuses v2 API keys, so the plugin
+can't start a run. In the v2 API a run reads back as an `assessment` row with `type` 30, titled
+"<assessment> - M/d/yy"; list them with `filter: "companyId eq <id> and type eq 30"`.
 
 Critical caveat: **nothing enforces the cadence.** No background job generates the next
 run or notifies anyone. The interval field is labelled "Recommended Interval" in the UI,

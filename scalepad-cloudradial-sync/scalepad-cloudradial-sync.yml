@@ -2897,12 +2897,20 @@ definition:
                           return $null
                       }
                       # The workbook's per-question Update Key: CloudRadial matches questions by it when a file is
-                      # re-uploaded into an assessment (live, 2026-10-06). It is derived from the assessment, category
-                      # and question text, which stay the same across evaluations of one ScalePad template.
+                      # re-uploaded into an assessment (live, 2026-10-06). It is derived from the assessment title and
+                      # ScalePad's assessment_template_question_id, which is the same in every evaluation of a template
+                      # (live check, 2026-10-07: 3 templates, 2 evaluations each, ids identical even where 2 of 16
+                      # question titles differed), so a reworded question keeps its key. A question without that id
+                      # falls back to the category and question text.
                       function Get-QuestionKey { param([string]$Text)
                           $b = [System.Security.Cryptography.MD5]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("cloudradial/scalepad-cloudradial-sync/$($Text.Trim().ToLowerInvariant())"))
                           $b[7] = ($b[7] -band 0x0f) -bor 0x30; $b[8] = ($b[8] -band 0x3f) -bor 0x80
                           return ([guid]::new([byte[]]$b)).ToString()
+                      }
+                      function Get-QuestionKeyText { param([string]$Title, [string]$Category, $Question)
+                          $qid = [string](Get-P $Question 'assessment_template_question_id' '')
+                          if ($qid.Trim()) { return "$Title|qid|$($qid.Trim())" }
+                          return "$Title|$Category|$([string](Get-P $Question 'title' ''))"
                       }
 
                       $crAssess = $null
@@ -2953,7 +2961,7 @@ definition:
                                           $answer, $ScoreText[$answer], ($responses -join ','), $(if ($answer -eq -2) { 'Yes' } else { 'No' }),
                                           (Get-Text (Get-P $qn 'public_comment')), [string](Get-P $qn 'scoring_instructions' ''), $summary, $tips,
                                           $(if ($refs) { "Linked initiatives: $refs" } else { '' }), (Get-Text (Get-P $qn 'internal_comments')),
-                                          (Get-QuestionKey "$title|$catRaw|$([string](Get-P $qn 'title' ''))")))
+                                          (Get-QuestionKey (Get-QuestionKeyText $title $catRaw $qn))))
                               }
                           }
                           $counts.questions += $rows.Count

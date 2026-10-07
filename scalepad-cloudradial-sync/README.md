@@ -132,7 +132,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 - **Live test checklist** (before this leaves draft):
   1. On KMCO company 9, run the `assessments` phase twice. The second run should skip the assessment as up to date.
   2. Click Run in the portal and check that the run copies the answers.
-  3. For a client with two evaluations of the same `assessment_template_id`, GET `/lifecycle-manager/v1/assessments/{id}` for each and compare the question ids.
+  3. ~~Compare question ids across two evaluations of the same `assessment_template_id`.~~ Done 2026-10-07: `assessment_template_question_id` is stable, and the Update Keys now use it (see Update Keys below).
   4. Re-upload a workbook with one question left out, and see whether the old question stays.
 - **Assessment runs are created in the portal (draft, 2026-10-06; filed as AAI-125).** The sync keeps one assessment (type 20) per ScalePad title current. To record a dated run, a person opens it under **Compliance > Assessments** and clicks **Run**, which copies the current answers. The sync report lists this under Needs attention.
   - The API can't create a run. The portal's Run button uses the portal's own API, which refuses API keys (HTTP 401), and v2 has no run endpoint.
@@ -143,8 +143,10 @@ All optional. With none, every name-matched company is migrated in apply mode.
   - The upload sets category "Import" and can't set a description.
 - **Assessment type codes** are undocumented. From live data: 10 = template, 20 = assessment, 30 = run. The portal lists only type 20, so the step matches only type 20 rows. A `type: 0` upload is listed by the API but never shown.
 - **When an assessment is refreshed.** Only the newest ScalePad evaluation of each title is used. Older ones are listed in the run output as skipped. The upload happens only when ScalePad's `updated_at` (or `evaluated_at`) is later than the CloudRadial assessment's `dateModified`.
-- **Update Keys.** CloudRadial matches questions on re-upload by the workbook's per-question **Update Key**. The step derives it from the assessment title, category and question text, which stay the same across evaluations of one ScalePad template. A question ScalePad rewords gets a new key, so it becomes a new question. Untested: what a re-upload does with a question that is missing from the new workbook. The upload probably adds and updates questions without deleting any, so the old question would stay with its old answer. A reworded or removed ScalePad question would then leave a stale copy in the assessment, which someone can delete in the portal.
-  - **ScalePad question ids aren't used.** Each evaluation has its own `id` and an `assessment_template_id`. Nothing shows whether question ids are reused across evaluations of one template. If a live check finds they are, keys should switch to the question id, which survives rewording.
+- **Update Keys.** CloudRadial matches questions on re-upload by the workbook's per-question **Update Key**. The step derives it from the assessment title and ScalePad's `assessment_template_question_id`.
+  - **That id is stable.** A live check on 2026-10-07 compared 3 templates with 2 evaluations each, and every question had the same `assessment_template_question_id` in both. In one template, 2 of 16 question titles differed while the ids still matched. So a question ScalePad rewords keeps its key and its place in the assessment.
+  - **Fallback.** A question with no `assessment_template_question_id` is keyed on its category and text instead, so rewording it makes a new question.
+  - **Untested:** what a re-upload does with a question that is missing from the new workbook. The upload probably adds and updates questions without deleting any. A question removed from the ScalePad template, or a reworded one without an id, would then leave a stale copy with its old answer, which someone can delete in the portal.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).
 - **Devices created from ScalePad** have no RMM agent until one is deployed, they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.
 
@@ -160,7 +162,7 @@ Results:
 - **Existing assessment changed after the evaluation** (different case, trailing space): skipped as up to date, with no upload.
 - **Existing assessment older than the evaluation:** answers re-uploaded into its id.
 - **New assessment not listed yet:** retried twice, counted as imported, warned.
-- **Workbook:** every question carries an Update Key.
+- **Workbook:** every question carries an Update Key. With ScalePad rewording two questions (harness `SP_REWORD=1`), the one with an `assessment_template_question_id` kept its key, the one without changed, and an unchanged question kept its key (2026-10-07).
 - **Report:** says to create the run in the portal.
 - **Full flow:** ran end to end. The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live (assessment 159 on Westgate Tech Services imported all its questions and answers); inline strings were never tried against the importer. Read back, the generated workbook had all 51 template columns, with every shared string resolving to its value.
 

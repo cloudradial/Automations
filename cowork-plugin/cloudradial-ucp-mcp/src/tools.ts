@@ -33,6 +33,54 @@ function requireStr(args: Record<string, unknown>, key: string): string {
   return v;
 }
 
+// Single-item endpoints that take a companyId query parameter in the v2 spec.
+// Without it, /v2/catalogquestion/{id} answers 404 "Catalog question not found"
+// for a question that exists (AAI-126).
+const COMPANY_SCOPED = new Set([
+  "catalog_question",
+  "course_lesson",
+  "course_lesson_history",
+  "domain",
+  "user",
+  "application_user",
+  "token",
+]);
+
+/**
+ * The `{ companyId }` query for a get/update/delete on one item, or undefined.
+ * Uses `company_id` when given. For a catalog question without one, looks the
+ * question up through OData (which works unscoped) to find its companyId, so a
+ * list-then-get flow works without the caller knowing the company.
+ */
+async function itemCompanyQuery(
+  resourceType: string,
+  args: Record<string, unknown>,
+  id?: string
+): Promise<Record<string, string> | undefined> {
+  if (!COMPANY_SCOPED.has(resourceType)) return undefined;
+  const given = str(args, "company_id");
+  if (given !== undefined && given !== "") return { companyId: given };
+  if (resourceType === "catalog_question" && id && /^\d+$/.test(id)) {
+    const r = await callApi("GET", "/v2/odata/catalogquestion", {
+      $filter: `companyCatalogQuestionId eq ${id}`,
+      $select: "companyId",
+      $top: "1",
+    });
+    const rows = (r.data as { value?: unknown })?.value ?? r.data;
+    const first = Array.isArray(rows) ? (rows[0] as { companyId?: unknown } | undefined) : undefined;
+    if (first && first.companyId !== undefined && first.companyId !== null) {
+      return { companyId: String(first.companyId) };
+    }
+  }
+  return undefined;
+}
+
+const COMPANY_ID_PARAM = {
+  type: "string",
+  description:
+    "Company the item belongs to, sent as ?companyId=. Needed by catalog_question, course_lesson, course_lesson_history, domain, user, application_user and token (catalog_question looks it up if omitted). For company_group_company it is the path key instead.",
+};
+
 function requireResource(args: Record<string, unknown>) {
   const resourceType = requireStr(args, "resource_type");
   const config = RESOURCE_MAP[resourceType];
@@ -282,7 +330,7 @@ export const tools: ToolDefinition[] = [
         endpoint_id: { type: "string", description: "Required for service_install" },
         service_id: { type: "string", description: "Required for service_install" },
         company_group_id: { type: "string", description: "Required for company_group_company" },
-        company_id: { type: "string", description: "Required for company_group_company" },
+        company_id: COMPANY_ID_PARAM,
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history" },
@@ -321,7 +369,8 @@ export const tools: ToolDefinition[] = [
         throw new Error(`get_resource is not supported for ${resourceType}`);
       }
       const id = requireStr(args, "id");
-      const result = await callApi("GET", `/v2/${config.itemPath}/${id}`);
+      const query = await itemCompanyQuery(resourceType, args, id);
+      const result = await callApi("GET", `/v2/${config.itemPath}/${id}`, query);
       return result.data;
     },
   },
@@ -363,6 +412,7 @@ export const tools: ToolDefinition[] = [
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
+        company_id: COMPANY_ID_PARAM,
       },
       required: ["resource_type", "data"],
     },
@@ -377,6 +427,7 @@ export const tools: ToolDefinition[] = [
       const data = (args.data as Record<string, unknown>) || {};
 
       let path: string;
+      let itemId: string | undefined;
       if (resourceType === "archive_item") {
         const archiveId = requireStr(args, "archive_id");
         const id = requireStr(args, "id");
@@ -393,9 +444,10 @@ export const tools: ToolDefinition[] = [
       } else if (resourceType === "company_group_company") {
         throw new Error("company_group_company has no update endpoint — use create_resource or delete_resource");
       } else {
-        const id = requireStr(args, "id");
-        path = `/v2/${config.itemPath}/${id}`;
+        itemId = requireStr(args, "id");
+        path = `/v2/${config.itemPath}/${itemId}`;
       }
+      const query = await itemCompanyQuery(resourceType, args, itemId);
 
       // CloudRadial's PATCH endpoints expect an RFC 6902 JSON Patch document,
       // not a plain partial object. Convert {field: value, ...} → an array of
@@ -409,7 +461,7 @@ export const tools: ToolDefinition[] = [
               value,
             }))
           : data;
-      const result = await callApi(method, path, undefined, body);
+      const result = await callApi(method, path, query, body);
       return result.data;
     },
   },
@@ -425,7 +477,7 @@ export const tools: ToolDefinition[] = [
         archive_id: { type: "string", description: "Required for archive_item" },
         endpoint_id: { type: "string", description: "Required for service_install (id = serviceId)" },
         company_group_id: { type: "string", description: "Required for company_group_company" },
-        company_id: { type: "string", description: "Required for company_group_company" },
+        company_id: COMPANY_ID_PARAM,
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
@@ -437,6 +489,7 @@ export const tools: ToolDefinition[] = [
       if (!config.itemPath) throw new Error(`delete is not supported for ${resourceType}`);
 
       let path: string;
+      let itemId: string | undefined;
       if (resourceType === "archive_item") {
         const archiveId = requireStr(args, "archive_id");
         const id = requireStr(args, "id");
@@ -455,11 +508,12 @@ export const tools: ToolDefinition[] = [
         const lessonId = str(args, "course_lesson_id") || requireStr(args, "id");
         path = `/v2/courselessonhistory/${courseId}/${auId}/${lessonId}`;
       } else {
-        const id = requireStr(args, "id");
-        path = `/v2/${config.itemPath}/${id}`;
+        itemId = requireStr(args, "id");
+        path = `/v2/${config.itemPath}/${itemId}`;
       }
 
-      const result = await callApi("DELETE", path);
+      const query = await itemCompanyQuery(resourceType, args, itemId);
+      const result = await callApi("DELETE", path, query);
       return result.data ?? { deleted: true };
     },
   },

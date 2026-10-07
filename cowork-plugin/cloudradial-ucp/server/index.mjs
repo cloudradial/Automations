@@ -15969,6 +15969,37 @@ function requireStr(args, key) {
   if (!v) throw new Error(`Missing required parameter: ${key}`);
   return v;
 }
+var COMPANY_SCOPED = /* @__PURE__ */ new Set([
+  "catalog_question",
+  "course_lesson",
+  "course_lesson_history",
+  "domain",
+  "user",
+  "application_user",
+  "token"
+]);
+async function itemCompanyQuery(resourceType, args, id) {
+  if (!COMPANY_SCOPED.has(resourceType)) return void 0;
+  const given = str(args, "company_id");
+  if (given !== void 0 && given !== "") return { companyId: given };
+  if (resourceType === "catalog_question" && id && /^\d+$/.test(id)) {
+    const r = await callApi("GET", "/v2/odata/catalogquestion", {
+      $filter: `companyCatalogQuestionId eq ${id}`,
+      $select: "companyId",
+      $top: "1"
+    });
+    const rows = r.data?.value ?? r.data;
+    const first = Array.isArray(rows) ? rows[0] : void 0;
+    if (first && first.companyId !== void 0 && first.companyId !== null) {
+      return { companyId: String(first.companyId) };
+    }
+  }
+  return void 0;
+}
+var COMPANY_ID_PARAM = {
+  type: "string",
+  description: "Company the item belongs to, sent as ?companyId=. Needed by catalog_question, course_lesson, course_lesson_history, domain, user, application_user and token (catalog_question looks it up if omitted). For company_group_company it is the path key instead."
+};
 function requireResource(args) {
   const resourceType = requireStr(args, "resource_type");
   const config2 = RESOURCE_MAP[resourceType];
@@ -16187,7 +16218,7 @@ var tools = [
         endpoint_id: { type: "string", description: "Required for service_install" },
         service_id: { type: "string", description: "Required for service_install" },
         company_group_id: { type: "string", description: "Required for company_group_company" },
-        company_id: { type: "string", description: "Required for company_group_company" },
+        company_id: COMPANY_ID_PARAM,
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history" }
@@ -16225,7 +16256,8 @@ var tools = [
         throw new Error(`get_resource is not supported for ${resourceType}`);
       }
       const id = requireStr(args, "id");
-      const result = await callApi("GET", `/v2/${config2.itemPath}/${id}`);
+      const query = await itemCompanyQuery(resourceType, args, id);
+      const result = await callApi("GET", `/v2/${config2.itemPath}/${id}`, query);
       return result.data;
     }
   },
@@ -16263,7 +16295,8 @@ var tools = [
         endpoint_id: { type: "string", description: "Required for service_install (id = serviceId)" },
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
-        course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" }
+        course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
+        company_id: COMPANY_ID_PARAM
       },
       required: ["resource_type", "data"]
     },
@@ -16276,6 +16309,7 @@ var tools = [
       }
       const data = args.data || {};
       let path;
+      let itemId;
       if (resourceType === "archive_item") {
         const archiveId = requireStr(args, "archive_id");
         const id = requireStr(args, "id");
@@ -16292,15 +16326,16 @@ var tools = [
       } else if (resourceType === "company_group_company") {
         throw new Error("company_group_company has no update endpoint \u2014 use create_resource or delete_resource");
       } else {
-        const id = requireStr(args, "id");
-        path = `/v2/${config2.itemPath}/${id}`;
+        itemId = requireStr(args, "id");
+        path = `/v2/${config2.itemPath}/${itemId}`;
       }
+      const query = await itemCompanyQuery(resourceType, args, itemId);
       const body = method === "PATCH" ? Object.entries(data).map(([key, value]) => ({
         op: "replace",
         path: `/${key}`,
         value
       })) : data;
-      const result = await callApi(method, path, void 0, body);
+      const result = await callApi(method, path, query, body);
       return result.data;
     }
   },
@@ -16315,7 +16350,7 @@ var tools = [
         archive_id: { type: "string", description: "Required for archive_item" },
         endpoint_id: { type: "string", description: "Required for service_install (id = serviceId)" },
         company_group_id: { type: "string", description: "Required for company_group_company" },
-        company_id: { type: "string", description: "Required for company_group_company" },
+        company_id: COMPANY_ID_PARAM,
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" }
@@ -16326,6 +16361,7 @@ var tools = [
       const { resourceType, config: config2 } = requireResource(args);
       if (!config2.itemPath) throw new Error(`delete is not supported for ${resourceType}`);
       let path;
+      let itemId;
       if (resourceType === "archive_item") {
         const archiveId = requireStr(args, "archive_id");
         const id = requireStr(args, "id");
@@ -16344,10 +16380,11 @@ var tools = [
         const lessonId = str(args, "course_lesson_id") || requireStr(args, "id");
         path = `/v2/courselessonhistory/${courseId}/${auId}/${lessonId}`;
       } else {
-        const id = requireStr(args, "id");
-        path = `/v2/${config2.itemPath}/${id}`;
+        itemId = requireStr(args, "id");
+        path = `/v2/${config2.itemPath}/${itemId}`;
       }
-      const result = await callApi("DELETE", path);
+      const query = await itemCompanyQuery(resourceType, args, itemId);
+      const result = await callApi("DELETE", path, query);
       return result.data ?? { deleted: true };
     }
   },

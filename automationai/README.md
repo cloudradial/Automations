@@ -40,6 +40,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`role-change-mover/`](role-change-mover/) | Workflow (no AI; previews, then applies on confirm) + department map KB template |
 | [`scalepad-cloudradial-alignment/`](scalepad-cloudradial-alignment/) | Agent + workflow + Knowledge (optional review before a Sync) |
 | [`scalepad-cloudradial-sync/`](scalepad-cloudradial-sync/) | Workflow |
+| [`shared-mailbox-dl/`](shared-mailbox-dl/) | Workflow (no AI; creates a shared mailbox or distribution list) |
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Agent + workflows + Knowledge |
 | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Workflow (no-AI audit, sent by Deliver Result) |
 

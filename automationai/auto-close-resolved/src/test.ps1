@@ -14,6 +14,10 @@ $Resolved = @{ connectwise = 'Resolved'; autotask = 'Resolved'; halopsa = 'Resol
 $RunIn = @{ syncro = @{ resolved_status_name = 'Pending Close' } }
 function Get-RunInput { param([string]$Psa, [hashtable]$Extra = @{}) $h = @{}; if ($RunIn.Contains($Psa)) { foreach ($k in $RunIn[$Psa].Keys) { $h[$k] = $RunIn[$Psa][$k] } }; foreach ($k in $Extra.Keys) { $h[$k] = $Extra[$k] }; return [pscustomobject]$h }
 function Get-Marker { param([string]$Tag, [double]$SinceDays) return "Note text.`n[auto-close-resolved: $Tag, resolved since $(Get-Stamp (Get-Ago $SinceDays))]" }
+# The public final notice as it now looks: our wording, then only the opaque ref.
+function Get-PubNotice { param($Id) return "Hello,`n`nWe marked ticket #$Id as resolved 5 days ago and haven't heard back, so we're closing it now.`nRef: 0a1b2c3d" }
+# A client-visible note: no marker, tag, address or internal status word, and it ends with only the opaque ref.
+function Test-CleanPublic { param([string]$Text) return ($Text -notmatch '\[|auto-close-resolved|@|final notice|failed' -and $Text -cmatch "`nRef: [0-9a-f]{8}$") }
 
 # The standard world. Expected on a first run with the defaults (resolved_days 3, max_resolved_days 30):
 #   201 close with notice   202 notice sent and close failed earlier: close only, no second notice
@@ -24,7 +28,7 @@ function New-StandardWorld {
     Reset-World $Psa
     $r = $Resolved[$Psa]
     $null = Add-WorldTicket 201 $r -Created 10 -Notes @(@{ d = 4; who = 'tech'; text = 'Fixed: the printer driver was reinstalled.' })
-    $null = Add-WorldTicket 202 $r -Created 20 -Notes @(@{ d = 10; who = 'tech'; text = 'Fixed: the mailbox was restored.' }, @{ d = 5; who = 'marker'; text = (Get-Marker 'final notice' 10) }, @{ d = 5; who = 'marker'; internal = $true; text = (Get-Marker 'closed' 10) }, @{ d = 5; who = 'marker'; internal = $true; text = (Get-Marker 'failed' 10) })
+    $null = Add-WorldTicket 202 $r -Created 20 -Notes @(@{ d = 10; who = 'tech'; text = 'Fixed: the mailbox was restored.' }, @{ d = 5; who = 'marker'; text = (Get-PubNotice 202) }, @{ d = 5; who = 'marker'; internal = $true; text = (Get-Marker 'closed' 10) }, @{ d = 5; who = 'marker'; internal = $true; text = (Get-Marker 'failed' 10) })
     $null = Add-WorldTicket 203 $r -Created 10 -Notes @(@{ d = 6; who = 'tech'; text = 'Fixed: VPN profile updated.' }, @{ d = 4; who = 'client'; text = 'It is still not connecting.' })
     $null = Add-WorldTicket 204 $r -Created 5 -Notes @(@{ d = 1; who = 'tech'; text = 'Fixed: password reset.' })
     $null = Add-WorldTicket 205 $r -Created 90 -Notes @(@{ d = 60; who = 'tech'; text = 'Fixed long ago.' })
@@ -57,7 +61,8 @@ $out = Invoke-Workflow $null
 Check 'cw live: status success' ($out.status -eq 'success') "$($out.status): $($out.message) $($out.warnings -join ' | ')"
 $pub = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.detailDescriptionFlag -eq $true } | Sort-Object { ($_.Uri -split '/')[-2] })
 Check 'cw live: final notices on 201 and 207 only' ((@($pub | ForEach-Object { ($_.Uri -split '/')[-2] }) -join ',') -eq '201,207') (Get-WriteList)
-Check 'cw live: the notice is plain and carries the marker' ($pub[0].Body.text -like "*as resolved 4 days ago and haven't heard back, so we're closing it now*" -and $pub[0].Body.text -match '\[auto-close-resolved: final notice, resolved since ') $pub[0].Body.text
+Check 'cw live: the notice is plain and ends with only the opaque ref' ($pub[0].Body.text -like "*as resolved 4 days ago and haven't heard back, so we're closing it now*" -and (Test-CleanPublic $pub[0].Body.text) -and (Test-CleanPublic $pub[1].Body.text)) "$($pub[0].Body.text) || $($pub[1].Body.text)"
+Check 'cw live: the closing internal note keeps the readable marker' (@(Get-Writes "POST $cw/service/tickets/201/notes" | Where-Object { $_.Body.internalAnalysisFlag -and $_.Body.text -match '\[auto-close-resolved: closed, resolved since ' }).Count -eq 1) (Get-WriteList)
 $int = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.internalAnalysisFlag -eq $true })
 Check 'cw live: internal notes on 201 and 207' ((@($int | ForEach-Object { ($_.Uri -split '/')[-2] } | Sort-Object) -join ',') -eq '201,207') (Get-WriteList)
 Check 'cw live: 202 already holds its closing note from the failed run, so no second one' ((Get-Action $out 202).internal_note -eq 'written earlier' -and @(Get-Writes "POST $cw/service/tickets/202/notes").Count -eq 0) ((Get-Action $out 202) | ConvertTo-Json -Compress)
@@ -102,7 +107,14 @@ $MockWorld.writes.Clear()
 $outB = ConvertTo-RoundTrip (Invoke-Step 'node-close' (ConvertTo-RoundTrip (Invoke-Step 'node-notice' $planB)))
 Check 'overlap: the second run posts no note at all' (@(Get-Writes "POST $cw/service/tickets/*/notes").Count -eq 0) (Get-WriteList)
 Check 'overlap: the second run reports the notices as sent earlier' (@($outB.actions | Where-Object { $_.result -like 'final notice: sent earlier*' }).Count -eq 3) ($outB.actions | ConvertTo-Json -Compress)
-Check 'overlap: each ticket holds one final notice' (@((Get-WorldTicket 201).notes | Where-Object { $_.text.Contains('[auto-close-resolved: final notice, ') }).Count -eq 1 -and @((Get-WorldTicket 207).notes | Where-Object { $_.text.Contains('[auto-close-resolved: final notice, ') }).Count -eq 1)
+Check 'overlap: each ticket holds one final notice' (@((Get-WorldTicket 201).notes | Where-Object { -not $_.internal -and $_.text -like "*so we're closing it now*" }).Count -eq 1 -and @((Get-WorldTicket 207).notes | Where-Object { -not $_.internal -and $_.text -like "*so we're closing it now*" }).Count -eq 1)
+Check 'overlap: no public note on any ticket shows a marker' (@($MockWorld.tickets | ForEach-Object { $_.notes } | Where-Object { -not $_.internal -and $_.text -like '*Ref: *' -and -not (Test-CleanPublic $_.text) }).Count -eq 0)
+
+# ---- 4c. Back-compat: an older public notice with the bracketed marker still counts as sent ----
+Reset-World 'connectwise'
+$null = Add-WorldTicket 202 'Resolved' -Created 20 -Notes @(@{ d = 10; who = 'tech'; text = 'Fixed: the mailbox was restored.' }, @{ d = 5; who = 'marker'; text = (Get-Marker 'final notice' 10) }, @{ d = 5; who = 'marker'; internal = $true; text = (Get-Marker 'failed' 10) })
+$out = Invoke-Workflow $null
+Check 'back-compat: old bracketed public notice read, closed without a second notice' ((Get-WorldTicket 202).status -eq 'Closed' -and @(Get-Writes "POST $cw/service/tickets/202/notes" | Where-Object { $_.Body.detailDescriptionFlag }).Count -eq 0) (Get-WriteList)
 
 # ---- 5. Missing permission (403) ----
 New-StandardWorld 'connectwise'

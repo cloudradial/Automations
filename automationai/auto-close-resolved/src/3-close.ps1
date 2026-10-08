@@ -1,5 +1,6 @@
 # === Step 3: Close with internal note ===
-# For each ticket whose final notice is out: writes the internal note, then closes the ticket. The note goes
+# For each ticket whose final notice is out: writes the internal note (its "closed" marker is also how a later run
+# knows the notice went out), then closes the ticket. The note goes
 # first because some PSAs (Zendesk) refuse notes on a closed ticket. If the close fails, a second internal note
 # says so, and the next run retries the close without another notice. Then returns the run summary.
 # With preview: true it changes nothing.

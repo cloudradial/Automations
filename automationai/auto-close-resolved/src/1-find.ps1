@@ -91,6 +91,8 @@ foreach ($t in $found) {
 
     $ours = @(); $others = @()
     foreach ($n in $notes) {
+        # Our own public final notice shows only an opaque Ref line; the internal "closed" note holds the marker.
+        if (Test-AcrOwnPublic $n) { continue }
         $m = [regex]::Match($n.text, $AcrMarkerPattern)
         if ($m.Success) { $ours += , @{ created = $n.created; tag = $m.Groups['tag'].Value.Trim().ToLowerInvariant(); since = (ConvertTo-PsaDate $m.Groups['since'].Value.Trim()) } }
         else { $others += , $n }
@@ -122,7 +124,7 @@ foreach ($t in $found) {
     $null = $plan.Add([ordered]@{
             ticketId = $t.id; number = $t.number; summary = $t.summary; companyId = $t.companyId; companyName = $t.companyName
             daysResolved = $days; since = (Format-AcrStamp $since)
-            action = 'close'; notice = -not (@($cycle | Where-Object { $_.tag -eq 'final notice' }).Count -gt 0)
+            action = 'close'; notice = -not (@($cycle | Where-Object { $_.tag -in @('final notice', 'closed') }).Count -gt 0)
             noticeResult = ''; closeResult = ''; closedStatus = ''; noteResult = ''; error = ''
         })
 }

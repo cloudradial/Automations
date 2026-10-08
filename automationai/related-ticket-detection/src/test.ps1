@@ -1,6 +1,6 @@
 # Strict-mode harness for Duplicate / Related Ticket Detection.
-# Runs each PowerShell step exactly as it is in related-ticket-detection.yml (shared libraries and
-# psa-extra.ps1 included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest,
+# Runs each PowerShell step exactly as it is in related-ticket-detection.yml (shared libraries
+# psa.ps1, psa-tickets.ps1 and plan.ps1 included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest,
 # with the runner Key Vault, Invoke-RestMethod, Get-NodeInput and Set-NodeOutput mocked. The AI Prompt
 # step is simulated by handing the write step a judgment string.
 # Placeholder data only (Contoso, Fabrikam, Example MSP).
@@ -20,8 +20,9 @@ $Steps = (& $node -e $js $yml) | ConvertFrom-Json -AsHashtable
 Check 'workflow has gather and write steps' ($Steps.Contains('gather') -and $Steps.Contains('write'))
 Check 'judge prompt reads the gather output' ($Steps['judge.prompt'] -like '*{{ nodes.gather.output.facts_json }}*')
 Check 'judge model is blank' ($Steps['judge.model'] -eq '')
-Check 'psa-extra.ps1 is pasted into both PSA steps' ($Steps['gather'] -like '*function Find-PsaTickets*' -and $Steps['write'] -like '*function Add-PsaTicketRelation*')
-Check 'psa-extra.ps1 in the yml matches the source' ($Steps['gather'].Contains((Get-Content -Raw (Join-Path $PSScriptRoot 'psa-extra.ps1')).Replace("`r`n", "`n").TrimEnd()))
+Check '_shared/psa-tickets.ps1 is pasted into both PSA steps' ($Steps['gather'] -like '*function Find-PsaTickets*' -and $Steps['write'] -like '*function Add-PsaTicketRelation*')
+Check '_shared/psa-tickets.ps1 in the yml matches the source' ($Steps['gather'].Contains((Get-Content -Raw (Join-Path $Shared 'psa-tickets.ps1')).Replace("`r`n", "`n").TrimEnd()))
+Check 'no local psa-extra.ps1 left' (-not (Test-Path (Join-Path $PSScriptRoot 'psa-extra.ps1')) -and $Steps['gather'] -notlike '*# >>> src/psa-extra.ps1*')
 
 # ---- runner mocks ----
 $global:NodeIn = $null; $global:NodeParams = @{}; $global:NodeOut = $null
@@ -59,6 +60,10 @@ $THA = 'https://halo.example.com'; $TKB = 'https://bms.example.com/v2'; $TSY = '
 $TNow = (Get-Date).ToUniversalTime()
 function TAgo { param([double]$Days) return $TNow.AddDays(-$Days).ToString('yyyy-MM-ddTHH:mm:ssZ') }
 $TS = @{ list403 = $false; empty = $false }
+# Notes written during a test, by ticket id, so a rerun sees the markers the first run left.
+$TNotes = @{}
+function TNote { param([string]$Id) if (-not $TNotes.Contains($Id)) { $TNotes[$Id] = New-Object System.Collections.ArrayList }; return , $TNotes[$Id] }
+function TReset { param($Secrets) Reset-Mock $Secrets $Handler; $TNotes.Clear() }
 
 # ConnectWise: 1001 is the new ticket; 1002 is the same Outlook fault from the same contact; 1003 and 1004 are unrelated.
 # 2001 is Fabrikam's (another company); 1005 is closed.
@@ -80,14 +85,14 @@ $Handler = {
         # ---- ConnectWise ----
         "GET $TCW/company/companies*" { if ([uri]::UnescapeDataString($c.Uri) -like "*Contoso*") { return @([pscustomobject]@{ id = 42; name = 'Contoso' }) }; return @() }
         "GET $TCW/service/tickets/*/configurations*" { return @() }
-        "GET $TCW/service/tickets/*/notes*" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; return @([pscustomobject]@{ id = 1; text = $TDesc[$id] }) }
+        "GET $TCW/service/tickets/*/notes*" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; if ($c.Uri -notlike '*page=1' -and $c.Uri -like '*page=*') { return @() }; return @(@([pscustomobject]@{ id = 1; text = $TDesc[$id]; internalAnalysisFlag = $false; detailDescriptionFlag = $true }) + @(TNote $id | ForEach-Object { [pscustomobject]@{ id = 2; text = $_; internalAnalysisFlag = $true; detailDescriptionFlag = $false } })) }
         "GET $TCW/service/tickets?conditions=*" {
             if ($TS.list403) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to Service Tickets."}' }
             if ($TS.empty) { return @() }
             return @($TCwTickets['1004'], $TCwTickets['1003'], $TCwTickets['1002'], $TCwTickets['1001'])
         }
         "GET $TCW/service/tickets/*" { $id = ($c.Uri -split '/service/tickets/')[1].Split('?')[0]; if ($TCwTickets.Contains($id)) { return $TCwTickets[$id] }; New-HttpError 404 '{"message":"Ticket not found"}' }
-        "POST $TCW/service/tickets/*/notes" { return [pscustomobject]@{ id = 9001 } }
+        "POST $TCW/service/tickets/*/notes" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; $null = (TNote $id).Add((Read-Body $c).text); return [pscustomobject]@{ id = 9001 } }
         # ---- Autotask ----
         "GET $TAT/Tickets/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'status'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'New'; isActive = $true }, [pscustomobject]@{ value = '5'; label = 'Complete'; isActive = $true }) },
@@ -107,24 +112,27 @@ $Handler = {
         "GET $TAT/Tickets/5002" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 5002; title = 'VPN drops every few minutes'; companyID = 42; status = 1; ticketType = 4; createDate = (TAgo 1) } } }
         "GET $TAT/Companies/query*" { return [pscustomobject]@{ items = @([pscustomobject]@{ id = 42; companyName = 'Contoso' }) } }
         "PATCH $TAT/Tickets" { return [pscustomobject]@{ itemId = 5001 } }
-        "POST $TAT/Tickets/*/Notes" { return [pscustomobject]@{ itemId = 3001 } }
+        "POST $TAT/Tickets/*/Notes" { $null = (TNote ([string](Read-Body $c).ticketID)).Add((Read-Body $c).description); return [pscustomobject]@{ itemId = 3001 } }
+        "GET $TAT/TicketNotes/query?search=*" { $s = [uri]::UnescapeDataString(($c.Uri -split 'search=')[1]) | ConvertFrom-Json; $tid = [string]@($s.filter)[0].value; return [pscustomobject]@{ items = @(TNote $tid | ForEach-Object { [pscustomobject]@{ id = 1; ticketID = [long]$tid; title = 'Note'; description = $_; publish = 2; noteType = 1; createDateTime = (TAgo 0) } }); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
         # ---- HaloPSA ----
         "POST $THA/auth/token" { return [pscustomobject]@{ access_token = 'halo-token' } }
         "GET $THA/api/Client?search=*" { return [pscustomobject]@{ clients = @([pscustomobject]@{ id = 42; name = 'Contoso' }) } }
         "GET $THA/api/Tickets/4001?includedetails=true" { return [pscustomobject]@{ id = 4001; summary = 'Teams calls dropping'; details = 'Teams calls drop after a minute.'; client_id = 42; status_id = 1; user_id = 5; dateoccurred = (TAgo 0.1); agent_id = $null } }
-        "GET $THA/api/Tickets?client_id=*" { return [pscustomobject]@{ record_count = 1; tickets = @([pscustomobject]@{ id = 4000; summary = 'Teams calls drop'; details = 'Calls in Teams drop.'; client_id = 42; status_id = 1; user_id = 6; dateoccurred = (TAgo 1); hasbeenclosed = $false }) } }
+        "GET $THA/api/Tickets?*client_id=42*" { return [pscustomobject]@{ record_count = 1; tickets = @([pscustomobject]@{ id = 4000; summary = 'Teams calls drop'; details = 'Calls in Teams drop.'; client_id = 42; status_id = 1; user_id = 6; dateoccurred = (TAgo 1); hasbeenclosed = $false }) } }
         "POST $THA/api/Tickets" { return @([pscustomobject]@{ id = 4001 }) }
-        "POST $THA/api/Actions" { return @([pscustomobject]@{ id = 1 }) }
+        "POST $THA/api/Actions" { $b = @(Read-Body $c)[0]; $null = (TNote ([string]$b.ticket_id)).Add($b.note); return @([pscustomobject]@{ id = 1 }) }
+        "GET $THA/api/Actions?ticket_id=*" { $tid = (($c.Uri -split 'ticket_id=')[1] -split '&')[0]; return [pscustomobject]@{ actions = @(TNote $tid | ForEach-Object { [pscustomobject]@{ id = 1; note = $_; hiddenfromuser = $true; datetime = (TAgo 0) } }) } }
         # ---- Zendesk ----
         "GET $TZD/organizations/autocomplete*" { return [pscustomobject]@{ organizations = @([pscustomobject]@{ id = 42; name = 'Contoso' }) } }
         "GET $TZD/tickets/3001" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 3001; subject = 'Cannot print to the office printer'; description = 'Printing fails with an error.'; organization_id = 42; requester_id = 9; status = 'new'; created_at = (TAgo 0.1); type = 'question' } } }
         "GET $TZD/tickets/3002" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 3002; subject = 'Office printer error'; organization_id = 42; status = 'open'; type = 'question'; created_at = (TAgo 1) } } }
         "GET $TZD/search?query=*" { return [pscustomobject]@{ results = @([pscustomobject]@{ id = 3002; subject = 'Office printer error'; description = 'The office printer shows an error when printing.'; organization_id = 42; requester_id = 9; status = 'open'; created_at = (TAgo 1); type = 'question' }); next_page = $null } }
-        "PUT $TZD/tickets/*" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 1 } } }
+        "GET $TZD/tickets/*/comments*" { $tid = ($c.Uri -split '/tickets/')[1].Split('/')[0]; return [pscustomobject]@{ comments = @(TNote $tid | ForEach-Object { [pscustomobject]@{ id = 1; body = $_; public = $false; author_id = 1; created_at = (TAgo 0) } }); next_page = $null } }
+        "PUT $TZD/tickets/*" { $tid = ($c.Uri -split '/tickets/')[1].Split('/')[0].Split('?')[0]; $b = Read-Body $c; if ($b.ticket.PSObject.Properties['comment']) { $null = (TNote $tid).Add($b.ticket.comment.body) }; return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 1 } } }
         # ---- Kaseya BMS and Syncro (list shape only) ----
         "POST $TKB/security/authenticate" { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }
-        "GET $TKB/servicedesk/tickets?Filter.AccountId=*" { return [pscustomobject]@{ Result = @([pscustomobject]@{ Id = 61; TicketNumber = 'T20261007.0001'; Title = 'Email bouncing'; AccountId = 42; StatusName = 'New'; OpenDate = (TAgo 1) }, [pscustomobject]@{ Id = 62; Title = 'Done'; AccountId = 42; StatusName = 'Completed'; OpenDate = (TAgo 1) }, [pscustomobject]@{ Id = 63; Title = 'Other'; AccountId = 77; StatusName = 'New'; OpenDate = (TAgo 1) }) } }
-        "GET $TSY/tickets?customer_id=*" { return [pscustomobject]@{ tickets = @([pscustomobject]@{ id = 71; number = 1071; subject = 'Wi-Fi slow'; customer_id = 42; status = 'New'; contact_id = 3; created_at = (TAgo 1) }, [pscustomobject]@{ id = 72; number = 1072; subject = 'Old'; customer_id = 42; status = 'New'; created_at = (TAgo 30) }); meta = [pscustomobject]@{ total_pages = 1 } } }
+        "GET $TKB/servicedesk/tickets?Filter.*" { return [pscustomobject]@{ Result = @([pscustomobject]@{ Id = 61; TicketNumber = 'T20261007.0001'; Title = 'Email bouncing'; AccountId = 42; StatusName = 'New'; OpenDate = (TAgo 1) }, [pscustomobject]@{ Id = 62; Title = 'Done'; AccountId = 42; StatusName = 'Completed'; OpenDate = (TAgo 1) }, [pscustomobject]@{ Id = 63; Title = 'Other'; AccountId = 77; StatusName = 'New'; OpenDate = (TAgo 1) }) } }
+        "GET $TSY/tickets?*customer_id=42*" { return [pscustomobject]@{ tickets = @([pscustomobject]@{ id = 71; number = 1071; subject = 'Wi-Fi slow'; customer_id = 42; status = 'New'; contact_id = 3; created_at = (TAgo 1) }, [pscustomobject]@{ id = 72; number = 1072; subject = 'Old'; customer_id = 42; status = 'New'; created_at = (TAgo 30) }); meta = [pscustomobject]@{ total_pages = 1 } } }
         "GET $TSY/tickets?number=*" { return [pscustomobject]@{ tickets = @([pscustomobject]@{ id = 71; number = 1071 }) } }
     }
     throw "Unexpected call in test: $k"
@@ -137,12 +145,12 @@ $base = @{ ticketId = '1001'; companyName = 'Contoso'; triggerSource = 'servicea
 function New-Body { param([hashtable]$Over) $b = @{}; foreach ($k in $base.Keys) { $b[$k] = $base[$k] }; foreach ($k in $Over.Keys) { $b[$k] = $Over[$k] }; return $b }
 
 # ---- 1. ConnectWise, confirm false: note written, nothing linked ----
-Reset-Mock $Psa.connectwise $Handler; $TS.list403 = $false; $TS.empty = $false
+TReset $Psa.connectwise; $TS.list403 = $false; $TS.empty = $false
 $f = Invoke-Flow (New-Body @{}) $aiDup
 $o = $f.r.out
 Check 'cw preview: reached the write step' ($f.stage -eq 'write' -and -not $f.r.error) "$($f.stage) $($f.r.error) $($f.gather | ConvertTo-Json -Depth 3)"
 Check 'cw preview: status pending_confirmation' ($o.status -eq 'pending_confirmation') $o.status
-Check 'cw preview: list scoped to company 42 and open tickets' (@(Get-Calls 'GET' "$TCW/service/tickets?conditions=*" | Where-Object { [uri]::UnescapeDataString($_.Uri) -like '*company/id=42 and closedFlag=false and dateEntered>=*' }).Count -eq 1) (Show-Calls)
+Check 'cw preview: list scoped to company 42 and open tickets' (@(Get-Calls 'GET' "$TCW/service/tickets?conditions=*" | Where-Object { [uri]::UnescapeDataString($_.Uri) -like '*closedFlag=false and company/id=42 and dateEntered>=*' }).Count -eq 1) (Show-Calls)
 Check 'cw preview: shortlist puts 1002 first and leaves out the printer ticket' (@($f.gather.candidates_json | ConvertFrom-Json)[0].id -eq '1002' -and -not @(($f.gather.candidates_json | ConvertFrom-Json) | Where-Object { $_.id -eq '1004' }).Count) $f.gather.candidates_json
 Check 'cw preview: 1002 flagged same contact' (@($f.gather.candidates_json | ConvertFrom-Json)[0].sameContact -eq $true)
 Check 'cw preview: one internal note, on 1001 only' (@(Get-WriteCalls).Count -eq 1 -and (Get-WriteCalls)[0].Uri -eq "$TCW/service/tickets/1001/notes" -and (Read-Body (Get-WriteCalls)[0]).internalAnalysisFlag -eq $true) (Show-Calls)
@@ -153,7 +161,7 @@ Check 'cw preview: planned one relation' (@($o.planned).Count -eq 1 -and $o.coun
 Check 'cw preview: AI decided' ($o.classified_by -eq 'ai')
 
 # ---- 2. ConnectWise, confirm true: cross-reference note on 1002, summary note on 1001 ----
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ confirm = $true }) $aiDup
 $o = $f.r.out
 Check 'cw confirm: status success' ($o.status -eq 'success') "$($o.status) $($o.message) $($f.r.error)"
@@ -162,32 +170,46 @@ Check 'cw confirm: summary note on 1001 says linked' (@(Get-Calls 'POST' "$TCW/s
 Check 'cw confirm: nothing merged, closed or patched' ((Test-NoMerge) -and -not @(Get-Calls 'PATCH' '*').Count) (Show-Calls)
 Check 'cw confirm: linked count 1' ($o.counts.linked -eq 1)
 
-# ---- 3. addNote false and confirm false: a pure preview writes nothing ----
+# ---- 2b. rerun (ServiceAI Retry or a Routine): the same confirmed run writes nothing twice ----
 Reset-Mock $Psa.connectwise $Handler
+$f = Invoke-Flow (New-Body @{ confirm = $true }) $aiDup
+$o = $f.r.out
+Check 'cw rerun: no second summary or cross-reference note' (-not @(Get-Calls 'POST' "$TCW/service/tickets/*/notes").Count) (Show-Calls)
+Check 'cw rerun: still success, note_written false' ($o.status -eq 'success' -and $o.note_written -eq $false) "$($o.status) $($o.note_written)"
+Check 'cw rerun: one copy of each note' ((TNote '1001').Count -eq 1 -and (TNote '1002').Count -eq 1 -and (TNote '1001')[0] -like '*`[related ticket check 1001 done 1002`]') ((TNote '1001') -join ' | ')
+# A preview first, then the confirmed run: both summary notes are written once (they say different things).
+TReset $Psa.connectwise
+$null = Invoke-Flow (New-Body @{}) $aiDup
+$null = Invoke-Flow (New-Body @{}) $aiDup
+$null = Invoke-Flow (New-Body @{ confirm = $true }) $aiDup
+Check 'cw preview twice then confirm: two summary notes on 1001, one cross-reference on 1002' ((TNote '1001').Count -eq 2 -and (TNote '1002').Count -eq 1) ((TNote '1001') -join ' | ')
+
+# ---- 3. addNote false and confirm false: a pure preview writes nothing ----
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ addNote = $false }) $aiDup
 Check 'pure preview: nothing written' (@(Get-WriteCalls).Count -eq 0 -and $f.r.out.status -eq 'pending_confirmation' -and $f.r.out.internal_note -like '*#1002*') (Show-Calls)
 
 # ---- 4. empty result ----
-Reset-Mock $Psa.connectwise $Handler; $TS.empty = $true
+TReset $Psa.connectwise; $TS.empty = $true
 $f = Invoke-Flow (New-Body @{ confirm = $true }) '{"matches":[]}'
 $o = $f.r.out
 Check 'empty: status success, no match message' ($o.status -eq 'success' -and $o.message -like 'No related open tickets*') "$($o.status) $($o.message) $($f.r.error)"
 Check 'empty: nothing written (noteWhenNone is off)' (@(Get-WriteCalls).Count -eq 0) (Show-Calls)
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ noteWhenNone = $true }) '{"matches":[]}'
 Check 'empty with noteWhenNone: one note saying nothing matched' (@(Get-WriteCalls).Count -eq 1 -and $f.r.out.internal_note -like '*No open ticket for this company looks like the same issue*') "$(Show-Calls) $($f.r.out.internal_note)"
 $TS.empty = $false
 
 # ---- 5. missing permission (403) ----
-Reset-Mock $Psa.connectwise $Handler; $TS.list403 = $true
+TReset $Psa.connectwise; $TS.list403 = $true
 $f = Invoke-Flow (New-Body @{}) $aiDup
 Check '403: stops in gather with status error' ($f.stage -eq 'gather' -and $f.r.out.status -eq 'error') "$($f.stage) $($f.r.out.status)"
-Check '403: message names the HTTP 403 and the PSA' ($f.r.out.message -like '*ConnectWise GET /service/tickets*HTTP 403*Service Tickets*') $f.r.out.message
+Check '403: message names the HTTP 403, the PSA and the permission' ($f.r.out.message -like '*ConnectWise*list tickets*HTTP 403*permission to read service tickets*') $f.r.out.message
 Check '403: nothing written' (@(Get-WriteCalls).Count -eq 0)
 $TS.list403 = $false
 
 # ---- 6. ServiceAI picks are checked: other company, closed and missing tickets are dropped ----
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ relatedTicketIds = '1002, #2001; 1005 9999'; reason = 'Same Outlook calendar crash.' }) $aiDup
 $o = $f.r.out
 $TSug = @($f.gather.suggested_json | ConvertFrom-Json)
@@ -198,39 +220,39 @@ Check 'suggested: Fabrikam data never reaches the AI or the note' ($f.gather.fac
 Check 'suggested: warnings explain the drops' (@($o.warnings | Where-Object { $_ -like '*2001*different company*' }).Count -eq 1)
 
 # ---- 7. AI answer empty: ServiceAI pick kept, word matches only listed ----
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ relatedTicketIds = '1002'; reason = 'Same Outlook calendar crash.'; confirm = $true }) ''
 $o = $f.r.out
 Check 'no AI: classified by rules, ServiceAI pick linked' ($o.classified_by -eq 'rules' -and @($o.matches).Count -eq 1 -and $o.matches[0].id -eq '1002' -and $o.counts.linked -eq 1) "$($o.classified_by) $($o | ConvertTo-Json -Depth 4)"
 Check 'no AI: warning says the AI answer was empty' (@($o.warnings | Where-Object { $_ -like '*AI answer was empty*' }).Count -eq 1)
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ confirm = $true }) 'not json at all'
 Check 'unreadable AI and no ServiceAI pick: nothing linked' ($f.r.out.counts.linked -eq 0 -and -not @(Get-Calls 'POST' "$TCW/service/tickets/1002/notes").Count) (Show-Calls)
 
 # ---- 8. AI names a ticket that wasn't shortlisted ----
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ confirm = $true }) '{"matches":[{"id":"2001","relation":"duplicate","confidence":0.99,"reason":"x"}]}'
 Check 'AI off-list id ignored' (@($f.r.out.matches).Count -eq 0 -and @($f.r.out.warnings | Where-Object { $_ -like '*2001*not on the shortlist*' }).Count -eq 1 -and -not @(Get-Calls 'POST' "$TCW/service/tickets/2001/notes").Count) ($f.r.out | ConvertTo-Json -Depth 4)
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{}) '{"matches":[{"id":"1002","relation":"related","confidence":0.4,"reason":"maybe"}]}'
 Check 'low-confidence pick ignored' (@($f.r.out.matches).Count -eq 0 -and $f.r.out.status -eq 'success')
 
 # ---- 9. wrong company and bad input fail closed ----
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ companyName = 'Fabrikam' }) $aiDup
 Check 'company mismatch: rejected in gather, nothing written' ($f.stage -eq 'gather' -and $f.r.out.status -eq 'rejected' -and @(Get-WriteCalls).Count -eq 0) "$($f.stage) $($f.r.out.status) $($f.r.out.message)"
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow @{ companyName = 'Contoso'; ticketId = '<ticketId>' } $aiDup
 Check 'placeholder ticketId: incomplete' ($f.stage -eq 'gather' -and $f.r.out.status -eq 'incomplete' -and $f.r.out.message -like '*ticketId is missing*') $f.r.out.message
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow (New-Body @{ days = 'lots' }) $aiDup
 Check 'bad days: incomplete' ($f.r.out.status -eq 'incomplete' -and $f.r.out.message -like '*days must be a whole number*') $f.r.out.message
-Reset-Mock $Psa.connectwise $Handler
+TReset $Psa.connectwise
 $f = Invoke-Flow @{ Ticket = @{ TicketId = '1001'; Questions = @() }; Company = @{ CompanyName = 'Contoso' } } $aiDup
 Check 'CloudRadial body shape accepted' ($f.stage -eq 'write' -and $f.r.out.status -eq 'pending_confirmation') "$($f.stage) $($f.r.out.status) $($f.r.error)"
 
 # ---- 10. Autotask: ticket number resolved, same device, incident of a Problem ticket on confirm ----
-Reset-Mock $Psa.autotask $Handler
+TReset $Psa.autotask
 $f = Invoke-Flow (New-Body @{ ticketId = 'T20261008.0001'; confirm = $true }) '{"matches":[{"id":"5002","relation":"related","confidence":0.85,"reason":"Both report the branch VPN dropping."}]}'
 $o = $f.r.out
 Check 'at: reached the write step' ($f.stage -eq 'write' -and -not $f.r.error) "$($f.stage) $($f.r.error) $($f.r.out.message)"
@@ -242,33 +264,38 @@ Check 'at: cross-reference note on 5002 and summary note on 5001' (@(Get-Calls '
 Check 'at: status success and nothing closed' ($o.status -eq 'success' -and (Test-NoMerge)) "$($o.status) $(Show-Calls)"
 Check 'at: link to the Autotask ticket' ($o.internal_note -like '*https://ww5.autotask.example/Mvc/ServiceDesk/TicketDetail.mvc?ticketId=5002*') $o.internal_note
 
+# Autotask rerun: the incident link is set again (same value), but no note is added twice.
+Reset-Mock $Psa.autotask $Handler
+$f = Invoke-Flow (New-Body @{ ticketId = 'T20261008.0001'; confirm = $true }) '{"matches":[{"id":"5002","relation":"related","confidence":0.85,"reason":"Both report the branch VPN dropping."}]}'
+Check 'at rerun: no note written twice' (-not @(Get-Calls 'POST' "$TAT/Tickets/*/Notes").Count -and (TNote '5001').Count -eq 1 -and (TNote '5002').Count -eq 1 -and $f.r.out.status -eq 'success') "$(Show-Calls) $($f.r.out.message)"
+
 # ---- 11. Zendesk: the other ticket isn't a problem, so notes only ----
-Reset-Mock $Psa.zendesk $Handler
+TReset $Psa.zendesk
 $f = Invoke-Flow (New-Body @{ ticketId = '3001'; confirm = $true }) '{"matches":[{"id":"3002","relation":"duplicate","confidence":0.9,"reason":"Same printer error from the same person."}]}'
 $o = $f.r.out
-Check 'zd: search scoped to the organization and open tickets' (@(Get-Calls 'GET' "$TZD/search?query=*" | Where-Object { [uri]::UnescapeDataString($_.Uri) -like '*type:ticket organization:42 status<solved created>=*' }).Count -eq 1) (Show-Calls)
+Check 'zd: search scoped to the organization and open tickets' (@(Get-Calls 'GET' "$TZD/search?query=*" | Where-Object { [uri]::UnescapeDataString($_.Uri) -like '*type:ticket status<solved organization:42 created>=*' }).Count -eq 1) (Show-Calls)
 Check 'zd: no type change, private notes only' (-not @(Get-WriteCalls | Where-Object { $_.Body -like '*problem_id*' }).Count -and @(Get-WriteCalls | Where-Object { $_.Body -like '*"public":false*' }).Count -eq 2) (Show-Calls)
 Check 'zd: link to the agent view' ($o.internal_note -like '*https://example.zendesk.com/agent/tickets/3002*') $o.internal_note
 
 # ---- 12. HaloPSA: parent ticket on confirm ----
-Reset-Mock $Psa.halopsa $Handler
+TReset $Psa.halopsa
 $f = Invoke-Flow (New-Body @{ ticketId = '4001'; confirm = $true }) '{"matches":[{"id":"4000","relation":"related","confidence":0.8,"reason":"Both describe Teams calls dropping."}]}'
 $THalo = @(Get-Calls 'POST' "$THA/api/Tickets")
 Check 'halo: 4001 made a child of 4000' ($THalo.Count -eq 1 -and @(Read-Body $THalo[0])[0].parent_id -eq 4000 -and @(Read-Body $THalo[0])[0].id -eq 4001) "$(Show-Calls) $($f.r.out.message)"
 Check 'halo: two private actions (cross-reference and summary)' (@(Get-Calls 'POST' "$THA/api/Actions").Count -eq 2)
 
-# ---- 13. psa-extra.ps1 list calls for Kaseya BMS and Syncro (shape and company filter) ----
-$TLib = (Get-Content -Raw (Join-Path $Shared 'psa.ps1')) + "`n" + (Get-Content -Raw (Join-Path $PSScriptRoot 'psa-extra.ps1'))
+# ---- 13. _shared/psa-tickets.ps1 list calls for Kaseya BMS and Syncro (shape and company filter) ----
+$TLib = (Get-Content -Raw (Join-Path $Shared 'psa.ps1')) + "`n" + (Get-Content -Raw (Join-Path $Shared 'psa-tickets.ps1'))
 function Invoke-Lib { param([string]$Body) & ([scriptblock]::Create("Set-StrictMode -Version Latest`n$TLib`n$Body")) }
-Reset-Mock $Psa.kaseyabms $Handler
-$TRows = @(Invoke-Lib '$null = Connect-Psa; @(Find-PsaTickets -CompanyId 42 -OpenOnly -Since ((Get-Date).AddDays(-7)))')
+TReset $Psa.kaseyabms
+$TRows = @(Invoke-Lib '$null = Connect-Psa; @(Find-PsaTickets -CompanyId 42 -Open -CreatedAfter ((Get-Date).AddDays(-7)) -Order newest)')
 Check 'bms: open tickets for company 42 only' (@($TRows).Count -eq 1 -and $TRows[0].id -eq '61' -and $TRows[0].number -eq 'T20261007.0001') ($TRows | ConvertTo-Json -Depth 2)
-Reset-Mock $Psa.syncro $Handler
-$TRows = @(Invoke-Lib '$null = Connect-Psa; @(Find-PsaTickets -CompanyId 42 -OpenOnly -Since ((Get-Date).AddDays(-7)))')
-Check 'syncro: open tickets from the window only, with status Not Closed' (@($TRows).Count -eq 1 -and $TRows[0].id -eq '71' -and @(Get-Calls 'GET' "$TSY/tickets?customer_id=42&status=Not%20Closed*").Count -eq 1) "$(Show-Calls) $($TRows | ConvertTo-Json -Depth 2)"
+TReset $Psa.syncro
+$TRows = @(Invoke-Lib '$null = Connect-Psa; @(Find-PsaTickets -CompanyId 42 -Open -CreatedAfter ((Get-Date).AddDays(-7)) -Order newest)')
+Check 'syncro: open tickets from the window only, with status Not Closed' (@($TRows).Count -eq 1 -and $TRows[0].id -eq '71' -and @(Get-Calls 'GET' "$TSY/tickets?status=Not%20Closed&customer_id=42*").Count -eq 1) "$(Show-Calls) $($TRows | ConvertTo-Json -Depth 2)"
 $TId = Invoke-Lib '$null = Connect-Psa; Resolve-PsaTicketId 1071'
 Check 'syncro: ticket number 1071 resolves to id 71' ($TId -eq '71') $TId
-$TSup = Invoke-Lib '$null = Connect-Psa; Get-PsaExtraSupport'
+$TSup = Invoke-Lib '$null = Connect-Psa; Get-PsaCapabilities'
 Check 'syncro: relation is notes only' ($TSup.relation -eq 'note')
 
 Complete-Test

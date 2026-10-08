@@ -76,7 +76,7 @@ By name only. Use the same names as the catalog extensions, so one set serves bo
 
 **ServiceAI Secrets manager:** `aai_link_related_tickets`, the workflow's webhook secret, sent as `X-Crauto-Webhook-Secret`.
 
-**PSA permissions:** the API member or key needs to read tickets and companies, and add notes. For `confirm: true` it also needs to update tickets (HaloPSA, Autotask, Zendesk). A missing permission stops the run with the PSA's own message, for example `ConnectWise GET /service/tickets failed (HTTP 403): ...`.
+**PSA permissions:** the API member or key needs to read tickets and companies, and add notes. For `confirm: true` it also needs to update tickets (HaloPSA, Autotask, Zendesk). A missing permission stops the run with a plain message naming the PSA and the permission, for example `ConnectWise refused to list tickets (HTTP 403). Give the API user permission to read service tickets and their notes, then run this again.`
 
 ## Required Graph permissions
 
@@ -121,7 +121,7 @@ Parameters: `ticketId`, `companyName`, `relatedTicketIds` and `reason` as string
 
 `status` (`success`, `pending_confirmation`, `incomplete`, `rejected` or `error`), `message`, `public_note` (always empty: nothing is posted to the client), `internal_note` (the note text), `ticket_id`, `psa`, `matches` (`id`, `number`, `relation`, `confidence`, `reason`, `url`), `possible` (word matches listed for a person to check), `classified_by` (`ai` or `rules`), `planned`, `linked`, `note_written`, `counts`, `actions`, `warnings` and `chatReply`.
 
-ServiceAI's Action Runs **Retry** replays the request. A retried run adds the note again; with `confirm: true` it also adds the cross-reference notes again (the PSA links themselves are the same).
+ServiceAI's Action Runs **Retry** (or a Routine running again) replays the request and writes nothing twice. The summary note ends with a marker such as `[related ticket check 1001 done 1002]` (the ticket, the outcome and the matched ids), and each cross-reference note with `[related: 1001 and 1002]`. When a note with that marker is already on the ticket, it isn't added again and `note_written` is `false`. A preview note and the later confirmed note have different markers, so both are written once. The PSA link itself is set again with the same value.
 
 ## Import & test
 
@@ -131,8 +131,8 @@ ServiceAI's Action Runs **Retry** replays the request. A retried run adds the no
 4. **Link.** Run again with `"confirm": true`. Expect the PSA link (or cross-reference notes) described above, and no merge, close or status change.
 5. **Wire the trigger.** Enable the webhook in **Properties** (AutomationAI issues the URL and secret), redeploy, store the secret as `aai_link_related_tickets` in the ServiceAI Secrets manager, and create the two Actions, the triage rule and the Quick Action above.
 
-> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `gather.ps1`, `write.ps1`, `psa-extra.ps1` or the `judge.*.txt` prompts, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `gather.ps1`, `write.ps1` or the `judge.*.txt` prompts, run `node src/build.js` (it pastes `_shared/psa.ps1`, `_shared/psa-tickets.ps1` and `_shared/plan.ps1` into the steps), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
 
 ### Not yet proven live
 
-`src/psa-extra.ps1` adds PSA calls that `_shared/psa.ps1` doesn't have yet (ticket lists, ticket-number lookup, ticket links, devices and relations). None is in `reference/build-kit/PSA.md` yet, and each carries an `Unverified` comment saying what to check. The AI Prompt step's property names (`promptTemplate`, `systemMessage`, `maxTokens`, `outputKey`) follow the Phishing Report Triage workflow and are also unverified.
+The ticket lists, ticket-number lookup, ticket links, devices and relations come from the shared `_shared/psa-tickets.ps1` and `_shared/psa.ps1`. Calls not yet in `reference/build-kit/PSA.md` carry an `Unverified` comment there saying what to check. The AI Prompt step's property names (`promptTemplate`, `systemMessage`, `maxTokens`, `outputKey`) follow the Phishing Report Triage workflow and are also unverified.

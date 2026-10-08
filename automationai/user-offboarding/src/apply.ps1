@@ -71,7 +71,8 @@ function Complete-Of {
     $who0 = $(if ($upn) { $upn } else { 'unknown user' })
     $mk = $(if ($Status -eq 'pending_confirmation') { "offboarding preview $who0 $(Get-OfFingerprint (@($out.planned) -join "`n"))" } else { "offboarding $Status $who0" })
     Write-OfNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { 'Offboarding plan (preview)' } else { 'Offboarding report' }) $mk
-    if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' "offboarding public $Status $who0" -Public }
+    # The client sees only the opaque "Ref: xxxxxxxx" Add-PsaNote derives from this marker; the user is a fingerprint.
+    if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' "offboarding public $Status $(Get-OfFingerprint $who0.ToLowerInvariant())" -Public }
     $out.actions = @($actions); $out.warnings = @($warnings)
     Set-NodeOutput $out
     # The output is kept; the throw marks the run as failed in the run history.

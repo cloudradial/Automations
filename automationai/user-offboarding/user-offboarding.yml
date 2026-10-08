@@ -1397,20 +1397,27 @@ definition:
           # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
           # Throws when the PSA rejects it.
           # -Marker makes the write safe to repeat (a ServiceAI Action Runs "Retry" replays the whole request):
-          # "[marker]" is added as the note's last line, and when a note on the ticket already holds that marker
-          # nothing is written. With -Marker it returns 'written' or 'already-present'; without it, nothing
-          # (so existing callers that don't discard the result are unchanged). If the notes can't be read, it
-          # throws rather than risk a second copy.
+          # when a note on the ticket already holds the marker nothing is written. An internal note gets "[marker]"
+          # as its last line. A public (client-visible) note never shows the marker: its last line is only the
+          # opaque "Ref: xxxxxxxx" (Get-PsaMarkerRef), and a "[marker]" the caller put in -Text is taken out.
+          # With -Marker it returns 'written' or 'already-present'; without it, nothing (so existing callers that
+          # don't discard the result are unchanged). If the notes can't be read, it throws rather than risk a
+          # second copy. Never put personal data (names, UPNs, email addresses) or internal tags in a marker.
           function Add-PsaNote {
               param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal, [string]$Marker = '')
               $c = Get-PsaConn
               $tag = ''
+              $pub = [bool]$Public
               if ($Marker) {
                   $tag = Get-PsaMarkerTag $Marker
                   if (Test-PsaNoteMarker -Id $Id -Marker $tag) { return 'already-present' }
-                  if ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
+                  if ($pub) {
+                      $ref = Get-PsaMarkerRef $tag
+                      $Text = ([string]$Text) -replace [regex]::Escape($tag), ''
+                      if (-not (Test-PsaMarkerRefIn $Text $ref)) { $Text = "$($Text.TrimEnd())`n$ref" }
+                  }
+                  elseif ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
               }
-              $pub = [bool]$Public
               switch ($c.Psa) {
                   'connectwise' {
                       # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
@@ -1908,11 +1915,30 @@ definition:
               if ($m -match '[\[\]\r\n]') { throw "A note marker can't contain brackets or line breaks ('$Marker')." }
               return "[$m]"
           }
-          # $true when a note on the ticket already holds "[marker]" (case-insensitive). Pass -Notes to reuse notes
-          # already read with Get-PsaTicketNotes. Throws when the notes can't be read.
+          # The opaque line a public note shows instead of its marker: "Ref: " and the first 8 hex characters
+          # (lowercase) of the SHA-256 of "[marker]" lowercased, as UTF-8. It reveals nothing of the marker text.
+          function Get-PsaMarkerRef {
+              param([string]$Marker)
+              $tag = (Get-PsaMarkerTag $Marker).ToLowerInvariant()
+              $sha = [System.Security.Cryptography.SHA256]::Create()
+              try { $h = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($tag)) } finally { $sha.Dispose() }
+              return 'Ref: ' + ((@($h[0..3] | ForEach-Object { $_.ToString('x2') })) -join '')
+          }
+          # $true when $Text holds the "Ref: xxxxxxxx" line $Ref (case-insensitive, not part of a longer hex run).
+          function Test-PsaMarkerRefIn {
+              param([string]$Text, [string]$Ref)
+              if (-not $Text) { return $false }
+              $hex = ([string]$Ref -replace '^(?i)Ref:\s*', '')
+              return ($Text -match "(?i)(?<![0-9a-z])Ref:\s*$([regex]::Escape($hex))(?![0-9a-f])")
+          }
+          # $true when a note on the ticket already holds the marker (case-insensitive): either the full "[marker]"
+          # (internal notes, and public notes written before public notes switched to the opaque ref) or the
+          # "Ref: xxxxxxxx" line a public note carries. Pass -Notes to reuse notes already read with
+          # Get-PsaTicketNotes. Throws when the notes can't be read.
           function Test-PsaNoteMarker {
               param([string]$Id, [string]$Marker, $Notes = $null)
               $tag = Get-PsaMarkerTag $Marker
+              $ref = Get-PsaMarkerRef $tag
               if ($null -eq $Notes) {
                   try { $Notes = @(Get-PsaTicketNotes -Id $Id -TextOnly) }
                   catch { throw "Couldn't check ticket $Id for an earlier note marked $tag, so nothing was written: $($_.Exception.Message)" }
@@ -1921,6 +1947,7 @@ definition:
                   if ($null -eq $n) { continue }
                   $t = if ($n -is [string]) { $n } else { [string](Get-PsaProp $n 'text') }
                   if ($t.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+                  if (Test-PsaMarkerRefIn $t $ref) { return $true }
               }
               return $false
           }
@@ -2541,7 +2568,8 @@ definition:
               $who0 = $(if ($upn) { $upn } else { 'unknown user' })
               $mk = $(if ($Status -eq 'pending_confirmation') { "offboarding preview $who0 $(Get-OfFingerprint (@($out.planned) -join "`n"))" } else { "offboarding $Status $who0" })
               Write-OfNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { 'Offboarding plan (preview)' } else { 'Offboarding report' }) $mk
-              if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' "offboarding public $Status $who0" -Public }
+              # The client sees only the opaque "Ref: xxxxxxxx" Add-PsaNote derives from this marker; the user is a fingerprint.
+              if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' "offboarding public $Status $(Get-OfFingerprint $who0.ToLowerInvariant())" -Public }
               $out.actions = @($actions); $out.warnings = @($warnings)
               Set-NodeOutput $out
               # The output is kept; the throw marks the run as failed in the run history.

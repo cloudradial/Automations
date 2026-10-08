@@ -243,7 +243,7 @@ $ar = @(Get-ArchiveWrites)
 $arBody = Read-Body $ar[0]
 Check 'confirm: completion report in archive Offboarding' ($ar.Count -eq 1 -and (Read-Body @(Get-Calls 'POST' 'https://cr.example/api/beta/archive')[0]).name -eq 'Offboarding' -and $arBody.text -match 'Convert the mailbox' -and $arBody.text -match 'allstaff@contoso.com' -and $arBody.isError -eq $false) (Show-Calls)
 $notes = @(Get-PsaNotes)
-Check 'confirm: internal report note plus a generic public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true -and (Read-Body $notes[1]).text -eq "The offboarding request has been processed.`n[offboarding public success sam.doe@contoso.com]") (($notes | ForEach-Object { $_.Body }) -join ' || ')
+Check 'confirm: internal report note plus a generic public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true -and (Read-Body $notes[1]).text -cmatch "^The offboarding request has been processed\.`nRef: [0-9a-f]{8}$") (($notes | ForEach-Object { $_.Body }) -join ' || ')
 Check 'confirm: message says what is left' ($o.message -match 'Offboarded sam.doe@contoso.com with 10 changes' -and $o.message -match 'left for a technician' -and $o.licences_removed -eq $true) $o.message
 
 # =================== 3. no Exchange on the runner (Autotask) ===================
@@ -367,5 +367,9 @@ $null = Invoke-Offboard (New-Body @{ confirm = 'true'; psa = 'autotask' })
 $n1 = @(Get-PsaNotes).Count
 $null = Invoke-Offboard (New-Body @{ confirm = 'true'; psa = 'autotask' })
 Check 'rerun on Autotask: nothing written twice' ($n1 -ge 1 -and @(Get-PsaNotes).Count -eq $n1) "$n1 / $(@(Get-PsaNotes).Count)"
+$pub = @($Sc.notes | Where-Object { -not $_.internal })
+Check 'public notes: only the message and an opaque Ref, no marker, address or internal status word' ($pub.Count -ge 1 -and @($pub | Where-Object { $_.text -match '\[|@|sam\.doe|success|pending|preview|error|incomplete|rejected' -or $_.text -notmatch '\nRef: [0-9a-f]{8}$' }).Count -eq 0) (@($pub | ForEach-Object { $_.text }) -join ' || ')
+$int = @($Sc.notes | Where-Object { $_.internal })
+Check 'internal notes keep the readable marker' (@($int | Where-Object { $_.text -match '\[offboarding success sam\.doe@contoso\.com\]$' }).Count -eq 1) (@($int | ForEach-Object { $_.text }) -join ' || ')
 
 Complete-Test

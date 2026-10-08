@@ -47,23 +47,31 @@ function Connect-OfPsa {
     return $psaReady.ok
 }
 # Notes never fail the run; a failure becomes a warning.
+# Every note carries a stable marker, so a ServiceAI Action Runs "Retry" (or a rerun) writes nothing twice.
 function Write-OfNote {
-    param([string]$Text, [string]$Title, [switch]$Public)
+    param([string]$Text, [string]$Title, [string]$Marker, [switch]$Public)
     if (-not $ticketId) { return }
     if (-not (Connect-OfPsa)) { return }
+    $kind = $(if ($Public) { 'public' } else { 'internal' })
     try {
-        if ($Public) { Add-PsaNote -Id $ticketId -Text $Text -Title $Title -Public; $null = $actions.Add("Added a public note to ticket $ticketId") }
-        else { Add-PsaNote -Id $ticketId -Text $Text -Title $Title; $out.note_written = $true; $null = $actions.Add("Added an internal note to ticket $ticketId") }
+        $res = $(if ($Public) { Add-PsaNote -Id $ticketId -Text $Text -Title $Title -Public -Marker $Marker } else { Add-PsaNote -Id $ticketId -Text $Text -Title $Title -Marker $Marker })
+        if ($res -eq 'already-present') { $null = $actions.Add("The $kind note was already on ticket $ticketId, so it wasn't added again"); return }
+        if (-not $Public) { $out.note_written = $true }
+        $null = $actions.Add("Added a$(if ($Public) { '' } else { 'n' }) $kind note to ticket $ticketId")
     }
-    catch { $null = $warnings.Add("Couldn't add the $(if ($Public) { 'public' } else { 'internal' }) note to ticket $($ticketId): $($_.Exception.Message)") }
+    catch { $null = $warnings.Add("Couldn't add the $kind note to ticket $($ticketId): $($_.Exception.Message)") }
 }
+# A short fingerprint of the planned changes, so a preview with different changes gets its own note.
+function Get-OfFingerprint { param([string]$s) $h = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($s)); return ([System.BitConverter]::ToString($h) -replace '-', '').Substring(0, 8).ToLowerInvariant() }
 function Complete-Of {
     param([string]$Status, [string]$Msg, [string]$Note, [switch]$PublicToo)
     $out.status = $Status; $out.message = $Msg; $out.chatReply = $Msg
     $out.internal_note = $(if ($Note) { $Note } else { $Msg })
     $out.public_note = $(if ($publicText.ContainsKey($Status)) { $publicText[$Status] } else { $publicText.other })
-    Write-OfNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { 'Offboarding plan (preview)' } else { 'Offboarding report' })
-    if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' -Public }
+    $who0 = $(if ($upn) { $upn } else { 'unknown user' })
+    $mk = $(if ($Status -eq 'pending_confirmation') { "offboarding preview $who0 $(Get-OfFingerprint (@($out.planned) -join "`n"))" } else { "offboarding $Status $who0" })
+    Write-OfNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { 'Offboarding plan (preview)' } else { 'Offboarding report' }) $mk
+    if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' "offboarding public $Status $who0" -Public }
     $out.actions = @($actions); $out.warnings = @($warnings)
     Set-NodeOutput $out
     # The output is kept; the throw marks the run as failed in the run history.

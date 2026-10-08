@@ -56,8 +56,8 @@ Two PowerShell steps. No AI is involved.
 
 Graph can't convert a mailbox, hide it from the address list or set forwarding. The workflow reaches Exchange Online in one of two ways, in this order:
 
-1. **The ExchangeOnlineManagement PowerShell module with app-only certificate sign-in**, when the module is installed on the runner and the certificate secrets below are set.
-2. **The Exchange admin REST endpoint used by the `microsoft-exchange` catalog extension**, signed in with that extension's own secrets (`MicrosoftExchange-TenantId`, `MicrosoftExchange-ClientId`, `MicrosoftExchange-ClientSecret`). No module is needed.
+1. **The Exchange admin REST endpoint used by the `microsoft-exchange` catalog extension**, signed in with that extension's own secrets (`MicrosoftExchange-TenantId`, `MicrosoftExchange-ClientId`, `MicrosoftExchange-ClientSecret`). No module is needed. This is tried first.
+2. **The ExchangeOnlineManagement PowerShell module with app-only certificate sign-in**, when REST can't be used, the module is installed on the runner and the certificate secrets below are set.
 
 **If neither works, the run does not fail.** The mailbox steps are marked "Not done, do this in Exchange" in the internal note and the report, with the exact commands, for example:
 
@@ -82,6 +82,8 @@ Set-Mailbox -Identity 'sam.doe@contoso.com' -ForwardingAddress 'alex.kim@contoso
 - **Report Archive item** in the company's **Offboarding** archive (Compliance > Reports, admins only) with the same content, for runs with `confirm` true. It needs the CloudRadial company id (`company_id` input or `CloudRadial-CompanyId` secret); without it the report stays in the run output and the note, with a warning. Reports never go to the knowledge base.
 - **Public ticket note**, only after a successful confirmed run: "The offboarding request has been processed." Nothing about groups, licences, devices or passwords is ever client-visible.
 
+**A retry writes nothing twice.** Each note ends with a short marker line, such as `[offboarding success sam.doe@contoso.com]` or, for a preview, `[offboarding preview sam.doe@contoso.com 1a2b3c4d]` (a fingerprint of the plan). Before writing, the workflow reads the ticket's notes and skips a note whose marker is already there, so a ServiceAI Action Runs **Retry** or a rerun adds no duplicate. A preview with a different plan, or a run with a different result, still gets its own note. If the notes can't be read, the note is skipped with a warning rather than risk a second copy.
+
 ## Download & import
 
 **Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/user-offboarding/user-offboarding.yml)
@@ -96,7 +98,7 @@ This is a per-company workflow: it reads the secrets of the runner it's deployed
 |---|---|---|
 | `M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` | Yes | Microsoft Graph sign-in (the `Entra-*` and `Graph-*` names also work) |
 | `MicrosoftExchange-TenantId`, `MicrosoftExchange-ClientId`, `MicrosoftExchange-ClientSecret` | For the mailbox steps | Exchange Online through the admin REST endpoint. The same names as the `microsoft-exchange` catalog extension, so one set serves both. |
-| `MicrosoftExchange-CertificateThumbprint`, or `MicrosoftExchange-Certificate` (base64 PFX) with optional `MicrosoftExchange-CertificatePassword` | Optional | Exchange Online PowerShell app-only sign-in, tried first when the ExchangeOnlineManagement module is on the runner. Uses `MicrosoftExchange-ClientId` as the app id. A thumbprint needs the certificate installed on the runner. |
+| `MicrosoftExchange-CertificateThumbprint`, or `MicrosoftExchange-Certificate` (base64 PFX) with optional `MicrosoftExchange-CertificatePassword` | Optional | Exchange Online PowerShell app-only sign-in, the fallback when REST can't be used and the ExchangeOnlineManagement module is on the runner. Uses `MicrosoftExchange-ClientId` as the app id. A thumbprint needs the certificate installed on the runner. |
 | `MicrosoftExchange-Organization` | Optional | The tenant's `.onmicrosoft.com` domain for the PowerShell sign-in. Found through Graph when it isn't set. |
 | `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey` | For the archive report | Writing the completion report to Report Archives |
 | `CloudRadial-CompanyId` | Optional | The CloudRadial company id for the report, when the run doesn't send `company_id` |
@@ -178,4 +180,4 @@ node automationai/user-offboarding/src/build.js            # rebuild the .yml
 pwsh -NoProfile -File automationai/user-offboarding/src/test.ps1
 ```
 
-`src/exchange.ps1` holds the Exchange Online sign-in and cmdlet calls used by both steps. The harness runs both steps from the built `.yml` under strict mode with a mocked Key Vault, Graph, Exchange Online (REST and the PowerShell module), CloudRadial and PSAs (ConnectWise, Autotask and HaloPSA notes). js-yaml comes from `automationai/_shared/node_modules` (`npm install` there) or `JS_YAML_PATH`.
+The Exchange Online sign-in and cmdlet calls come from `automationai/_shared/exchange.ps1`, which the build pastes into both steps; the Graph, plan, PSA note and CloudRadial calls come from the other `_shared` libraries. The harness runs both steps from the built `.yml` under strict mode with a mocked Key Vault, Graph, Exchange Online (REST and the PowerShell module), CloudRadial and PSAs (ConnectWise, Autotask and HaloPSA notes, including reruns that must write nothing twice). js-yaml comes from `automationai/_shared/node_modules` (`npm install` there) or `JS_YAML_PATH`.

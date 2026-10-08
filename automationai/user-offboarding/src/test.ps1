@@ -65,6 +65,7 @@ function New-Scenario {
     $Sc.exoLog = New-Object System.Collections.ArrayList
     $Sc.order = New-Object System.Collections.ArrayList
     $Sc.archives = New-Object System.Collections.ArrayList
+    $Sc.notes = New-Object System.Collections.ArrayList   # @{ text; internal } for every note written, read back by the marker check
     foreach ($k in $Over.Keys) { $Sc[$k] = $Over[$k] }
     $sec = $BaseSecrets.Clone()
     if ($Psa) { foreach ($k in $PsaSecrets[$Psa].Keys) { $sec[$k] = $PsaSecrets[$Psa][$k] }; $sec['PSA-Type'] = $Psa }
@@ -151,14 +152,20 @@ $Handler = {
         throw "unmocked Graph $m $p"
     }
     # ---- PSAs ----
-    if ($u -like 'https://cw.example/*' -and $m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { return J @{ id = 1 } }
+    # Notes are kept in $Sc.notes and read back, so Add-PsaNote -Marker can find an earlier copy.
+    if ($u -like 'https://cw.example/*') {
+        if ($m -eq 'GET' -and $u -like '*/service/tickets/12345/notes*') { $i = 0; return , @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; text = $_.text; internalAnalysisFlag = $_.internal; detailDescriptionFlag = (-not $_.internal); member = (J @{ identifier = 'api' }) } }) }
+        if ($m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.text; internal = [bool]$b.internalAnalysisFlag }); return J @{ id = $Sc.notes.Count } }
+    }
     if ($u -like 'https://at.example/*') {
         if ($m -eq 'GET' -and $u -like '*/TicketNotes/entityInformation/fields') { return J @{ fields = @((J @{ name = 'publish'; picklistValues = @((J @{ value = '1'; label = 'All Autotask Users'; isActive = $true }), (J @{ value = '2'; label = 'Internal Only'; isActive = $true })) }), (J @{ name = 'noteType'; picklistValues = @((J @{ value = '13'; label = 'System Workflow Note'; isActive = $true }), (J @{ value = '1'; label = 'Task Detail'; isActive = $true })) })) } }
-        if ($m -eq 'POST' -and $u -like '*/Tickets/12345/Notes') { return J @{ itemId = 1 } }
+        if ($m -eq 'GET' -and $u -like '*/TicketNotes/query?*') { $i = 0; return J @{ items = @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; description = $_.text; publish = $(if ($_.internal) { 2 } else { 1 }); creatorResourceID = 1 } }); pageDetails = (J @{ nextPageUrl = $null }) } }
+        if ($m -eq 'POST' -and $u -like '*/Tickets/12345/Notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.description; internal = ([string]$b.publish -eq '2') }); return J @{ itemId = $Sc.notes.Count } }
     }
     if ($u -like 'https://halo.example/*') {
         if ($u -like '*/auth/token') { return J @{ access_token = 'halo-tok' } }
-        if ($m -eq 'POST' -and $u -like '*/api/Actions') { return @(J @{ id = 1 }) }
+        if ($m -eq 'GET' -and $u -like '*/api/Actions?ticket_id=12345*') { $i = 0; return J @{ actions = @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; note = $_.text; hiddenfromuser = $_.internal; who_type = 1 } }) } }
+        if ($m -eq 'POST' -and $u -like '*/api/Actions') { $b = @($c.Body | ConvertFrom-Json)[0]; $null = $Sc.notes.Add(@{ text = [string]$b.note; internal = [bool]$b.hiddenfromuser }); return @(J @{ id = $Sc.notes.Count }) }
     }
     throw "unmocked $m $u"
 }
@@ -169,7 +176,8 @@ function Import-Module { [CmdletBinding()] param([string]$Name) }
 function Connect-ExchangeOnline { [CmdletBinding()] param($AppId, $Organization, $CertificateThumbprint, $Certificate, [switch]$ShowBanner) $Sc.connected = "$AppId|$Organization|$CertificateThumbprint" }
 function Get-Mailbox { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-Mailbox' @{ Identity = $Identity } }
 function Get-MailboxStatistics { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-MailboxStatistics' @{ Identity = $Identity } }
-function Set-Mailbox { [CmdletBinding()] param($Identity, $Type, $HiddenFromAddressListsEnabled, $ForwardingAddress, $DeliverToMailboxAndForward) $h = @{ Identity = $Identity }; foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Identity') { $h[$k] = $PSBoundParameters[$k] } }; Invoke-FakeExo 'Set-Mailbox' $h }
+# _shared/exchange.ps1 runs every non-Get cmdlet with -Confirm:$false in module mode, so Set-Mailbox takes -Confirm.
+function Set-Mailbox { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Type, $HiddenFromAddressListsEnabled, $ForwardingAddress, $DeliverToMailboxAndForward) $h = @{ Identity = $Identity }; foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Identity' -and $k -ne 'Confirm') { $h[$k] = $PSBoundParameters[$k] } }; Invoke-FakeExo 'Set-Mailbox' $h }
 
 # ---------- runner ----------
 $Node = @{ In = $null; Out = $null }
@@ -235,7 +243,7 @@ $ar = @(Get-ArchiveWrites)
 $arBody = Read-Body $ar[0]
 Check 'confirm: completion report in archive Offboarding' ($ar.Count -eq 1 -and (Read-Body @(Get-Calls 'POST' 'https://cr.example/api/beta/archive')[0]).name -eq 'Offboarding' -and $arBody.text -match 'Convert the mailbox' -and $arBody.text -match 'allstaff@contoso.com' -and $arBody.isError -eq $false) (Show-Calls)
 $notes = @(Get-PsaNotes)
-Check 'confirm: internal report note plus a generic public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true -and (Read-Body $notes[1]).text -eq 'The offboarding request has been processed.') (($notes | ForEach-Object { $_.Body }) -join ' || ')
+Check 'confirm: internal report note plus a generic public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true -and (Read-Body $notes[1]).text -eq "The offboarding request has been processed.`n[offboarding public success sam.doe@contoso.com]") (($notes | ForEach-Object { $_.Body }) -join ' || ')
 Check 'confirm: message says what is left' ($o.message -match 'Offboarded sam.doe@contoso.com with 10 changes' -and $o.message -match 'left for a technician' -and $o.licences_removed -eq $true) $o.message
 
 # =================== 3. no Exchange on the runner (Autotask) ===================
@@ -341,5 +349,23 @@ Check 'CloudRadial form shape: parsed, literal token ignored, preview' ($r.out.s
 New-Scenario 'connectwise' 'rest' @{ lit = $true }
 $r = Invoke-Offboard (New-Body)
 Check 'litigation hold: licences kept' (-not ($r.out.planned -match 'licences') -and $r.out.internal_note -match 'litigation hold') $r.out.internal_note
+
+# =================== rerun writes nothing twice (ServiceAI Action Runs Retry) ===================
+New-Scenario 'connectwise' 'rest'
+$null = Invoke-Offboard (New-Body)
+$first = @(Get-PsaNotes).Count
+$r = Invoke-Offboard (New-Body)
+Check 'rerun preview: no second internal note' ($first -eq 1 -and @(Get-PsaNotes).Count -eq 1 -and $Sc.notes[0].text -match '\[offboarding preview sam\.doe@contoso\.com [0-9a-f]{8}\]' -and (@($r.out.actions) -match 'already on ticket 12345').Count -eq 1) "$first / $(@(Get-PsaNotes).Count) / $(@($r.out.actions) -join ' | ')"
+$null = Invoke-Offboard (New-Body @{ forward_to_manager = 'false' })
+Check 'preview with a different plan: gets its own note' (@(Get-PsaNotes).Count -eq 2) (Show-Calls)
+$null = Invoke-Offboard (New-Body @{ confirm = 'true' })
+$afterConfirm = @(Get-PsaNotes).Count
+$r = Invoke-Offboard (New-Body @{ confirm = 'true' })
+Check 'rerun confirm: report and public note not written again' ($afterConfirm -eq 4 -and @(Get-PsaNotes).Count -eq 4 -and (@($r.out.actions) -match 'already on ticket').Count -eq 2) "$afterConfirm / $(@(Get-PsaNotes).Count) / $(@($r.out.actions) -join ' | ')"
+New-Scenario 'autotask' 'none'
+$null = Invoke-Offboard (New-Body @{ confirm = 'true'; psa = 'autotask' })
+$n1 = @(Get-PsaNotes).Count
+$null = Invoke-Offboard (New-Body @{ confirm = 'true'; psa = 'autotask' })
+Check 'rerun on Autotask: nothing written twice' ($n1 -ge 1 -and @(Get-PsaNotes).Count -eq $n1) "$n1 / $(@(Get-PsaNotes).Count)"
 
 Complete-Test

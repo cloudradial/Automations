@@ -24,13 +24,13 @@ const readScript = preamble('Read the user and plan the offboarding', [
   'Writes nothing. Reads the user, admin roles, groups, licences, manager, direct reports and devices from Microsoft Graph,',
   'and the mailbox from Exchange Online when the runner can reach it.',
   'Secrets: M365-TenantId, M365-ClientId, M365-ClientSecret; optional MicrosoftExchange-* (see README) and CloudRadial-CompanyId.',
-]) + lib('graph.ps1') + read('exchange.ps1') + '\n# ---------- this step ----------\n' + read('read.ps1');
+]) + lib('graph.ps1') + lib('exchange.ps1') + '\n# ---------- this step ----------\n' + read('read.ps1');
 
 const applyScript = preamble('Preview or offboard, then report', [
   'Changes Microsoft 365 and Exchange Online only when confirm is true. Adds an internal note to ticket_id,',
   'writes the completion report to the company\'s Report Archive "Offboarding" (admins only) and a generic public note.',
   'Secrets: M365-*, optional MicrosoftExchange-*, PSA-Type and the PSA\'s own secrets, CloudRadial-BaseUrl/PublicKey/PrivateKey.',
-]) + lib('plan.ps1') + lib('graph.ps1') + lib('psa.ps1') + lib('cloudradial.ps1') + read('exchange.ps1') + '\n# ---------- this step ----------\n' + read('apply.ps1');
+]) + lib('plan.ps1') + lib('graph.ps1') + lib('psa.ps1') + lib('cloudradial.ps1') + lib('exchange.ps1') + '\n# ---------- this step ----------\n' + read('apply.ps1');
 
 const testInput = {
   upn: 'sam.doe@contoso.com',
@@ -91,7 +91,7 @@ const header = [
 ].join('\n');
 const dumped = header + '\n' + y.dump(wf, { lineWidth: -1, noRefs: true });
 const { text, blocks } = injectText(dumped, 'user-offboarding.yml', new Map());
-if (blocks.length !== 5) throw new Error(`expected 5 _shared blocks, got ${blocks.length}`);
+if (blocks.length !== 7) throw new Error(`expected 7 _shared blocks, got ${blocks.length}`);
 const back = y.load(text);
 JSON.parse(back.definition.activities.find((a) => a.id === 'node-read').properties.testInput);
 if (back.definition.activities[0].properties.webhookEnabled !== false) throw new Error('webhook must ship off');

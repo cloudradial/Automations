@@ -29,7 +29,7 @@ $scoreRaw = Get-StepField $a @('score', 'rating', 'Score')
 $mode = (Get-StepField $a @('mode')).ToLowerInvariant()
 if (-not $mode) { $mode = $(if ($scoreRaw) { 'score' } else { 'survey' }) }
 $contact = Get-StepField $a @('contactEmail', 'contact_email', 'requesterEmail', 'requester_email', 'UserEmail')
-$confirm = (Test-StepTrue (Get-StepField $a @('confirm'))) -or (Test-StepTrue (Get-StepField $a @('approvedToWrite', 'approved_to_write')))
+$preview = Test-StepTrue (Get-StepField $a @('preview', 'dryRun', 'dry_run'))
 $scoreMax = Get-Int (Get-StepField $a @('score_max', 'scoreMax')) 5
 $threshold = Get-Int (Get-StepField $a @('threshold', 'low_score_threshold')) 2
 
@@ -63,7 +63,7 @@ $surveySent = @($notes | Where-Object { $_.public -and ([string]$_.text).Contain
 $tplUrl = [string](Get-PsaSecret 'PSA-TicketUrlTemplate')
 $ctx = @{
     skip = $false; mode = $mode; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); summary = [string]$t.summary; company_id = [string]$t.companyId
-    contact = $contact; confirm = $confirm; score_max = $scoreMax; ticket_url = (Get-PsaTicketUrl $ticketId $tplUrl); actions = @($actions); warnings = @($warnings)
+    contact = $contact; preview = $preview; score_max = $scoreMax; ticket_url = (Get-PsaTicketUrl $ticketId $tplUrl); actions = @($actions); warnings = @($warnings)
 }
 
 if ($mode -eq 'survey') {

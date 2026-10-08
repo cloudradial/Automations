@@ -80,53 +80,53 @@ function New-CwNote { param([string]$Text, [bool]$Public, [int]$Id = 5) return [
 
 # ---- 1. ConnectWise survey preview ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; contactEmail = 'megan.bowen@contoso.com' }
+$f = Invoke-Flow @{ ticketId = '1001'; contactEmail = 'megan.bowen@contoso.com'; preview = $true }
 $o = $f.r.out
 Check 'survey preview: pending_confirmation, nothing posted' ($o.status -eq 'pending_confirmation' -and @(Get-WriteCalls).Count -eq 0) "$($o.status) $($f.r.error) $(Show-Calls)"
 Check 'survey preview: five one-click answers with ticket and score' ($o.public_note -like 'How did we do on ticket 1001 (Printer on floor 2 not printing)?*' -and $o.public_note -like '*Excellent (5): https://feedback.example.com/csat?ticket=1001&score=5*' -and $o.public_note -like '*Very poor (1): https://feedback.example.com/csat?ticket=1001&score=1*') $o.public_note
 Check 'survey preview: route step returned the survey result' ($o.mode -eq 'survey' -and $o.survey_sent -eq $false)
 
-# ---- 2. ConnectWise survey confirm: public note ----
+# ---- 2. ConnectWise survey act: public note ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; contactEmail = 'megan.bowen@contoso.com'; confirm = 'true' }
+$f = Invoke-Flow @{ ticketId = '1001'; contactEmail = 'megan.bowen@contoso.com' }
 $o = $f.r.out
 $nt = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
-Check 'survey confirm: success, sent' ($o.status -eq 'success' -and $o.survey_sent -eq $true) "$($o.status) $($f.r.error)"
-Check 'survey confirm: one public note (Discussion tab)' ($nt.Count -eq 1 -and (Read-Body $nt[0]).detailDescriptionFlag -eq $true -and (Read-Body $nt[0]).internalAnalysisFlag -eq $false -and (Read-Body $nt[0]).text -like 'How did we do on ticket 1001*')
-Check 'survey confirm: no email, no other change' (@(Get-WriteCalls).Count -eq 1)
+Check 'survey act: success, sent' ($o.status -eq 'success' -and $o.survey_sent -eq $true) "$($o.status) $($f.r.error)"
+Check 'survey act: one public note (Discussion tab)' ($nt.Count -eq 1 -and (Read-Body $nt[0]).detailDescriptionFlag -eq $true -and (Read-Body $nt[0]).internalAnalysisFlag -eq $false -and (Read-Body $nt[0]).text -like 'How did we do on ticket 1001*')
+Check 'survey act: no email, no other change' (@(Get-WriteCalls).Count -eq 1)
 
 # ---- 3. Survey skips: duplicate, spam reason, already sent ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwStatus = 'Closed - Duplicate'
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001' }
 Check 'closed as duplicate: success, no survey' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*closed as Closed - Duplicate*' -and @(Get-WriteCalls).Count -eq 0) "$($f.r.out.message) $($f.r.error)"
 Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; close_reason = 'Spam'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001'; close_reason = 'Spam' }
 Check 'close reason spam: no survey' ($f.r.out.message -like '*closed as Spam*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
 $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001' }
 Check 'survey already sent: not sent again (safe retry)' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*already sent*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
 $TScenario.cwNotes = @(New-CwNote $TSurveyNote $false)
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001' }
 Check 'an internal copy of the survey text does not count as sent' ($f.r.out.survey_sent -eq $true) "$($f.r.out.message) $($f.r.error)"
 
 # ---- 4. Autotask: status id read as a name, Duplicate skipped; survey link without {score} ----
 Reset-Mock (Get-Secrets 'autotask') $Handler; Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; status = '14'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001'; status = '14' }
 Check 'autotask: status 14 read as Duplicate and skipped' ($f.r.out.message -like '*closed as Duplicate*') $f.r.out.message
-$f = Invoke-Flow @{ ticketId = '1001'; feedback_url = 'https://feedback.example.com/rate'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001'; feedback_url = 'https://feedback.example.com/rate' }
 $atn = @(Get-Calls 'POST' "$TAT/Tickets/1001/Notes")
 Check 'autotask: survey link gets ticket and score parameters' ($f.r.out.public_note -like '*Good (4): https://feedback.example.com/rate?ticket=1001&score=4*') $f.r.out.public_note
 Check 'autotask: note published to all users' ($atn.Count -eq 1 -and (Read-Body $atn[0]).publish -eq 1)
 
 # ---- 5. Zendesk survey: public comment ----
 Reset-Mock (Get-Secrets 'zendesk') $Handler; Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true; score_max = '3' }
+$f = Invoke-Flow @{ ticketId = '1001'; score_max = '3' }
 $zn = @(Get-Calls 'PUT' "$TZD/tickets/1001")
 Check 'zendesk: public comment with a 3-point scale' ($zn.Count -eq 1 -and (Read-Body $zn[0]).ticket.comment.public -eq $true -and (Read-Body $zn[0]).ticket.comment.body -like '*3 out of 3: https://*score=3*') "$($f.r.error)"
 
 # ---- 6. Score mode, low score, ConnectWise: email the service manager, internal note ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '2'; comment = 'Took three days to hear back.'; contactEmail = 'megan.bowen@contoso.com'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '2'; comment = 'Took three days to hear back.'; contactEmail = 'megan.bowen@contoso.com' }
 $o = $f.r.out
 $pm = @(Get-Calls 'POST' $TPM)
 $nt = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
@@ -137,65 +137,65 @@ Check 'low score: no client-visible note' (-not @($nt | Where-Object { (Read-Bod
 
 # ---- 7. High score: note only ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = 5; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = 5 }
 Check 'high score: note, no email' ($f.r.out.status -eq 'success' -and $f.r.out.low_score -eq $false -and -not @(Get-Calls 'POST' $TPM).Count -and @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes").Count -eq 1) "$($f.r.error)"
 Check 'mode inferred from score' ((Invoke-Flow @{ ticketId = '1001'; score = '4' }).r.out.mode -eq 'score')
 
 # ---- 8. Score preview ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; preview = 'true' }
 Check 'score preview: pending_confirmation, nothing sent or written' ($f.r.out.status -eq 'pending_confirmation' -and $f.r.out.email_text -like '*rated 1 out of 5*' -and @(Get-WriteCalls).Count -eq 0) "$($f.r.out.status) $(Show-Calls)"
 
 # ---- 9. Score gates: no survey, already scored, bad score ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
 Check 'no survey sent: rejected' ($f.stage -eq 'parse' -and $f.r.out.status -eq 'rejected' -and $f.r.error -like '*No survey was sent*' -and @(Get-WriteCalls).Count -eq 0) $f.r.error
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; require_survey = 'false'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; require_survey = 'false' }
 Check 'require_survey false: accepted' ($f.r.out.status -eq 'success') $f.r.error
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @((New-CwNote 'Satisfaction score received: 4 out of 5.' $false 6), (New-CwNote $TSurveyNote $true))
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
 Check 'already scored: ignored, nothing sent' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*already recorded*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; company_psa_id = '99'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; company_psa_id = '99' }
 Check 'score from another company (@CompanyPsaId mismatch): rejected, nothing written' ($f.r.out.status -eq 'rejected' -and $f.r.error -like '*different company*' -and @(Get-WriteCalls).Count -eq 0) $f.r.error
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; company_psa_id = '42'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; company_psa_id = '42' }
 Check 'score from the same company: accepted' ($f.r.out.status -eq 'success') $f.r.error
 foreach ($bad in @('0', '6', 'abc', '2.5')) {
     Reset-Mock (Get-Secrets 'connectwise') $Handler
-    $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = $bad; confirm = $true }
+    $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = $bad }
     Check "bad score '$bad': rejected" ($f.r.out.status -eq 'rejected' -and $Mock.Calls.Count -eq 0) $f.r.error
 }
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001' }
 Check 'score mode with no score: incomplete' ($f.r.out.status -eq 'incomplete') $f.r.error
 
 # ---- 10. Low score, Postmark not set up: the note asks the team to follow up ----
 Reset-Mock (Get-Secrets 'connectwise' -Drop @('Postmark-ServerToken')) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
 Check 'no Postmark: success, not emailed, note asks for follow-up' ($f.r.out.status -eq 'success' -and $f.r.out.manager_emailed -eq $false -and $f.r.out.internal_note -like '*email was not sent because Postmark is not set up*follow up*') $f.r.out.internal_note
 
 # ---- 11. Autotask low score recorded as CloudRadial feedback ----
 Reset-Mock (Get-Secrets 'autotask' @{ 'CloudRadial-BaseUrl' = $TCR; 'CloudRadial-PublicKey' = 'crpub'; 'CloudRadial-PrivateKey' = 'crpriv' }) $Handler; Reset-Scenario
 $TScenario.atNotes = @([pscustomobject]@{ id = 1; description = "How did we do on ticket 1001 (Printer out of toner)?"; publish = 1; createDateTime = '2026-10-08T09:00:00Z' })
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '2'; cr_company_id = '9'; contactEmail = 'megan.bowen@contoso.com'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '2'; cr_company_id = '9'; contactEmail = 'megan.bowen@contoso.com' }
 $fb = @(Get-Calls 'POST' "$TCR/v2/feedback")
 $atn = @(Get-Calls 'POST' "$TAT/Tickets/1001/Notes")
 Check 'autotask score: CloudRadial feedback posted (negative, ticket and company ids)' ($f.r.out.cloudradial_recorded -eq $true -and $fb.Count -eq 1 -and (Read-Body $fb[0]).companyId -eq 9 -and (Read-Body $fb[0]).feedbackRating -eq -1 -and (Read-Body $fb[0]).ticketPsaId -eq 1001 -and (Read-Body $fb[0]).feedbackRatingNumber -eq 2) "$($f.r.error) $(Show-Calls)"
 Check 'autotask score: internal note (Internal Only)' ($atn.Count -eq 1 -and (Read-Body $atn[0]).publish -eq 2)
 Reset-Mock (Get-Secrets 'autotask') $Handler
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; cr_company_id = '9'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; cr_company_id = '9' }
 Check 'no CloudRadial secrets: warning, still success' ($f.r.out.status -eq 'success' -and $f.r.out.cloudradial_recorded -eq $false -and @($f.r.out.warnings | Where-Object { $_ -like '*CloudRadial-BaseUrl*' }).Count -eq 1) $f.r.error
 
 # ---- 12. Missing PSA permission (403) on the note ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.noteFail = 403
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001' }
 Check '403 on the survey note: error naming the call' ($f.stage -eq 'survey' -and $f.r.out.status -eq 'error' -and $f.r.error -like '*ConnectWise POST /service/tickets/1001/notes failed (HTTP 403)*') $f.r.error
 $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; confirm = $true }
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
 Check '403 after the manager email: error says the email went out' ($f.r.out.status -eq 'error' -and $f.r.out.manager_emailed -eq $true -and $f.r.error -like '*service manager was emailed*HTTP 403*') $f.r.error
 
 # ---- 13. Empty and missing input ----
 Reset-Mock (Get-Secrets 'connectwise' -Drop @('CSAT-FeedbackUrl')) $Handler; Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true }
+$f = Invoke-Flow @{ ticketId = '1001' }
 Check 'no survey link: incomplete, names the secret, no call' ($f.r.out.status -eq 'incomplete' -and $f.r.error -like '*CSAT-FeedbackUrl*' -and $Mock.Calls.Count -eq 0) $f.r.error
 $f = Invoke-Flow @{ ticketId = '1001'; feedback_url = 'http://feedback.example.com/rate' }
 Check 'plain http survey link: rejected' ($f.r.out.status -eq 'rejected')
@@ -210,7 +210,7 @@ Check 'route with no input: error' ($r.out.status -eq 'error') $r.error
 
 # ---- 14. CloudRadial shape (score from a portal form) ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
-$cr = @{ Ticket = @{ TicketId = 2222; Questions = @(@{ Id = 'ticketId'; Value = '1001' }, @{ Id = 'score'; Value = '5' }, @{ Id = 'comment'; Value = 'Quick and friendly.' }) }; Company = @{ CompanyName = 'Contoso'; CompanyId = 9 }; confirm = 'true' }
+$cr = @{ Ticket = @{ TicketId = 2222; Questions = @(@{ Id = 'ticketId'; Value = '1001' }, @{ Id = 'score'; Value = '5' }, @{ Id = 'comment'; Value = 'Quick and friendly.' }) }; Company = @{ CompanyName = 'Contoso'; CompanyId = 9 } }
 $f = Invoke-Flow $cr
 Check 'CloudRadial shape: the answered ticket (question) wins over the form ticket' ($f.r.out.status -eq 'success' -and $f.r.out.ticket_id -eq '1001' -and $f.r.out.score -eq 5) "$($f.r.out.ticket_id) $($f.r.error)"
 

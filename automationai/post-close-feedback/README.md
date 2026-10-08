@@ -46,13 +46,13 @@ One workflow with **two entry points**, chosen by the `mode` input. Three steps,
 2. **Send the survey.** Nothing to do in score mode.
 3. **Route low scores.** When the score is at or below `threshold` (default 2 out of 5), it emails the service manager through Postmark with the score, the comment and a link to the ticket. Every score, high or low, is then added as an **internal** note ("Satisfaction score received: 2 out of 5 ..."). If Postmark isn't set up, the note says the email wasn't sent and asks the team to follow up. When a CloudRadial company id is sent, it also records the score as CloudRadial **feedback** (see below).
 
-`confirm` defaults to `false`: the run returns what it would post or send (`status: pending_confirmation`) and writes nothing. The webhook bodies send `"confirm": "true"`, because nobody is there to rerun them.
+A normal call posts and sends. `"preview": true` returns what it would post or send (`status: pending_confirmation`) and writes nothing. It only writes notes and sends emails, which the service-desk rules exempt from the confirm pattern, so a normal call acts straight away; a live webhook that previewed because its body left out a flag would be the worse failure. Duplicate guards stop a retry from acting twice.
 
 ### Where the survey links go
 
 The links point at the `feedback_url` input (or the `CSAT-FeedbackUrl` secret). `{ticketId}`, `{score}` and `{email}` are filled in; without `{score}`, `?ticket=...&score=...` is added. That page has to send the answer back to this workflow's webhook in score mode, with the secret header. Two ways to do that:
 
-- **A CloudRadial portal form** ("Rate your support") with questions whose Field IDs are `ticketId`, `score` and `comment`, and a Webhook activity that posts `{"mode": "score", "ticketId": "@ticketId", "score": "@score", "comment": "@comment", "contactEmail": "@UserEmail", "company_psa_id": "@CompanyPsaId", "confirm": "true"}`. `@CompanyPsaId` is set by CloudRadial, so a client can't score another company's ticket. To record CloudRadial feedback as well, add `"cr_company_id"` with the company's CloudRadial id (no predefined token for it is documented, so it is a fixed value per company form). **[unverified]** whether a portal form can be opened with its answers filled in from the link, so the requester may have to pick the score again on the form.
+- **A CloudRadial portal form** ("Rate your support") with questions whose Field IDs are `ticketId`, `score` and `comment`, and a Webhook activity that posts `{"mode": "score", "ticketId": "@ticketId", "score": "@score", "comment": "@comment", "contactEmail": "@UserEmail", "company_psa_id": "@CompanyPsaId"}`. `@CompanyPsaId` is set by CloudRadial, so a client can't score another company's ticket. To record CloudRadial feedback as well, add `"cr_company_id"` with the company's CloudRadial id (no predefined token for it is documented, so it is a fixed value per company form). **[unverified]** whether a portal form can be opened with its answers filled in from the link, so the requester may have to pick the score again on the form.
 - **Any survey tool or small web page** that can POST JSON with the `X-Crauto-Webhook-Secret` header (for example a Microsoft Form with a Power Automate flow). Keep the secret on the server side, never in the link.
 
 ### CloudRadial feedback
@@ -113,18 +113,18 @@ The PSA API user needs to read tickets and notes and add public and internal not
 | `company_psa_id` | both | No | The PSA company id (`@CompanyPsaId` on a portal form, or `Company.CompanyPsaId`). When sent, the run stops (`rejected`) unless the ticket belongs to that company. |
 | `cr_company_id` | score | No | The CloudRadial company id. When sent, the score is also recorded as CloudRadial feedback. |
 | `psa` | both | No | Overrides the `PSA-Type` secret. |
-| `confirm` | both | No (default `false`) | `true` posts and sends. `false` returns a preview. `approvedToWrite` works too. |
+| `preview` | both | No (default `false`) | `true` returns what it would post or send and writes nothing. `dryRun` works too. |
 
 **Ticket closed webhook body:**
 
 ```json
-{ "mode": "survey", "ticketId": "1001", "contactEmail": "megan.bowen@contoso.com", "status": "Closed", "confirm": "true" }
+{ "mode": "survey", "ticketId": "1001", "contactEmail": "megan.bowen@contoso.com", "status": "Closed" }
 ```
 
 **Score webhook body:**
 
 ```json
-{ "mode": "score", "ticketId": "1001", "score": "2", "comment": "Took three days to hear back.", "contactEmail": "megan.bowen@contoso.com", "confirm": "true" }
+{ "mode": "score", "ticketId": "1001", "score": "2", "comment": "Took three days to hear back.", "contactEmail": "megan.bowen@contoso.com" }
 ```
 
 ## Output
@@ -135,17 +135,17 @@ The PSA API user needs to read tickets and notes and add public and internal not
 
 The caller POSTs to the workflow's webhook URL with the secret in the **`X-Crauto-Webhook-Secret`** header.
 
-- **Zendesk:** a webhook with a custom `X-Crauto-Webhook-Secret` header, and a trigger on "Status changed to Solved" that notifies it with `{"mode": "survey", "ticketId": "{{ticket.id}}", "contactEmail": "{{ticket.requester.email}}", "status": "{{ticket.status}}", "confirm": "true"}`. Use **Solved**, not Closed: Zendesk won't add comments to a closed ticket.
+- **Zendesk:** a webhook with a custom `X-Crauto-Webhook-Secret` header, and a trigger on "Status changed to Solved" that notifies it with `{"mode": "survey", "ticketId": "{{ticket.id}}", "contactEmail": "{{ticket.requester.email}}", "status": "{{ticket.status}}"}`. Use **Solved**, not Closed: Zendesk won't add comments to a closed ticket.
 - **ConnectWise, Autotask, HaloPSA, Kaseya BMS, Syncro:** use the PSA's outbound webhook or callback on ticket close. **[unverified]** whether each can add a custom header; if not, put a small relay in between that adds it.
 - **The score:** the survey page or portal form described above.
 
 ## Import & test
 
 1. Import `post-close-feedback.yml`, add the secrets above to the runner vault, then **Publish** and **Deploy** to that runner.
-2. **Survey preview.** In **Run**, use the first step's Test Input with a closed test ticket. Leave `confirm` false. Expect `status: pending_confirmation` and the survey in `public_note`. Nothing is posted.
+2. **Survey preview.** In **Run**, use the first step's Test Input with a closed test ticket. Set `"preview": true`. Expect `status: pending_confirmation` and the survey in `public_note`. Nothing is posted.
 3. **Skip.** Run with `"status": "Duplicate"`. Expect `success` and "no survey was sent".
-4. **Send the survey.** Run with `"confirm": true` on a test ticket whose contact is you. Expect a public note and the PSA's email. Run it again: expect "already sent".
-5. **Score.** Run with `"mode": "score"`, the same ticket, `"score": "1"`, `"service_manager_email"` set to your address and `"confirm": true`. Expect the low-score email and an internal note. Run it again: expect "already recorded". Try a ticket with no survey: expect `rejected`.
+4. **Send the survey.** Run without `preview` on a test ticket whose contact is you. Expect a public note and the PSA's email. Run it again: expect "already sent".
+5. **Score.** Run with `"mode": "score"`, the same ticket, `"score": "1"`, and `"service_manager_email"` set to your address (no `preview`). Expect the low-score email and an internal note. Run it again: expect "already recorded". Try a ticket with no survey: expect `rejected`.
 6. **Wire the triggers** as above, enable the webhook in **Properties**, and redeploy.
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `survey.ps1`, `route.ps1`, `step.ps1` or `psa-extra.ps1`, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs, Postmark and CloudRadial). Never edit the `.yml` by hand.

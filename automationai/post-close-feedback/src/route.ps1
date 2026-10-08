@@ -3,7 +3,7 @@
 # emails the service manager through Postmark (or, if Postmark isn't set up, says so in the note).
 # When a CloudRadial company id is sent and the CloudRadial secrets are set, it also records the score as
 # CloudRadial feedback, so the Feedback & CSAT Report (automationai/feedback-csat-report) counts it.
-# With confirm=false it returns a preview (status pending_confirmation) and writes nothing.
+# With preview=true it returns what it would do (status pending_confirmation) and writes nothing.
 # In mode "survey", or when step 1 skipped, it returns the result of the earlier steps.
 $stopState = @{ done = $false }
 $ctx = Read-StepContext (Get-NodeInput)
@@ -36,11 +36,11 @@ $mailText = @(
 ) -join "`n"
 $subject = "Low satisfaction score on ticket $($id): $score out of $max"
 
-if (-not $ctx.confirm) {
+if ($ctx.preview) {
     $stopState.done = $true
     $preview = ($noteLines -join "`n") + $(if ($low) { "`nIt would email the service manager ($mgrText)." } else { '' })
     Set-NodeOutput ([ordered]@{
-            status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again with confirm set to true to record it$(if ($low) { ' and alert the service manager' })."
+            status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again without preview to record it$(if ($low) { ' and alert the service manager' })."
             public_note = ''; internal_note = $preview; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $false
             email_text = $(if ($low) { $mailText } else { '' }); actions = @($actions); warnings = @($warnings)
         })

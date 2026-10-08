@@ -820,7 +820,7 @@ definition:
         $mode = (Get-StepField $a @('mode')).ToLowerInvariant()
         if (-not $mode) { $mode = $(if ($scoreRaw) { 'score' } else { 'survey' }) }
         $contact = Get-StepField $a @('contactEmail', 'contact_email', 'requesterEmail', 'requester_email', 'UserEmail')
-        $confirm = (Test-StepTrue (Get-StepField $a @('confirm'))) -or (Test-StepTrue (Get-StepField $a @('approvedToWrite', 'approved_to_write')))
+        $preview = Test-StepTrue (Get-StepField $a @('preview', 'dryRun', 'dry_run'))
         $scoreMax = Get-Int (Get-StepField $a @('score_max', 'scoreMax')) 5
         $threshold = Get-Int (Get-StepField $a @('threshold', 'low_score_threshold')) 2
 
@@ -854,7 +854,7 @@ definition:
         $tplUrl = [string](Get-PsaSecret 'PSA-TicketUrlTemplate')
         $ctx = @{
             skip = $false; mode = $mode; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); summary = [string]$t.summary; company_id = [string]$t.companyId
-            contact = $contact; confirm = $confirm; score_max = $scoreMax; ticket_url = (Get-PsaTicketUrl $ticketId $tplUrl); actions = @($actions); warnings = @($warnings)
+            contact = $contact; preview = $preview; score_max = $scoreMax; ticket_url = (Get-PsaTicketUrl $ticketId $tplUrl); actions = @($actions); warnings = @($warnings)
         }
 
         if ($mode -eq 'survey') {
@@ -909,7 +909,7 @@ definition:
           "score": "",
           "comment": "",
           "service_manager_email": "",
-          "confirm": false
+          "preview": true
         }
   - id: survey
     name: Send the survey
@@ -1688,7 +1688,7 @@ definition:
         # Step 2: Send the survey (mode "survey" only).
         # Posts a one-question satisfaction survey as a public note, so the PSA emails it to the requester.
         # Each answer is a link to the survey page with the ticket number and score filled in.
-        # With confirm=false it returns the note as a preview (status pending_confirmation) and posts nothing.
+        # With preview=true it returns the note (status pending_confirmation) and posts nothing.
         # In mode "score", or when step 1 skipped, it passes the context straight on.
         $stopState = @{ done = $false }
         $ctx = Read-StepContext (Get-NodeInput)
@@ -1726,10 +1726,10 @@ definition:
         $null = $lines.Add('Thank you. If anything still isn''t right, just reply to this ticket.')
         $note = $lines -join "`n"
 
-        if (-not $ctx.confirm) {
+        if ($ctx.preview) {
             $stopState.done = $true
             $ctx | Add-Member -NotePropertyName result -NotePropertyValue ([ordered]@{
-                    status = 'pending_confirmation'; message = "Preview: this survey would be posted on ticket $id as a public note. Run again with confirm set to true to send it."
+                    status = 'pending_confirmation'; message = "Preview: this survey would be posted on ticket $id as a public note. Run again without preview to send it."
                     public_note = $note; internal_note = 'Post-close survey preview. Nothing was posted.'; ticket_id = $id; mode = 'survey'; survey_sent = $false
                     score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @($warnings)
                 }) -Force
@@ -2735,7 +2735,7 @@ definition:
         # emails the service manager through Postmark (or, if Postmark isn't set up, says so in the note).
         # When a CloudRadial company id is sent and the CloudRadial secrets are set, it also records the score as
         # CloudRadial feedback, so the Feedback & CSAT Report (automationai/feedback-csat-report) counts it.
-        # With confirm=false it returns a preview (status pending_confirmation) and writes nothing.
+        # With preview=true it returns what it would do (status pending_confirmation) and writes nothing.
         # In mode "survey", or when step 1 skipped, it returns the result of the earlier steps.
         $stopState = @{ done = $false }
         $ctx = Read-StepContext (Get-NodeInput)
@@ -2768,11 +2768,11 @@ definition:
         ) -join "`n"
         $subject = "Low satisfaction score on ticket $($id): $score out of $max"
 
-        if (-not $ctx.confirm) {
+        if ($ctx.preview) {
             $stopState.done = $true
             $preview = ($noteLines -join "`n") + $(if ($low) { "`nIt would email the service manager ($mgrText)." } else { '' })
             Set-NodeOutput ([ordered]@{
-                    status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again with confirm set to true to record it$(if ($low) { ' and alert the service manager' })."
+                    status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again without preview to record it$(if ($low) { ' and alert the service manager' })."
                     public_note = ''; internal_note = $preview; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $false
                     email_text = $(if ($low) { $mailText } else { '' }); actions = @($actions); warnings = @($warnings)
                 })

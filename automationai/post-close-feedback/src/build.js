@@ -34,7 +34,7 @@ const testInput = JSON.stringify({
   score: '',
   comment: '',
   service_manager_email: '',
-  confirm: false,
+  preview: true,
 }, null, 2);
 
 function psStep({ id, name: n, x, body, params, test }) {

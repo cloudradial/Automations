@@ -1,7 +1,7 @@
 # Step 2: Send the survey (mode "survey" only).
 # Posts a one-question satisfaction survey as a public note, so the PSA emails it to the requester.
 # Each answer is a link to the survey page with the ticket number and score filled in.
-# With confirm=false it returns the note as a preview (status pending_confirmation) and posts nothing.
+# With preview=true it returns the note (status pending_confirmation) and posts nothing.
 # In mode "score", or when step 1 skipped, it passes the context straight on.
 $stopState = @{ done = $false }
 $ctx = Read-StepContext (Get-NodeInput)
@@ -39,10 +39,10 @@ $null = $lines.Add('')
 $null = $lines.Add('Thank you. If anything still isn''t right, just reply to this ticket.')
 $note = $lines -join "`n"
 
-if (-not $ctx.confirm) {
+if ($ctx.preview) {
     $stopState.done = $true
     $ctx | Add-Member -NotePropertyName result -NotePropertyValue ([ordered]@{
-            status = 'pending_confirmation'; message = "Preview: this survey would be posted on ticket $id as a public note. Run again with confirm set to true to send it."
+            status = 'pending_confirmation'; message = "Preview: this survey would be posted on ticket $id as a public note. Run again without preview to send it."
             public_note = $note; internal_note = 'Post-close survey preview. Nothing was posted.'; ticket_id = $id; mode = 'survey'; survey_sent = $false
             score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @($warnings)
         }) -Force

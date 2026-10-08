@@ -22,7 +22,10 @@ foreach ($p in $todo) {
     if ($s.preview) { $p.noteResult = 'would write'; $p.closeResult = 'would close'; continue }
 
     $notice = if ($p.noticeResult -eq 'sent') { 'The final notice was sent to the client as a public note.' } else { 'The final notice was sent on an earlier run.' }
-    try { Add-PsaNote -Id $p.ticketId -Text "$wf is closing this ticket. It has been in '$($s.resolvedStatus)' for $($p.daysResolved) days, since $since, with no reply from the client. $notice`n$(Get-AcrMarker 'closed' $p.since)" -Title $wf; $p.noteResult = 'written' }
+    try {
+        $r = Add-PsaNote -Id $p.ticketId -Text "$wf is closing this ticket. It has been in '$($s.resolvedStatus)' for $($p.daysResolved) days, since $since, with no reply from the client. $notice`n$(Get-AcrMarker 'closed' $p.since)" -Title $wf -Marker (Get-AcrMarker 'closed' $p.since)
+        $p.noteResult = $(if ($r -eq 'already-present') { 'written earlier' } else { 'written' })
+    }
     catch { $p.noteResult = 'failed'; $state.warnings += "Couldn't write the internal note on ticket $(Get-AcrTicketLabel $p): $($_.Exception.Message)" }
     try {
         $p.closedStatus = [string](Close-PsaTicket -Id $p.ticketId -StatusName $s.closeStatus -NotStatus $s.resolvedStatus)

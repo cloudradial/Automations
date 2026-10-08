@@ -20,6 +20,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | Folder | Contains |
 |---|---|
 | [`add-cc-to-ticket/`](add-cc-to-ticket/) | Workflow |
+| [`auto-close-resolved/`](auto-close-resolved/) | Workflow (no AI, runs daily) |
 | [`certificate-expiration-report/`](certificate-expiration-report/) | Workflow |
 | [`cloudradial-ucp/`](cloudradial-ucp/) | Agent (run by Portal Lookup and Remove Empty Flexible Asset Type) |
 | [`deliver-result/`](deliver-result/) | Agent (a reusable delivery step other workflows call) |

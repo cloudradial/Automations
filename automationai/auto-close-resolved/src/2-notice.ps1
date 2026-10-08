@@ -10,8 +10,8 @@ foreach ($p in $todo) {
     if (-not $p.notice) { $p.noticeResult = 'sent earlier'; continue }
     if ($state.settings.preview) { $p.noticeResult = 'would send'; continue }
     try {
-        Add-PsaNote -Id $p.ticketId -Text (Get-AcrNoticeText $p) -Title 'Closing this ticket' -Public
-        $p.noticeResult = 'sent'
+        $r = Add-PsaNote -Id $p.ticketId -Text (Get-AcrNoticeText $p) -Title 'Closing this ticket' -Public -Marker (Get-AcrMarker 'final notice' $p.since)
+        $p.noticeResult = $(if ($r -eq 'already-present') { 'sent earlier' } else { 'sent' })
     }
     catch {
         $p.noticeResult = 'failed'; $p.error = [string]$_.Exception.Message

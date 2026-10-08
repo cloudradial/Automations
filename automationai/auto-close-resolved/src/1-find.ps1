@@ -72,9 +72,8 @@ if ($companyIn) {
 $now = (Get-Date).ToUniversalTime()
 # Untouched for at least resolved_days, and touched within max_resolved_days (older tickets are left alone,
 # so a first run doesn't email clients about tickets resolved long ago).
-$found = @(Find-PsaTickets -StatusName $resolved -OlderThan $now.AddDays(-$resolvedDays) -NewerThan $now.AddDays(-$maxDays) -DateField updated -CompanyId $companyId -Max $maxTickets)
-$truncated = $found.Count -gt $maxTickets
-$found = @($found | Select-Object -First $maxTickets)
+$found = @(Find-PsaTickets -Status $resolved -UpdatedBefore $now.AddDays(-$resolvedDays) -UpdatedAfter $now.AddDays(-$maxDays) -CompanyId $companyId -Max $maxTickets)
+$truncated = [bool]$PsaState.FindTruncated
 
 $plan = New-Object System.Collections.ArrayList
 $skipped = New-Object System.Collections.ArrayList
@@ -111,7 +110,7 @@ foreach ($t in $found) {
     if ($withSince.Count) { $since = $withSince[-1].since }
     else {
         # Resolved since the latest of: the newest note, the last update, the last status change and the resolved date.
-        $cands = @(@($lastOtherAt, $t.updated, $t.statusChanged, $t.resolved) | Where-Object { $null -ne $_ } | Sort-Object)
+        $cands = @(@($lastOtherAt, $t.updated, $t.statusChanged, $t.closed) | Where-Object { $null -ne $_ } | Sort-Object)
         if ($cands.Count) { $since = $cands[-1] }
     }
     if ($null -eq $since) { $null = $warnings.Add("Ticket $label has no dates to count from, so it was left alone."); $null = $skipped.Add(@{ ticketId = $t.id; number = $t.number; reason = 'no dates' }); continue }

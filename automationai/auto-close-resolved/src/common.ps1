@@ -1,9 +1,11 @@
 # ---------- src/common.ps1: helpers shared by the Auto-Close Resolved steps ----------
-# Paste after _shared/psa.ps1 and src/psa-extra.ps1. Every note this workflow writes ends with a marker:
+# Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every note this workflow writes ends with a marker:
 #   [auto-close-resolved: <tag>, resolved since <yyyy-MM-ddTHH:mmZ>]
 # Tags: "final notice" (sent to the client), "closed" (closing now), "failed".
 # A later run reads the markers, so the final notice is never sent twice, and a failed close is retried
-# without another notice.
+# without another notice. The final notice and the "closed" note also pass their marker to Add-PsaNote -Marker,
+# which checks the ticket again just before writing, so a retried close doesn't repeat the "closing" note and
+# two runs that overlap send the client one notice.
 
 $AcrMarkerPattern = '\[auto-close-resolved: (?<tag>[^,\]]+), resolved since (?<since>[^\]]+)\]'
 

@@ -55,16 +55,16 @@ New-StandardWorld 'connectwise'
 $cw = $MockBase.connectwise
 $out = Invoke-Workflow $null
 Check 'cw live: status success' ($out.status -eq 'success') "$($out.status): $($out.message) $($out.warnings -join ' | ')"
-$pub = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.detailDescriptionFlag -eq $true })
+$pub = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.detailDescriptionFlag -eq $true } | Sort-Object { ($_.Uri -split '/')[-2] })
 Check 'cw live: final notices on 201 and 207 only' ((@($pub | ForEach-Object { ($_.Uri -split '/')[-2] }) -join ',') -eq '201,207') (Get-WriteList)
 Check 'cw live: the notice is plain and carries the marker' ($pub[0].Body.text -like "*as resolved 4 days ago and haven't heard back, so we're closing it now*" -and $pub[0].Body.text -match '\[auto-close-resolved: final notice, resolved since ') $pub[0].Body.text
 $int = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.internalAnalysisFlag -eq $true })
-Check 'cw live: internal notes on 201, 202, 207' ((@($int | ForEach-Object { ($_.Uri -split '/')[-2] }) -join ',') -eq '201,202,207') (Get-WriteList)
-Check 'cw live: 202 note says the notice went out earlier' (@($int | Where-Object { $_.Uri -like '*/202/notes' })[0].Body.text -like '*final notice was sent on an earlier run*')
+Check 'cw live: internal notes on 201 and 207' ((@($int | ForEach-Object { ($_.Uri -split '/')[-2] } | Sort-Object) -join ',') -eq '201,207') (Get-WriteList)
+Check 'cw live: 202 already holds its closing note from the failed run, so no second one' ((Get-Action $out 202).internal_note -eq 'written earlier' -and @(Get-Writes "POST $cw/service/tickets/202/notes").Count -eq 0) ((Get-Action $out 202) | ConvertTo-Json -Compress)
 $patch = @(Get-Writes "PATCH $cw/service/tickets/*")
-Check 'cw live: 201, 202, 207 moved to Closed, not left in Resolved' ((@($patch | ForEach-Object { ($_.Uri -split '/')[-1] }) -join ',') -eq '201,202,207' -and @($patch | Where-Object { $_.Body[0].value.id -ne 13 }).Count -eq 0) ($patch | ConvertTo-Json -Depth 5 -Compress)
+Check 'cw live: 201, 202, 207 moved to Closed, not left in Resolved' ((@($patch | ForEach-Object { ($_.Uri -split '/')[-1] } | Sort-Object) -join ',') -eq '201,202,207' -and @($patch | Where-Object { $_.Body[0].value.id -ne 13 }).Count -eq 0) ($patch | ConvertTo-Json -Depth 5 -Compress)
 Check 'cw live: nothing written on 203, 204, 205, 206' (@(Get-Writes | Where-Object { $_.Uri -match '/(203|204|205|206)(/|$)' }).Count -eq 0) (Get-WriteList)
-Check 'cw live: list asks for the status and both date bounds' (@($MockWorld.calls | Where-Object { $_ -like "GET $cw/service/tickets?*" -and [uri]::UnescapeDataString($_) -like '*status/name="Resolved" and lastUpdated < `[*`] and lastUpdated > `[*`]*' }).Count -ge 1) (@($MockWorld.calls)[0..2] -join ' ; ')
+Check 'cw live: list asks for the status and both date bounds' (@($MockWorld.calls | Where-Object { $_ -like "GET $cw/service/tickets?*" -and [uri]::UnescapeDataString($_) -like '*status/name="Resolved" and lastUpdated>=`[*`] and lastUpdated<`[*`]*' }).Count -ge 1) (@($MockWorld.calls)[0..2] -join ' ; ')
 Check 'cw live: message' ($out.message -eq "Checked 4 tickets in 'Resolved' in ConnectWise and closed 3 tickets after a final notice to the client. 1 ticket was left open because the client had replied.") $out.message
 $MockWorld.writes.Clear()
 $out2 = Invoke-Workflow $null
@@ -90,12 +90,25 @@ $MockWorld.fail = ''; $MockWorld.writes.Clear()
 (Get-WorldTicket 201).updated = Get-Ago 4   # resolved_days later, the ticket is listed again
 $out = Invoke-Workflow $null
 Check 'cw retry: 201 closed, no second notice' ((Get-WorldTicket 201).status -eq 'Closed' -and @(Get-Writes "POST $cw/service/tickets/201/notes" | Where-Object { $_.Body.detailDescriptionFlag }).Count -eq 0) (Get-WriteList)
+Check 'cw retry: no second "closing" note (Add-PsaNote -Marker)' (@((Get-WorldTicket 201).notes | Where-Object { $_.text.Contains('[auto-close-resolved: closed, ') }).Count -eq 1 -and (Get-Action $out 201).internal_note -eq 'written earlier') ((Get-Action $out 201) | ConvertTo-Json -Compress)
+
+# ---- 4b. Two runs that overlap (or an Action Runs Retry) send the client one notice ----
+# Both runs plan before either writes, so only the -Marker check in Add-PsaNote stands between them.
+New-StandardWorld 'connectwise'
+$planA = ConvertTo-RoundTrip (Invoke-Step 'node-find' $null)
+$planB = ConvertTo-RoundTrip (Invoke-Step 'node-find' $null)
+$null = Invoke-Step 'node-close' (ConvertTo-RoundTrip (Invoke-Step 'node-notice' $planA))
+$MockWorld.writes.Clear()
+$outB = ConvertTo-RoundTrip (Invoke-Step 'node-close' (ConvertTo-RoundTrip (Invoke-Step 'node-notice' $planB)))
+Check 'overlap: the second run posts no note at all' (@(Get-Writes "POST $cw/service/tickets/*/notes").Count -eq 0) (Get-WriteList)
+Check 'overlap: the second run reports the notices as sent earlier' (@($outB.actions | Where-Object { $_.result -like 'final notice: sent earlier*' }).Count -eq 3) ($outB.actions | ConvertTo-Json -Compress)
+Check 'overlap: each ticket holds one final notice' (@((Get-WorldTicket 201).notes | Where-Object { $_.text.Contains('[auto-close-resolved: final notice, ') }).Count -eq 1 -and @((Get-WorldTicket 207).notes | Where-Object { $_.text.Contains('[auto-close-resolved: final notice, ') }).Count -eq 1)
 
 # ---- 5. Missing permission (403) ----
 New-StandardWorld 'connectwise'
 $MockWorld.fail = "$cw/service/tickets?*"
 $msg = Get-ThrowMessage { Invoke-Workflow $null }
-Check 'cw 403: the run stops with the HTTP 403 and the permission' ($msg -like '*HTTP 403*inquire permission*') $msg
+Check 'cw 403: the run stops with the HTTP 403 and the permission' ($msg -like '*HTTP 403*permission to read service tickets*') $msg
 Check 'cw 403: nothing written' (@(Get-Writes).Count -eq 0)
 
 # ---- 6. Empty result ----
@@ -109,7 +122,7 @@ New-StandardWorld 'autotask'
 $at = $MockBase.autotask
 $out = Invoke-Workflow $null
 $patch = @(Get-Writes "PATCH $at/Tickets")
-Check 'autotask live: 201, 202, 207 set to Complete (5)' ((@($patch | ForEach-Object { $_.Body.id }) -join ',') -eq '201,202,207' -and @($patch | Where-Object { $_.Body.status -ne 5 }).Count -eq 0) ($patch | ConvertTo-Json -Depth 4 -Compress)
+Check 'autotask live: 201, 202, 207 set to Complete (5)' ((@($patch | ForEach-Object { $_.Body.id } | Sort-Object) -join ',') -eq '201,202,207' -and @($patch | Where-Object { $_.Body.status -ne 5 }).Count -eq 0) ($patch | ConvertTo-Json -Depth 4 -Compress)
 Check 'autotask live: notices published to all users, notes internal' ((@(Get-Writes "POST $at/Tickets/201/Notes" | ForEach-Object { $_.Body.publish }) -join ',') -eq '1,2') (Get-WriteList)
 
 # ---- 8. Inputs fail closed ----

@@ -15,7 +15,8 @@ These links point at the `main` branch, so they always open the current version.
 | All files in this automation | [automationai/auto-close-resolved](https://github.com/cloudradial/Automations/tree/main/automationai/auto-close-resolved) |
 | Build source (`src/`) | [automationai/auto-close-resolved/src](https://github.com/cloudradial/Automations/tree/main/automationai/auto-close-resolved/src) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/auto-close-resolved) |
-| Works with | [Waiting-on-Client Nudge](https://github.com/cloudradial/Automations/tree/main/automationai/waiting-on-client-nudge) (same PSA code) |
+| Works with | [Waiting-on-Client Nudge](https://github.com/cloudradial/Automations/tree/main/automationai/waiting-on-client-nudge) (same marker pattern) |
+| Shared PSA code | [`_shared/psa.ps1` and `_shared/psa-tickets.ps1`](https://github.com/cloudradial/Automations/tree/main/automationai/_shared) |
 
 ## How it works
 
@@ -30,6 +31,8 @@ A Routine runs the workflow once a day. It works in ConnectWise PSA, Autotask, H
 3. **Close with internal note** writes a technician-only note, then closes the ticket, then returns the run summary. The note goes first because Zendesk refuses notes on a closed ticket. If the close fails, a second internal note says so.
 
 **Never twice.** Every note this workflow writes ends with a marker such as `[auto-close-resolved: final notice, resolved since 2026-10-04T16:49Z]`. If a close failed after the notice went out, a later run retries the close without sending the notice again. Because the workflow's own notes count as a touch, that retry happens once the ticket has again gone `resolved_days` untouched. Don't edit or delete the markers.
+
+**Safe to run again.** A rerun (an Action Runs **Retry**, or the next Routine) reads the markers first, so it never sends the final notice twice. The final notice and the internal "closing" note also go through `Add-PsaNote -Marker`, which checks the ticket once more just before writing: a retried close doesn't repeat the "closing" note, and two runs that overlap send the client one notice.
 
 It only ever touches tickets whose status is exactly the resolved status, and it never "closes" a ticket to the status it is already in.
 
@@ -78,7 +81,7 @@ The same names as each PSA's catalog extension, so one set of secrets serves bot
 | Syncro | `Syncro-ApiUrl`, `Syncro-ApiKey` |
 | Zendesk | `Zendesk-BaseUrl`, `Zendesk-Email`, `Zendesk-ApiToken` |
 
-The PSA API account needs to read tickets and notes, add public and internal notes, and change ticket status. A missing permission stops the run with the PSA's own message (for example `HTTP 403`), before anything is written.
+The PSA API account needs to read tickets and notes, add public and internal notes, and change ticket status. A missing permission stops the run with a plain sentence naming the HTTP status (for example `HTTP 403`) and the permission to add, before anything is written.
 
 ## Required Graph permissions
 
@@ -100,8 +103,7 @@ The three PowerShell steps are generated. Edit the files in `src/`, never the sc
 |---|---|
 | `src/1-find.ps1` to `src/3-close.ps1` | The three steps |
 | `src/common.ps1` | Marker, notice text and step-to-step helpers |
-| `src/psa-extra.ps1` | `Find-PsaTickets`, `Get-PsaTicketNotes`, `Close-PsaTicket` and helpers for all six PSAs. The same file ships in `waiting-on-client-nudge/src`; keep them identical. A candidate to move into `_shared`. |
-| `src/build.js` | Assembles the `.yml`: pastes `_shared/psa.ps1` (through `_shared/inject.js`), `psa-extra.ps1` and `common.ps1` into every step |
+| `src/build.js` | Assembles the `.yml`: pastes `_shared/psa.ps1` and `_shared/psa-tickets.ps1` (through `_shared/inject.js`), then `common.ps1`, into every step |
 | `src/test.ps1`, `src/mock-psa.ps1` | Strict-mode harness against mock versions of all six PSAs |
 
 ```
@@ -113,7 +115,7 @@ pwsh -NoProfile -File test.ps1        # runs the shipped steps against the mock 
 
 ## Not yet proven live
 
-The list calls and some note fields aren't in the build kit's PSA reference yet. Each has an `Unverified` comment in `src/psa-extra.ps1`. Check them on the first preview run in each PSA:
+The list calls and some note fields aren't in the build kit's PSA reference yet. Each has an `Unverified` comment in `_shared/psa-tickets.ps1` (`Find-PsaTickets`) or `_shared/psa.ps1` (`Get-PsaTicketNotes`, `Close-PsaTicket`). Check them on the first preview run in each PSA:
 
 - **Default status names** are common defaults, not read from your PSA. In Autotask, HaloPSA and Kaseya BMS a wrong name stops the run with a list of the statuses that do exist; in the others the run just finds nothing.
 - **ConnectWise:** the `lastUpdated` conditions; a note with a contact and no member counts as the client's.

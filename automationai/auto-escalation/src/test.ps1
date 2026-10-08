@@ -1,19 +1,14 @@
 # Strict-mode harness for Auto-Escalation.
-# Runs each PowerShell step exactly as it is in auto-escalation.yml (shared libraries and psa-extra.ps1
-# included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the runner
+# Runs each PowerShell step exactly as it is in auto-escalation.yml (the _shared libraries included),
+# through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the runner
 # Key Vault, Invoke-RestMethod, Get-NodeInput and Set-NodeOutput mocked. Outputs pass through JSON between
 # steps, as the runner does. Placeholder data only (Contoso, Example MSP).
+# The shared libraries have their own tests (automationai/_shared/tests/run.ps1); this file tests the steps.
 # Test variables start with T: a step runs in a child scope of this script, and a same-named step variable
 # would hide a test variable from the mocks (PowerShell names ignore case).
 # Usage: pwsh -NoProfile -File automationai/auto-escalation/src/test.ps1
 #        (needs node and js-yaml: JS_YAML_PATH, NODE_PATH, or npm install in automationai/_shared)
 . (Join-Path $PSScriptRoot '..\..\_shared\tests\mock.ps1')
-
-# ---- psa-extra.ps1 on its own, all six PSAs ----
-& (Get-Command pwsh).Source -NoProfile -File (Join-Path $PSScriptRoot 'test-psa-extra.ps1') | Out-Host
-Check 'psa-extra.ps1 unit tests (six PSAs) pass' ($LASTEXITCODE -eq 0)
-$TOther = Join-Path $PSScriptRoot '..\..\sla-breach-report\src\psa-extra.ps1'
-if (Test-Path $TOther) { Check 'psa-extra.ps1 is identical to the sla-breach-report copy' ((Get-Content -Raw $TOther) -eq (Get-Content -Raw (Join-Path $PSScriptRoot 'psa-extra.ps1'))) }
 
 # ---- the steps, straight from the built workflow ----
 $node = (Get-Command node -ErrorAction Stop).Source
@@ -93,9 +88,12 @@ $TCwHandler = { param($c, $n)
     if ($c.Uri -like 'https://api.postmarkapp.com/email') { if ($global:TCw.pm) { New-HttpError $global:TCw.pm '{"ErrorCode":10,"Message":"Bad token"}' }; return [pscustomobject]@{ ErrorCode = 0; MessageID = 'm1' } }
     if ($c.Method -eq 'GET' -and $u -like '*/service/tickets[?]*') { if ($global:TCw.failFind) { New-HttpError $global:TCw.failFind '{"message":"denied"}' }; return @($global:TCw.tickets) }
     if ($c.Method -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes\?') {
-        if ($global:TCw.failNotes -eq $Matches[1]) { New-HttpError 500 'oops' }
-        if ($Matches[1] -eq '2004') { return @([pscustomobject]@{ id = 1; text = '[Auto-Escalation] This ticket was escalated automatically.'; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 200) }) }
-        return @([pscustomobject]@{ id = 1; text = 'Customer called'; internalAnalysisFlag = $false; dateCreated = (Get-TAgo 500) })
+        $TTid = $Matches[1]
+        if ($global:TCw.failNotes -eq $TTid) { New-HttpError 500 'oops' }
+        $TBase = if ($TTid -eq '2004') { [pscustomobject]@{ id = 1; text = '[Auto-Escalation] This ticket was escalated automatically.'; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 200) } } else { [pscustomobject]@{ id = 1; text = 'Customer called'; internalAnalysisFlag = $false; dateCreated = (Get-TAgo 500) } }
+        # Notes this test has POSTed are on the ticket too, so a rerun sees them (as the PSA would).
+        $TPosted = @($Mock.Calls | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like "*/service/tickets/$TTid/notes" } | ForEach-Object { [pscustomobject]@{ id = 50; text = (Read-Body $_).text; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 0) } })
+        return @(@($TBase) + $TPosted)
     }
     if ($u -like '*/company/companies*') { if ($u -match 'name="Contoso Ltd"') { return @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return @() }
     if ($u -like '*/service/SLAs/5/priorities*') { return @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
@@ -128,7 +126,10 @@ $TPm = @(Get-TPostmark); $TPmBody = if ($TPm.Count) { $TPm[0].Body | ConvertFrom
 Check 'Live: one dispatcher email listing all 4, HTML-escaped' ($TPm.Count -eq 1 -and $TPmBody.To -eq 'dispatch@example.com' -and $TPmBody.Subject -eq 'Auto-Escalation: 4 tickets escalated' -and $TPmBody.HtmlBody -match 'Firewall alert &lt;WAN&gt;' -and $TPmBody.HtmlBody -match '2007') (Show-Calls)
 Check 'Live: 4 internal notes, each starting with the marker' (@(Get-TCwNotes).Count -eq 4 -and -not @(Get-TCwNotes | Where-Object { $b = Read-Body $_; -not ($b.internalAnalysisFlag -eq $true -and $b.detailDescriptionFlag -eq $false -and $b.text.StartsWith('[Auto-Escalation] ')) }).Count) ((Get-TCwNotes | ForEach-Object { $_.Body }) -join ' || ')
 $TN1 = Get-TCwNote 2001; $TN2 = Get-TCwNote 2002; $TN3 = Get-TCwNote 2003
-Check 'Live: 2001 note gives the reason, the move and the email' ($TN1.text -match 'no update for 2 hours, past the 60-minute limit for high priority tickets' -and $TN1.text -match 'It was moved from Service Desk to Tier 2\.' -and $TN1.text -match 'The dispatcher was emailed\.') $TN1.text
+Check 'Live: 2001 note gives the reason, the move and the email' ($TN1.text -match 'no update for 2 hours, past the 60-minute limit for high priority tickets' -and $TN1.text -match 'Auto-Escalation is going to move it from Service Desk to Tier 2\.' -and $TN1.text -match 'The dispatcher is being emailed') $TN1.text
+$TCw2001 = @($Mock.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Uri -match '/service/tickets/2001(/notes)?$' })
+Check 'Live: 2001 marker note is written before the move' ($TCw2001.Count -eq 2 -and $TCw2001[0].Method -eq 'POST' -and $TCw2001[1].Method -eq 'PATCH' -and (Get-TEsc $TR '2001').outcome -eq 'It was moved from Service Desk to Tier 2.') (($TCw2001 | ForEach-Object { "$($_.Method) $($_.Uri)" }) -join ' ; ')
+Check 'Live: no follow-up notes when everything went to plan' (-not @(Get-TCwNotes | Where-Object { (Read-Body $_).text.Contains('[Auto-Escalation: follow-up]') }).Count) ''
 Check 'Live: 2002 note says why it was not moved' ($TN2.text -match "There is no escalation_map entry for Alerts, so it wasn't moved\.") $TN2.text
 Check 'Live: 2003 note keeps it with the working tech and names the SLA' ($TN3.text -match 'Its SLA respond-by time .* has passed\.' -and $TN3.text -match 'stays with them') $TN3.text
 Check 'Live: already-escalated 2004 gets nothing' ($null -eq (Get-TCwNote 2004)) ''
@@ -158,13 +159,15 @@ Check 'max_tickets=1: only the most overdue ticket (2003, SLA passed) is escalat
 # ---- 4. No Postmark: the note is the notification ----
 Reset-Mock -Secrets (Get-TSecrets connectwise -NoPostmark) -Handler $TCwHandler
 $TR = Invoke-Flow $TBody
-Check 'No Postmark: success, no email, notes say they are the notification, plain warning' ($TR.out.status -eq 'success' -and @(Get-TPostmark).Count -eq 0 -and $TR.out.dispatcher_emailed -eq $false -and (Get-TCwNote 2001).text -match 'No dispatcher email was sent, so this note is the notification\.' -and @($TR.out.warnings) -match 'Postmark is not set up') ($TR.out.warnings -join ' | ')
+Check 'No Postmark: success, no email, notes say they are the notification, plain warning' ($TR.out.status -eq 'success' -and @(Get-TPostmark).Count -eq 0 -and $TR.out.dispatcher_emailed -eq $false -and (Get-TCwNote 2001).text -match 'No dispatcher email is set up, so this note is the notification\.' -and @($TR.out.warnings) -match "Postmark isn't set up" -and @(Get-TCwNotes).Count -eq 4) ($TR.out.warnings -join ' | ')
 
 # ---- 5. Postmark refuses ----
 $global:TCw.pm = 401
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow $TBody
-Check 'Postmark 401: escalations and notes still done, plain warning' ($TR.out.status -eq 'success' -and @(Get-TCwNotes).Count -eq 4 -and @($TR.out.warnings) -match 'Postmark refused the dispatcher email \(HTTP 401\)') ($TR.out.warnings -join ' | ')
+Check 'Postmark 401: escalations and notes still done, plain warning' ($TR.out.status -eq 'success' -and @(Get-Calls PATCH '*/2001').Count -eq 1 -and @($TR.out.warnings) -match "dispatcher email couldn't be sent.*\(HTTP 401\)") ($TR.out.warnings -join ' | ')
+$TFollow = @(Get-TCwNotes | Where-Object { (Read-Body $_).text.StartsWith('[Auto-Escalation: follow-up] ') })
+Check 'Postmark 401: one follow-up note per escalated ticket says the email failed' (@(Get-TCwNotes).Count -eq 8 -and $TFollow.Count -eq 4 -and (Read-Body $TFollow[0]).text -match 'dispatcher email could not be sent, so these notes are the notification') ((Get-TCwNotes | ForEach-Object { (Read-Body $_).text }) -join ' || ')
 $global:TCw.pm = 0
 
 # ---- 6. Routine with no input: live, empty map, no dispatcher ----
@@ -186,7 +189,11 @@ $global:TCw.failFind = 0
 $global:TCw.failPatch = '2001'
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow $TBody
-Check '403 on a move: incomplete, plain reason, others still done, note still added' ($TR.out.status -eq 'incomplete' -and (Get-TEsc $TR '2001').result -eq 'failed' -and (Get-TEsc $TR '2007').result -eq 'reassigned' -and (Get-TCwNote 2001).text -match "couldn't be moved to Tier 2 \(ConnectWise refused the change \(HTTP 403\)\. Give the API user permission to update service tickets\.\)" -and @(Get-TCwNotes).Count -eq 4) "$($TR.out.message) | $((Get-TCwNote 2001).text)"
+Check '403 on a move: incomplete, plain reason, others still done, note still added' ($TR.out.status -eq 'incomplete' -and (Get-TEsc $TR '2001').result -eq 'failed' -and (Get-TEsc $TR '2007').result -eq 'reassigned' -and @(Get-TCwNotes).Count -eq 5) "$($TR.out.message) | $((Get-TCwNote 2001).text)"
+$T2001Notes = @(Get-Calls POST '*/service/tickets/2001/notes' | ForEach-Object { (Read-Body $_).text })
+Check '403 on a move: the marker note went first, then a follow-up note gives the plain reason' ($T2001Notes.Count -eq 2 -and $T2001Notes[0].StartsWith('[Auto-Escalation] ') -and $T2001Notes[1] -match "^\[Auto-Escalation: follow-up\] It couldn't be moved to Tier 2 \(ConnectWise refused the change \(HTTP 403\)\. Give the API user permission to update service tickets\.\)\. A technician needs to finish") ($T2001Notes -join ' || ')
+$TR = Invoke-Flow $TBody
+Check '403 on a move, run again: the ticket is not moved, noted or emailed again' (@(Get-Calls PATCH '*/2001').Count -eq 1 -and @(Get-Calls POST '*/service/tickets/2001/notes').Count -eq 2 -and @(Get-TPostmark).Count -eq 1 -and $TR.out.message -match '^No open tickets need escalating\.') "$($TR.out.message) $(Show-Calls)"
 $global:TCw.failPatch = ''
 
 # ---- 8. Notes unreadable: fail closed for that ticket ----
@@ -254,7 +261,7 @@ Check 'AT live: internal note (Internal Only publish) with the marker; dispatche
 Reset-Mock -Secrets (Get-TSecrets zendesk) -Handler { param($c, $n)
     if ($c.Uri -like 'https://api.postmarkapp.com/email') { return [pscustomobject]@{ ErrorCode = 0 } }
     if ($c.Method -eq 'GET' -and $c.Uri -like '*/search?*') { return [pscustomobject]@{ next_page = $null; results = @([pscustomobject]@{ id = 3001; subject = 'Cannot log in'; organization_id = 61; status = 'open'; priority = 'urgent'; group_id = 21; assignee_id = $null; created_at = (Get-TAgo 60); updated_at = (Get-TAgo 45); slas = [pscustomobject]@{ policy_metrics = @() } }) } }
-    if ($c.Uri -like '*/tickets/3001/comments') { return [pscustomobject]@{ comments = @([pscustomobject]@{ body = 'Help'; public = $true; created_at = (Get-TAgo 60) }) } }
+    if ($c.Uri -like '*/tickets/3001/comments*') { return [pscustomobject]@{ comments = @([pscustomobject]@{ body = 'Help'; public = $true; created_at = (Get-TAgo 60) }) } }
     if ($c.Uri -like '*/organizations/61') { return [pscustomobject]@{ organization = [pscustomobject]@{ name = 'Contoso Ltd' } } }
     if ($c.Uri -like '*/groups/21') { return [pscustomobject]@{ group = [pscustomobject]@{ name = 'Service Desk' } } }
     if ($c.Uri -like '*/groups?*') { return [pscustomobject]@{ groups = @([pscustomobject]@{ id = 21; name = 'Service Desk' }, [pscustomobject]@{ id = 22; name = 'Tier 2' }) } }
@@ -263,6 +270,41 @@ Reset-Mock -Secrets (Get-TSecrets zendesk) -Handler { param($c, $n)
 }
 $TR = Invoke-Flow $TBody
 $TPut = @(Get-Calls PUT '*/tickets/3001')
-Check 'Zendesk live: group moved by name, then a private comment with the marker' ($TR.out.status -eq 'success' -and $TPut.Count -eq 2 -and (Read-Body $TPut[0]).ticket.group_id -eq 22 -and (Read-Body $TPut[1]).ticket.comment.public -eq $false -and (Read-Body $TPut[1]).ticket.comment.body.StartsWith('[Auto-Escalation] ')) "$($TR.error) $(Show-Calls)"
+Check 'Zendesk live: a private comment with the marker, then the group moved by name' ($TR.out.status -eq 'success' -and $TPut.Count -eq 2 -and (Read-Body $TPut[0]).ticket.comment.public -eq $false -and (Read-Body $TPut[0]).ticket.comment.body.StartsWith('[Auto-Escalation] ') -and (Read-Body $TPut[1]).ticket.group_id -eq 22) "$($TR.error) $(Show-Calls)"
+
+# ---- 14. Retry safety: a rerun writes nothing twice, moves nothing twice and emails nothing twice ----
+# The mock returns the notes this test has POSTed, as the PSA would, but never changes a ticket's board,
+# so without the marker check a rerun would move 2001 and 2007 again (Tier 2 to Tier 3, and so on).
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow $TBody
+$TBefore = @{ patch = @(Get-Calls PATCH '*').Count; notes = @(Get-TCwNotes).Count; pm = @(Get-TPostmark).Count }
+$TR = Invoke-Flow $TBody
+Check 'Rerun (Action Runs Retry or the next Routine): no move, note or email the second time' ($TBefore.patch -eq 3 -and $TBefore.notes -eq 4 -and $TBefore.pm -eq 1 -and @(Get-Calls PATCH '*').Count -eq 3 -and @(Get-TCwNotes).Count -eq 4 -and @(Get-TPostmark).Count -eq 1 -and $TR.out.counts.alreadyEscalated -eq 5) "$($TBefore | ConvertTo-Json -Compress) $($TR.out.message)"
+
+# The run stopped after step 2 (notes written, tickets moved) and is retried from the start.
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TS = Invoke-Step 'find' ($TBody | ConvertTo-Json | ConvertFrom-Json)
+$TS = Invoke-Step 'reassign' $TS.out
+$TR = Invoke-Flow $TBody
+Check 'Retry after a run stopped mid-way: the moved tickets are not moved or noted again' (@(Get-Calls PATCH '*').Count -eq 3 -and @(Get-TCwNotes).Count -eq 4 -and @(Get-TPostmark).Count -eq 0 -and $TR.out.message -match '^No open tickets need escalating\.') "$($TR.out.message) $(Show-Calls)"
+
+# Two runs overlap: both plan before either writes, so only the check inside Add-PsaNote -Marker stands between them.
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TA = (Invoke-Step 'find' ($TBody | ConvertTo-Json | ConvertFrom-Json)).out
+$TB = (Invoke-Step 'find' ($TBody | ConvertTo-Json | ConvertFrom-Json)).out
+$TA = (Invoke-Step 'note' (Invoke-Step 'notify' (Invoke-Step 'reassign' $TA).out).out).out
+$TPatchA = @(Get-Calls PATCH '*').Count; $TNotesA = @(Get-TCwNotes).Count
+$TB2 = (Invoke-Step 'reassign' $TB).out
+$TB = (Invoke-Step 'note' (Invoke-Step 'notify' $TB2).out).out
+Check 'Overlapping runs: the second finds the marker just before writing and moves, notes and emails nothing' ($TPatchA -eq 3 -and @(Get-Calls PATCH '*').Count -eq 3 -and @(Get-TCwNotes).Count -eq $TNotesA -and @(Get-TPostmark).Count -eq 1 -and -not @($TB2.escalations | Where-Object { $_.result -ne 'already-escalated' }).Count) "$($TB.message) $(Show-Calls)"
+Check 'Overlapping runs: the second run says so in plain words' ($TB.status -eq 'success' -and $TB.message -match '^Nothing new was escalated\. 4 tickets were already escalated by another run and left alone\.') $TB.message
+
+# The marker note can't be written: fail closed, the ticket isn't moved.
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler { param($c, $n)
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/service/tickets/2001/notes') { New-HttpError 403 '{"message":"denied"}' }
+    return (& $TCwHandler $c $n)
+}
+$TR = Invoke-Flow $TBody
+Check 'Marker note refused (403): 2001 is not moved, the run is incomplete and says why' ($TR.out.status -eq 'incomplete' -and @(Get-Calls PATCH '*/2001').Count -eq 0 -and @(Get-Calls PATCH '*/2007').Count -eq 2 -and (Get-TEsc $TR '2001').error -match 'permission to add ticket notes' -and $TR.out.message -match '1 escalation note could not be added, so that ticket was not moved') "$($TR.out.message) | $((Get-TEsc $TR '2001') | ConvertTo-Json -Compress)"
 
 Complete-Test

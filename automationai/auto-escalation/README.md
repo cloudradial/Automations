@@ -1,6 +1,6 @@
 # Escalate Forgotten Tickets Before They Breach
 
-Every 15 minutes, tickets nobody has touched for too long, or whose SLA is about to run out, move up one tier, the dispatcher gets an email, and each ticket gets an internal note saying why. A ticket is escalated once and never bounced around.
+Every 15 minutes, tickets nobody has touched for too long, or whose SLA is about to run out, get an internal note saying why, move up one tier, and the dispatcher gets an email. A ticket is escalated once and never bounced around, even when a run is retried.
 
 **Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI), run every 15 minutes by a Routine
 
@@ -13,6 +13,7 @@ These links point at the `main` branch, so they always open the current version.
 | View `auto-escalation.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/auto-escalation/auto-escalation.yml) |
 | Download `auto-escalation.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/auto-escalation/auto-escalation.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/auto-escalation/src) |
+| Shared PSA and Postmark code | [`_shared/psa.ps1`, `psa-tickets.ps1` and `postmark.ps1`](https://github.com/cloudradial/Automations/tree/main/automationai/_shared) |
 | All files in this automation | [automationai/auto-escalation](https://github.com/cloudradial/Automations/tree/main/automationai/auto-escalation) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/auto-escalation) |
 
@@ -29,9 +30,19 @@ Four steps, no AI. It works with ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS,
    Then it plans one escalation per ticket:
    - **Move up one tier** when `escalation_map` has an entry for the ticket's queue (ConnectWise board, Autotask or Kaseya BMS queue, HaloPSA team, Syncro issue type, Zendesk group), matched by name or id, or a `"*"` catch-all entry.
    - **Note and notify only** when there's no entry for its queue, when it is already where the map sends it, or when **someone is actively working it**: a ticket that is only at SLA risk, updated recently and assigned to a technician stays with that technician. The workflow never reassigns away from a technician who is working the ticket.
-2. **Reassign up a tier.** Moves each planned ticket to the mapped queue and/or assigns the mapped user. One tier per run, and only once per ticket. For Autotask, a user is assigned with the role in the map entry, or else the resource's default Service Desk role. A refused change (for example HTTP 403) is recorded in plain language, and the run carries on with the other tickets.
-3. **Notify the dispatcher.** One email per run through Postmark to `dispatcher_email`, listing each ticket, the company, why it was escalated and what was done. Without a dispatcher address or the Postmark secrets, the internal note on each ticket is the notification.
-4. **Internal note with the reason.** Adds a technician-only note to each escalated ticket, for example: "[Auto-Escalation] This ticket was escalated automatically. It has had no update for 2 hours, past the 60-minute limit for high priority tickets. It was moved from Service Desk to Tier 2. The dispatcher was emailed." The `[Auto-Escalation]` tag at the start is what stops the ticket being escalated again. Nothing is posted where the client can see it.
+2. **Mark and reassign up a tier.** For each planned ticket it first adds a technician-only note, for example: "[Auto-Escalation] This ticket was escalated automatically. It has had no update for 2 hours, past the 60-minute limit for high priority tickets. Auto-Escalation is going to move it from Service Desk to Tier 2. The dispatcher is being emailed a list of the escalated tickets." Only then does it move the ticket to the mapped queue and/or assign the mapped user. One tier per run, and only once per ticket. For Autotask, a user is assigned with the role in the map entry, or else the resource's default Service Desk role. A refused change (for example HTTP 403) is recorded in plain language, and the run carries on with the other tickets. Nothing is posted where the client can see it.
+3. **Notify the dispatcher.** One email per run through Postmark to `dispatcher_email`, listing each ticket this run escalated, the company, why it was escalated and what was done. Without a dispatcher address or the Postmark secrets, the internal note on each ticket is the notification.
+4. **Follow-up note and summary.** Adds a second internal note (`[Auto-Escalation: follow-up]`) only where something went wrong after the first note: the move failed, or the dispatcher email couldn't be sent. Then it returns the run summary.
+
+### Safe to retry
+
+The `[Auto-Escalation]` note is the record that a ticket was escalated, so it is written **before** the move, through `Add-PsaNote -Marker`, which checks the ticket for the note again just before writing.
+
+- **A rerun** (an Action Runs **Retry**, or the next Routine) skips every ticket that already has the note in step 1, so it never moves a ticket a second time (for example on from Tier 2 to Tier 3) and never emails the dispatcher about it again.
+- **Two runs that overlap** both plan the same ticket, but the second finds the note at the moment it writes, leaves the ticket alone and leaves it out of its email.
+- **If the note can't be written,** the ticket isn't moved (and the run is `incomplete`), because without the note a retry couldn't tell the move had happened.
+- **If a run stops between steps,** a retry doesn't repeat the move; tickets that were already marked are not emailed again either. The note on the ticket still says what happened.
+- The follow-up note has its own marker, so it is written at most once per ticket.
 
 ### Preview
 
@@ -99,14 +110,14 @@ A list works too: `[{"from": "Service Desk", "queue": "Tier 2"}]`. The target ca
 
 ## Output
 
-`status` (`success`, `pending_confirmation` for a preview, `incomplete` when a move or a note failed, `rejected` for invalid input, `error` when the PSA can't be read), `message`, `public_note` (always empty), `internal_note` (one line per ticket), `ticket_id` (when exactly one ticket was escalated), `preview`, `dispatcher_emailed`, `counts` (`open`, `skipped`, `atRisk`, `alreadyEscalated`, `notesUnreadable`, `selected`, `toReassign`, `noteOnly`, `overLimit`), `escalations` (per ticket: reason, action, target queue and assignee, result, outcome, error, noted), `actions` and `warnings`.
+`status` (`success`, `pending_confirmation` for a preview, `incomplete` when a move or a marker note failed, `rejected` for invalid input, `error` when the PSA can't be read), `message`, `public_note` (always empty), `internal_note` (one line per ticket), `ticket_id` (when exactly one ticket was escalated), `preview`, `dispatcher_emailed`, `counts` (`open`, `skipped`, `atRisk`, `alreadyEscalated`, `notesUnreadable`, `selected`, `toReassign`, `noteOnly`, `overLimit`), `escalations` (per ticket: reason, action, target queue and assignee, result (`reassigned`, `partial`, `failed`, `note-only`, or `already-escalated` when another run got there first), outcome, error, noted), `actions` and `warnings`.
 
 ## Import & test
 
 1. Import `auto-escalation.yml`, add the secrets above to the runner, then **Publish** and **Deploy** to that runner.
 2. **Preview first.** In **Run**, use the first step's Test Input (it has `preview: true`) with your own queue names in `escalation_map` and `company` set to one test client. Expect `status: pending_confirmation` (or `success` with "No open tickets need escalating") and a list of what would happen. Nothing changes.
-3. **One live ticket.** Make a test ticket for the test client in a mapped queue, wait past its untouched limit (or set `minutes_untouched_by_priority` to `{"low":1,"medium":1}`), then run with `preview: false` and `company` set to that client, so no other client's ticket can be touched. Expect the ticket moved one tier, one dispatcher email and one internal `[Auto-Escalation]` note.
-4. **Run it again.** The same ticket must not move again: expect `alreadyEscalated: 1`.
+3. **One live ticket.** Make a test ticket for the test client in a mapped queue, wait past its untouched limit (or set `minutes_untouched_by_priority` to `{"low":1,"medium":1}`), then run with `preview: false` and `company` set to that client, so no other client's ticket can be touched. Expect one internal `[Auto-Escalation]` note, the ticket moved one tier, and one dispatcher email.
+4. **Run it again** (or press **Retry** on the run in Action Runs). The same ticket must not move again, get another note or be emailed again: expect `alreadyEscalated: 1`.
 5. **Schedule it.** Add the `AutoEscalation-Map` and `Dispatcher-Email` secrets, then a **Routine** that runs the deployed version every 15 minutes.
 
-> Routines aren't part of an export, so attach the Routine after every import. The step logic lives in `src/`: edit `find.ps1`, `reassign.ps1`, `notify.ps1`, `note.ps1` or `psa-extra.ps1`, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs and Postmark). Never edit the `.yml` by hand. `src/psa-extra.ps1` is the same file as in [SLA Breach Report](../sla-breach-report/) and is a candidate to move into [`_shared`](../_shared/).
+> Routines aren't part of an export, so attach the Routine after every import. The step logic lives in `src/`: edit `find.ps1`, `reassign.ps1`, `notify.ps1` or `note.ps1`, run `node src/build.js` (it pastes [`_shared/psa.ps1`, `psa-tickets.ps1` and `postmark.ps1`](../_shared/) through `_shared/inject.js`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs and Postmark). Never edit the `.yml` by hand.

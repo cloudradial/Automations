@@ -54,6 +54,10 @@ $TPsa = @{
 function Get-TSecrets { param([string]$P) $s = @{}; foreach ($h in @($TCrSecrets, $TPsa[$P])) { foreach ($k in $h.Keys) { $s[$k] = $h[$k] } }; return $s }
 $TUrl = 'https://contoso.portal.example-msp.test/kb/article/321'
 $TMarker = 'Ref: AAI troubleshooting article sent (article 321, to megan.bowen@contoso.com).'
+# The opaque line _shared/psa.ps1 puts on a public note for a marker: first 8 hex of SHA-256('[marker]' lowercased).
+function Get-TRef { param([string]$Marker) $h = [System.Security.Cryptography.SHA256]::Create(); try { $b = $h.ComputeHash([Text.Encoding]::UTF8.GetBytes("[$Marker]".ToLowerInvariant())) } finally { $h.Dispose() }; return 'Ref: ' + (-join @($b[0..3] | ForEach-Object { $_.ToString('x2') })) }
+# A client-visible note: no bracketed marker, no internal AAI tag, no contact address, and it ends with only the opaque ref.
+function Test-TCleanPublic { param([string]$Text, [string]$Marker) return ($Text -notmatch '\[|AAI|megan\.bowen|@contoso\.com|already-sent|low-confidence|not-clear' -and $Text.TrimEnd().EndsWith("`n$(Get-TRef $Marker)")) }
 
 function Reset-TScenario {
     $global:TS = @{
@@ -113,7 +117,10 @@ Check 'send: one public (Discussion) note and one internal note' ($TN.Count -eq 
 Check "send: public note has the link, greets by first name and says Reply 'fixed' and we'll close this" ($TN[0].text -like "*$TUrl*" -and $TN[0].text -like 'Hi Megan,*' -and $TN[0].text -like "*Reply 'fixed' and we'll close this ticket*") $TN[0].text
 Check 'send: internal note carries the marker reply mode looks for' ($TN[1].text -like "*$TMarker*" -and $TN[1].text -like '*confidence 0.9*') $TN[1].text
 Check 'send: no status change' (-not @(Get-Calls 'PATCH' "$TCW/*").Count)
-Check 'send: public and internal notes end with their retry markers' ($TN[0].text.TrimEnd().EndsWith('[Ref: troubleshooting article 321]') -and $TN[1].text.TrimEnd().EndsWith('[AAI-TA sent 321]')) "$($TN[0].text) :: $($TN[1].text)"
+Check 'send: public note ends with only the opaque ref; internal note keeps its readable marker' ((Test-TCleanPublic $TN[0].text 'AAI-TA public sent 321') -and $TN[1].text.TrimEnd().EndsWith('[AAI-TA sent 321]')) "$($TN[0].text) :: $($TN[1].text)"
+$TBefore = @(Get-TWrites).Count
+$f = Invoke-Flow (New-TBody $TSend)
+Check 'send rerun (notes read back): already-sent, nothing written twice' ($f.r.out.decision -eq 'already-sent' -and @(Get-TWrites).Count -eq $TBefore -and @($global:TS.notes).Count -eq 2) "$($f.r.out.decision) $(Show-Calls)"
 Check 'send: no em dash in the output' (-not (($o | ConvertTo-Json -Depth 10).Contains([string][char]0x2014)))
 
 # ---- 2. Dry run: everything checked, nothing written ----
@@ -139,7 +146,7 @@ Check 'retry: already-sent, success, no writes at all' ($f.r.out.decision -eq 'a
 
 # ---- 4b. Rerun after the public note was posted but the internal note wasn't: no second public note ----
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
-$global:TS.notes = @("Hi Megan, while a technician looks at your ticket...`n[Ref: troubleshooting article 321]")
+$global:TS.notes = @("Hi Megan, while a technician looks at your ticket...`n$(Get-TRef 'AAI-TA public sent 321')")
 $f = Invoke-Flow (New-TBody $TSend)
 $TN = @(Get-TCwNotes)
 Check 'rerun after a half-finished send: only the internal note is written' ($f.r.out.decision -eq 'send' -and $TN.Count -eq 1 -and $TN[0].internalAnalysisFlag -eq $true -and $TN[0].text -like "*$TMarker*") (Show-Calls)
@@ -226,6 +233,7 @@ $TAtNotes = @(Get-Calls 'POST' "$TAT/Tickets/555/Notes" | ForEach-Object { Read-
 Check 'reply fixed: success, closed (quoted history ignored)' ($o.status -eq 'success' -and $o.closed -eq $true -and $o.decision -eq 'close') "$($o.decision) $($o.reason) $($f.r.error)"
 Check 'reply fixed: status set to Complete (5)' ($TPatch.Count -eq 1 -and (Read-Body $TPatch[0]).status -eq 5 -and (Read-Body $TPatch[0]).id -eq 555) (Show-Calls)
 Check 'reply fixed: public note then internal note with the closed marker' ($TAtNotes.Count -eq 2 -and $TAtNotes[0].publish -eq 1 -and $TAtNotes[1].publish -eq 2 -and $TAtNotes[1].description -like '*Ref: AAI troubleshooting article closed*') ($TAtNotes | ConvertTo-Json -Compress)
+Check 'reply fixed: the public closing note ends with only the opaque ref' (Test-TCleanPublic $TAtNotes[0].description 'AAI-TA public closed') $TAtNotes[0].description
 
 # ---- 9. Reply mode: anything short of a clear yes leaves the ticket open, with an internal note ----
 foreach ($TReply in @('Still not working', 'fixed?', 'It works now but Outlook is slow', 'Thanks, I will try it later', 'no longer an issue', 'Not fixed')) {
@@ -260,6 +268,7 @@ $global:TS.notes = @($TMarker)
 $f = Invoke-Flow @{ mode = 'reply'; ticketId = '777'; replyText = 'Yes that worked' }
 $TZ = @(Get-Calls 'PUT' "$TZD/tickets/777" | ForEach-Object { Read-Body $_ })
 Check 'zendesk reply: solved, then a public and a private comment' ($f.r.out.closed -eq $true -and $TZ.Count -eq 3 -and $TZ[0].ticket.status -eq 'solved' -and $TZ[1].ticket.comment.public -eq $true -and $TZ[2].ticket.comment.public -eq $false) ($TZ | ConvertTo-Json -Depth 5 -Compress)
+Check 'zendesk reply: the public comment shows no marker or internal tag' (Test-TCleanPublic $TZ[1].ticket.comment.body 'AAI-TA public closed') $TZ[1].ticket.comment.body
 Reset-Mock (Get-TSecrets 'zendesk') $Handler; Reset-TScenario
 $global:TS.notes = @($TMarker, 'Ref: AAI troubleshooting article closed.')
 $f = Invoke-Flow @{ mode = 'reply'; ticketId = '777'; replyText = 'Yes that worked' }

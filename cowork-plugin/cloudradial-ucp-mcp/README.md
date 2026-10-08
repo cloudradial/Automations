@@ -12,16 +12,19 @@ An MCP (Model Context Protocol) server that exposes the CloudRadial API V2 as to
 | `count_resources` | Count a resource type with an optional filter |
 | `get_resource` | Retrieve a single resource by ID (incl. composite keys) |
 | `create_resource` | Create a new resource |
-| `update_resource` | Update a resource (PUT full / PATCH partial) |
+| `update_resource` | Update a resource: PATCH (default) changes only the fields given; PUT replaces the whole record |
 | `delete_resource` | Delete a resource by ID |
 | `user_lookup` | Find users by email, name, or company |
-| `manage_tokens` | List / get / create / revoke CloudRadial API tokens |
+| `manage_tokens` | List / get / create / revoke replacement tokens (like @SupportPhone), not API keys |
 | `endpoint_update_warranty` | Trigger an async warranty refresh for an endpoint by serial number |
 | `courseenrollment_complete` | Mark a course enrollment as completed (with optional score/comment) |
-| `courseenrollment_for_user` | Get a user's enrollment record for a specific course |
+| `courseenrollment_for_user` | Get a user's enrollment record for a specific course (null if not enrolled) |
+| `assessment_import` | Create or refresh an assessment from questions or an .xlsx (through the upload; the API has no other create) |
 | `raw_api_call` | Direct API call for advanced/custom use cases |
 
 Plus `setup_status`, `configure_credentials`, `clear_credentials` for credential management.
+
+Every tool returns an MCP error when CloudRadial answers with an HTTP error, with the status and CloudRadial's message.
 
 Supported resource types (30): `company`, `user`, `application_user`, `article`, `endpoint`, `catalog`, `catalog_question`, `assessment`, `feedback`, `service`, `service_install`, `domain`, `course`, `course_enrollment`, `course_lesson`, `course_lesson_history`, `menu`, `product`, `archive_item`, `certificate`, `company_group`, `company_group_company`, `quickstart`, `flexible_asset`, `flexible_asset_type`, `flexible_asset_field`, `endpoint_application`, `endpoint_custom_property`, `media`, `token`.
 
@@ -33,8 +36,31 @@ Composite-key resources need extra args on `get_resource` / `update_resource` / 
 | `service_install` | `endpoint_id` + `service_id` (or `id`=serviceId on update/delete) |
 | `company_group_company` | `company_group_id` + `company_id` (create/delete only — no update) |
 | `course_lesson_history` | `course_id` + `application_user_id` + `course_lesson_id` |
+| `endpoint_custom_property` | `serial_number` + `property_name` (create: `serial_number`, data `{name, value, dataType}`) |
 
 `application_user` has no OData endpoint — use `get_resource` / `create_resource` / `update_resource` / `delete_resource` by id only.
+
+Some single-item endpoints are scoped by company: `catalog_question`, `course_lesson`, `course_lesson_history`, `domain`, `user`, `application_user` and `token`. Pass `company_id`, or let the tool look it up (all but `course_lesson_history` and `token`).
+
+What the API can't do, so the tools refuse with a reason: update or delete an `assessment` (use `assessment_import`), update or delete a `flexible_asset_field`, delete a `course_enrollment`, or PUT a `flexible_asset`, `flexible_asset_type` or `course_enrollment`. `get_resource` reads `assessment` and `course_enrollment` through OData by id. To update a `flexible_asset`, pass the traits to change as `data.traits`. The API only lets you replace traits the asset already has; traits you leave out are kept.
+
+`list_resources` and `user_lookup` select every User field except `supportPin` by default: any `/v2/odata/user` read that includes `supportPin` returns HTTP 500. `get_resource` on one user still returns it.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs the tools against a mocked CloudRadial API (no keys or network needed) and checks that no skill file is cut off or corrupted.
+
+To check the tools against a real tenant, use a demo or test company only. Set `CLOUDRADIAL_PUBLIC_KEY`, `CLOUDRADIAL_PRIVATE_KEY` (and `CLOUDRADIAL_BASE_URL` outside the US), plus `LIVE_COMPANY_ID` and `LIVE_COMPANY_NAME`, then:
+
+```bash
+npm run test:live
+```
+
+It stops unless the company's name matches `LIVE_COMPANY_NAME`. It reads and writes catalog questions, users, endpoint custom properties, flexible assets and Planner items in that company, putting back or deleting what it changes. It leaves one assessment, "Plugin live check (create)", because the API can't delete assessments; later runs reuse it.
 
 ## Install
 

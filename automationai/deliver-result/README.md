@@ -8,10 +8,15 @@ Lets any automation finish by opening a ticket in your PSA, sending an email or 
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import** [`deliver-result.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/deliver-result/deliver-result.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
+
+- [Get a Weekly List of Warranty and Ownership Gaps](https://github.com/cloudradial/Automations/tree/main/automationai/weekly-fleet-audit)
+
 | What | Link |
 |---|---|
 | View `deliver-result.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/deliver-result/deliver-result.agent.yml) |
 | Download `deliver-result.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/deliver-result/deliver-result.agent.yml) |
+| Used by | [Get a Weekly List of Warranty and Ownership Gaps](https://github.com/cloudradial/Automations/tree/main/automationai/weekly-fleet-audit) |
 | All files in this automation | [automationai/deliver-result](https://github.com/cloudradial/Automations/tree/main/automationai/deliver-result) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/deliver-result) |
 

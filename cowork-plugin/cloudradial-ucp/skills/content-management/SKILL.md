@@ -31,10 +31,10 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
-| `get_resource` | Retrieve one resource by ID | `resource_type`, `id` |
+| `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
-| `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID | `resource_type`, `id` |
+| `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
+| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -44,7 +44,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200; walk through larger pages by incrementing `skip`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -52,12 +52,15 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 - Courses use `name` (not `title`).
 - `archive_item` composite key — pass `archive_id` and `id`.
 - `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
 
 - **"credentials not configured"** → defer to the `setup` skill.
 - **401/403 from CloudRadial** → stored credentials are invalid. Run `setup` to rotate.
-- **404** → resource not found, verify the ID.
+- **404** → resource not found. Verify the ID, and for `catalog_question`, `course_lesson`, `domain`, `user`, `application_user` and `token` pass `company_id`.
+- Every HTTP 4xx/5xx comes back as a tool error, not as data. Read the message and fix the call instead of retrying it unchanged.
 
 ## API Reference
 
@@ -66,7 +69,7 @@ If you need to check exact field names, required parameters, or schema details f
 ## Supported Content Types
 
 ### Articles
-Portal knowledge base articles. Key fields: `subject` (NOT `title`), `body` (HTML), `companyId`, `category`, `isPublished`.
+Portal knowledge base articles. Key fields: `articleId`, `subject` (NOT `title`), `body` (HTML), `companyId`, `category`, `datePublished`, `author`, `isFavorite`, `isFrontPage`, `url`. Creating one requires `companyId`, `subject`, `body` and `datePublished`. There is no draft or `isPublished` flag in the API.
 
 - **List articles:** Call `list_resources` with `resource_type: "article"`, `filter: "companyId eq 42"`.
 - **Get article:** Call `get_resource` with `resource_type: "article"`, `id: "123"`.
@@ -87,22 +90,23 @@ Key fields: `companyCatalogQuestionId`, `companyCatalogId`, `companyId`, `label`
 - **Subscribed forms:** if the catalog item came from a content package, editing it may detach it from the package. Ask before changing a subscribed item.
 
 ### Menus
-Portal navigation tiles. Key fields: `menuId`, `companyId`, `name`, `url`, `category`, `order`, `editRights`, `icon`, `iconColor`, `toolTip`. Creating one requires `companyId`, `name`, `url`, `category`, `order` and `editRights`.
+Portal navigation tiles. Key fields: `companyMenuId` (the ID to pass to `get_resource` / `update_resource` / `delete_resource`), `companyId`, `name`, `url`, `category`, `order`, `editRights`, `icon`, `iconColor`, `toolTip`. Creating one requires `companyId`, `name`, `url`, `category`, `order` and `editRights`.
 
 - **List menus:** Call `list_resources` with `resource_type: "menu"`, `filter: "companyId eq 42"`.
 - **Add a menu tile:** Call `create_resource` with `resource_type: "menu"`. Copy `editRights` and `category` from an existing menu on the same company, since their allowed values aren't published.
 
 ### Courses & Lessons
-Training content for end users. Course uses `name` (NOT `title`). CourseLesson uses `title`, `overview`, `text` (HTML body), and `order`.
+Training content for end users. Course uses `name` (NOT `title`); creating one requires `companyId`, `name`, `description`, `shortDescription`, `category` and `estimatedTime` (an integer number of minutes). CourseLesson uses `title`, `overview`, `category`, `text` (HTML body), and `order`; creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`.
 
 - **List courses:** Call `list_resources` with `resource_type: "course"`, `filter: "companyId eq 42"`.
 - **List lessons for a course:** Call `list_resources` with `resource_type: "course_lesson"`, `filter: "courseId eq 372"`.
 - **Check enrollments:** Call `list_resources` with `resource_type: "course_enrollment"`, `filter: "companyId eq 42"`.
 
 ### Assessments
-Security and compliance assessments.
+Security and compliance assessments. Key fields: `assessmentId`, `companyId`, `title`, `category`, `type`, `status`, `dateConducted`, `totalScore`, `maxScore`, `compliantScore`. `type` 20 is an assessment (the only type the portal's Assessments list shows); 10 is a template and 30 is a run.
 
-- **List assessments:** Call `list_resources` with `resource_type: "assessment"`.
+- **List assessments:** Call `list_resources` with `resource_type: "assessment"`, `filter: "companyId eq 42 and type eq 20"`. Don't pass `select` for assessments; it returns HTTP 500.
+- **Create or refresh one:** use the `assessment_import` tool (the assessment-compliance skill covers it).
 
 ## Workflow for Creating Articles
 
@@ -112,19 +116,19 @@ Security and compliance assessments.
 
 3. **Prepare the article content.** The `body` field accepts HTML. If converting from a document, use pandoc to extract HTML.
 
-4. **Create the article.** Use `subject` (not `title`) for the article name. Set `isPublished: false` to create as draft. Call `create_resource` with `resource_type: "article"` and `data: { companyId: <id>, subject: "Article Title Here", body: "<p>Article HTML content here</p>", isPublished: false }`. The response includes the new `articleId`.
+4. **Create the article.** Use `subject` (not `title`) for the article name. `datePublished` is required, and there's no draft flag, so confirm the content with the user before creating it. Call `create_resource` with `resource_type: "article"` and `data: { companyId: <id>, subject: "Article Title Here", category: "How To", body: "<p>Article HTML content here</p>", datePublished: "<today, ISO 8601>" }`. The response includes the new `articleId`.
 
 5. **For large HTML bodies**, assemble the HTML in your working notes or local variables across multiple turns, then pass the combined string as `body` in a single `create_resource` call.
 
-6. **To update an existing article**, call `update_resource` with `resource_type: "article"`, `id: "<articleId>"`, `method: "PATCH"`, and `data: { ...fields to update }`.
+6. **To update an existing article**, call `update_resource` with `resource_type: "article"`, `id: "<articleId>"`, and `data: { ...only the fields to change }`. The default method is PATCH, so fields you leave out are kept.
 
 ## Workflow for Creating Courses
 
 1. **Confirm the target company** (same as articles).
 
-2. **Create the course container first.** Call `create_resource` with `resource_type: "course"` and `data: { companyId: <id>, name: "Course Name Here", description: "<p>HTML course description</p>", category: "Category", estimatedTime: "30 minutes", isRequired: false, passScore: 80 }`. The response includes the new `courseId`.
+2. **Create the course container first.** Call `create_resource` with `resource_type: "course"` and `data: { companyId: <id>, name: "Course Name Here", shortDescription: "One-line summary", description: "<p>HTML course description</p>", category: "Category", estimatedTime: 30, isRequired: false, passScore: 80 }`. `estimatedTime` is a whole number of minutes. The response includes the new `courseId`.
 
-3. **Create each lesson** in order, referencing the parent courseId. Call `create_resource` with `resource_type: "course_lesson"` and `data: { courseId: <courseId>, companyId: <companyId>, title: "Lesson Title", overview: "Brief lesson summary", text: "<p>HTML lesson body content</p>", order: 1 }`.
+3. **Create each lesson** in order, referencing the parent courseId. Call `create_resource` with `resource_type: "course_lesson"` and `data: { courseId: <courseId>, companyId: <companyId>, title: "Lesson Title", overview: "Brief lesson summary", category: "Category", text: "<p>HTML lesson body content</p>", order: 1 }`.
 
 4. **Repeat** for each lesson, incrementing the `order` field.
 
@@ -133,9 +137,8 @@ Security and compliance assessments.
 ## Workflow for Auditing Portal Content
 
 1. Identify the company.
-2. Pull articles filtered by companyId. Note total count and published vs unpublished.
+2. Pull articles filtered by companyId. Note the total count, the categories covered, and how recent `datePublished` is.
 3. Pull catalogs filtered by companyId.
 4. Pull menus filtered by companyId.
 5. Pull courses filtered by companyId.
-6. Summarize content coverage and identify gaps (e.g., "No service catalog configured", "3 unpublished articles", "0 courses assigned").
-                                                                                                                                                                                                                                                                                                                                                                                                              
+6. Summarize content coverage and identify gaps (e.g., "No service catalog configured", "No articles published in the last year", "0 courses assigned").

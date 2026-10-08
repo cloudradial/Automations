@@ -1,10 +1,24 @@
 # Turn Microsoft Secure Score into a Client Assessment
 
-Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control to a CloudRadial assessment question, and **creates + uploads** the assessment — the automated replacement for the old `Import-SecureScoreAssessment.ps1` / manual-import flow. This is a **deterministic PowerShell workflow** (not an agent): the spreadsheet is built in memory and uploaded, nothing is written to disk.
+Reads a client's Microsoft Secure Score and builds it into a CloudRadial assessment, one question per control with its current status, so security gaps are ready to review with the client.
 
-**Formerly:** Secure Score Assessment script (**AAI-00001**) | **Type:** Workflow (PowerShell)
+**Formerly:** Secure Score Assessment script | **Marketplace ID:** AAI-00001 | **Type:** Workflow
+
+## Files (always the latest version)
+
+These links point at the `main` branch, so they always open the current version.
+
+| What | Link |
+|---|---|
+| View `secure-score-assessment.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/secure-score-assessment/secure-score-assessment.yml) |
+| Download `secure-score-assessment.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/secure-score-assessment/secure-score-assessment.yml) |
+| All files in this automation | [automationai/secure-score-assessment](https://github.com/cloudradial/Automations/tree/main/automationai/secure-score-assessment) |
+| Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/secure-score-assessment) |
+| Marketplace listing | [AAI-00001](https://automations.cloudradial.com/marketplace/AAI-00001) |
 
 ## How it works
+
+Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control to a CloudRadial assessment question, and **creates + uploads** the assessment — the automated replacement for the old `Import-SecureScoreAssessment.ps1` / manual-import flow. This is a **deterministic PowerShell workflow** (not an agent): the spreadsheet is built in memory and uploaded, nothing is written to disk.
 
 `Start → Import Secure Score (single PowerShell node) → End`:
 

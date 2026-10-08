@@ -2,21 +2,30 @@
 
 Every computer is checked against age, warranty and Windows 11 readiness, and each client's refresh plan in Planner stays sorted by priority.
 
-**Formerly:** Endpoint LifeCycle Manager | **Marketplace ID:** Not yet listed | **Type:** Workflow (an optional AI agent version is included)
+**Formerly:** Endpoint LifeCycle Manager | **Marketplace ID:** AAI-00021 | **Type:** Workflow (an optional AI agent version is included)
 
 ## Files (always the latest version)
 
 These links point at the `main` branch, so they always open the current version.
 
+**Start with** [`endpoint-lifecycle-manager.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) on **Workflows → Import**. It doesn't need an agent.
+
+**Optional:** [`endpoint-lifecycle-manager-ai.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) on **Workflows → Import**, after importing the **Endpoint LifeCycle Manager** agent, [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml), on **Agents → Custom → Import**. See How it works for when to use it.
+
 | What | Link |
 |---|---|
-| View `endpoint-lifecycle-manager.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) |
+| View `endpoint-lifecycle-manager.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) |
 | Download `endpoint-lifecycle-manager.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) |
-| View `knowledge/endpoint-refresh-standards.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
+| View `endpoint-lifecycle-manager.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) |
+| Download `endpoint-lifecycle-manager.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) |
+| View `endpoint-lifecycle-manager-ai.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) |
+| Download `endpoint-lifecycle-manager-ai.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) |
+| View `knowledge/endpoint-refresh-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
 | Download `knowledge/endpoint-refresh-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
 | All files in this automation | [automationai/endpoint-lifecycle-manager](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/endpoint-lifecycle-manager) |
 | Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager/src) |
+| Marketplace listing | [AAI-00021](https://automations.cloudradial.com/marketplace/AAI-00021) |
 
 ## How it works
 
@@ -28,22 +37,22 @@ The workflow is **one PowerShell step with no AI**. The rules are fixed, so it d
 
 It uses **only the CloudRadial portal's endpoints**, both **workstations and servers** (servers go to *Human review*, VMs to their own track). It needs **no RMM and no ScalePad** connection; every decision comes from native endpoint fields already in CloudRadial.
 
-Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lifecycle Manager data into CloudRadial first, run the [ScalePad to CloudRadial Sync](../scalepad-cloudradial-sync/); this workflow then works from whatever the endpoints hold.
+Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lifecycle Manager data into CloudRadial first, run the [ScalePad to CloudRadial Sync](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync); this workflow then works from whatever the endpoints hold.
 
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml) | `automationsWorkflow` | **Use this one.** One PowerShell step, no AI: reads endpoints, sorts them, and writes the cards through the CloudRadial API. |
-| [`endpoint-lifecycle-manager.agent.yml`](endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | Optional. The same rules as an AI agent (slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.2), for asking questions in the AI Playground. |
-| [`endpoint-lifecycle-manager-ai.yml`](endpoint-lifecycle-manager-ai.yml) | `automationsWorkflow` | Optional. Runs the agent with a goal. It handles up to 3 companies per run and is subject to the runner's 25-turn limit, so prefer the PowerShell workflow for scheduled runs. |
-| [`knowledge/endpoint-refresh-standards.md`](knowledge/endpoint-refresh-standards.md) | Knowledge | The refresh standards in plain language: age, warranty, OS support, RAM, category rules, priority tiers and roadmap quarters, with one table of adjustable values. See [Adjusting the standards](#adjusting-the-standards). |
-| [`src/`](src/) | Source | `elm.ps1` (the PowerShell step), a mocked test harness, and the script that embeds it into the `.yml`. See [Changing the workflow](#changing-the-workflow). |
+| [`endpoint-lifecycle-manager.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) | `automationsWorkflow` | **Use this one.** One PowerShell step, no AI: reads endpoints, sorts them, and writes the cards through the CloudRadial API. |
+| [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | Optional. The same rules as an AI agent (slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.3), for asking questions in the AI Playground. |
+| [`endpoint-lifecycle-manager-ai.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) | `automationsWorkflow` | Optional. Runs the agent with a goal. It handles up to 3 companies per run and is subject to the runner's 25-turn limit, so prefer the PowerShell workflow for scheduled runs. |
+| [`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) | Knowledge | The refresh standards in plain language: age, warranty, OS support, RAM, category rules, priority tiers and roadmap quarters, with one table of adjustable values. See [Adjusting the standards](#adjusting-the-standards). |
+| [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager/src) | Source | `elm.ps1` (the PowerShell step), a mocked test harness, and the script that embeds it into the `.yml`. See [Changing the workflow](#changing-the-workflow). |
 
 ## Install / run
 
 1. Add the CloudRadial API secrets to the runner Key Vault: `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`.
-2. On **Workflows → Import**, upload [`endpoint-lifecycle-manager.yml`](endpoint-lifecycle-manager.yml), then **Publish** and **deploy** it to your runner.
+2. On **Workflows → Import**, upload [`endpoint-lifecycle-manager.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml), then **Publish** and **deploy** it to your runner.
 3. Run it from **Test**. Start with `{"mode": "plan"}` to see what it would change, then run it with no input to write the cards.
 4. Attach a **Routine** (for example monthly) to keep the cards current.
 
@@ -124,7 +133,7 @@ The run output lists every card with its action (`created`, `updated`, `reopened
 
 ## Adjusting the standards
 
-[`knowledge/endpoint-refresh-standards.md`](knowledge/endpoint-refresh-standards.md) holds every threshold and rule the workflow uses, so you can review or change your refresh standards in one place. Its **Standard values** table lists each setting, such as `replaceAgeYears` = 5 and `minimumRamGb` = 4.
+[`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) holds every threshold and rule the workflow uses, so you can review or change your refresh standards in one place. Its **Standard values** table lists each setting, such as `replaceAgeYears` = 5 and `minimumRamGb` = 4.
 
 1. Edit the values to your own standards. Keep the headings and setting names: the agent searches by them.
 2. Upload the file to a Knowledge folder, for example **Lifecycle Standards**.
@@ -133,7 +142,7 @@ The run output lists every card with its action (`created`, `updated`, `reopened
 
 ## Changing the workflow
 
-The PowerShell step in `endpoint-lifecycle-manager.yml` is [`src/elm.ps1`](src/elm.ps1). Change that file, test it, then embed it.
+The PowerShell step in `endpoint-lifecycle-manager.yml` is [`src/elm.ps1`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/src/elm.ps1). Change that file, test it, then embed it.
 
 From `src/`:
 
@@ -141,4 +150,4 @@ From `src/`:
 2. `pwsh -File test.ps1 -InputJson '{"mode":"apply","companyIds":"1"}'` runs `elm.ps1` against a mocked Key Vault, CloudRadial API and set of cards, in strict mode as on the runner. Add `-RejectNotes` to check the fallback when the portal refuses the internal note.
 3. `node build-elm.js` writes `elm.ps1` into `../endpoint-lifecycle-manager.yml`.
 
-[Weekly Fleet Audit](../weekly-fleet-audit/) copies the rules block (between `# ---- shared: begin` and `# ---- shared: end ----`) at build time, so after changing a rule, run its `build-audit.js` too. The agent (`endpoint-lifecycle-manager.agent.yml`) follows the same rules. If you change a rule in `elm.ps1`, change the agent's system prompt and [`knowledge/endpoint-refresh-standards.md`](knowledge/endpoint-refresh-standards.md) to match.
+[Weekly Fleet Audit](https://github.com/cloudradial/Automations/tree/main/automationai/weekly-fleet-audit) copies the rules block (between `# ---- shared: begin` and `# ---- shared: end ----`) at build time, so after changing a rule, run its `build-audit.js` too. The agent (`endpoint-lifecycle-manager.agent.yml`) follows the same rules. If you change a rule in `elm.ps1`, change the agent's system prompt and [`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) to match.

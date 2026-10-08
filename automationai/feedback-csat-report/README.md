@@ -2,7 +2,7 @@
 
 Turns portal feedback into a CSAT score and summary for each client on a Planner card, updated every run.
 
-**Formerly:** Feedback & CSAT Report | **Marketplace ID:** Not yet listed | **Type:** Workflow
+**Formerly:** Feedback & CSAT Report | **Marketplace ID:** AAI-00022 | **Type:** Workflow
 
 ## Files (always the latest version)
 
@@ -14,6 +14,7 @@ These links point at the `main` branch, so they always open the current version.
 | Download `feedback-csat-report.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/feedback-csat-report/feedback-csat-report.yml) |
 | All files in this automation | [automationai/feedback-csat-report](https://github.com/cloudradial/Automations/tree/main/automationai/feedback-csat-report) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/feedback-csat-report) |
+| Marketplace listing | [AAI-00022](https://automations.cloudradial.com/marketplace/AAI-00022) |
 
 ## How it works
 

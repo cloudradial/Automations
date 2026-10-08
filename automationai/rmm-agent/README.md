@@ -8,14 +8,19 @@ The shared engine behind the device fix and patch compliance automations. It wor
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import** [`rmm-agent.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/rmm-agent/rmm-agent.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
+
+- [Show Every Client's Patch Compliance in Their Planner](https://github.com/cloudradial/Automations/tree/main/automationai/patch-compliance)
+- [Fix Common Workstation Alerts Without a Technician](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-auto-remediation)
+
 | What | Link |
 |---|---|
 | View `rmm-agent.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/rmm-agent/rmm-agent.agent.yml) |
 | Download `rmm-agent.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/rmm-agent/rmm-agent.agent.yml) |
+| Used by | [Show Every Client's Patch Compliance in Their Planner](https://github.com/cloudradial/Automations/tree/main/automationai/patch-compliance) |
+| Used by | [Fix Common Workstation Alerts Without a Technician](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-auto-remediation) |
 | All files in this automation | [automationai/rmm-agent](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-agent) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/rmm-agent) |
-| Works with | [Fix Common Workstation Alerts Without a Technician](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-auto-remediation) |
-| Works with | [Show Every Client's Patch Compliance in Their Planner](https://github.com/cloudradial/Automations/tree/main/automationai/patch-compliance) |
 
 ## How it works
 
@@ -23,7 +28,7 @@ A reusable RMM operations **agent** that uses the partner's RMM extension to res
 issues automatically, plus thin **workflows** that each run it with a goal for one
 trigger: an RMM alert webhook, a ServiceAI Triage Action on a ticket, or a schedule.
 Each workflow is a `type: agent` node with a `goal` + `agentSlug` (the same pattern as
-[Portal Lookup](../portal-lookup/)).
+[Portal Lookup](https://github.com/cloudradial/Automations/tree/main/automationai/portal-lookup)).
 
 This build uses the **Datto RMM** extension (`datto-rmm`). To support another RMM, add
 its extension slug to the agent's `requiredExtensionSlugs` and the workflow node's

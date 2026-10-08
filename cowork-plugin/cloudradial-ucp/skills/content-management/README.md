@@ -16,7 +16,7 @@ Seed Contoso's portal with 10 starter KB articles covering password reset, VPN, 
 
 | Say this | What you get |
 |---|---|
-| `Create a KB article for Acme Corp about resetting MFA` | A draft article with step-by-step instructions |
+| `Create a KB article for Acme Corp about resetting MFA` | An article with step-by-step instructions, shown to you before it's created |
 | `Seed Contoso with 10 starter KB articles` | 10 draft articles covering common IT topics |
 | `Show me all unpublished articles for Contoso` | Filtered list of draft content ready for review |
 | `Audit Contoso's portal content` | Summary of articles, catalogs, and menus by status |

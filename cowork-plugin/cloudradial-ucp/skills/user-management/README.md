@@ -16,10 +16,10 @@ Who has access to Contoso's portal?
 
 | Say this | What you get |
 |---|---|
-| `Find user john@acme.com` | User record with company, role, and last login |
-| `Who has access to Contoso's portal?` | Full user list with names, emails, and roles |
+| `Find user john@contoso.com` | User record with company, title and department |
+| `Who has access to Contoso's portal?` | Full user list with names and emails (roles are portal-only) |
 | `How many users does Acme Corp have?` | Quick count by company |
-| `List Contoso's users with just name, email, and role` | Filtered fields for a clean view |
+| `List Contoso's users with just name, email, and title` | Filtered fields for a clean view |
 | `Which of Contoso's users haven't completed security training?` | Cross-referenced with course enrollments |
 
 ## Good to know

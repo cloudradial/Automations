@@ -33,10 +33,10 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
-| `get_resource` | Retrieve one resource by ID | `resource_type`, `id` |
+| `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
-| `update_resource` | PUT (full) or PATCH (partial) update | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID | `resource_type`, `id` |
+| `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
+| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -46,7 +46,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200; walk through larger pages by incrementing `skip`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -54,12 +54,15 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 - Courses use `name` (not `title`).
 - `archive_item` composite key — pass `archive_id` and `id`.
 - `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
 
 - **"credentials not configured"** → defer to the `setup` skill.
 - **401/403 from CloudRadial** → stored credentials are invalid. Run `setup` to rotate.
-- **404** → resource not found, verify the ID.
+- **404** → resource not found. Verify the ID, and for `catalog_question`, `course_lesson`, `domain`, `user`, `application_user` and `token` pass `company_id`.
+- Every HTTP 4xx/5xx comes back as a tool error, not as data. Read the message and fix the call instead of retrying it unchanged.
 
 ## Resource Types
 
@@ -69,16 +72,16 @@ Archived reports and documents. Key fields: `companyReportItemId`, `companyRepor
 **Note:** archive_item is a composite-key resource. Getting a specific item requires both `archive_id` (the folder) and `id` (the item).
 
 ### certificate
-Certificates tracked in the portal. Key fields: `certificateId`, `companyId`, `name`, `expirationDate`.
+Certificates tracked in the portal. Key fields: `id` (the certificate's ID), `companyId`, `companyDomainId`, `name`, `url`, `expirationDate`, `issuer`, `isValid`, `thumbprint`. Creating one requires `companyId`, `name` and `url`.
 
 ### company_group
-Logical groupings of companies. Key fields: `companyGroupId`, `name`, `description`.
+Logical groupings of companies. Key fields: `companyGroupId`, `group` (the group's name; there is no `name` or `description`), `partnerId`. Create with `data: { group: "Managed Plus" }`. Membership lives in `company_group_company` (`companyGroupId`, `companyId`).
 
 ### quickstart
 Quickstart guides on a company's portal home page. Key fields: `quickstartId`, `companyId`, `subject` (NOT `name`), `description`, `category`, `body` (HTML), `icon`, `iconColor`, `datePublished`, `isText`. Creating one requires `companyId`, `subject`, `description`, `category`, `icon`, `iconColor`, `datePublished` and `isText`.
 
 ### media
-Media files (images, documents) stored in the portal. Key fields: `mediaId`, `originalName`, `contentType`, `url`. Create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }`; `width` and `height` are required, so use 0 for non-images.
+Media files (images, documents) stored in the portal. Key fields: `partnerMediaId` (the media file's ID), `originalName`, `contentType`, `description`, `length`, `width`, `height`, `viewToken`. Create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }`; `width` and `height` are required, so use 0 for non-images.
 
 ### token
 **Replacement tokens**, not API keys: the named values (like `@SupportPhone`) that portal forms, articles and automations fill in. A token lives at partner level (`companyId` 0) or on one company, and a company token overrides the partner token of the same name. Manage them with `manage_tokens`. Token names are case-sensitive.
@@ -117,8 +120,33 @@ For advanced operations not covered by the standard tools, use `raw_api_call` to
 
 **GET example:** Call `raw_api_call` with `method: "GET"`, `path: "/v2/odata/company/$count"`.
 
-**POST example with query params:** Call `raw_api_call` with `method: "GET"`, `path: "/v2/odata/company"`, `query: { "$top": 5, "$select": "companyId,name" }`.
+**GET example with query params:** Call `raw_api_call` with `method: "GET"`, `path: "/v2/odata/company"`, `query: { "$top": 5, "$select": "companyId,name" }`.
+
+**POST example with a body:** Call `raw_api_call` with `method: "POST"`, `path: "/v2/companygroup"`, `body: { "group": "Managed Plus" }`. Confirm any write with the user first.
+
+A raw `PATCH` body must be a JSON Patch array (`[{ "op": "replace", "path": "/name", "value": "Contoso Ltd" }]`); `update_resource` builds that for you, so prefer it.
 
 ## API Reference
 
-For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references/api
+For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references/api-reference.md`.
+
+## Workflows
+
+### Certificate Expiration Report
+
+1. List certificates for a company (or all companies), paging with `top: "200"` and `skip`
+2. Check `expirationDate` against the current date
+3. Flag certificates expiring within 30/60/90 days, and any where `isValid` is false
+4. Present as a prioritized action list
+
+### Archive Report History
+
+1. List archive items for a company with `orderby: "dateUploaded desc"`
+2. Note subjects and dates to understand reporting history
+3. Get specific items for detailed content (`archive_id` = `companyReportFolderId`, `id` = `companyReportItemId`)
+
+### Company Group Overview
+
+1. List all company groups (`resource_type: "company_group"`); the group's name is in `group`
+2. List memberships with `resource_type: "company_group_company"` (filter `companyGroupId eq <id>` for one group)
+3. Join `companyId` to the company list and present group membership, including companies in no group

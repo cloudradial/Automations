@@ -100,14 +100,15 @@ Fields that justify a refresh recommendation, all verified present on the live e
 | `expirationDate` | Warranty or EOL date. Past date is the strongest signal. |
 | `cpuDate`, `biosDate` | Derive platform age when no purchase date exists |
 | `os`, `osVersion` | Operating system end-of-support exposure |
-| `windows11Readiness` | `NotReady` is a hardware-bound refresh driver |
+| `windows11Readiness` | `Windows11Status` enum (spec values 1, 2, -1, -2), returned as a name. Only `Installed` / `Capable` are positive; a not-capable value is a hardware-bound refresh driver; `Unknown` or blank proves nothing |
 | `lastCheckIn` | A device silent for a year is a data-hygiene finding |
 | `manufacturer`, `model`, `serialNumber` | The appendix table columns |
 | `isEncrypted`, `antiVirus`, `tpmVersion` | Security posture, feeds Policies |
 
 Note the field names differ from some older docs: the entity uses
-`companyEndpointId`, `expirationDate`, and `os` — not `endpointId`,
-`warrantyExpirationDate`, or `operatingSystem`.
+`companyEndpointId`, `expirationDate`, `os` and `lastCheckIn` — not `endpointId`,
+`warrantyExpirationDate`, `operatingSystem` or `lastSeen`. OData returns enum fields
+(`enclosure`, `windows11Readiness`, `platformType`) as names, not numbers.
 
 ### 3b. Sync ScalePad asset/EOL data into the endpoints (Lifecycle Manager imports)
 
@@ -118,9 +119,12 @@ onto the real endpoints so they drive `WarrantyExpirationPolicy` and future repo
 Match each asset to an endpoint by `serialNumber`; enrich the match (write the missing
 `expirationDate`, never clobber RMM-supplied fields) or, with the operator's confirmation,
 create a tagged placeholder endpoint for assets not yet in the portal. `expirationDate` is
-directly writable — use `update_resource` / `create_resource`, **not**
+directly writable — use `update_resource` (PATCH, the default) / `create_resource`, **not**
 `endpoint_update_warranty` (that does an async manufacturer lookup and ignores the ScalePad
-date). Rows with no serial cannot be safely matched or created — skip them.
+date). Rows with no serial cannot be safely matched or created — skip them. Values with no
+endpoint field (a purchase date, a source tag) go on as custom properties:
+`create_resource` with `resource_type: "endpoint_custom_property"`, `serial_number`, and
+`data: { name, value, dataType }`.
 
 Full field map, match/update/create mechanics, required-field caveats, and the
 `pdftotext` extraction recipe:
@@ -150,7 +154,8 @@ for the full field map, enum values, and verified write quirks.
 
 The essentials:
 
-- `subject`, `body`, `summary`, `category` and `productCategoryId` are all required on create
+- `companyId`, `subject`, `body`, `summary`, `category`, `productCategoryId`, `datePublished`,
+  `isRequired` and `isShowPrice` are all required on create
 - `productType: 2` plus `estimatedStartDate` and `estimatedEndDate` puts the item on the Timeline
 - `productType: 0` means Not Scheduled — the right home for an overdue backlog that has
   recognised budget but no agreed date
@@ -166,8 +171,9 @@ triggered the recommendation ("Warranty expired 24 Jun 2025", not "old").
 ### 6. Create the budget lines
 
 Recurring contracts and licence lines become Planner items with `monthlyUnitPrice` set,
-`status: "Completed"` and `currentlyInstalled: true` so they read as active spend rather
-than proposals.
+`status: "Completed"` (40) and `currentlyInstalled: true` so they read as active spend rather
+than proposals. `status` and `priority` take the name string (live-tested) or the integer (see
+`planner-item-schema.md`); OData returns their names on read.
 
 Where a contract bills annually, either divide to a monthly equivalent so quarterly
 totals behave, or place the full amount in the renewal quarter. State which convention

@@ -2,7 +2,7 @@
 
 Moves every matched client's devices, other hardware, software, assessments, roadmap, budget, SaaS, insights and QBR documents from ScalePad into CloudRadial, and is safe to re-run.
 
-**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** Not yet listed | **Type:** Workflow
+**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** AAI-00030 | **Type:** Workflow
 
 ## Files (always the latest version)
 
@@ -14,8 +14,8 @@ These links point at the `main` branch, so they always open the current version.
 | Download `scalepad-cloudradial-sync.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
 | All files in this automation | [automationai/scalepad-cloudradial-sync](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/scalepad-cloudradial-sync) |
-| Works with | [Review Messy ScalePad Data Before You Migrate](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-alignment) |
 | Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync/src) |
+| Marketplace listing | [AAI-00030](https://automations.cloudradial.com/marketplace/AAI-00030) |
 
 ## How it works
 
@@ -26,7 +26,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | File | Type | Role |
 |---|---|---|
 | [`scalepad-cloudradial-sync.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) | `automationsWorkflow` | Three steps: **Match companies by name** → **Migrate each company** (a For Each that runs every phase below for one company, in order) → **Migration report** (one report per company, written into its portal, plus a roll-up in the run output). |
-| [`src/`](src/) | Source | The PowerShell for each step and phase, the build script that assembles them into the `.yml`, and a mocked test harness. Partners don't need it; see [Changing the workflow](#changing-the-workflow). |
+| [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync/src) | Source | The PowerShell for each step and phase, the build script that assembles them into the `.yml`, and a mocked test harness. Partners don't need it; see [Changing the workflow](#changing-the-workflow). |
 
 ## What it moves
 
@@ -143,7 +143,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 
 ## Changing the workflow
 
-`scalepad-cloudradial-sync.yml` is **generated** from [`src/`](src/). Don't edit the scripts inside the `.yml`; change the source and rebuild.
+`scalepad-cloudradial-sync.yml` is **generated** from [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/scalepad-cloudradial-sync/src). Don't edit the scripts inside the `.yml`; change the source and rebuild.
 
 | File | What |
 |---|---|

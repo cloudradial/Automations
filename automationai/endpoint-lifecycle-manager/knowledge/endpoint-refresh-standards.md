@@ -67,7 +67,7 @@ Warranty comes from the endpoint's `expirationDate`:
 | macOS 12 (Monterey) and older, the `macosHardEndOfLife` value | Unsupported and past hard end of life (Critical tier) |
 | "macOS" with no version number | Unknown |
 
-**Windows 11 readiness.** Windows 11 readiness (`windows11Readiness`) counts only when it says "Installed" or "Capable". "Unknown" or a blank value never means the computer can't run Windows 11.
+**Windows 11 readiness.** Windows 11 readiness (`windows11Readiness`) counts only when it says "Installed", "Capable" or "Ready". "NotReady" or any other "not" value means the computer is not ready. "Unknown" or a blank value never means the computer can't run Windows 11.
 
 ## RAM
 
@@ -84,7 +84,7 @@ For a computer that isn't a server or a virtual machine, the **first** rule that
    - it's at least `replaceAgeYears` (5) old
    - its OS is unsupported and it isn't Windows 11-ready
    - it has less than `minimumRamGb` (4 GB) of RAM
-2. **Upgrade in place:** its OS is unsupported, but Windows 11 readiness says "Installed" or "Capable". The hardware is fine, so upgrade the OS.
+2. **Upgrade in place:** its OS is unsupported, but Windows 11 readiness says "Installed", "Capable" or "Ready". The hardware is fine, so upgrade the OS.
 3. **Plan replacement:** it's at least `planAgeYears` (3) old but younger than 5.
 4. **Retain:** it's younger than 3 years. It's carded only when its warranty is expired or expiring, or it has less than `recommendedRamGb` (8 GB) of RAM. Otherwise it's healthy and not carded.
 5. **Needs data:** it has no age, no warranty date, and an unknown OS. The card asks for those details so it can be placed next time.

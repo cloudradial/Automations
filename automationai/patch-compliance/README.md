@@ -8,13 +8,18 @@ Each client gets a current patch compliance score and a list of problem devices 
 
 These links point at the `main` branch, so they always open the current version.
 
+**Import in this order.** A workflow can't find its agent until the agent is imported.
+
+1. Import the **RMM Agent** agent, [`rmm-agent.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/rmm-agent/rmm-agent.agent.yml) from [Safe Device Fixes and Patch Checks Through Your RMM](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-agent), on **Agents → Custom → Import** (skip this if it's already installed).
+2. Import [`patch-compliance.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/patch-compliance/patch-compliance.yml) on **Workflows → Import**.
+
 | What | Link |
 |---|---|
 | View `patch-compliance.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/patch-compliance/patch-compliance.yml) |
 | Download `patch-compliance.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/patch-compliance/patch-compliance.yml) |
+| Needs the agent | [RMM Agent](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-agent) |
 | All files in this automation | [automationai/patch-compliance](https://github.com/cloudradial/Automations/tree/main/automationai/patch-compliance) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/patch-compliance) |
-| Works with | [Safe Device Fixes and Patch Checks Through Your RMM](https://github.com/cloudradial/Automations/tree/main/automationai/rmm-agent) |
 
 ## How it works
 

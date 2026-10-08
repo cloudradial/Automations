@@ -58,17 +58,57 @@ $out = [ordered]@{
     actions = @(); warnings = @()
     audit = [ordered]@{ requestedBy = $submitter; submitterSource = [string]$state['submitter_source']; target = $upn; evaluatedAt = $when }
 }
-$stop = @{ done = $false }
+$stop = @{ done = $false; category = 'graph-error' }
 trap {
     if (-not $stop.done) {
         $stop.done = $true
         $m = [string]$_.Exception.Message
-        $out.status = 'error'; $out.category = 'graph-error'; $out.message = $m
+        $out.status = 'error'; $out.category = $stop.category; $out.message = $m
         $out.public_note = 'Something went wrong while resetting your sign-in methods. A technician will follow up shortly.'; $out.chatReply = $out.public_note
         $out.internal_note = "MFA reset for $upn failed: $m"; $out.actions = $actions; $out.warnings = $warnings
         Set-NodeOutput $out
     }
     break
+}
+
+# Retry guard. The internal note ends with [mfa-reset: <ticket id>] (a rejected request with
+# [mfa-reset-request: <ticket id>]). The marker holds only the ticket id: never the account, and never
+# the Temporary Access Pass. Before anything changes, the ticket's notes are read; when the reset's
+# marker is already there (ServiceAI Retry, or the same request run twice), nothing is removed, no
+# new pass is created (which would replace the one a technician is relaying) and no note is added.
+$ticketPsa = @{ ok = $false; marker = '' }
+if ($ticketId) { $ticketPsa.marker = $(if ($status -eq 'rejected') { "mfa-reset-request: $ticketId" } else { "mfa-reset: $ticketId" }) }
+if (-not $dryRun -and $ticketId) {
+    try {
+        $psa = Get-PsaType ([string]$state['psa'])
+        if (-not $psa) { $warnings += 'No PSA is set up (PSA-Type secret), so the internal note is only in this run''s output.' }
+        else {
+            $null = Connect-Psa -Psa $psa
+            $companyId = [string]$state['psaCompanyId']
+            $ticketPsa.ok = $true
+            if ($companyId) {
+                $tk = Get-PsaTicket -Id $ticketId
+                if ($tk.companyId -and [string]$tk.companyId -ne $companyId) { $ticketPsa.ok = $false; $warnings += "Ticket $ticketId belongs to another company in $(Get-PsaName), so no note was written to it. The internal note is only in this run's output." }
+            }
+        }
+    }
+    catch { $ticketPsa.ok = $false; $warnings += "The internal note could not be written to ticket $($ticketId): $($_.Exception.Message)" }
+}
+if ($status -ne 'rejected' -and -not $dryRun -and $ticketPsa.ok) {
+    $stop.category = 'psa-error'
+    try { $seen = Test-PsaNoteMarker -Id $ticketId -Marker $ticketPsa.marker }
+    catch { throw "The notes on ticket $ticketId couldn't be read, so nothing was changed. (This check stops a retried run from resetting twice.) $($_.Exception.Message)" }
+    $stop.category = 'graph-error'
+    if ($seen) {
+        $out.status = 'success'; $out.category = 'already-done'
+        $out.message = "The MFA reset for ticket $ticketId was already done, so nothing was changed again and no note was added."
+        $out.public_note = 'Your MFA reset has already been done. If you still cannot sign in, contact the service desk.'; $out.chatReply = $out.public_note
+        $out.internal_note = "MFA reset for ticket $ticketId was already recorded on the ticket. This rerun changed nothing."
+        $actions += "The reset was already recorded on ticket $ticketId, so this run changed nothing"
+        $out.actions = $actions; $out.warnings = $warnings
+        Set-NodeOutput $out
+        return
+    }
 }
 
 $noteLines = New-Object System.Collections.Generic.List[string]
@@ -177,20 +217,12 @@ $out.internal_note = $noteLines -join "`n"
 # Internal note on the ticket, through the six-PSA adapter. A dry run writes nothing.
 if ($dryRun) { }
 elseif (-not $ticketId) { $warnings += 'No ticket id was sent, so the internal note is only in this run''s output.' }
-else {
+elseif ($ticketPsa.ok) {
+    # Written last, after every change, so a run that failed part way is retried in full.
     try {
-        $psa = Get-PsaType ([string]$state['psa'])
-        if (-not $psa) { $warnings += 'No PSA is set up (PSA-Type secret), so the internal note is only in this run''s output.' }
-        else {
-            $null = Connect-Psa -Psa $psa
-            $companyId = [string]$state['psaCompanyId']
-            $ok = $true
-            if ($companyId) {
-                $tk = Get-PsaTicket -Id $ticketId
-                if ($tk.companyId -and [string]$tk.companyId -ne $companyId) { $ok = $false; $warnings += "Ticket $ticketId belongs to another company in $(Get-PsaName), so no note was written to it. The internal note is only in this run's output." }
-            }
-            if ($ok) { Add-PsaNote -Id $ticketId -Text $out.internal_note -Title 'MFA reset'; $out.note_written = $true; $actions += "Added the internal note to ticket $ticketId in $(Get-PsaName)" }
-        }
+        $r = Add-PsaNote -Id $ticketId -Text $out.internal_note -Title 'MFA reset' -Marker $ticketPsa.marker
+        if ($r -eq 'already-present') { $actions += "The internal note was already on ticket $ticketId, so it was not added again" }
+        else { $out.note_written = $true; $actions += "Added the internal note to ticket $ticketId in $(Get-PsaName)" }
     }
     catch { $warnings += "The internal note could not be written to ticket $($ticketId): $($_.Exception.Message)" }
 }

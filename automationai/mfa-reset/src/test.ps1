@@ -80,7 +80,11 @@ function Reset-TScenario {
     $global:TS = @{ methods = 'full'; enabled = $true; direct = $false; group = $false; eligible = $false; eligibleLicense = $false
         risk = 'none'; riskForbidden = $false; authForbidden = $false; roleForbidden = $false; tap = 'ok'; phoneDefaultFirst = $false
         revokeFail = $false; atCompany = 42 }
+    # Notes written to each ticket, read back by the retry guard (Test-PsaNoteMarker).
+    $global:TNotes = @{}
 }
+function Add-TNote { param([string]$T, [string]$Text, [bool]$Public) if (-not $global:TNotes.Contains($T)) { $global:TNotes[$T] = @() }; $global:TNotes[$T] += [pscustomobject]@{ text = $Text; public = $Public } }
+function Get-TNotes { param([string]$T) if ($global:TNotes.Contains($T)) { return @($global:TNotes[$T]) }; return @() }
 Reset-TScenario
 
 $Handler = {
@@ -126,15 +130,17 @@ $Handler = {
             if ($S.tap -eq 'policy') { New-HttpError 400 '{"error":{"code":"badRequest","message":"Temporary Access Pass policy is not enabled for this user."}}' }
             return [pscustomobject]@{ id = 'newtap'; temporaryAccessPass = $TTapCode; startDateTime = '2026-10-07T15:00:00Z'; lifetimeInMinutes = 60; isUsableOnce = $true }
         }
-        "GET $TCW/service/tickets/777/notes*" { return @() }
+        "GET $TCW/service/tickets/777/notes*" { $i = 0; return @(Get-TNotes '777' | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public; dateCreated = '2026-10-08T10:00:00Z' } }) }
         "GET $TCW/service/tickets/777" { return [pscustomobject]@{ id = 777; summary = 'Reset my MFA'; company = [pscustomobject]@{ id = 42 }; owner = $null; status = [pscustomobject]@{ name = 'New' } } }
-        "POST $TCW/service/tickets/777/notes" { return [pscustomobject]@{ id = 9001 } }
+        "POST $TCW/service/tickets/777/notes" { $b = $c.Body | ConvertFrom-Json; Add-TNote '777' $b.text ([bool]$b.detailDescriptionFlag); return [pscustomobject]@{ id = 9001 } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
         "GET $TAT/Tickets/12345" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 12345; title = 'MFA reset'; description = ''; companyID = $S.atCompany; status = 1; assignedResourceID = $null } } }
-        "POST $TAT/Tickets/12345/Notes" { return [pscustomobject]@{ itemId = 3001 } }
-        "PUT $TZD/tickets/506" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 506 } } }
+        "POST $TAT/Tickets/12345/Notes" { $b = $c.Body | ConvertFrom-Json; Add-TNote '12345' $b.description ($b.publish -ne 2); return [pscustomobject]@{ itemId = 3001 } }
+        "GET $TAT/TicketNotes/query*" { $i = 0; return [pscustomobject]@{ items = @(Get-TNotes '12345' | ForEach-Object { $i++; [pscustomobject]@{ id = $i; ticketID = 12345; title = 'MFA reset'; description = $_.text; publish = $(if ($_.public) { 1 } else { 2 }); createDateTime = '2026-10-08T10:00:00Z' } }); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
+        "PUT $TZD/tickets/506" { $b = $c.Body | ConvertFrom-Json; Add-TNote '506' $b.ticket.comment.body ([bool]$b.ticket.comment.public); return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 506 } } }
+        "GET $TZD/tickets/506/comments*" { $i = 0; return [pscustomobject]@{ comments = @(Get-TNotes '506' | ForEach-Object { $i++; [pscustomobject]@{ id = $i; body = $_.text; public = $_.public; author_id = 1; created_at = '2026-10-08T10:00:00Z' } }); next_page = $null } }
     }
     throw "Unexpected call in test: $k"
 }
@@ -297,7 +303,43 @@ Reset-Mock (Get-TSecrets 'none') $Handler; Reset-TScenario
 $f = Invoke-Flow (New-TBody @{})
 Check 'no PSA set up: success, warning' ($f.r.out.status -eq 'success' -and @($f.r.out.warnings | Where-Object { $_ -like '*No PSA is set up*' }).Count -eq 1) "$($f.r.out.status) $($f.r.out.warnings -join ';')"
 
-# ---- 12. Parse ----
+# ---- 12. Rerun (ServiceAI Retry, or the same request twice) writes nothing twice ----
+# ConnectWise: the first run resets and writes the marked internal note; the rerun finds the marker
+# before any Graph change, so nothing is removed, no second pass is created and no note is added.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
+$f = Invoke-Flow (New-TBody @{ issue_tap = $true })
+Check 'rerun cw: first run succeeds and writes one marked internal note' ($f.r.out.status -eq 'success' -and @(Get-TNotes '777').Count -eq 1 -and (Get-TNotes '777')[0].text.Contains('[mfa-reset: 777]') -and (Get-TNotes '777')[0].public -eq $false) "$($f.r.out.status) $($f.r.error)"
+$TFirstTap = @(Get-TNotes '777')[0].text
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ issue_tap = $true })
+$o = $f.r.out
+Check 'rerun cw: success, already-done, nothing changed' ($o.status -eq 'success' -and $o.category -eq 'already-done' -and $o.note_written -eq $false -and -not $f.r.error) "$($o.status) $($o.category) $($f.r.error)"
+Check 'rerun cw: no Graph write (no DELETE, revoke or new pass)' (@(Get-TGraphWrites).Count -eq 0 -and -not @(Get-Calls 'GET' "$TG/users/u1/authentication/methods").Count) (Show-Calls)
+Check 'rerun cw: no second note' (@(Get-Calls 'POST' "$TCW/service/tickets/777/notes").Count -eq 0 -and @(Get-TNotes '777').Count -eq 1 -and (Get-TNotes '777')[0].text -eq $TFirstTap)
+Check 'rerun cw: the TAP is not in any output field, and the marker never holds it' (($o | ConvertTo-Json -Depth 8) -notlike "*$TTapCode*" -and $TFirstTap -notmatch "\[[^\]]*$TTapCode[^\]]*\]" -and $TFirstTap -like "*$TTapCode*")
+# Autotask: same guard through the Autotask notes query.
+Reset-Mock (Get-TSecrets 'autotask') $Handler; Reset-TScenario
+$null = Invoke-Flow (New-TBody @{ ticketId = '12345'; psaCompanyId = '42' })
+Reset-Mock (Get-TSecrets 'autotask') $Handler
+$f = Invoke-Flow (New-TBody @{ ticketId = '12345'; psaCompanyId = '42' })
+Check 'rerun autotask: nothing removed, no second note' ($f.r.out.category -eq 'already-done' -and @(Get-TGraphWrites).Count -eq 0 -and -not @(Get-Calls 'POST' "$TAT/Tickets/12345/Notes").Count -and @(Get-TNotes '12345').Count -eq 1) "$($f.r.out.status) $($f.r.out.category) $($f.r.error)"
+# A rejected request retried: the refusal note is written once.
+Reset-Mock (Get-TSecrets 'zendesk') $Handler; Reset-TScenario
+$null = Invoke-Flow (New-TBody @{ userPrincipalName = 'alex.wilber@contoso.com'; ticketId = '506' })
+Reset-Mock (Get-TSecrets 'zendesk') $Handler
+$f = Invoke-Flow (New-TBody @{ userPrincipalName = 'alex.wilber@contoso.com'; ticketId = '506' })
+Check 'rerun rejected (Zendesk): refusal note written once, marker holds only the ticket id' ($f.r.out.status -eq 'rejected' -and -not @(Get-Calls 'PUT' "$TZD/tickets/506").Count -and @(Get-TNotes '506').Count -eq 1 -and (Get-TNotes '506')[0].text.Contains('[mfa-reset-request: 506]')) "$(Show-Calls)"
+# The marker is checked before any change: unreadable notes stop the run with nothing changed.
+Reset-Mock (Get-TSecrets 'autotask') $Handler; Reset-TScenario
+$TSaved = $Handler
+$Handler2 = { param($c, $n) if ($c.Method -eq 'GET' -and $c.Uri -like '*/TicketNotes/query*') { New-HttpError 403 '{"errors":["denied"]}' }; return (& $TSaved $c $n) }
+Reset-Mock (Get-TSecrets 'autotask') $Handler2
+$f = Invoke-Flow (New-TBody @{ ticketId = '12345' })
+Check 'notes unreadable: error psa-error, nothing removed, no note' ($f.r.out.status -eq 'error' -and $f.r.out.category -eq 'psa-error' -and @(Get-TGraphWrites).Count -eq 0 -and -not @(Get-Calls 'POST' "$TAT/Tickets/12345/Notes").Count) "$($f.r.out.status) $($f.r.out.category) $($f.r.error)"
+# No note this workflow writes is public, so no personal data or marker reaches the client.
+Check 'every ticket note is internal' (-not @(foreach ($TK in @($global:TNotes.Keys)) { Get-TNotes $TK | Where-Object { $_.public } }).Count)
+
+# ---- 13. Parse ----
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
 $p = Invoke-Step 'parse' $null
 Check 'parse: no input -> incomplete' ($p.out.status -eq 'incomplete' -and $p.error)

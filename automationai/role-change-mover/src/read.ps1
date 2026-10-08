@@ -1,17 +1,15 @@
 # Step 1: read the request, the department map and the user, and work out the plan.
 # Writes nothing. Its output feeds the Apply step, which previews or applies the plan and notes the ticket.
-function Get-RcProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
-function Get-RcSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
 function Test-RcGuid { param([string]$s) return ([string]$s).Trim() -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' }
 
 $in = Get-NodeInput
 if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { $in = $null } }
-foreach ($wrap in @('trigger', 'body')) { $w = Get-RcProp $in $wrap; if ($w -is [string]) { try { $w = $w | ConvertFrom-Json } catch { $w = $null } }; if ($null -ne $w -and -not ($w -is [string])) { $in = $w } }
+foreach ($wrap in @('trigger', 'body')) { $w = Get-CrProp $in $wrap; if ($w -is [string]) { try { $w = $w | ConvertFrom-Json } catch { $w = $null } }; if ($null -ne $w -and -not ($w -is [string])) { $in = $w } }
 
 $warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 $out = [ordered]@{
-    status = 'ok'; message = ''; ticket_id = ''; psa = ''; confirm = $false
+    status = 'ok'; message = ''; ticket_id = ''; psa = ''; confirm = $false; request_key = ''
     upn = ''; user_id = ''; display_name = ''
     old_department = ''; new_department = ''
     current = [ordered]@{ department = ''; jobTitle = ''; manager = '' }
@@ -28,13 +26,13 @@ function Stop-Read {
 
 # CloudRadial form answers arrive as Ticket.Questions [{Id, Value}]; flat bodies as plain fields.
 $answers = @{}
-$ticketObj = Get-RcProp $in 'Ticket'
-foreach ($q in @(Get-RcProp $ticketObj 'Questions')) { $qid = [string](Get-RcProp $q 'Id'); if ($qid) { $answers[$qid.ToLowerInvariant()] = Get-RcProp $q 'Value' } }
+$ticketObj = Get-CrProp $in 'Ticket'
+foreach ($q in @(Get-CrProp $ticketObj 'Questions')) { $qid = [string](Get-CrProp $q 'Id'); if ($qid) { $answers[$qid.ToLowerInvariant()] = Get-CrProp $q 'Value' } }
 # A value is missing when it is blank or still an unreplaced token (@Field or {{field}}).
 function Get-In {
     param([string[]]$Names)
     foreach ($n in $Names) {
-        $v = Get-RcProp $in $n
+        $v = Get-CrProp $in $n
         if ($null -eq $v -and $answers.ContainsKey($n.ToLowerInvariant())) { $v = $answers[$n.ToLowerInvariant()] }
         if ($null -eq $v -or $v -is [System.Management.Automation.PSCustomObject] -or $v -is [System.Collections.IDictionary]) { continue }
         $s = ([string]$v).Trim()
@@ -49,7 +47,7 @@ try {
 
     # ---------- 1. the request ----------
     $out.ticket_id = Get-In @('ticket_id', 'ticketId', 'TicketId')
-    if (-not $out.ticket_id) { $out.ticket_id = [string](Get-RcProp $ticketObj 'TicketId') }
+    if (-not $out.ticket_id) { $out.ticket_id = [string](Get-CrProp $ticketObj 'TicketId') }
     $out.psa = Get-In @('psa')
     $out.confirm = (Get-In @('confirm')) -match '^(?i)(true|yes|y|1)$'
     $upn = Get-In @('upn', 'userPrincipalName', 'user_upn', 'email')
@@ -59,15 +57,19 @@ try {
     $oldDeptIn = Get-In @('old_department', 'oldDepartment')
     $tenantIn = Get-In @('company_tenant_id', 'companyTenantId', 'CompanyTenantId')
     $out.upn = $upn; $out.new_department = $newDept
+    # A short code for this request (user, department, title, manager), used by the Apply step's note marker so a
+    # retry of the same request writes no second note. It is a hash, so no name or address is in the marker.
+    $rcSha = [System.Security.Cryptography.SHA256]::Create()
+    try { $out.request_key = (-join ($rcSha.ComputeHash([Text.Encoding]::UTF8.GetBytes(((@($upn, $newDept, $newTitle, $newMgr) -join "|").ToLowerInvariant()))) | ForEach-Object { $_.ToString("x2") })).Substring(0, 8) } finally { $rcSha.Dispose() }
     $miss = @(); if (-not $upn) { $miss += 'upn' }; if (-not $newDept) { $miss += 'new_department' }
     if ($miss.Count) { Stop-Read 'incomplete' "The request has no $($miss -join ' or '). Nothing was changed."; return }
     if ($upn -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$' -and -not (Test-RcGuid $upn)) { Stop-Read 'incomplete' "'$upn' isn't a user principal name or object id. Nothing was changed."; return }
 
     # ---------- 2. the department map ----------
-    $companyId = ([string](Get-RcSecret 'DepartmentMap-CompanyId')).Trim()
+    $companyId = ([string](Get-CrSecret 'DepartmentMap-CompanyId')).Trim()
     if (-not $companyId) { $companyId = Get-In @('company_id', 'companyId') }
     if ($companyId -notmatch '^\d+$') { Stop-Read 'incomplete' 'No department map company was set. Add the DepartmentMap-CompanyId secret (the CloudRadial company id that holds the department map article).'; return }
-    $title = Get-In @('map_article'); if (-not $title) { $title = ([string](Get-RcSecret 'DepartmentMap-ArticleTitle')).Trim() }; if (-not $title) { $title = 'Role Change: Department Map' }
+    $title = Get-In @('map_article'); if (-not $title) { $title = ([string](Get-CrSecret 'DepartmentMap-ArticleTitle')).Trim() }; if (-not $title) { $title = 'Role Change: Department Map' }
     $null = Connect-Cr
     $f = "companyId eq $companyId and subject eq '$($title -replace "'", "''")'"
     $found = @(Get-CrProp (Invoke-CrApi -Path "/v2/odata/article?`$filter=$([uri]::EscapeDataString($f))&`$select=articleId,subject,companyId") 'value' | Where-Object { $null -ne $_ })

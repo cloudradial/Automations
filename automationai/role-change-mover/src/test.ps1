@@ -62,6 +62,7 @@ function New-Scenario {
     $Sc.licenses = @(@{ skuId = 'f245ecc8-75af-4f8e-b61f-27d8114de5f3'; skuPartNumber = 'Microsoft_365_Business_Standard' })
     $Sc.forbid = @()     # Graph paths (regex) that answer 403
     $Sc.extraGroups = @()
+    $Sc.notes = New-Object System.Collections.ArrayList   # ticket notes written so far, read back by the retry guard
     foreach ($k in $Over.Keys) { $Sc[$k] = $Over[$k] }
     $sec = $BaseSecrets.Clone(); foreach ($k in $PsaSecrets[$Psa].Keys) { $sec[$k] = $PsaSecrets[$Psa][$k] }
     $sec['PSA-Type'] = $Psa
@@ -112,16 +113,21 @@ $Handler = {
         throw "unmocked Graph $m $p"
     }
     # ---- PSAs ----
-    if ($u -like 'https://cw.example/*' -and $m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { return J @{ id = 1 } }
+    # Notes are kept in $Sc.notes, so a rerun in the same scenario sees what the first run wrote.
+    if ($u -like 'https://cw.example/*' -and $m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add((J @{ id = $Sc.notes.Count + 1; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag })); return J @{ id = $Sc.notes.Count } }
+    if ($u -like 'https://cw.example/*' -and $m -eq 'GET' -and $u -like '*/service/tickets/12345/notes?*') { if ($u -like '*page=1') { return @($Sc.notes) }; return @() }
     if ($u -like 'https://at.example/*') {
         if ($m -eq 'GET' -and $u -like '*/TicketNotes/entityInformation/fields') { return J @{ fields = @((J @{ name = 'publish'; picklistValues = @((J @{ value = '1'; label = 'All Autotask Users'; isActive = $true }), (J @{ value = '2'; label = 'Internal Only'; isActive = $true })) }), (J @{ name = 'noteType'; picklistValues = @((J @{ value = '13'; label = 'System Workflow Note'; isActive = $true }), (J @{ value = '1'; label = 'Task Detail'; isActive = $true })) })) } }
-        if ($m -eq 'POST' -and $u -like '*/Tickets/12345/Notes') { return J @{ itemId = 1 } }
+        if ($m -eq 'POST' -and $u -like '*/Tickets/12345/Notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add((J @{ id = $Sc.notes.Count + 1; title = $b.title; description = $b.description; publish = $b.publish })); return J @{ itemId = $Sc.notes.Count } }
+        if ($m -eq 'GET' -and $u -like '*/TicketNotes/query?search=*') { return J @{ items = @($Sc.notes); pageDetails = (J @{ nextPageUrl = $null }) } }
     }
     if ($u -like 'https://halo.example/*') {
         if ($u -like '*/auth/token') { return J @{ access_token = 'halo-tok' } }
-        if ($m -eq 'POST' -and $u -like '*/api/Actions') { return @(J @{ id = 1 }) }
+        if ($m -eq 'POST' -and $u -like '*/api/Actions') { $b = @($c.Body | ConvertFrom-Json)[0]; $null = $Sc.notes.Add((J @{ id = $Sc.notes.Count + 1; note = $b.note; hiddenfromuser = $b.hiddenfromuser })); return @(J @{ id = $Sc.notes.Count }) }
+        if ($m -eq 'GET' -and $u -like '*/api/Actions?ticket_id=12345*') { return J @{ actions = @($Sc.notes) } }
     }
-    if ($u -like 'https://zd.example/*' -and $m -eq 'PUT' -and $u -like '*/tickets/12345') { return J @{ ticket = J @{ id = 12345 } } }
+    if ($u -like 'https://zd.example/*' -and $m -eq 'PUT' -and $u -like '*/tickets/12345') { $cm = ($c.Body | ConvertFrom-Json).ticket.comment; $null = $Sc.notes.Add((J @{ id = $Sc.notes.Count + 1; body = $cm.body; public = $cm.public; author_id = 1 })); return J @{ ticket = J @{ id = 12345 } } }
+    if ($u -like 'https://zd.example/*' -and $m -eq 'GET' -and $u -like '*/tickets/12345/comments*') { return J @{ comments = @($Sc.notes); next_page = $null } }
     throw "unmocked $m $u"
 }
 
@@ -163,7 +169,14 @@ $nb = if ($note.Count) { Read-Body $note[0] } else { $null }
 Check 'preview: one ConnectWise internal note' ($note.Count -eq 1 -and $note[0].Uri -like '*/service/tickets/12345/notes' -and $nb.internalAnalysisFlag -eq $true -and $nb.detailDescriptionFlag -eq $false -and $o.note_written) (Show-Calls)
 Check 'preview: note holds the plan, Exchange items and licences' ($nb.text -match 'Preview only' -and $nb.text -match 'Change in Exchange' -and $nb.text -match 'marketing@contoso.com list' -and $nb.text -match 'Licences to review' -and $nb.text -match 'Sales to Marketing') $nb.text
 Check 'preview: public note has no group or licence names' ($o.public_note -and $o.public_note -notmatch 'Team|list|Microsoft_365|CRM|Adobe') $o.public_note
+Check 'preview: note marker is a code, with no names or addresses' ($nb.text -match '\n\[role-change-mover: preview [0-9a-f]{8} \d{4}-\d{2}-\d{2}\]$' -and (@($nb.text -split "`n")[-1]) -notmatch '@|contoso|Sam|Marketing') (@($nb.text -split "`n")[-1])
 Check 'preview: message is a plain sentence' ($o.message -match '^Previewed 6 changes for sam\.doe@contoso\.com\. Nothing was changed' -and $o.message -match '2 lists need changing in Exchange') $o.message
+
+# ---------- 1b. rerun of the same preview (ServiceAI Retry) ----------
+$Mock.Calls.Clear()
+$r = Invoke-Mover (New-Body)
+Check 'rerun preview: no second note, nothing written' (@(Get-PsaWrites).Count -eq 0 -and @(Get-GraphWrites).Count -eq 0 -and $Sc.notes.Count -eq 1 -and -not $r.out.note_written) (Show-Calls)
+Check 'rerun preview: says the note was already there' ((@($r.out.actions) -join ' ') -match 'already on ticket 12345') (@($r.out.actions) -join ' | ')
 
 # ---------- 2. confirm (Autotask) ----------
 New-Scenario 'autotask'
@@ -183,6 +196,13 @@ $atNote = @(Get-Calls 'POST' 'https://at.example/*/Tickets/12345/Notes')
 $atb = if ($atNote.Count) { Read-Body $atNote[0] } else { $null }
 Check 'confirm: Autotask internal note with the result' ($atNote.Count -eq 1 -and $atb.publish -eq 2 -and $atb.noteType -eq 1 -and $atb.description -match 'Applied all 6' -and $atb.title -eq 'Role change result') (Show-Calls)
 Check 'confirm: writes come after every read (stop-at-first-failure order)' ($o.ran[0].description -like 'Add to Marketing Team*' -and $o.ran[5].description -like 'Set manager*') ''
+Check 'confirm: Autotask note ends with the applied marker' ($atb.description -match '\n\[role-change-mover: applied [0-9a-f]{8} \d{4}-\d{2}-\d{2}\]$') $atb.description
+# 2b. Retry after the changes landed: Microsoft 365 now matches, so nothing is changed and no second note is written.
+$Sc.member = @('g-mkt', 'g-adobe', 'g-saleslist'); $Sc.dept = 'Marketing'; $Sc.title = 'Marketing Coordinator'; $Sc.manager = 'u-alex'
+$Mock.Calls.Clear()
+$r = Invoke-Mover (New-Body @{ confirm = 'true'; psa = 'autotask' })
+Check 'rerun confirm: success, no Graph writes' ($r.out.status -eq 'success' -and @(Get-GraphWrites).Count -eq 0) "$($r.out.status) $($r.out.message)"
+Check 'rerun confirm: no second Autotask note' (@(Get-Calls 'POST' 'https://at.example/*/Tickets/12345/Notes').Count -eq 0 -and $Sc.notes.Count -eq 1) (Show-Calls)
 
 # ---------- 3. missing permission (403) ----------
 New-Scenario 'connectwise' -Over @{ forbid = @('^POST /v1\.0/groups/g-adobe/members') }
@@ -192,6 +212,10 @@ Check '403 on write: stops at the first failure and says so' ($o.status -eq 'err
 Check '403 on write: message names GroupMember.ReadWrite.All' ($o.message -match 'GroupMember\.ReadWrite\.All' -and $o.message -match 'Made 1 of 6 changes') $o.message
 Check '403 on write: run marked failed, output kept, note still written' ($r.err -and $o.note_written -and (Read-Body @(Get-PsaWrites)[0]).text -match 'Not run:') $r.err
 Check '403 on write: no remove ran after the failure' (@(Get-Calls 'DELETE' "$GraphBase/*").Count -eq 0) (Show-Calls)
+# 3b. Retry once the permission is fixed: the run finishes, and its result note is written (the earlier note was the failure).
+$Sc.forbid = @(); $Mock.Calls.Clear()
+$r = Invoke-Mover (New-Body @{ confirm = 'true' })
+Check 'retry after failure: success note written as a second note' ($r.out.status -eq 'success' -and $r.out.note_written -and $Sc.notes.Count -eq 2 -and (Read-Body @(Get-PsaWrites)[0]).text -match 'Applied all') "$($r.out.status) notes=$($Sc.notes.Count)"
 New-Scenario 'connectwise' -Over @{ forbid = @('^GET /v1\.0/groups\?') }
 $r = Invoke-Mover (New-Body)
 Check '403 on read: plain error naming Group.Read.All, nothing written' ($r.out.status -eq 'error' -and $r.out.message -match 'Group\.Read\.All' -and @(Get-GraphWrites).Count -eq 0 -and $r.err) "$($r.out.status) $($r.out.message)"
@@ -212,6 +236,9 @@ New-Scenario 'connectwise' -Over @{ articles = @{} }
 $r = Invoke-Mover (New-Body)
 Check 'no map article: incomplete, names the article, no Graph calls' ($r.out.status -eq 'incomplete' -and $r.out.message -match "no KB article titled 'Role Change: Department Map'" -and @($Mock.Calls | Where-Object { $_.Uri -like "$GraphBase/*" }).Count -eq 0 -and $r.err) "$($r.out.status) $($r.out.message)"
 Check 'no map article: internal note says why' ((Read-Body @(Get-PsaWrites)[0]).text -match 'was not planned') (Show-Calls)
+$Mock.Calls.Clear()
+$r = Invoke-Mover (New-Body)
+Check 'no map article rerun: the same note is not added again' (@(Get-PsaWrites).Count -eq 0 -and $Sc.notes.Count -eq 1) (Show-Calls)
 New-Scenario 'connectwise' -Map (@($TemplateCsv) + 'Marketing,Brand Approvers,security,')
 $r = Invoke-Mover (New-Body)
 Check 'unknown group: incomplete, names the group, nothing written' ($r.out.status -eq 'incomplete' -and $r.out.message -match "no group is named 'Brand Approvers'" -and @(Get-GraphWrites).Count -eq 0) $r.out.message
@@ -238,6 +265,9 @@ Check 'old department defaults to the Graph department' ($r.read.old_department 
 Check 'no title or manager given: only department changes' (@($o.planned | Where-Object { $_ -like "Set department to 'Finance'" }).Count -eq 1 -and @($o.planned | Where-Object { $_ -like 'Set manager*' }).Count -eq 0) ($o.planned -join ' | ')
 $halo = @(Get-Calls 'POST' 'https://halo.example/api/Actions')
 Check 'HaloPSA: hidden note' ($halo.Count -eq 1 -and (Read-Body $halo[0])[0].hiddenfromuser -eq $true) (Show-Calls)
+$Mock.Calls.Clear()
+$r = Invoke-Mover (New-Body @{ new_department = 'Finance'; new_title = ''; new_manager_upn = ''; psa = 'halopsa' })
+Check 'HaloPSA rerun: no second note' (@(Get-Calls 'POST' 'https://halo.example/api/Actions').Count -eq 0 -and $Sc.notes.Count -eq 1) (Show-Calls)
 New-Scenario 'connectwise'
 $r = Invoke-Mover (New-Body @{ old_department = 'Finance' })
 Check 'old_department input overrides Graph: removes Finance groups only' ($r.read.old_department -eq 'Finance' -and @($r.out.planned | Where-Object { $_ -like 'Remove from*' }).Count -eq 0 -and @($r.read.unchanged | Where-Object { $_ -match 'Finance Team' }).Count -eq 1) ($r.out.planned -join ' | ')
@@ -249,6 +279,9 @@ $r = Invoke-Mover ([pscustomobject]@{ trigger = $cr })
 Check 'CloudRadial form shape: parsed, literal @token treated as missing' ($r.out.status -eq 'pending_confirmation' -and $r.read.ticket_id -eq '12345' -and @($r.out.planned | Where-Object { $_ -like "Set department to 'Marketing'" }).Count -eq 1) "$($r.out.status) $($r.out.message) $($r.out.planned -join ' | ')"
 $zd = @(Get-Calls 'PUT' 'https://zd.example/api/v2/tickets/12345')
 Check 'Zendesk: private comment' ($zd.Count -eq 1 -and (Read-Body $zd[0]).ticket.comment.public -eq $false) (Show-Calls)
+$Mock.Calls.Clear()
+$r = Invoke-Mover ([pscustomobject]@{ trigger = $cr })
+Check 'Zendesk rerun: no second comment' (@(Get-Calls 'PUT' 'https://zd.example/*').Count -eq 0 -and $Sc.notes.Count -eq 1) (Show-Calls)
 New-Scenario 'connectwise'
 $r = Invoke-Mover (New-Body @{ company_tenant_id = '11111111-2222-4333-8444-555555555555' })
 Check 'tenant mismatch: rejected, nothing read from Graph users' ($r.out.status -eq 'rejected' -and @(Get-Calls 'GET' "$GraphBase/v1.0/users*").Count -eq 0) "$($r.out.status) $($r.out.message)"

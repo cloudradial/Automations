@@ -23,7 +23,7 @@ These links point at the `main` branch, so they always open the current version.
 Two PowerShell steps. No AI is involved: the department map decides everything.
 
 1. **Read the request, department map and user.** Reads your department map from a CloudRadial KB article, then reads the user, their manager, their direct group memberships and their licences from Microsoft Graph. It looks up every group the old and new departments name, and works out the plan. It writes nothing.
-2. **Preview or apply, then note the ticket.** With `confirm` false (the default) it changes nothing and returns the plan. With `confirm` true it makes the changes in order and stops at the first failure, saying what ran and what didn't. Either way it adds an internal note to the ticket when you give a `ticket_id`.
+2. **Preview or apply, then note the ticket.** With `confirm` false (the default) it changes nothing and returns the plan. With `confirm` true it makes the changes in order and stops at the first failure, saying what ran and what didn't. Either way it adds an internal note to the ticket when you give a `ticket_id`. The note is retry-safe: it ends with a marker made of the outcome, a short code for the request (a hash, so no names or addresses) and the day, so a ServiceAI Retry of the same request adds nothing twice. A retry that gets further than a failed run (for example after a missing permission is granted) writes its own result note.
 
 The plan holds:
 

@@ -51,7 +51,7 @@ All optional.
 | `cloudradialCompanyId` | — | Brief on one company by CloudRadial companyId. |
 | `warrantyWindowDays` | `90` | Days ahead that count a warranty as "expiring soon". |
 
-Example: `{"companyName": "KMCO Group Ltd"}`
+Example: `{"companyName": "Contoso Ltd"}`
 
 ## Read-only
 

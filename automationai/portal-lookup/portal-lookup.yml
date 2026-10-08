@@ -49,7 +49,7 @@ definition:
         parameters: []
         aiExtensions: []
         testInput: |-
-          {"companyName": "KMCO Group Ltd"}
+          {"companyName": "Contoso Ltd"}
     - id: node-agent
       name: Portal Briefing
       type: agent

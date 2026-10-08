@@ -58,7 +58,7 @@ It needs the `lifecycle-manager` (ScalePad) extension at **1.2.0 or later**: 1.0
 
 ## Run inputs
 
-Nothing to wire after import. The workflow's **Run inputs** step reads the **Trigger input** box of the Run dialog (or a Routine's input), leaving it empty is fine, fills in every default, and is already bound to the agent's inputs. To change a run, send any of these fields as JSON, for example `{"companyId": 9, "mode": "plan"}`, and leave the rest out. An empty run plans for up to three crosswalked clients.
+Nothing to wire after import. The workflow's **Run inputs** step reads the **Trigger input** box of the Run dialog (or a Routine's input), leaving it empty is fine, fills in every default, and is already bound to the agent's inputs. To change a run, send any of these fields as JSON, for example `{"companyId": 123, "mode": "plan"}`, and leave the rest out. An empty run plans for up to three crosswalked clients.
 
 Every input is optional, the agent never stops to ask. Defaults are shown.
 
@@ -73,7 +73,7 @@ Every input is optional, the agent never stops to ask. Defaults are shown.
 
 Example first run: `{"mode":"plan","companyId":1,"phase":"devices"}`
 
-**What it hands to the Sync workflow.** For devices, assets, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"` and the count, plus a single **`syncRun`**, the exact run input for the Sync, for example `{"companyId":9,"scalePadClientId":"…","mode":"plan","phases":"all"}`. Paste it as the Sync's run input. `phases` only ever uses the Sync's six names, initiatives and contracts are `roadmap`, deliverable PDFs are `archive`.
+**What it hands to the Sync workflow.** For devices, assets, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"` and the count, plus a single **`syncRun`**, the exact run input for the Sync, for example `{"companyId":123,"scalePadClientId":"…","mode":"plan","phases":"all"}`. Paste it as the Sync's run input. `phases` only ever uses the Sync's six names, initiatives and contracts are `roadmap`, deliverable PDFs are `archive`.
 
 **Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint — network, mobile and imaging devices — and devices with no serial number go to one flexible asset type per kind of device (**Network Devices**, **Mobile Devices**, **Printers & Imaging**, and so on) through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools (0.2.1 or later — 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
 

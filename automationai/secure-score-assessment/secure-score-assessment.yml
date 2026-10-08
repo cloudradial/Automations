@@ -1,6 +1,6 @@
 automationsWorkflow: 1
 name: "Turn Microsoft Secure Score into a Client Assessment"
-description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, creates the assessment and uploads it - all in one deterministic PowerShell node. Send {"companyId":9,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
+description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, creates the assessment and uploads it - all in one deterministic PowerShell node. Send {"companyId":123,"tenantId":"<client-tenant-guid>"}. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
 definition:
   schemaVersion: 1
   activities:
@@ -22,7 +22,7 @@ definition:
         script: |-
           # =====================================================================
           #  Secure Score -> CloudRadial Assessment (deterministic, in-memory xlsx)
-          #  Run input: {"companyId":9,"tenantId":"<client Graph tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
+          #  Run input: {"companyId":123,"tenantId":"<client Graph tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
           #    companyId  - CloudRadial company the assessment is created under (required)
           #    tenantId   - the CLIENT's Entra tenant id to pull Secure Score from (required)
           #    mode       - "apply" (default) writes; "plan" previews only
@@ -45,7 +45,7 @@ definition:
           $title     = [string](Get-Prop $in 'assessmentTitle'); if ([string]::IsNullOrWhiteSpace($title)) { $title = 'Microsoft Secure Score' }
           $mode      = [string](Get-Prop $in 'mode'); if ([string]::IsNullOrWhiteSpace($mode)) { $mode = 'apply' }
           if (-not $companyId -or [string]::IsNullOrWhiteSpace([string]$tenantId)) {
-              $m = 'Need companyId (CloudRadial) and tenantId (the client Entra tenant). e.g. {"companyId":9,"tenantId":"00000000-0000-0000-0000-000000000000"}.'
+              $m = 'Need companyId (CloudRadial) and tenantId (the client Entra tenant). e.g. {"companyId":123,"tenantId":"00000000-0000-0000-0000-000000000000"}.'
               Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
           }
 

@@ -11,6 +11,8 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `psa.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/psa.ps1) |
+| View `psa-tickets.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/psa-tickets.ps1) |
+| View `postmark.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/postmark.ps1) |
 | View `graph.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/graph.ps1) |
 | View `plan.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/plan.ps1) |
 | View `cloudradial.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/cloudradial.ps1) |
@@ -26,6 +28,8 @@ AutomationAI runs each PowerShell step as one self-contained script, so a step c
 | File | What it is |
 |---|---|
 | `psa.ps1` | One adapter for six PSAs: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk. Same secret names as each PSA's catalog extension. |
+| `psa-tickets.ps1` | Ticket lists, names, SLA targets, time entries, agreements, invoices, contacts and ticket relations for the same six PSAs. Paste it after `psa.ps1`. |
+| `postmark.ps1` | Staff email through Postmark that never throws, so the caller can fall back to an internal note. Needs no other file. |
 | `graph.ps1` | Microsoft Graph: client-credentials sign-in, retries, paging, and the user, group, licence, sign-in and security helpers. A 403 says which permission is missing. |
 | `plan.ps1` | The preview/confirm pattern. AutomationAI has no approval step, so a write automation previews its changes and only makes them when the run says `confirm: true`. Used with or without Graph. |
 | `cloudradial.ps1` | The CloudRadial API: calls with retry, paging, one Planner card per key (updated, never duplicated), and reports into Report Archives. |
@@ -88,14 +92,26 @@ Connect once, then call the functions. `Connect-Psa` with no argument uses `Get-
 | `Invoke-Psa -Method <string> -Path <string> [-Body <object>] [-ContentType <string>]` | One call. Retries 429 (and GET 502/503/504) honoring Retry-After. Errors read `"<PSA> <METHOD> <path> failed (HTTP n): <reason>"`. |
 | `Get-PsaTicket -Id <string>` | `@{ id; summary; description; companyId; status; assigneeId; assigneeIds; raw }` |
 | `New-PsaTicket -CompanyId <string> -Summary <string> [-Description <string>] [-Priority critical\|high\|medium\|low] [-Queue <string>] [-Extra <hashtable>]` | Creates a ticket and returns `@{ id; raw }`. `-Queue` is the board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro) or group id (Zendesk). `-Extra` adds raw PSA fields for tenant-specific required ids. |
-| `Add-PsaNote -Id <string> -Text <string> [-Title <string>] [-Public]` | Internal (technician-only) note by default; `-Public` makes it client-visible. |
+| `Add-PsaNote -Id <string> -Text <string> [-Title <string>] [-Public] [-Marker <string>]` | Internal (technician-only) note by default; `-Public` makes it client-visible. `-Marker` makes the write safe to repeat (see [Retry-safe writes](#retry-safe-writes)) and returns `written` or `already-present`; without it, nothing is returned. |
 | `Set-PsaAssignee -Id <string> -UserId <string> [-RoleId <string>]` | Assigns the ticket. Autotask also needs the role id. |
 | `Set-PsaStatus -Id <string> [-State closed\|open] [-StatusName <string>]` | Closes (default) or reopens, and returns the status it set. `-StatusName` picks an exact status (an id for HaloPSA and Kaseya BMS). |
 | `Find-PsaCompany -Name <string>` | `@(@{ id; name; exact; raw })`, exact name matches first. |
 | `Get-PsaOpenCount -UserId <string>` | Open tickets assigned to the technician, or `$null` when the PSA can't count (Kaseya BMS). |
 | `Get-PsaLastAssigned -UserId <string>` | Date of the newest ticket assigned to them, `[datetime]::MinValue` for none, or `$null` when the PSA can't tell (Kaseya BMS). |
+| `Get-PsaTicketNotes -Id <string> [-Ticket <row>] [-Newest] [-Max <int>] [-TextOnly]` | The ticket's notes, oldest first: `@(@{ id; text; title; created; internal; public; fromClient; author; raw })`. `created` is a UTC `[datetime]` or `$null`. `-Newest` reverses the order; `-Max` keeps the newest n. `-Ticket` (a `Find-PsaTickets` row) saves Zendesk a read to find the requester; `-TextOnly` skips it. A 403 is a plain permission sentence. |
+| `Test-PsaNoteMarker -Id <string> -Marker <string> [-Notes <notes>]` | `$true` when a note on the ticket holds `[marker]` (case-insensitive). `-Notes` reuses notes already read. Throws when the notes can't be read. |
+| `Close-PsaTicket -Id <string> [-StatusName <string>] [-NotStatus <string>]` | Closes to the named status, or the PSA's usual closed status, never to `-NotStatus` (the status the ticket is waiting in). Returns the status set. |
+| `Set-PsaQueue -Id <string> -Queue <string>` | Moves the ticket to a board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro) or group (Zendesk), by name or id. |
+| `Set-PsaTicketContact -Id <string> -ContactId <string>` | Sets the ticket's contact (the requester in Zendesk). |
+| `Get-PsaDefaultRole -UserId <string>` | Autotask: the resource's default Service Desk role id for `Set-PsaAssignee`. `''` (and no call) on the other PSAs. |
+| `Get-PsaStatusList`, `Get-PsaStatusId -Name <string>`, `Get-PsaStatusName -Status <string>` | Status ids and names for the PSAs that key statuses by id (Autotask, HaloPSA, Kaseya BMS), read once per connection. The others pass names through. An unknown name throws a sentence listing the statuses. |
+| `Get-PsaTicketUrl -Id <string> [-Template <string>]` | A link a technician can open, with no API call: `-Template` (with `{id}` or `{ticketId}`), then the `PSA-TicketUrlTemplate` secret, then the PSA's usual link (`''` for Kaseya BMS). |
+| `Resolve-PsaCompanyId -Company <string>` | A run's `company` input as `@{ id; name }`: a number as given, an exact name looked up, blank or an `@token` as `@{ id = ''; name = '' }`. A missing or ambiguous name throws a plain sentence. |
+| `Resolve-PsaTicketId -Ref <string>` | A ticket number as people see it (`#T20261008.0001`, a Syncro number) as the PSA's id. |
+| `Get-PsaPriorityLevel -Label <string>` | `critical`, `high`, `medium`, `low` or `''` for a PSA priority label. |
+| `ConvertTo-PsaDate`, `Format-PsaDate`, `ConvertTo-PsaPlainText`, `Get-PsaFirst`, `Get-PsaNumber`, `Invoke-PsaRead`, `Invoke-PsaAtQuery`, `Get-PsaBmsList`, `Add-PsaWarning` | Helpers: a UTC date or `$null` (HaloPSA's 1900-01-01 counts as none), `yyyy-MM-ddTHH:mm:ssZ` text, plain text from HTML, the first non-blank property, a number, a GET whose 403 becomes a permission sentence, Autotask query paging, the Kaseya BMS list envelope, and a warning added once to `$PsaState.Warnings`. |
 
-**Secrets:** the extension's own names (`CW-*`, `Autotask-*`, `Halo-*`, `KaseyaBMS-*`, `Syncro-*`, `Zendesk-*`) plus `PSA-Type`. Optional tenant ids: `Autotask-NotePublishId`, `Autotask-NotePublicPublishId`, `Autotask-NoteTypeId`, `Autotask-NewStatusId`, `Autotask-BillingCodeId`, `Halo-NoteOutcomeId`, `Halo-PublicNoteOutcomeId`, `Halo-ClosedStatusId`, `Halo-OpenStatusId`, `KaseyaBMS-NoteTypeId` (needed for notes), `KaseyaBMS-NewStatusId`, `KaseyaBMS-TicketTypeId`, `KaseyaBMS-TicketSourceId`, `KaseyaBMS-PriorityId`, `KaseyaBMS-QueueId`, `KaseyaBMS-ClosedStatusId`, `KaseyaBMS-OpenStatusId`.
+**Secrets:** the extension's own names (`CW-*`, `Autotask-*`, `Halo-*`, `KaseyaBMS-*`, `Syncro-*`, `Zendesk-*`) plus `PSA-Type`. Optional tenant ids: `Autotask-NotePublishId`, `Autotask-NotePublicPublishId`, `Autotask-NoteTypeId`, `Autotask-NewStatusId`, `Autotask-BillingCodeId`, `Halo-NoteOutcomeId`, `Halo-PublicNoteOutcomeId`, `Halo-ClosedStatusId`, `Halo-OpenStatusId`, `KaseyaBMS-NoteTypeId` (needed for notes), `KaseyaBMS-NewStatusId`, `KaseyaBMS-TicketTypeId`, `KaseyaBMS-TicketSourceId`, `KaseyaBMS-PriorityId`, `KaseyaBMS-QueueId`, `KaseyaBMS-ClosedStatusId`, `KaseyaBMS-OpenStatusId`. Optional link pattern: `PSA-TicketUrlTemplate`.
 
 ### Calls not yet proven live
 
@@ -108,6 +124,92 @@ Each of these has a one-line `Unverified` comment in `psa.ps1`. Check it against
 - **Kaseya BMS:** the sign-in `GrantType` value `password`; required ids on create; the `/crm/accounts` filter name; status ids; how to list note types.
 - **Syncro:** create body (`comments_attributes`, priority labels such as `1 High`); the `Resolved` and `New` status labels; `/customers?query=`.
 - **Zendesk:** whether `Zendesk-BaseUrl` already ends in `/api/v2`; organization autocomplete.
+- **Notes, statuses and single-ticket changes (October 2026 additions):** the ConnectWise, Kaseya BMS, Syncro and Zendesk note reads follow vendor docs; the Autotask `TicketNotes` query, HaloPSA `/Actions` and `/Status`, every "written by the client" rule, every default ticket link, `Set-PsaQueue` (except the Zendesk `group_id` write), `Set-PsaTicketContact`, the Autotask `defaultServiceDeskRoleID`, and the Autotask, Kaseya BMS and Syncro ticket-number lookups are unverified.
+
+## psa-tickets.ps1
+
+Paste it after `psa.ps1` in the same step (it uses `Connect-Psa`, `Invoke-PsaRead`, `Add-PsaNote` and `$PsaState` from there). It was merged from the `src/psa-extra.ps1` files of the service-desk builds (October 2026), keeping the most complete, best-checked version of each call and every `Unverified` comment.
+
+| Function | What it does |
+|---|---|
+| `Find-PsaTickets [-Status <string[]>] [-Open \| -Closed] [-CompanyId <id>] [-CreatedAfter] [-CreatedBefore] [-UpdatedAfter] [-UpdatedBefore] [-ClosedAfter] [-ClosedBefore] [-Text <string>] [-Max <int>] [-Order oldest\|newest] [-IncludeSla]` | Lists tickets. Every filter is sent to the PSA where it can take one, and every row is checked again here: status (exact, case-insensitive; `-StatusName` also works), open or closed, each date bound (After is `>=`, Before is `<`, UTC), and text. **With `-CompanyId`, a row for any other company, or with no company, is always dropped**, even when the PSA ignored the filter. Pages to the end, stops at `-Max` (default 500) and sets `$PsaState.FindTruncated` when there were more. `-IncludeSla` sideloads Zendesk SLA metrics. |
+| `ConvertTo-PsaTicketRow -Raw <record> [-AssumeStatus <string>] [-AssumeClosed]` | One record (a list row, or `Get-PsaTicket`'s `.raw`) in the same row shape. |
+| `Resolve-PsaTicketNames -Tickets <rows>` | Fills blank `companyName`, `assigneeName`, `queueName` and `queue`, one cached lookup per id (Autotask companies in batches). A failed lookup leaves "Company 42", "Technician 7" or "Unassigned". |
+| `Get-PsaTicketSla -Ticket <row>` | The PSA's own SLA target: `@{ source ('psa' or 'none'); kind ('respond', 'resolve' or 'due'); start; target; breached; detail }`. |
+| `Get-PsaTicketDevices -Id <string> [-Row <row>]` | Configuration item ids on the ticket (the row's `configIds`, or the ConnectWise sub-resource). |
+| `Get-PsaCapabilities` | `@{ tickets; notes; time; agreements; invoices; primaryContact; relation }` for the connected PSA. `time` is `'field'` on Zendesk; `relation` is `native`, `conditional` or `note`. |
+| `Get-PsaTimeEntries [-TicketId <string>] [-TicketIds <string[]>] [-CompanyId <id>] [-After] [-Before] [-ZendeskTimeFieldId <string>] [-Max <int>] [-MaxTickets <int>]` | `@{ supported; reason; entries; warnings }`. Entries: `@{ id; ticketId; date; hours; billableHours; billable; billableKnown; notes; notesKnown; member; workType; agreementId; raw }`. ConnectWise with `-CompanyId` reads the whole company in one query; PSAs that keep time per ticket stop after `-MaxTickets` (default 50) with a warning. Zendesk needs the Time Tracking app's field id, or `supported` is `$false`. |
+| `Get-PsaAgreements -CompanyId <id>` | `@{ supported; reason; agreements = @(@{ id; name; type; status; active; startDate; endDate; amount; cycle; coverage }) }`, checked against the company id. Not supported on Zendesk. |
+| `Get-PsaInvoice -Number <string>` | `@{ id; number; companyId; date; periodStart; periodEnd; periodDerived; total }` or `$null`. ConnectWise, Autotask and HaloPSA; the others throw a plain sentence. |
+| `Get-PsaCompanyContacts -CompanyId <id>` | `@{ primarySupported; contacts = @(@{ id; name; email; primary }) }`. Syncro and Zendesk have no primary flag. |
+| `Get-PsaPrimaryContact -CompanyId <id>` | `@{ id; name; email }`, or `$null` when there is none or it has no usable email (always `$null` on Zendesk). |
+| `Add-PsaTicketRelation -Id <string> -RelatedId <string> [-Reason <string>] [-NotesOnly] [-NoteTicketId <string>]` | Relates a ticket to an older one: HaloPSA parent, Autotask or Zendesk incident of a Problem ticket, otherwise notes only. Adds one internal cross-reference note marked `[related: <Id> and <RelatedId>]`, so a retry doesn't add it twice. Returns `@{ method; detail; note }`. Never merges or closes. |
+
+**Row shape** (`Find-PsaTickets`, `ConvertTo-PsaTicketRow`): `@{ id; number; summary; description; status; isClosed; companyId; companyName; contactId; contactName; contactEmail; assigneeId; assigneeName; queue; queueId; queueName; priority; priorityLevel; created; updated; closed; statusChanged; ticketType; configIds; url; raw }`. `priority` is the PSA's own label and `priorityLevel` is `critical`, `high`, `medium`, `low` or `''`. `created`, `updated` (falls back to `created`), `closed` and `statusChanged` are UTC `[datetime]` or `$null`. A field a PSA leaves out of its list rows is `''`.
+
+**State:** `$PsaState.FindTruncated`, `$PsaState.Warnings` (plain sentences to copy into a run's warnings), `$PsaState.MaxPages` (default 50), and the `Lookups`, `Sla` and `Statuses` caches, all reset by `Connect-Psa`.
+
+**Not proven live:** the comment on each call says what to check. Briefly: Kaseya BMS list filters and the Syncro list filters follow vendor docs; the ConnectWise date and `contains` conditions, the Autotask `in` and `contains` operators and date fields, every HaloPSA list parameter, the Zendesk `solved` and `organization:` search terms, every SLA field, every time, agreement, invoice and contact read except the Kaseya BMS and Syncro ones marked vendor docs, and every relation write are unverified.
+
+## Retry-safe writes
+
+ServiceAI's Action Runs **Retry** replays the whole request, and a Routine can run twice. Any step that writes a note should be safe to run again. The standard way:
+
+```powershell
+$r = Add-PsaNote -Id $ticketId -Text $note -Title 'Invoice context' -Marker "invoice-context: $invoiceNumber"
+if ($r -eq 'already-present') { $actions += 'The invoice note was already on the ticket, so it was not added again.' }
+```
+
+- The marker is added as the note's last line in brackets (`[invoice-context: INV-1001]`). Before writing, the ticket's notes are read; if one already holds that marker, nothing is written and `already-present` comes back.
+- Make the marker name the workflow and what the note is about (a ticket, an invoice number, a day), so a genuinely new note gets a new marker. No brackets or line breaks inside it.
+- If the notes can't be read, `Add-PsaNote -Marker` throws instead of risking a second copy.
+- For other writes (status, queue, contact, relation), check the ticket's current state first, or check for the marker with `Test-PsaNoteMarker` and skip the whole action. Write the marker note last, after the change, so a failed run is retried in full.
+
+## postmark.ps1
+
+| Function | What it does |
+|---|---|
+| `Send-PmMail -To <string[]> -Subject <string> [-Html <string>] [-Text <string>] [-Tag <string>] [-Stream <string>] [-From <string>]` | Sends one email and never throws. Returns `@{ configured; sent; reason; messageId; to }`. `-To` takes addresses or a comma/semicolon list; invalid ones are dropped. `-From` overrides the sender. Retries 429 and 5xx twice; a 401 names the token secret. When `sent` is `$false`, fall back to an internal note. |
+| `Test-PmConfigured` | `$true` when `Postmark-ServerToken` and `Postmark-FromEmail` are both set. |
+| `ConvertTo-PmHtml -s <string>`, `Get-PmSecret`, `Get-PmProp`, `Test-PmEmail` | Helpers: HTML-encode text, read a secret, a strict-mode-safe property read, check an address. |
+
+**Secrets:** `Postmark-ServerToken`, `Postmark-FromEmail` (a verified sender), and optional `Postmark-ApiUrl` (default `https://api.postmarkapp.com`), the same names as the Postmark extension and `deliver-result`. Email is for staff; a message to a ticket's requester goes as a public PSA note so the PSA emails them.
+
+## Moving the service-desk builds over
+
+The service-desk builds (open PRs #65 to #77) each carry a `src/psa-extra.ps1` (and some a Postmark sender). To move one over: swap the `# >>> src/psa-extra.ps1` markers for `_shared/psa-tickets.ps1` markers placed after `_shared/psa.ps1` (and `_shared/postmark.ps1` where it emails), delete the local file, apply the renames below, run `inject.js`, and run the build's own test.
+
+| Old (where) | New | What changes for the caller |
+|---|---|---|
+| `Find-PsaTickets -State open\|closed -ClosedFrom -ClosedTo` (time-entry-review, psa-hygiene) | `Find-PsaTickets -Open`, or `-Closed -ClosedAfter <from> -ClosedBefore <to>` | Row `closed` (bool) is now `isClosed`; `closedDate`, `createdDate` and `updatedDate` (UTC text) are now `closed`, `created` and `updated` (`[datetime]`; use `Format-PsaDate` for text). Autotask company names are no longer filled by the list: call `Resolve-PsaTicketNames`. `$PsaState.FindTruncated` is unchanged. |
+| `Find-PsaTickets -CompanyId -OpenOnly -Since -Until` (related-ticket-detection, invoice-context) | `Find-PsaTickets -CompanyId -Open -CreatedAfter -CreatedBefore -Order newest` | Was newest first; pass `-Order newest`. Row `createdAt` is now `created`; `closed` (bool) is now `isClosed`; Autotask `ticketType` is now the label. |
+| `Find-PsaTickets -UpdatedBefore -Status -CompanyId -Max [-IncludeClosed]` (sla-breach-report, auto-escalation) | `Find-PsaTickets -Open -UpdatedBefore -Status -CompanyId -Max -IncludeSla` | Was open-only by default; pass `-Open` (leave it out where `-IncludeClosed` was used). Row `priority` (the level) is now `priorityLevel`, and `priorityLabel` is now `priority`. `-IncludeSla` keeps the Zendesk SLA sideload. |
+| `Find-PsaTickets -StatusName -OlderThan -NewerThan -DateField updated\|created` (waiting-on-client-nudge, auto-close-resolved) | `Find-PsaTickets -Status` with `-UpdatedBefore`/`-UpdatedAfter` or `-CreatedBefore`/`-CreatedAfter` | `-StatusName` still works. `-NewerThan` was `>`; After is `>=`. It returned up to Max + 1 rows to show there were more; it now returns at most Max and sets `$PsaState.FindTruncated`. Row `requesterId` is now `contactId`; `resolved` is now `closed`. |
+| `ConvertTo-PsaTicketRow $raw $completeStatuses` (related-ticket-detection) | `ConvertTo-PsaTicketRow -Raw $raw` | Picklists are read inside; same row renames as above (`createdAt` to `created`, `closed` to `isClosed`). |
+| `New-PsaTicketRow` (positional, three different shapes) | `New-PsaTicketRow -F @{ ... }` | Internal; only tests build rows by hand. |
+| `Get-PsaNotes -Id [-Max]` (vip-ticket-alert, status-change-updates, post-close-feedback) | `Get-PsaTicketNotes -Id -Newest [-Max]` | Same `text` and `public`; `created` is now `[datetime]`. Was newest first; pass `-Newest`. |
+| `Get-PsaNotes -Id` (troubleshooting-article-delivery) | `Get-PsaTicketNotes -Id` | Throws on a failed read instead of returning `$null` (keep the existing `try`). `internal` is always `$true` or `$false`. Autotask `text` no longer starts with the note title (it is in `title`). |
+| `Get-PsaTicketNotes -Id` (sla-breach-report, auto-escalation) | `Get-PsaTicketNotes -Id` | Now always oldest first (`-Newest` for the reverse). `created` unchanged. |
+| `Get-PsaTicketNotes -Id -Ticket` (waiting-on-client-nudge, auto-close-resolved) | unchanged | Rows also carry `public`, `title` and `raw`. |
+| `Get-PsaTimeEntries -TicketId -ZendeskTimeFieldId` (time-entry-review) | unchanged | Entry `who` is now `member`; `date` is now `[datetime]`; entries also carry `ticketId` and `billableHours`. |
+| `Get-PsaTimeEntries -CompanyId -Since -Until -TicketIds` (invoice-context) | `Get-PsaTimeEntries -CompanyId -TicketIds -After -Before` | Returns `@{ supported; reason; entries; warnings }` instead of rows or `$null`: read `.entries`. ConnectWise still reads by company. |
+| `Get-PsaAgreements -CompanyId` (invoice-context) | unchanged name | Returns `@{ supported; reason; agreements }` instead of rows or `$null`. |
+| `Get-PsaExtraSupport` (related-ticket-detection, invoice-context) | `Get-PsaCapabilities` | Adds `notes` and `primaryContact`; Zendesk `time` is `'field'` instead of `$false`. |
+| `$PsaExtraState.Warnings`, `.MaxPages`, `.MaxTicketLoop` | `$PsaState.Warnings`, `$PsaState.MaxPages`, `Get-PsaTimeEntries -MaxTickets` | |
+| `Get-PsaPriorityClass` (sla-breach-report, auto-escalation) | `Get-PsaPriorityLevel` | Same result. |
+| `ConvertTo-PsaUtcText` (time-entry-review, psa-hygiene) | `Format-PsaDate` | Same text; `''` for no date. |
+| `ConvertFrom-PsaHtml` (time-entry-review, psa-hygiene) | `ConvertTo-PsaPlainText` | Keeps line breaks instead of folding all whitespace. |
+| `ConvertTo-PsaDate`, `Format-PsaDate` (several) | unchanged names | Dates before 1971 (HaloPSA's 1900-01-01) and `'0'` are `$null`. `Format-PsaDate` takes any date value. |
+| `Invoke-PsaCwList` (related-ticket-detection, invoice-context) | removed | Paging is inside each function. |
+| `Get-PsaTicketUrl -Id -Template` (vip-ticket-alert, post-close-feedback) and `Get-PsaTicketUrl -Id` (related-ticket-detection, invoice-context) | `Get-PsaTicketUrl -Id [-Template]` | Both work: `-Template` wins, then the `PSA-TicketUrlTemplate` secret. Default ConnectWise link is `fv_sr100_request.rails` (was `.rpt` in one copy); default HaloPSA link is `/tickets?id=` (was `/ticket?id=` in one copy). Both unverified. |
+| `Get-PsaStatusName`, `Get-PsaStatusId`, `Get-PsaStatusList` | unchanged | Cached per connection. HaloPSA names now come from the `/Status` list (was `/Status/{id}`). Get-PsaStatusId passes names through on ConnectWise, Syncro and Zendesk instead of throwing. |
+| `Get-PsaPrimaryContact -CompanyId` (outage-broadcast) | unchanged | Returns `@{ id; name; email }`. Kaseya BMS now reads `/crm/contacts/summary` (vendor docs) instead of `/crm/contacts`. |
+| `Get-PsaCompanyContacts`, `Set-PsaTicketContact` (psa-hygiene) | unchanged | ConnectWise contacts now carry the email from `communicationItems`. |
+| `Add-PsaTicketRelation` (related-ticket-detection) | unchanged | Its note is now marker-guarded; the result adds `note`. |
+| `Set-PsaQueue`, `Get-PsaTicketSla`, `Resolve-PsaTicketNames`, `Get-PsaDefaultRole`, `Resolve-PsaCompanyId` (sla-breach-report, auto-escalation), `Close-PsaTicket` (waiting-on-client-nudge, auto-close-resolved), `Resolve-PsaTicketId`, `Get-PsaTicketDevices`, `Get-PsaInvoice` (related-ticket-detection, invoice-context) | unchanged | `Resolve-PsaTicketNames` also fills `queue`. |
+| `Send-PmMail -To -Subject -Html -Text [-Stream]` (time-entry-review, psa-hygiene `src/mail.ps1`) | `Send-PmMail` in `_shared/postmark.ps1` | Same call; the result adds `to`. |
+| `Send-StepEmail -To -Subject -Text [-Html] [-Tag]` (vip-ticket-alert, status-change-updates, post-close-feedback `src/step.ps1`) | `Send-PmMail -To -Subject -Text [-Html] [-Tag]` | Result `id` is now `messageId`; also returns `configured`. |
+| Inline Postmark calls (outage-broadcast `Send-ObEmail`, sla-breach-report `send.ps1`, auto-escalation `notify.ps1`) | `Send-PmMail [-From $settings.from]` | One call instead of the hand-built request. |
 
 ## graph.ps1
 

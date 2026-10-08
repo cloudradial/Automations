@@ -94,6 +94,18 @@ if ($ncoPsa.company_id -eq '') {
 }
 if ($ncoPsa.identifier -eq '') { $ncoPsa.identifier = $ncoPsa.company_id }
 
+# An open onboarding ticket from an earlier run (ServiceAI Retry, or a rerun with company_id) is reused, so a
+# rerun never opens a second one. Matched on the exact summary, only among this PSA company's open tickets.
+$ncoPsa['open_ticket'] = ''
+if ([string](Get-NcoProp $opt 'ticket_id') -eq '' -and $ncoPsa.company_id -match '^\d+$') {
+    $wantSummary = "New client onboarding: $name"
+    try {
+        $open = @(Find-PsaTickets -Open -CompanyId $ncoPsa.company_id -Text 'New client onboarding' -Max 100 -Order newest | Where-Object { ([string]$_.summary).Trim() -ieq $wantSummary })
+        if ($open.Count) { $ncoPsa.open_ticket = [string]$open[0].id; $warnings += "$psaName already has an open onboarding ticket for $name (ticket $($ncoPsa.open_ticket)), so it is used instead of opening another." }
+    }
+    catch { $warnings += "Couldn't check $psaName for an open onboarding ticket, so a rerun could open a second one: $($_.Exception.Message)" }
+}
+
 # The PSA company must not already be linked to a different CloudRadial company.
 $linked = @($companies | Where-Object {
         $cid = [string](Get-NcoProp $_ 'companyId')

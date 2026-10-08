@@ -19,7 +19,11 @@ $Steps = @{}; foreach ($s in $StepIds) { $Steps[$s] = Get-Content -Raw (Join-Pat
 Remove-Item -Recurse -Force $tmp
 
 $Tally = @{ pass = 0; fail = 0 }
-$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{} }
+$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{}; Notes = @{} }
+# Notes written to each ticket (kept across runs until Clear-Notes), read back by the shared retry guard.
+function Add-MockNote { param([string]$T, [string]$Text, [bool]$Public) if (-not $Mock.Notes.Contains($T)) { $Mock.Notes[$T] = @() }; $Mock.Notes[$T] += [pscustomobject]@{ text = $Text; public = $Public } }
+function Get-MockNotes { param([string]$T) if ($Mock.Notes.Contains($T)) { return @($Mock.Notes[$T]) }; return @() }
+function Clear-Notes { $Mock.Notes = @{} }
 function Get-AzKeyVaultSecret { [CmdletBinding()] param($VaultName, $Name, [switch]$AsPlainText) if ($Mock.Secrets.Contains($Name)) { return $Mock.Secrets[$Name] }; return $null }
 function Start-Sleep { [CmdletBinding()] param([double]$Seconds = 0, [int]$Milliseconds = 0) }
 function Get-NodeInput { return $global:NodeIn }
@@ -88,12 +92,22 @@ function Invoke-RestMethod {
     }
     if ($u -like "$CW/service/priorities*") { return @([pscustomobject]@{ id = 8; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 6; name = 'Priority 1 - Emergency Response' }) }
     if ($u -eq "$CW/service/tickets" -and $m -eq 'POST') { return [pscustomobject]@{ id = 5150 } }
-    if ($u -like "$CW/service/tickets/*/notes" -and $m -eq 'POST') { return [pscustomobject]@{ id = 1 } }
+    if ($u -like "$CW/service/tickets/*/notes" -and $m -eq 'POST') { $bo = $Body | ConvertFrom-Json; Add-MockNote ($u -split '/')[-2] $bo.text ([bool]$bo.detailDescriptionFlag); return [pscustomobject]@{ id = 1 } }
+    if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
+    if ($m -eq 'GET' -and $u -like "$CW/service/tickets[?]conditions=*") {
+        if ($Mock.Opt.Contains('ListFail')) { New-HttpError 500 '{"message":"Mock list error"}' }
+        $rows = @([pscustomobject]@{ id = 3001; summary = 'New client onboarding: Fabrikam Inc'; company = [pscustomobject]@{ id = 250 }; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } })
+        if ($Mock.Opt.Contains('OpenTicket')) { $rows += [pscustomobject]@{ id = 5150; summary = 'New client onboarding: Contoso Ltd'; company = [pscustomobject]@{ id = 250 }; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } } }
+        $rows += [pscustomobject]@{ id = 3002; summary = 'New client onboarding: Contoso Ltd'; company = [pscustomobject]@{ id = 999 }; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }
+        return $rows
+    }
     # ---- HaloPSA ----
     if ($u -eq "$HALO/auth/token") { return [pscustomobject]@{ access_token = 'mock' } }
     if ($u -like "$HALO/api/Client[?]*") { return [pscustomobject]@{ clients = @([pscustomobject]@{ id = 31; name = 'Contoso Ltd' }, [pscustomobject]@{ id = 32; name = 'Contoso Ltd Holdings' }) } }
     if ($u -eq "$HALO/api/Tickets" -and $m -eq 'POST') { return @([pscustomobject]@{ id = 8080 }) }
-    if ($u -eq "$HALO/api/Actions" -and $m -eq 'POST') { return @([pscustomobject]@{ id = 1 }) }
+    if ($u -eq "$HALO/api/Actions" -and $m -eq 'POST') { $bo = @($Body | ConvertFrom-Json)[0]; Add-MockNote ([string]$bo.ticket_id) $bo.note (-not $bo.hiddenfromuser); return @([pscustomobject]@{ id = 1 }) }
+    if ($m -eq 'GET' -and $u -match "^$([regex]::Escape($HALO))/api/Actions[?]ticket_id=(\d+)") { $i = 0; return [pscustomobject]@{ actions = @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; note = $_.text; hiddenfromuser = (-not $_.public) } }) } }
+    if ($m -eq 'GET' -and $u -like "$HALO/api/Tickets[?]*") { return [pscustomobject]@{ tickets = @(); record_count = 0 } }
     # ---- Microsoft Graph (read only) ----
     if ($u -like 'https://login.microsoftonline.com/*') {
         if ($Mock.Opt.Contains('NoConsent')) { New-HttpError 400 '{"error":"unauthorized_client","error_description":"AADSTS700016: Application not found in the directory."}' }
@@ -291,6 +305,28 @@ Check 'failure: no ticket opened' (@(Get-Calls POST "$CW/service/tickets").Count
 # 18. Company create reply without an id: looked up by name.
 $r = Invoke-Workflow @{ confirm = 'true' } @{} @{ NoIdReply = $true }
 Check 'no id reply: company found by name' ($r.error -eq '' -and $r.out.status -eq 'success' -and $r.out.company_id -eq 9001) "$($r.error) $($r.out.message)"
+
+# 18b. Rerun writes nothing twice.
+# The internal note ends with a marker of the ticket id and a hash of the note, never the name or domain.
+Clear-Notes
+$r = Invoke-Workflow @{ company_id = '9001'; ticket_id = '4242'; confirm = 'true' } @{} @{ Existing = $true }
+Check 'rerun: first run writes one internal note with the marker' (@(Get-MockNotes '4242').Count -eq 1 -and (Get-MockNotes '4242')[0].text -match '\[new-client-onboarding: 4242 [0-9a-f]{8}\]' -and (Get-MockNotes '4242')[0].public -eq $false) (@(Get-MockNotes '4242' | ForEach-Object { $_.text }) -join ' || ')
+Check 'rerun: marker holds no name or domain' (-not ((Get-MockNotes '4242')[0].text -match '\[new-client-onboarding:[^\]]*(Contoso|contoso\.com)'))
+# ServiceAI Retry of the same run: the domain is on the company now and the same note is already there.
+$r = Invoke-Workflow @{ company_id = '9001'; ticket_id = '4242'; confirm = 'true' } @{} @{ Existing = $true; ExistingHasDomain = $true }
+$TFirst = @(Get-MockNotes '4242').Count
+$r = Invoke-Workflow @{ company_id = '9001'; ticket_id = '4242'; confirm = 'true' } @{} @{ Existing = $true; ExistingHasDomain = $true }
+Check 'rerun: the same outcome adds no second note' ($r.error -eq '' -and @(Get-MockNotes '4242').Count -eq $TFirst -and @(Get-Calls POST "$CW/service/tickets/4242/notes").Count -eq 0 -and (@($r.out.actions) -join ' ') -match 'already on ticket 4242') "$TFirst $(@(Get-MockNotes '4242').Count) $(@($r.out.actions) -join ' | ')"
+# A rerun with company_id and no ticket_id finds the open onboarding ticket (this PSA company's only) and reuses it.
+Clear-Notes
+$r = Invoke-Workflow @{ company_id = '9001'; confirm = 'true' } @{} @{ Existing = $true; ExistingHasDomain = $true; OpenTicket = $true }
+Check 'rerun: open onboarding ticket reused, no second ticket' ($r.error -eq '' -and $r.out.ticket_id -eq '5150' -and @(Get-Calls POST "$CW/service/tickets").Count -eq 0 -and @(Get-MockNotes '5150').Count -eq 1 -and @(Get-MockNotes '3002').Count -eq 0) "$($r.error) $($r.out.ticket_id) $($r.out.message)"
+Check 'rerun: the search is scoped to the PSA company' (@(Get-Calls GET "$CW/service/tickets?conditions=*" | Where-Object { $_.Uri -match 'company/id=250' -and $_.Uri -match 'closedFlag=false' }).Count -eq 1) ''
+$r = Invoke-Workflow @{ company_id = '9001' } @{} @{ Existing = $true; ExistingHasDomain = $true; OpenTicket = $true }
+Check 'rerun preview: no ticket planned when one is already open' (-not @($r.out.planned | Where-Object { $_ -like 'Open the onboarding*' }).Count -and @(Get-Writes).Count -eq 0) "$($r.out.status) $(@($r.out.planned) -join ' | ')"
+$r = Invoke-Workflow @{ company_id = '9001'; confirm = 'true' } @{} @{ Existing = $true; ExistingHasDomain = $true; ListFail = $true }
+Check 'ticket search fails: a warning, the run goes on' ($r.error -eq '' -and $r.out.status -eq 'success' -and (@($r.out.warnings) -join ' ') -match "Couldn't check ConnectWise for an open onboarding ticket") (@($r.out.warnings) -join ' | ')
+Check 'every ticket note this workflow writes is internal' (-not @($Mock.Notes.Values | ForEach-Object { $_ } | Where-Object { $_.public }).Count) ''
 
 # 19. Bad input fails closed before any call.
 $r = Invoke-Workflow @{ primary_domain = $null }

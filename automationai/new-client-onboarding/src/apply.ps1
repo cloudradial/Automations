@@ -8,6 +8,10 @@
 # Then it writes the Microsoft 365 baseline report into the company's "Onboarding" report archive
 # (Compliance > Reports, admins only) and adds an internal note to the ticket. Neither of those can undo
 # the changes above, so a failure there becomes a warning and the report stays in the run output.
+# Retry-safe: an open onboarding ticket found by the check step is reused instead of opening another, and
+# the internal note goes through Add-PsaNote -Marker "new-client-onboarding: <ticket id> <note hash>" (the
+# first 8 hex characters of the note text's SHA-256), so a rerun with the same outcome adds nothing, while a
+# rerun that finished more work adds its new note. The marker holds no name or domain.
 $ErrorActionPreference = 'Stop'
 function Get-NcoProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-NcoState {
@@ -45,6 +49,8 @@ $m365Read = [string](Get-NcoProp $m365 'status') -eq 'read'
 
 # Values the changes fill in as they run (a hashtable, changed in place).
 $run = @{ company_id = [int](Get-NcoProp $ncoCr 'company_id'); ticket_id = [string](Get-NcoProp $opt 'ticket_id'); company_created = $false; ticket_opened = $false }
+$openTicket = [string](Get-NcoProp $ncoPsa 'open_ticket')
+if (-not $run.ticket_id -and $openTicket) { $run.ticket_id = $openTicket }
 
 $null = Connect-Cr
 $null = Connect-Psa -Psa ([string](Get-NcoProp $ncoPsa 'type'))
@@ -178,8 +184,10 @@ if ($reportOk) { $noteLines += "Full baseline report: $($report.location)." }
 $internal = $noteLines -join "`n"
 if ($confirm -and $run.ticket_id) {
     try {
-        Add-PsaNote -Id $run.ticket_id -Text $internal -Title 'Onboarding: CloudRadial and Microsoft 365 baseline'
-        $actions += "Added an internal note to ticket $($run.ticket_id)."
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = (-join @($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($internal)) | Select-Object -First 4 | ForEach-Object { $_.ToString('x2') }))
+        $w = Add-PsaNote -Id $run.ticket_id -Text $internal -Title 'Onboarding: CloudRadial and Microsoft 365 baseline' -Marker "new-client-onboarding: $($run.ticket_id) $hash"
+        $actions += $(if ($w -eq 'already-present') { "The same internal note was already on ticket $($run.ticket_id), so it was not added again." } else { "Added an internal note to ticket $($run.ticket_id)." })
     }
     catch { $warnings += "Couldn't add the internal note to ticket $($run.ticket_id): $($_.Exception.Message)" }
 }

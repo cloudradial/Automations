@@ -26,7 +26,7 @@ const inject = path.join(here, '..', '..', '_shared', 'inject.js');
 const steps = [
   { id: 'node-inputs', name: 'Read inputs', file: 'read-inputs.ps1', libs: [], timeout: 60,
     testInput: { company_name: 'Contoso Ltd', primary_domain: 'contoso.com', psa_company_id: '', company_group: '', account_manager: '', territory: '', company_id: '', ticket_id: '', checklist: '', ticket_queue: '', tenant_id: '', include_m365: true, psa: '', confirm: false } },
-  { id: 'node-check', name: 'Check CloudRadial and the PSA', file: 'check.ps1', libs: ['cloudradial.ps1', 'psa.ps1'], timeout: 300 },
+  { id: 'node-check', name: 'Check CloudRadial and the PSA', file: 'check.ps1', libs: ['cloudradial.ps1', 'psa.ps1', 'psa-tickets.ps1'], timeout: 300 },
   { id: 'node-m365', name: 'Microsoft 365 baseline preview', file: 'm365.ps1', libs: ['graph.ps1'], timeout: 300 },
   { id: 'node-apply', name: 'Create the company and open the ticket', file: 'apply.ps1', libs: ['cloudradial.ps1', 'psa.ps1', 'plan.ps1'], timeout: 600 },
 ];

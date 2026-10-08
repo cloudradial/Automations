@@ -43,11 +43,13 @@ AutomationAI has no approval step, so the workflow **previews first**. With `con
    1. Creates the CloudRadial company with its PSA link (or, with `company_id`, links that company to the PSA if it has no link yet).
    2. Adds `primary_domain` to the company as its default domain.
    3. Adds the company to `company_group`.
-   4. Opens **one** onboarding checklist ticket for the client in the PSA (ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk). The checklist is in the ticket description. Skipped when `ticket_id` is given.
+   4. Opens **one** onboarding checklist ticket for the client in the PSA (ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk). The checklist is in the ticket description. Skipped when `ticket_id` is given, or when the check step finds an open ticket for this PSA company with the summary `New client onboarding: <company_name>` (found with the shared `Find-PsaTickets`); that ticket is used instead.
 
    It then writes the Microsoft 365 baseline into the company's **Onboarding** report archive (Compliance > Reports, admins only, never the knowledge base) and adds an **internal** note to the ticket with what was set up and the baseline. If either of those fails, the run still finishes, says so in `warnings`, and returns the report as `report_html`.
 
 If a confirm run stops after creating the company, the message tells you to run again with `company_id` (and `ticket_id` if the ticket was opened), so nothing is created twice.
+
+**Safe to retry.** A ServiceAI **Retry** (or a rerun with `company_id`) never opens a second onboarding ticket: the open one is reused. The internal note goes through the shared `Add-PsaNote -Marker` and ends with `[new-client-onboarding: <ticket id> <note hash>]`, where the hash is the first 8 hex characters of the note's SHA-256. A rerun with the same outcome adds no second note; a rerun that finished more of the work adds its new note. The marker holds no name or domain. Every note is internal: the workflow writes no client-visible note (`public_note` is only returned in the output).
 
 ### What the CloudRadial API can and can't set
 
@@ -121,7 +123,7 @@ If a permission is missing, the run stops before changing anything, with a sente
 | `company_group` | empty | A CloudRadial company group to add the company to. It must already exist. |
 | `account_manager`, `territory` | empty | Optional CloudRadial company fields |
 | `company_id` | empty | An existing CloudRadial company to finish onboarding (made by Add Companies to the Portal, or by an earlier run that stopped). No company is created. |
-| `ticket_id` | empty | An onboarding ticket that already exists. No new ticket is opened; the note goes on this one. |
+| `ticket_id` | empty | An onboarding ticket that already exists. No new ticket is opened; the note goes on this one. When empty, an open `New client onboarding: <company_name>` ticket for the PSA company is reused if there is one. |
 | `checklist` | the 10 items below | The ticket's checklist: a list, or text with one item per line (or separated by `;`). Up to 50 items. |
 | `ticket_queue` | PSA default | Board (ConnectWise), queue (Autotask, Kaseya BMS id), team (HaloPSA), issue type (Syncro) or group id (Zendesk) |
 | `tenant_id` | the tenant that owns `primary_domain` | The client's Microsoft 365 tenant id |

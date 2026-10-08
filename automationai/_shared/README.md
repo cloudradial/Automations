@@ -1,6 +1,6 @@
 # Shared PowerShell Libraries for AutomationAI Workflows
 
-One copy of the PSA, Microsoft Graph, CloudRadial and preview/confirm code that every automation needs, pasted into each workflow's PowerShell steps by a small build script.
+One copy of the PSA, Microsoft Graph, Exchange Online, CloudRadial and preview/confirm code that every automation needs, pasted into each workflow's PowerShell steps by a small build script.
 
 **Type:** Build source for maintainers (not an automation, and nothing here is imported into a tenant)
 
@@ -12,6 +12,7 @@ These links point at the `main` branch, so they always open the current version.
 |---|---|
 | View `psa.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/psa.ps1) |
 | View `graph.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/graph.ps1) |
+| View `exchange.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/exchange.ps1) |
 | View `plan.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/plan.ps1) |
 | View `cloudradial.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/cloudradial.ps1) |
 | View `inject.js` | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/_shared/inject.js) |
@@ -27,6 +28,7 @@ AutomationAI runs each PowerShell step as one self-contained script, so a step c
 |---|---|
 | `psa.ps1` | One adapter for six PSAs: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk. Same secret names as each PSA's catalog extension. |
 | `graph.ps1` | Microsoft Graph: client-credentials sign-in, retries, paging, and the user, group, licence, sign-in and security helpers. A 403 says which permission is missing. |
+| `exchange.ps1` | Exchange Online for what Graph can't do (shared mailboxes, distribution lists, forwarding, hiding from the address list): the Exchange admin REST endpoint first, the ExchangeOnlineManagement module as the fallback, and a plain reason when neither works. |
 | `plan.ps1` | The preview/confirm pattern. AutomationAI has no approval step, so a write automation previews its changes and only makes them when the run says `confirm: true`. Used with or without Graph. |
 | `cloudradial.ps1` | The CloudRadial API: calls with retry, paging, one Planner card per key (updated, never duplicated), and reports into Report Archives. |
 | `inject.js` | Pastes the libraries into an automation's `.yml` files. |
@@ -70,9 +72,9 @@ js-yaml: run `npm install` in this folder, or set `JS_YAML_PATH` (or `NODE_PATH`
 
 ## Rules every library follows (and every step that uses one should too)
 
-- **Strict mode.** Steps run under `Set-StrictMode -Version Latest`. Nothing reads a property that might not exist; the `Get-PsaProp`, `Get-GraphProp` and `Get-CrProp` helpers return `$null` instead.
-- **State in one hashtable per library**, changed in place: `$PsaState`, `$GraphState`, `$CrState`. The runner runs a step in a child scope where `$script:` variables don't work. Don't create your own variables with these names.
-- **Prefixed names.** Every function and helper carries its library's prefix (`Psa`, `Graph`, `Cr`, or `ChangePlan` and `PlannedChange`), so several libraries can sit in one step.
+- **Strict mode.** Steps run under `Set-StrictMode -Version Latest`. Nothing reads a property that might not exist; the `Get-PsaProp`, `Get-GraphProp`, `Get-OfProp` and `Get-CrProp` helpers return `$null` instead.
+- **State in one hashtable per library**, changed in place: `$PsaState`, `$GraphState`, `$OfExo`, `$CrState`. The runner runs a step in a child scope where `$script:` variables don't work. Don't create your own variables with these names.
+- **Prefixed names.** Every function and helper carries its library's prefix (`Psa`, `Graph`, `Of` for Exchange, `Cr`, or `ChangePlan` and `PlannedChange`), so several libraries can sit in one step.
 - **Variable names ignore case,** and a function sees its caller's variables. A step variable `$psastate`, or a typed parameter such as `[string[]]$Add` next to a local `$add`, silently clobbers the other one. The tests caught both mistakes while these files were written.
 - **Secrets by name only,** from `Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name <name> -AsPlainText`.
 - Lists come back as arrays; wrap a call in `@(...)` so one result is still a list.
@@ -129,6 +131,30 @@ Each of these has a one-line `Unverified` comment in `psa.ps1`. Check it against
 | `Get-GraphRiskyUsers [-UserId <string>] [-AtRiskOnly]` | Identity Protection risky users. Needs Entra ID P2. | IdentityRiskyUser.Read.All |
 | `New-GraphTempPassword [-Length <int>]` | A random password with every character class and no look-alike characters. | |
 
+## exchange.ps1
+
+Graph can't convert a mailbox to shared, hide it from the address list, set forwarding, or create a shared mailbox or distribution list. These helpers run Exchange Online cmdlets instead.
+
+```powershell
+if (-not (Connect-OfExchange -Organization $tenantDomain)) { throw "Exchange Online couldn't be reached: $($OfExo.Reason)" }
+if (-not (Get-OfRecipient 'sales@contoso.com')) { $null = Invoke-OfExo 'New-Mailbox' @{ Shared = $true; Name = 'Contoso Sales'; PrimarySmtpAddress = 'sales@contoso.com' } }
+```
+
+| Function | What it does |
+|---|---|
+| `Connect-OfExchange [-Organization <string>]` | Signs in once per step. Tries the Exchange admin REST endpoint (`/adminapi/beta/{tenant}/InvokeCommand`, the one the microsoft-exchange catalog extension uses) first, then the ExchangeOnlineManagement module with a certificate. Returns `$true`, or `$false` with `$OfExo.Reason` saying why. A failed sign-in isn't retried in the same step. `-Organization` (the tenant's `.onmicrosoft.com` domain) is used when the `MicrosoftExchange-Organization` secret isn't set. |
+| `Invoke-OfExo -Cmdlet <string> [-Parameters <hashtable>]` | Runs one cmdlet and returns an array of results. REST retries 429, 503 and 504; a 401 or 403 names the permission and role below. In module mode every cmdlet that isn't `Get-*` runs with `-Confirm:$false`, so it can't stop to ask. Errors read `"Exchange Online <cmdlet> failed (HTTP n): <Exchange's message>"`. |
+| `Get-OfRecipient -Identity <string>` | The recipient with that address, alias or name (any type: mailbox, group, contact), or `$null`. |
+| `Get-OfMailbox -Identity <string>` | The mailbox, or `$null` when there is none. |
+| `Get-OfMailboxBytes -Identity <string>` | Mailbox size in bytes from `Get-MailboxStatistics`, or `-1` when it can't be read. |
+| `Get-OfSecret`, `Get-OfProp`, `Get-OfErrorText`, `Get-OfHttpStatus`, `Test-OfNotFound` | Helpers: a Key Vault secret (`''` when unset), a strict-mode-safe property read, the readable text of a web error (a sign-in error's `error_description`, not its code), the HTTP status of a web error, and whether an Exchange message means "not found". |
+
+`$OfExo` holds `Mode` (`rest`, `module` or `''`), `Connected`, `Tried`, `Reason`, `TenantId` and `Token`. Read `Mode` and `Reason` for run output; don't set them.
+
+**Secrets:** REST uses the extension's own names, `MicrosoftExchange-TenantId`, `MicrosoftExchange-ClientId` and `MicrosoftExchange-ClientSecret`. The module fallback uses `MicrosoftExchange-ClientId`, `MicrosoftExchange-Organization` (or `-Organization`) and either `MicrosoftExchange-CertificateThumbprint` or `MicrosoftExchange-Certificate` (base64 PFX, with optional `MicrosoftExchange-CertificatePassword`), and needs the ExchangeOnlineManagement module on the runner.
+
+**Permissions:** the app registration needs the **Exchange.ManageAsApp** application permission (Office 365 Exchange Online, with admin consent) and the **Exchange Administrator** Entra role assigned to its service principal. Without the role, cmdlets fail with 401 or 403 even though sign-in works.
+
 ## plan.ps1
 
 ```powershell
@@ -165,8 +191,8 @@ Reports always go to Report Archives, never to a knowledge base article (client 
 pwsh -NoProfile -File automationai/_shared/tests/run.ps1
 ```
 
-Each library runs the way the runner runs it: pasted into one script with the test body, run through `& ([scriptblock]::Create(...))` under `Set-StrictMode -Version Latest`, with `Get-AzKeyVaultSecret`, `Invoke-RestMethod` and `Start-Sleep` mocked. The tests cover each PSA's sign-in, internal and public notes, create-ticket request, close and company lookup; Graph's 429 and 503 retries, paging, 401 refresh and the 403 permission message for every helper; plan preview, confirm and mid-plan failure; CloudRadial paging, card update-or-create and archive writes; and `inject.js` itself.
+Each library runs the way the runner runs it: pasted into one script with the test body, run through `& ([scriptblock]::Create(...))` under `Set-StrictMode -Version Latest`, with `Get-AzKeyVaultSecret`, `Invoke-RestMethod` and `Start-Sleep` mocked (and, for Exchange, `Get-Module`, `Import-Module`, `Connect-ExchangeOnline` and the cmdlets). The tests cover each PSA's sign-in, internal and public notes, create-ticket request, close and company lookup; Graph's 429 and 503 retries, paging, 401 refresh and the 403 permission message for every helper; plan preview, confirm and mid-plan failure; Exchange REST sign-in and calls, REST failure falling back to the module, neither available, cmdlet error messages and `-Confirm:$false` in module mode; CloudRadial paging, card update-or-create and archive writes; and `inject.js` itself.
 
 ## Not migrated yet
 
-New User Onboarding, Ticket Routing and Password Reset still carry their own copies of this code. Move them over one at a time: add the markers, delete the old functions, run `inject.js`, and run that automation's tests.
+New User Onboarding, Ticket Routing and Password Reset still carry their own copies of this code, and the open User Offboarding and Shared Mailbox / Distribution List branches still read their own `src/exchange.ps1`. Move them over one at a time: add the markers, delete the old functions, run `inject.js`, and run that automation's tests.

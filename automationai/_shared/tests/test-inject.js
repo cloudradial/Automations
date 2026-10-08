@@ -1,5 +1,5 @@
 // Tests for _shared/inject.js against a throwaway workflow file: inject, --check, indentation,
-// CRLF, several libraries in one step, and a missing end marker.
+// CRLF, several libraries in one step (all five libraries), and a missing end marker.
 // Usage: node automationai/_shared/tests/test-inject.js   (needs js-yaml, like inject.js)
 const fs = require('fs');
 const os = require('os');
@@ -47,6 +47,8 @@ const workflow = [
   `          ${end('psa.ps1')}`,
   `          ${start('cloudradial.ps1')}`,
   `          ${end('cloudradial.ps1')}`,
+  `          ${start('exchange.ps1')}`,
+  `          ${end('exchange.ps1')}`,
   '',
 ].join('\n');
 
@@ -61,7 +63,7 @@ try {
   check('--check leaves the file alone', fs.readFileSync(f, 'utf8') === workflow);
 
   r = run(dir);
-  check('inject exits 0 and reports the blocks', r.status === 0 && /sample\.yml: 5 block\(s\) \[plan\.ps1, graph\.ps1, psa\.ps1, cloudradial\.ps1\] updated/.test(r.stdout), r.stdout + r.stderr);
+  check('inject exits 0 and reports the blocks', r.status === 0 && /sample\.yml: 6 block\(s\) \[plan\.ps1, graph\.ps1, psa\.ps1, cloudradial\.ps1, exchange\.ps1\] updated/.test(r.stdout), r.stdout + r.stderr);
   const doc = y.load(fs.readFileSync(f, 'utf8'));
   const s1 = doc.definition.activities[0].properties.script;
   const s2 = doc.definition.activities[1].properties.script;
@@ -69,7 +71,7 @@ try {
   check('the step script holds the library text exactly', s1 === want1, s1.slice(0, 300));
   check('a block at a deeper indent keeps its indent', s2 === [start('plan.ps1'), lib('plan.ps1'), end('plan.ps1')].join('\n'), s2.slice(0, 200));
   const s3 = doc.definition.activities[2].properties.script;
-  check('psa.ps1 and cloudradial.ps1 survive the YAML round trip', s3 === [start('psa.ps1'), lib('psa.ps1'), end('psa.ps1'), start('cloudradial.ps1'), lib('cloudradial.ps1'), end('cloudradial.ps1'), ''].join('\n'), s3.slice(0, 200));
+  check('psa.ps1, cloudradial.ps1 and exchange.ps1 survive the YAML round trip', s3 === [start('psa.ps1'), lib('psa.ps1'), end('psa.ps1'), start('cloudradial.ps1'), lib('cloudradial.ps1'), end('cloudradial.ps1'), start('exchange.ps1'), lib('exchange.ps1'), end('exchange.ps1'), ''].join('\n'), s3.slice(0, 200));
   check('a file without markers is not touched', fs.readFileSync(path.join(dir, 'untouched.yml'), 'utf8') === 'kind: automationsAgent\n');
 
   r = run(dir, '--check');
@@ -86,9 +88,9 @@ try {
   fs.writeFileSync(f, broken);
   r = run(dir);
   check('a missing end marker is an error and nothing is written', r.status === 2 && /# <<< _shared\/graph\.ps1/.test(r.stderr) && fs.readFileSync(f, 'utf8') === broken, r.stdout + r.stderr);
-  fs.writeFileSync(f, workflow.replace(`          ${end('cloudradial.ps1')}\n`, ''));
+  fs.writeFileSync(f, workflow.replace(`          ${end('exchange.ps1')}\n`, ''));
   r = run(dir);
-  check('an end marker missing at the end of the file is an error', r.status === 2 && /no "# <<< _shared\/cloudradial\.ps1"/.test(r.stderr), r.stdout + r.stderr);
+  check('an end marker missing at the end of the file is an error', r.status === 2 && /no "# <<< _shared\/exchange\.ps1"/.test(r.stderr), r.stdout + r.stderr);
 
   fs.writeFileSync(f, workflow.replace(/plan\.ps1/g, 'nope.ps1'));
   r = run(dir);

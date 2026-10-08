@@ -6,10 +6,9 @@
 # Admins and accounts synced from on-premises Active Directory are listed but flagged, and are never disabled.
 # Changes nothing. A missing permission stops the run with a sentence naming it.
 $ErrorActionPreference = 'Stop'
-function Get-SgProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-SgState {
     $raw = Get-NodeInput
-    if ($null -ne $raw -and $null -eq (Get-SgProp $raw 'inputs') -and $null -ne (Get-SgProp $raw 'output')) { $raw = Get-SgProp $raw 'output' }
+    if ($null -ne $raw -and $null -eq (Get-GraphProp $raw 'inputs') -and $null -ne (Get-GraphProp $raw 'output')) { $raw = Get-GraphProp $raw 'output' }
     $st = [ordered]@{}
     if ($raw -is [System.Collections.IDictionary]) { foreach ($k in $raw.Keys) { $st[[string]$k] = $raw[$k] } }
     elseif ($null -ne $raw) { foreach ($p in $raw.PSObject.Properties) { $st[$p.Name] = $p.Value } }
@@ -36,11 +35,11 @@ function ConvertTo-SgDate {
 
 $sg = Read-SgState
 $opt = $sg['inputs']
-$days = [int](Get-SgProp $opt 'days')
-$includeGuests = [bool](Get-SgProp $opt 'include_guests')
+$days = [int](Get-GraphProp $opt 'days')
+$includeGuests = [bool](Get-GraphProp $opt 'include_guests')
 
 try { $conn = Connect-Graph } catch { Stop-SgRun $sg "Couldn't sign in to Microsoft 365: $($_.Exception.Message) Nothing was changed." }
-$tenantWanted = [string](Get-SgProp $opt 'tenant_id')
+$tenantWanted = [string](Get-GraphProp $opt 'tenant_id')
 if ($tenantWanted -and $tenantWanted -ne ([string]$conn.TenantId).ToLowerInvariant()) {
     $sg['status'] = 'rejected'; $sg['message'] = 'The run asked for a different Microsoft 365 tenant than the one this runner is set up for, so nothing was read or changed.'
     $sg['internal_note'] = "Inactive account review rejected: tenant_id $tenantWanted is not this runner's tenant."
@@ -64,12 +63,12 @@ $admins = @{}
 try {
     $roles = @(Get-GraphAll -Path "/v1.0/directoryRoles?`$select=id,displayName&`$expand=members" -Permission 'RoleManagement.Read.Directory')
     foreach ($r in $roles) {
-        $roleName = [string](Get-SgProp $r 'displayName')
-        foreach ($mbr in @(Get-SgProp $r 'members')) {
+        $roleName = [string](Get-GraphProp $r 'displayName')
+        foreach ($mbr in @(Get-GraphProp $r 'members')) {
             if ($null -eq $mbr) { continue }
-            $ids = @([string](Get-SgProp $mbr 'id'))
-            if ([string](Get-SgProp $mbr '@odata.type') -match 'group$') {
-                $ids = @(Get-GraphAll -Path "/v1.0/groups/$(Get-SgProp $mbr 'id')/transitiveMembers?`$select=id" -Permission 'GroupMember.Read.All' | ForEach-Object { [string](Get-SgProp $_ 'id') })
+            $ids = @([string](Get-GraphProp $mbr 'id'))
+            if ([string](Get-GraphProp $mbr '@odata.type') -match 'group$') {
+                $ids = @(Get-GraphAll -Path "/v1.0/groups/$(Get-GraphProp $mbr 'id')/transitiveMembers?`$select=id" -Permission 'GroupMember.Read.All' | ForEach-Object { [string](Get-GraphProp $_ 'id') })
             }
             foreach ($i in $ids) { if (-not $i) { continue }; if (-not $admins.ContainsKey($i)) { $admins[$i] = @() }; if ($admins[$i] -notcontains $roleName) { $admins[$i] += $roleName } }
         }
@@ -89,28 +88,28 @@ $counts = [ordered]@{ users_read = $users.Count; members_reviewed = 0; guests_re
 $rows = New-Object System.Collections.ArrayList
 foreach ($u in $users) {
     if ($null -eq $u) { continue }
-    $isGuest = ([string](Get-SgProp $u 'userType')) -ieq 'Guest'
+    $isGuest = ([string](Get-GraphProp $u 'userType')) -ieq 'Guest'
     if ($isGuest -and -not $includeGuests) { $counts.skipped_guests++; continue }
-    if ((Get-SgProp $u 'accountEnabled') -eq $false) { $counts.skipped_disabled++; continue }
+    if ((Get-GraphProp $u 'accountEnabled') -eq $false) { $counts.skipped_disabled++; continue }
     if ($isGuest) { $counts.guests_reviewed++ } else { $counts.members_reviewed++ }
-    $created = ConvertTo-SgDate (Get-SgProp $u 'createdDateTime')
+    $created = ConvertTo-SgDate (Get-GraphProp $u 'createdDateTime')
     if ($null -ne $created -and $created -gt $cutoff) { $counts.skipped_new++; continue }
-    $sia = Get-SgProp $u 'signInActivity'
+    $sia = Get-GraphProp $u 'signInActivity'
     $last = $null
     foreach ($f in @('lastSignInDateTime', 'lastNonInteractiveSignInDateTime', 'lastSuccessfulSignInDateTime')) {
-        $d = ConvertTo-SgDate (Get-SgProp $sia $f)
+        $d = ConvertTo-SgDate (Get-GraphProp $sia $f)
         if ($null -ne $d -and ($null -eq $last -or $d -gt $last)) { $last = $d }
     }
     if ($null -ne $last -and $last -gt $cutoff) { continue }
 
-    $id = [string](Get-SgProp $u 'id')
+    $id = [string](Get-GraphProp $u 'id')
     $flag = ''; $why = ''; $roleText = ''
     if ($admins.ContainsKey($id)) { $flag = 'admin'; $roleText = (@($admins[$id]) -join ', '); $why = "Holds an admin role ($roleText). Review manually; this workflow never disables admins." }
-    elseif ((Get-SgProp $u 'onPremisesSyncEnabled') -eq $true) { $flag = 'synced'; $why = 'Synced from on-premises Active Directory. Disable it there; a change made in Microsoft 365 would not stick.' }
+    elseif ((Get-GraphProp $u 'onPremisesSyncEnabled') -eq $true) { $flag = 'synced'; $why = 'Synced from on-premises Active Directory. Disable it there; a change made in Microsoft 365 would not stick.' }
     $row = [ordered]@{
         id            = $id
-        upn           = [string](Get-SgProp $u 'userPrincipalName')
-        name          = [string](Get-SgProp $u 'displayName')
+        upn           = [string](Get-GraphProp $u 'userPrincipalName')
+        name          = [string](Get-GraphProp $u 'displayName')
         kind          = $(if ($isGuest) { 'guest' } else { 'member' })
         last_sign_in  = $(if ($null -ne $last) { $last.ToString('yyyy-MM-dd') } else { '' })
         never_signed_in = ($null -eq $last)

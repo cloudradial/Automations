@@ -4,10 +4,9 @@
 # when one was given, and returns the result. A report or note that can't be written becomes a
 # warning; the report then stays in the run output as report_html.
 $ErrorActionPreference = 'Stop'
-function Get-SgProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-SgState {
     $raw = Get-NodeInput
-    if ($null -ne $raw -and $null -eq (Get-SgProp $raw 'inputs') -and $null -ne (Get-SgProp $raw 'output')) { $raw = Get-SgProp $raw 'output' }
+    if ($null -ne $raw -and $null -eq (Get-PsaProp $raw 'inputs') -and $null -ne (Get-PsaProp $raw 'output')) { $raw = Get-PsaProp $raw 'output' }
     $st = [ordered]@{}
     if ($raw -is [System.Collections.IDictionary]) { foreach ($k in $raw.Keys) { $st[[string]$k] = $raw[$k] } }
     elseif ($null -ne $raw) { foreach ($p in $raw.PSObject.Properties) { $st[$p.Name] = $p.Value } }
@@ -21,23 +20,23 @@ function Get-SgPlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1
 
 $sg = Read-SgState
 $opt = $sg['inputs']
-$days = [int](Get-SgProp $opt 'days')
-$confirm = [bool](Get-SgProp $opt 'confirm')
-$includeGuests = [bool](Get-SgProp $opt 'include_guests')
+$days = [int](Get-PsaProp $opt 'days')
+$confirm = [bool](Get-PsaProp $opt 'confirm')
+$includeGuests = [bool](Get-PsaProp $opt 'include_guests')
 $cnt = $sg['counts']
 $dis = $sg['disable']
-$res = Get-SgProp $dis 'result'
+$res = Get-PsaProp $dis 'result'
 $candidates = @($sg['candidates'] | Where-Object { $null -ne $_ })
-$members = @($candidates | Where-Object { [string](Get-SgProp $_ 'kind') -eq 'member' })
-$guests = @($candidates | Where-Object { [string](Get-SgProp $_ 'kind') -eq 'guest' })
-$flagged = @($candidates | Where-Object { -not [bool](Get-SgProp $_ 'can_disable') })
-$canDisable = @($candidates | Where-Object { [bool](Get-SgProp $_ 'can_disable') })
-$requested = @(Get-SgProp $dis 'requested')
-$disabled = @(Get-SgProp $dis 'disabled' | Where-Object { $_ })
-$skipped = @(Get-SgProp $dis 'skipped' | Where-Object { $null -ne $_ })
-$planned = @(Get-SgProp $dis 'planned' | Where-Object { $_ })
-$failed = Get-SgProp $res 'failed'
-$notRun = @(Get-SgProp $res 'notRun' | Where-Object { $_ })
+$members = @($candidates | Where-Object { [string](Get-PsaProp $_ 'kind') -eq 'member' })
+$guests = @($candidates | Where-Object { [string](Get-PsaProp $_ 'kind') -eq 'guest' })
+$flagged = @($candidates | Where-Object { -not [bool](Get-PsaProp $_ 'can_disable') })
+$canDisable = @($candidates | Where-Object { [bool](Get-PsaProp $_ 'can_disable') })
+$requested = @(Get-PsaProp $dis 'requested')
+$disabled = @(Get-PsaProp $dis 'disabled' | Where-Object { $_ })
+$skipped = @(Get-PsaProp $dis 'skipped' | Where-Object { $null -ne $_ })
+$planned = @(Get-PsaProp $dis 'planned' | Where-Object { $_ })
+$failed = Get-PsaProp $res 'failed'
+$notRun = @(Get-PsaProp $res 'notRun' | Where-Object { $_ })
 $warnings = @($sg['warnings'])
 $actions = @($sg['actions'])
 
@@ -57,7 +56,7 @@ if (-not $confirm) {
 }
 elseif (-not $requested.Count) { $status = 'incomplete'; $message = 'confirm was true but disable_ids was empty, so nothing was changed. List the sign-in names or ids to disable.' }
 elseif (-not $planned.Count) { $status = 'rejected'; $message = "None of the accounts in disable_ids are on the current inactive list or allowed to be disabled, so nothing was changed. $(Get-SgPlural $skipped.Count 'account was' 'accounts were') skipped; see the report for why." }
-elseif ($null -ne $failed) { $status = 'error'; $message = "Disabled $(Get-SgPlural $disabled.Count 'account' 'accounts'), then stopped because '$(Get-SgProp $failed 'description')' failed: $(Get-SgProp $failed 'error'). Not run: $(if ($notRun.Count) { $notRun -join '; ' } else { 'nothing' })." }
+elseif ($null -ne $failed) { $status = 'error'; $message = "Disabled $(Get-SgPlural $disabled.Count 'account' 'accounts'), then stopped because '$(Get-PsaProp $failed 'description')' failed: $(Get-PsaProp $failed 'error'). Not run: $(if ($notRun.Count) { $notRun -join '; ' } else { 'nothing' })." }
 else {
     $status = 'success'
     $message = "Disabled $(Get-SgPlural $disabled.Count 'account' 'accounts') and signed $(if ($disabled.Count -eq 1) { 'it' } else { 'them' }) out of every session: $($disabled -join ', ')."
@@ -73,10 +72,10 @@ function Add-SgTable {
     if (-not @($Rows).Count) { Add-SgHtml "<p>$(ConvertTo-SgHtml $Empty)</p>"; return }
     Add-SgHtml '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse"><tr><th>Name</th><th>Sign-in name</th><th>Last sign-in</th><th>Days inactive</th><th>Created</th><th>Review note</th></tr>'
     foreach ($r in @($Rows)) {
-        $last = if ([bool](Get-SgProp $r 'never_signed_in')) { 'Never' } else { [string](Get-SgProp $r 'last_sign_in') }
-        $di = [int](Get-SgProp $r 'days_inactive'); $diText = if ($di -ge 0) { [string]$di } else { 'Unknown' }
-        $note = [string](Get-SgProp $r 'note'); if (-not $note) { $note = 'Can be disabled if you confirm it.' }
-        Add-SgHtml "<tr><td>$(ConvertTo-SgHtml (Get-SgProp $r 'name'))</td><td>$(ConvertTo-SgHtml (Get-SgProp $r 'upn'))</td><td>$(ConvertTo-SgHtml $last)</td><td>$diText</td><td>$(ConvertTo-SgHtml (Get-SgProp $r 'created'))</td><td>$(ConvertTo-SgHtml $note)</td></tr>"
+        $last = if ([bool](Get-PsaProp $r 'never_signed_in')) { 'Never' } else { [string](Get-PsaProp $r 'last_sign_in') }
+        $di = [int](Get-PsaProp $r 'days_inactive'); $diText = if ($di -ge 0) { [string]$di } else { 'Unknown' }
+        $note = [string](Get-PsaProp $r 'note'); if (-not $note) { $note = 'Can be disabled if you confirm it.' }
+        Add-SgHtml "<tr><td>$(ConvertTo-SgHtml (Get-PsaProp $r 'name'))</td><td>$(ConvertTo-SgHtml (Get-PsaProp $r 'upn'))</td><td>$(ConvertTo-SgHtml $last)</td><td>$diText</td><td>$(ConvertTo-SgHtml (Get-PsaProp $r 'created'))</td><td>$(ConvertTo-SgHtml $note)</td></tr>"
     }
     Add-SgHtml '</table>'
 }
@@ -86,26 +85,26 @@ Add-SgHtml "<p>Checked $(ConvertTo-SgHtml $sg['checked_at']) for accounts with n
 Add-SgHtml "<p><strong>$(ConvertTo-SgHtml $message)</strong></p>"
 if ($confirm) {
     Add-SgHtml '<h3>What was changed</h3>'
-    if ($disabled.Count) { Add-SgHtml '<ul>'; foreach ($d in $disabled) { Add-SgHtml "<li>$(ConvertTo-SgHtml $d): sign-in turned off$(if (@(@(Get-SgProp $res 'ran') | Where-Object { [string](Get-SgProp $_ 'description') -eq "Sign $d out of every session" }).Count) { ' and signed out of every session' } else { '; the sign-out did not run' }).</li>" }; Add-SgHtml '</ul>' }
+    if ($disabled.Count) { Add-SgHtml '<ul>'; foreach ($d in $disabled) { Add-SgHtml "<li>$(ConvertTo-SgHtml $d): sign-in turned off$(if (@(@(Get-PsaProp $res 'ran') | Where-Object { [string](Get-PsaProp $_ 'description') -eq "Sign $d out of every session" }).Count) { ' and signed out of every session' } else { '; the sign-out did not run' }).</li>" }; Add-SgHtml '</ul>' }
     else { Add-SgHtml '<p>No accounts were changed.</p>' }
-    if ($null -ne $failed) { Add-SgHtml "<p>Stopped because '$(ConvertTo-SgHtml (Get-SgProp $failed 'description'))' failed: $(ConvertTo-SgHtml (Get-SgProp $failed 'error'))</p>" }
+    if ($null -ne $failed) { Add-SgHtml "<p>Stopped because '$(ConvertTo-SgHtml (Get-PsaProp $failed 'description'))' failed: $(ConvertTo-SgHtml (Get-PsaProp $failed 'error'))</p>" }
     if ($notRun.Count) { Add-SgHtml "<p>Not run: $(ConvertTo-SgHtml ($notRun -join '; '))</p>" }
     if ($skipped.Count) {
         Add-SgHtml '<h3>Requested but not changed</h3><ul>'
-        foreach ($s in $skipped) { Add-SgHtml "<li>$(ConvertTo-SgHtml (Get-SgProp $s 'requested')): $(ConvertTo-SgHtml (Get-SgProp $s 'reason'))</li>" }
+        foreach ($s in $skipped) { Add-SgHtml "<li>$(ConvertTo-SgHtml (Get-PsaProp $s 'requested')): $(ConvertTo-SgHtml (Get-PsaProp $s 'reason'))</li>" }
         Add-SgHtml '</ul>'
     }
 }
-Add-SgHtml "<p>Accounts reviewed: $([int](Get-SgProp $cnt 'members_reviewed')) members and $([int](Get-SgProp $cnt 'guests_reviewed')) guests. Not counted as inactive: $([int](Get-SgProp $cnt 'skipped_disabled')) already disabled, $([int](Get-SgProp $cnt 'skipped_new')) created in the last $days days$(if (-not $includeGuests) { ", $([int](Get-SgProp $cnt 'skipped_guests')) guests (guests were not included)" }).</p>"
+Add-SgHtml "<p>Accounts reviewed: $([int](Get-PsaProp $cnt 'members_reviewed')) members and $([int](Get-PsaProp $cnt 'guests_reviewed')) guests. Not counted as inactive: $([int](Get-PsaProp $cnt 'skipped_disabled')) already disabled, $([int](Get-PsaProp $cnt 'skipped_new')) created in the last $days days$(if (-not $includeGuests) { ", $([int](Get-PsaProp $cnt 'skipped_guests')) guests (guests were not included)" }).</p>"
 Add-SgTable 'Needs manual review (never disabled by this workflow)' $flagged 'No inactive account holds an admin role or is synced from on-premises.'
-Add-SgTable 'Inactive member accounts' @($members | Where-Object { [bool](Get-SgProp $_ 'can_disable') }) 'None.'
-if ($includeGuests) { Add-SgTable 'Inactive guest accounts' @($guests | Where-Object { [bool](Get-SgProp $_ 'can_disable') }) 'None.' }
+Add-SgTable 'Inactive member accounts' @($members | Where-Object { [bool](Get-PsaProp $_ 'can_disable') }) 'None.'
+if ($includeGuests) { Add-SgTable 'Inactive guest accounts' @($guests | Where-Object { [bool](Get-PsaProp $_ 'can_disable') }) 'None.' }
 Add-SgHtml '<p>Nothing is disabled automatically. To disable accounts from this list, run the workflow again with confirm set to true and disable_ids listing their sign-in names. Only accounts that are still inactive at that time are changed.</p>'
 $html = $sgHtml.ToString()
 
 # ---- Report Archive ----
 $reportInfo = [ordered]@{ action = 'not-written'; location = '' }
-$cid = [string](Get-SgProp $opt 'company_id')
+$cid = [string](Get-PsaProp $opt 'company_id')
 $subject = if ($confirm) { "Inactive accounts changes $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC" } else { "Inactive accounts review $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd'))" }
 $reportOk = $false
 if ($cid -match '^\d+$') {
@@ -121,19 +120,30 @@ if ($cid -match '^\d+$') {
 else { $warnings += 'No CloudRadial company id (company_id input or CloudRadial-CompanyId secret), so the report was not archived. It is in report_html.' }
 
 # ---- Internal note ----
-$top = @($candidates | Select-Object -First 25 | ForEach-Object { "$(Get-SgProp $_ 'upn') ($(if ([bool](Get-SgProp $_ 'never_signed_in')) { 'never signed in' } else { "last sign-in $(Get-SgProp $_ 'last_sign_in')" })$(if ([string](Get-SgProp $_ 'flag')) { ", $(Get-SgProp $_ 'flag'), review manually" }))" })
+$top = @($candidates | Select-Object -First 25 | ForEach-Object { "$(Get-PsaProp $_ 'upn') ($(if ([bool](Get-PsaProp $_ 'never_signed_in')) { 'never signed in' } else { "last sign-in $(Get-PsaProp $_ 'last_sign_in')" })$(if ([string](Get-PsaProp $_ 'flag')) { ", $(Get-PsaProp $_ 'flag'), review manually" }))" })
 $noteLines = @("Inactive Microsoft 365 account review ($days days).", $message)
 if (-not $confirm -and $top.Count) { $noteLines += "Inactive accounts$(if ($candidates.Count -gt 25) { ' (first 25)' }): $($top -join '; ')." }
-if ($confirm -and $skipped.Count) { $noteLines += "Skipped: $(@($skipped | ForEach-Object { "$(Get-SgProp $_ 'requested') ($(Get-SgProp $_ 'reason'))" }) -join '; ')" }
+if ($confirm -and $skipped.Count) { $noteLines += "Skipped: $(@($skipped | ForEach-Object { "$(Get-PsaProp $_ 'requested') ($(Get-PsaProp $_ 'reason'))" }) -join '; ')" }
 $noteLines += $(if ($reportOk) { "Full report: $($reportInfo.location)." } else { 'The report could not be archived; it is in the workflow run output.' })
 $internal = $noteLines -join "`n"
 
 $tid = [string]$sg['ticket_id']
+# Retry guard: the note carries a marker, so a ServiceAI Retry or a re-run Routine doesn't add it twice.
+# A review is keyed by the UTC day and settings; a confirm run by a short hash of the accounts it was asked
+# to disable (never the sign-in names themselves).
+if ($confirm) {
+    $sgReq = @(@(Get-PsaProp $dis 'requested') | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique) -join ','
+    $sgSha = [System.Security.Cryptography.SHA256]::Create()
+    try { $sgHash = (-join ($sgSha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sgReq)) | ForEach-Object { $_.ToString('x2') })).Substring(0, 8) } finally { $sgSha.Dispose() }
+    $noteMarker = "stale-guest-cleanup: disable $sgHash"
+}
+else { $noteMarker = "stale-guest-cleanup: review $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')) $($days)d$(if ($includeGuests) { ' with guests' })" }
 if ($tid) {
     try {
-        $null = Connect-Psa -Psa (Get-PsaType ([string](Get-SgProp $opt 'psa')))
-        Add-PsaNote -Id $tid -Text $internal -Title 'Inactive account review'
-        $actions += "Added an internal note to ticket $tid."
+        $null = Connect-Psa -Psa (Get-PsaType ([string](Get-PsaProp $opt 'psa')))
+        $noteWrite = Add-PsaNote -Id $tid -Text $internal -Title 'Inactive account review' -Marker $noteMarker
+        if ($noteWrite -eq 'already-present') { $actions += "The internal note was already on ticket $tid, so it was not added again." }
+        else { $actions += "Added an internal note to ticket $tid." }
     }
     catch { $warnings += "Couldn't add the internal note to ticket $($tid): $($_.Exception.Message)" }
 }

@@ -19,7 +19,7 @@ $Steps = @{}; foreach ($s in $StepIds) { $Steps[$s] = Get-Content -Raw (Join-Pat
 Remove-Item -Recurse -Force $tmp
 
 $Tally = @{ pass = 0; fail = 0 }
-$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{} }
+$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{}; Notes = (New-Object System.Collections.ArrayList) }
 function Get-AzKeyVaultSecret { [CmdletBinding()] param($VaultName, $Name, [switch]$AsPlainText) if ($Mock.Secrets.Contains($Name)) { return $Mock.Secrets[$Name] }; return $null }
 function Start-Sleep { [CmdletBinding()] param([double]$Seconds = 0, [int]$Milliseconds = 0) }
 function Get-NodeInput { return $global:NodeIn }
@@ -36,6 +36,7 @@ function New-HttpError {
 function Get-Iso { param([int]$DaysAgo) return (Get-Date).ToUniversalTime().AddDays(-$DaysAgo).ToString('yyyy-MM-ddTHH:mm:ssZ') }
 function New-U {
     param([string]$Id, [string]$Upn, [int]$Created, $Last = $null, $NonInt = $null, [string]$Type = 'Member', [bool]$Enabled = $true, [bool]$Synced = $false)
+    if ($Mock.Opt.Contains('DisabledIds') -and @($Mock.Opt['DisabledIds']) -contains $Id) { $Enabled = $false }
     $sia = $null
     if ($null -ne $Last -or $null -ne $NonInt) { $sia = [pscustomobject]@{ lastSignInDateTime = $(if ($null -ne $Last) { Get-Iso $Last }); lastNonInteractiveSignInDateTime = $(if ($null -ne $NonInt) { Get-Iso $NonInt }); lastSuccessfulSignInDateTime = $null } }
     return [pscustomobject]@{ id = $Id; userPrincipalName = $Upn; displayName = ($Upn -split '@')[0]; mail = $Upn; accountEnabled = $Enabled; userType = $Type
@@ -85,8 +86,17 @@ function Invoke-RestMethod {
     if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return @([pscustomobject]@{ id = 55; companyId = 9; name = 'Account Reviews' }) }
     if ($u -like 'https://portal.example-msp.test/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @() } }
     if ($u -eq 'https://portal.example-msp.test/v2/archiveitem' -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
-    if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes' -and $m -eq 'POST') { return [pscustomobject]@{ id = 1 } }
-    if ($u -like 'https://examplemsp.zendesk.test/api/v2/tickets/*' -and $m -eq 'PUT') { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 123 } } }
+    # Ticket notes are kept in $Mock.Notes, so a rerun (KeepNotes) sees what the first run wrote.
+    if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes' -and $m -eq 'POST') {
+        $b = $Body | ConvertFrom-Json; $null = $Mock.Notes.Add([pscustomobject]@{ id = $Mock.Notes.Count + 1; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag })
+        return [pscustomobject]@{ id = $Mock.Notes.Count }
+    }
+    if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes[?]*' -and $m -eq 'GET') { if ($u -like '*page=1') { return @($Mock.Notes) }; return @() }
+    if ($u -like 'https://examplemsp.zendesk.test/api/v2/tickets/*' -and $m -eq 'PUT') {
+        $c = ($Body | ConvertFrom-Json).ticket.comment; $null = $Mock.Notes.Add([pscustomobject]@{ id = $Mock.Notes.Count + 1; body = $c.body; public = $c.public; author_id = 1 })
+        return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 123 } }
+    }
+    if ($u -like 'https://examplemsp.zendesk.test/api/v2/tickets/*/comments*' -and $m -eq 'GET') { return [pscustomobject]@{ comments = @($Mock.Notes); next_page = $null } }
     throw "Unmocked call: $m $u"
 }
 
@@ -106,6 +116,7 @@ function Invoke-Workflow {
     param($RunInput, [hashtable]$Secrets = @{}, [hashtable]$Opt = @{})
     $Mock.Secrets = $BaseSecrets.Clone(); foreach ($k in $Secrets.Keys) { if ($null -eq $Secrets[$k]) { $Mock.Secrets.Remove($k) } else { $Mock.Secrets[$k] = $Secrets[$k] } }
     $Mock.Calls.Clear(); $Mock.Opt = $Opt
+    if (-not $Opt.Contains('KeepNotes')) { $Mock.Notes.Clear() }
     $global:NodeIn = $(if ($RunInput -is [string] -or $null -eq $RunInput) { $RunInput } else { RoundTrip $RunInput })
     $global:NodeOut = $null
     foreach ($s in $StepIds) {
@@ -143,6 +154,14 @@ Check 'preview: ConnectWise internal note' ($note.Count -eq 1 -and ($note[0].Bod
 Check 'preview: note points at the archive' (($note[0].Body | ConvertFrom-Json).text -match 'Account Reviews') ''
 Check 'preview: message is plain and says nothing changed' ($o.message -match 'Nothing was changed' -and $o.message -match '7 accounts have not signed in for 90 days') $o.message
 Check 'preview: no report_html when archived' ($null -eq $o.PSObject.Properties['report_html']) ''
+$nt = ($note[0].Body | ConvertFrom-Json).text
+Check 'preview: note ends with the review marker (no names in it)' ($nt -match "\n\[stale-guest-cleanup: review \d{4}-\d{2}-\d{2} 90d with guests\]$") $nt
+
+# 1b. Rerun (ServiceAI Retry, or the Routine running twice): writes no second note.
+$r = Invoke-Workflow @{ ticket_id = '123'; company_id = '9' } @{} @{ KeepNotes = $true }
+Check 'rerun preview: no error' ($r.error -eq '') $r.error
+Check 'rerun preview: no second ConnectWise note' (@(Get-Calls POST 'https://cw.example-msp.test/*/notes').Count -eq 0 -and $Mock.Notes.Count -eq 1) "$($Mock.Notes.Count) notes"
+Check 'rerun preview: says the note was already there' ((@($r.out.actions) -join ' ') -match 'already on ticket 123') (@($r.out.actions) -join ' | ')
 
 # 2. Guests excluded, company id from the secret, no ticket.
 $r = Invoke-Workflow @{ include_guests = 'false' } @{ 'CloudRadial-CompanyId' = '9' }
@@ -170,6 +189,15 @@ Check 'confirm: note lists the disabled accounts' (($zd[0].Body | ConvertFrom-Js
 $cb = @(Get-Calls POST '*/v2/archiveitem')[0].Body | ConvertFrom-Json
 Check 'confirm: change log written to archive' ($cb.subject -like 'Inactive accounts changes *' -and $cb.text -match 'sign-in turned off and signed out of every session') $cb.subject
 Check 'confirm: disabled list output' (@($o.disabled).Count -eq 2) (@($o.disabled) -join ', ')
+$zb = ($zd[0].Body | ConvertFrom-Json).ticket.comment.body
+$zLast = @($zb -split "`n")[-1]
+Check 'confirm: marker is a hash, with no sign-in names' ($zLast -match '^\[stale-guest-cleanup: disable [0-9a-f]{8}\]$' -and $zLast -notmatch '@|contoso|aaaaaaaa') $zLast
+
+# 3b. Rerun of the same confirm after it worked: the two accounts are now disabled, so nothing is written again.
+$r = Invoke-Workflow @{ confirm = 'true'; psa = 'zendesk'; ticket_id = '123'; company_id = '9'; disable_ids = 'aaaaaaaa-0000-0000-0000-000000000002, vendor_example.org#EXT#@contoso.com;aaaaaaaa-0000-0000-0000-000000000009 ffffffff-ffff-ffff-ffff-ffffffffffff active@contoso.com not-an-id' } @{} @{ KeepNotes = $true; DisabledIds = @('aaaaaaaa-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000007') }
+Check 'rerun confirm: no Graph writes' (@(Get-Writes).Count -eq 0) (@(Get-Writes | ForEach-Object { "$($_.Method) $($_.Uri)" }) -join '; ')
+Check 'rerun confirm: no second Zendesk note' (@(Get-Calls PUT 'https://examplemsp.zendesk.test/*').Count -eq 0 -and $Mock.Notes.Count -eq 1) "$($Mock.Notes.Count) notes"
+Check 'rerun confirm: says the note was already there' ((@($r.out.actions) -join ' ') -match 'already on ticket 123') (@($r.out.actions) -join ' | ')
 
 # 4. Confirm where the second disable fails: stops and says what didn't run.
 $r = Invoke-Workflow @{ confirm = $true; company_id = '9'; disable_ids = 'aaaaaaaa-0000-0000-0000-000000000002,aaaaaaaa-0000-0000-0000-000000000003' } @{} @{ FailPatch = 'aaaaaaaa-0000-0000-0000-000000000003' }

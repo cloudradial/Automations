@@ -205,15 +205,15 @@ Check 'autotask: company names resolved' (@($o.issues | Where-Object { $_.ticket
 # 4. HaloPSA and Kaseya BMS confirm.
 $r = Invoke-Workflow @{ psa = 'halopsa'; fix = 'missing_contact'; confirm = $true }
 $o = $r.out
-# HaloPSA and Kaseya BMS: _shared/psa-tickets.ps1 counts a ticket with a closed date as closed, so -Open drops
-# 204 (closed date on an open ticket) and only the unassigned ticket 205 is a wrong status there.
-Check 'halo: findings' ($r.error -eq '' -and (Get-Cat $o 'stale') -eq '201' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '205') "$(Get-Cat $o 'wrong_status') $($r.error)"
+# HaloPSA and Kaseya BMS: Find-PsaTickets -OpenByStatus keeps 204 (open status, closed date set), so it is flagged.
+Check 'halo: findings' ($r.error -eq '' -and (Get-Cat $o 'stale') -eq '201' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '204,205') "$(Get-Cat $o 'wrong_status') $($r.error)"
 $pw = @(Get-PsaWrites)
 Check 'halo: POST Tickets user_id 9 on 202' ($pw.Count -eq 1 -and @($pw[0].Body | ConvertFrom-Json)[0].user_id -eq 9) (@($pw | ForEach-Object { $_.Body }) -join '; ')
 Check 'halo: 203 skipped, no primary' (@($o.fix.skipped)[0].reason -match 'no primary contact') ''
 $r = Invoke-Workflow @{ psa = 'kaseyabms'; fix = 'missing_contact'; confirm = $true }
 $o = $r.out
-Check 'bms: findings' ($r.error -eq '' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '205') "$($r.error)"
+Check 'bms: findings' ($r.error -eq '' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '204,205') "$($r.error) $(Get-Cat $o 'wrong_status')"
+Check 'bms: open tickets listed by status (no Filter.ExcludeCompleted)' (@($Mock.Calls | Where-Object { $_.Uri -like '*/v2/servicedesk/tickets[?]*' -and $_.Decoded -match 'ExcludeCompleted' }).Count -eq 0) ''
 $pw = @(Get-PsaWrites)
 Check 'bms: PATCH ContactId 9 on 202' ($pw.Count -eq 1 -and $pw[0].Uri -like '*/v2/servicedesk/tickets/202' -and @($pw[0].Body | ConvertFrom-Json)[0].path -eq '/ContactId') (@($pw | ForEach-Object { "$($_.Uri) $($_.Body)" }) -join '; ')
 

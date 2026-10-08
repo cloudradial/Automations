@@ -37,7 +37,9 @@ $psaName = Get-PsaName
 $psa = $PsaState.Conn.Psa
 
 $open = @()
-try { $open = @(Find-PsaTickets -Open -CompanyId ([string](Get-PhProp $opt 'company_id')) -Max ([int](Get-PhProp $opt 'max_tickets'))) }
+# -OpenByStatus: open by the PSA's status or closed flag only. Plain -Open counts a closed date as closed on
+# HaloPSA and Kaseya BMS, which would hide exactly the open tickets with a closed date this check looks for.
+try { $open = @(Find-PsaTickets -OpenByStatus -CompanyId ([string](Get-PhProp $opt 'company_id')) -Max ([int](Get-PhProp $opt 'max_tickets'))) }
 catch {
     $m = $_.Exception.Message
     if ($m -match 'HTTP 40[13]') { Stop-PhRun $ph "The $psaName API account isn't allowed to read tickets ($(if ($m -match 'HTTP 401') { 'HTTP 401' } else { 'HTTP 403' })). Give it read access to service tickets and run again. Nothing was changed." }

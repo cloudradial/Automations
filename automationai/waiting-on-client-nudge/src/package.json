@@ -1,0 +1,12 @@
+{
+  "name": "waiting-on-client-nudge-build",
+  "private": true,
+  "description": "Builds and tests the waiting-on-client-nudge workflow export from its PowerShell source. Not an extension.",
+  "scripts": {
+    "build": "node build.js",
+    "test": "pwsh -NoProfile -File test.ps1"
+  },
+  "devDependencies": {
+    "js-yaml": "^5.4.2"
+  }
+}

@@ -11,6 +11,8 @@ function Get-NudgeInternalNote {
     $since = Format-NudgeDay $p.since
     switch ($p.action) {
         'remind' {
+            # Another run already sent this reminder (and writes its own internal note).
+            if ($p.remindResult -eq 'already sent') { return $null }
             if ($p.remindResult -eq 'sent') {
                 return @{ tag = "day $($p.day)"; text = "$wf sent reminder $($p.reminderNo) of $($p.reminderTotal) (day $($p.day)) to the client as a public note. The ticket has waited $($p.daysWaiting) days, since $since. It will be closed on $(Format-NudgeDay $p.closeBy) if the client doesn't reply." }
             }

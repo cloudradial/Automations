@@ -13,7 +13,10 @@ foreach ($p in $todo) {
         continue
     }
     if ($p.notice) {
-        try { Add-PsaNote -Id $p.ticketId -Text (Get-NudgeClosingText $p) -Title 'Closing this ticket' -Public; $p.noticeResult = 'sent' }
+        try {
+            $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeClosingText $p) -Title 'Closing this ticket' -Public -Marker (Get-NudgeMarker 'closing notice' $p.since)
+            $p.noticeResult = $(if ($r -eq 'already-present') { 'sent earlier' } else { 'sent' })
+        }
         catch {
             $p.noticeResult = 'failed'; $p.closeResult = 'not closed'; $p.error = [string]$_.Exception.Message
             $state.warnings += "Couldn't send the closing notice on ticket $(Get-NudgeTicketLabel $p), so it was left open: $($p.error)"

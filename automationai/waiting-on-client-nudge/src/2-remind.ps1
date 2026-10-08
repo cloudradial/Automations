@@ -8,8 +8,8 @@ if ($todo.Count -and -not $state.settings.preview) { $null = Connect-Psa $state.
 foreach ($p in $todo) {
     if ($state.settings.preview) { $p.remindResult = 'would send'; continue }
     try {
-        Add-PsaNote -Id $p.ticketId -Text (Get-NudgeReminderText $p) -Title 'Reminder: we are waiting on your reply' -Public
-        $p.remindResult = 'sent'
+        $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeReminderText $p) -Title 'Reminder: we are waiting on your reply' -Public -Marker (Get-NudgeMarker "day $($p.day)" $p.since)
+        $p.remindResult = $(if ($r -eq 'already-present') { 'already sent' } else { 'sent' })
     }
     catch {
         $p.remindResult = 'failed'; $p.error = [string]$_.Exception.Message

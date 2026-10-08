@@ -15,7 +15,8 @@ These links point at the `main` branch, so they always open the current version.
 | All files in this automation | [automationai/waiting-on-client-nudge](https://github.com/cloudradial/Automations/tree/main/automationai/waiting-on-client-nudge) |
 | Build source (`src/`) | [automationai/waiting-on-client-nudge/src](https://github.com/cloudradial/Automations/tree/main/automationai/waiting-on-client-nudge/src) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/waiting-on-client-nudge) |
-| Works with | [Auto-Close Resolved](https://github.com/cloudradial/Automations/tree/main/automationai/auto-close-resolved) (same PSA code) |
+| Works with | [Auto-Close Resolved](https://github.com/cloudradial/Automations/tree/main/automationai/auto-close-resolved) (same marker pattern) |
+| Shared PSA code | [`_shared/psa.ps1` and `_shared/psa-tickets.ps1`](https://github.com/cloudradial/Automations/tree/main/automationai/_shared) |
 
 ## How it works
 
@@ -33,6 +34,8 @@ A Routine runs the workflow once a day. It works in ConnectWise PSA, Autotask, H
 4. **Internal note per action** writes a technician-only note on every ticket that had an action, including failures and holds, and returns the run summary.
 
 **How it counts the days, and why it never sends the same reminder twice.** Every note this workflow writes ends with a marker such as `[waiting-nudge: day 2, waiting since 2026-10-05T16:49Z]`. The wait starts at the latest of the ticket's newest note, its last update and (in Kaseya BMS) its last status change. After the first reminder, later runs read the start date from the marker, so the workflow's own notes don't restart the clock. A reminder for a day that already has a marker isn't sent again. A new note from a technician or the client starts a new wait. Don't edit or delete the markers.
+
+**Safe to run again.** Because every run reads the markers first, rerunning the workflow (an Action Runs **Retry**, or the next Routine) never sends a reminder or closing notice twice and never closes a ticket twice. The public reminder and the closing notice also go through `Add-PsaNote -Marker`, which checks the ticket once more just before writing, so two runs that overlap still send the client one copy.
 
 It only ever touches tickets whose status is exactly the waiting status. Tickets in any other status are left alone, even if the PSA's list filter returns them.
 
@@ -81,7 +84,7 @@ The same names as each PSA's catalog extension, so one set of secrets serves bot
 | Syncro | `Syncro-ApiUrl`, `Syncro-ApiKey` |
 | Zendesk | `Zendesk-BaseUrl`, `Zendesk-Email`, `Zendesk-ApiToken` |
 
-The PSA API account needs to read tickets and notes, add public and internal notes, and change ticket status. A missing permission stops the run with the PSA's own message (for example `HTTP 403`), before anything is written.
+The PSA API account needs to read tickets and notes, add public and internal notes, and change ticket status. A missing permission stops the run with a plain sentence naming the HTTP status (for example `HTTP 403`) and the permission to add, before anything is written.
 
 ## Required Graph permissions
 
@@ -103,8 +106,7 @@ The four PowerShell steps are generated. Edit the files in `src/`, never the scr
 |---|---|
 | `src/1-find.ps1` to `src/4-notes.ps1` | The four steps |
 | `src/common.ps1` | Marker, message text and step-to-step helpers |
-| `src/psa-extra.ps1` | `Find-PsaTickets`, `Get-PsaTicketNotes`, `Close-PsaTicket` and helpers for all six PSAs. The same file ships in `auto-close-resolved/src`; keep them identical. A candidate to move into `_shared`. |
-| `src/build.js` | Assembles the `.yml`: pastes `_shared/psa.ps1` (through `_shared/inject.js`), `psa-extra.ps1` and `common.ps1` into every step |
+| `src/build.js` | Assembles the `.yml`: pastes `_shared/psa.ps1` and `_shared/psa-tickets.ps1` (through `_shared/inject.js`), then `common.ps1`, into every step |
 | `src/test.ps1`, `src/mock-psa.ps1` | Strict-mode harness against mock versions of all six PSAs |
 
 ```
@@ -116,10 +118,10 @@ pwsh -NoProfile -File test.ps1        # runs the shipped steps against the mock 
 
 ## Not yet proven live
 
-The list calls and some note fields aren't in the build kit's PSA reference yet. Each has an `Unverified` comment in `src/psa-extra.ps1`. Check them on the first preview run in each PSA:
+The list calls and some note fields aren't in the build kit's PSA reference yet. Each has an `Unverified` comment in `_shared/psa-tickets.ps1` (`Find-PsaTickets`) or `_shared/psa.ps1` (`Get-PsaTicketNotes`, `Close-PsaTicket`). Check them on the first preview run in each PSA:
 
 - **Default status names** are common defaults, not read from your PSA. In Autotask, HaloPSA and Kaseya BMS a wrong name stops the run with a list of the statuses that do exist; in the others the run just finds nothing.
-- **ConnectWise:** the `lastUpdated` / `dateEntered` conditions; a note with a contact and no member counts as the client's.
+- **ConnectWise:** the `dateEntered` condition; a note with a contact and no member counts as the client's.
 - **Autotask:** the `TicketNotes` query and `createdByContactID` as the client marker; `lastActivityDate` as the update date.
 - **HaloPSA:** the `status_id` list filter, `GET /api/Status`, `GET /api/Actions?ticket_id=`, and `who_type` 2 meaning the end user.
 - **Kaseya BMS:** the notes API doesn't say who wrote a note, so a client reply restarts the wait instead of being flagged.

@@ -1,9 +1,11 @@
 # ---------- src/common.ps1: helpers shared by the Waiting-on-Client Nudge steps ----------
-# Paste after _shared/psa.ps1 and src/psa-extra.ps1. Every note this workflow writes ends with a marker:
+# Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every note this workflow writes ends with a marker:
 #   [waiting-nudge: <tag>, waiting since <yyyy-MM-ddTHH:mmZ>]
 # Tags: "day N" (reminder sent), "closing notice", "closed", "close held" (P1/P2), "failed".
 # The markers are how a later run knows what was already sent and when the wait started, so a
-# reminder is never sent twice for the same day.
+# reminder is never sent twice for the same day. The public reminder and closing notice also pass their
+# marker to Add-PsaNote -Marker, which checks the ticket again just before writing, so two runs that
+# overlap (a Routine and a manual run, or an Action Runs Retry) still send the client one copy.
 
 $NudgeMarkerPattern = '\[waiting-nudge: (?<tag>[^,\]]+), waiting since (?<since>[^\]]+)\]'
 

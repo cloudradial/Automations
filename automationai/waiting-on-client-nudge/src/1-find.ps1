@@ -70,9 +70,8 @@ if ($companyIn) {
 $now = (Get-Date).ToUniversalTime()
 $firstDay = if ($reminderDays.Count) { $reminderDays[0] } else { $closeDay }
 # A ticket created less than $firstDay days ago can't be due yet, so the list is cut on the created date.
-$found = @(Find-PsaTickets -StatusName $waiting -OlderThan $now.AddDays(-$firstDay) -DateField created -CompanyId $companyId -Max $maxTickets)
-$truncated = $found.Count -gt $maxTickets
-$found = @($found | Select-Object -First $maxTickets)
+$found = @(Find-PsaTickets -Status $waiting -CreatedBefore $now.AddDays(-$firstDay) -CompanyId $companyId -Max $maxTickets)
+$truncated = [bool]$PsaState.FindTruncated
 
 $plan = New-Object System.Collections.ArrayList
 $skipped = New-Object System.Collections.ArrayList

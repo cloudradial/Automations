@@ -1,6 +1,6 @@
 # Strict-mode harness for SLA Breach Report.
-# Runs each PowerShell step exactly as it is in sla-breach-report.yml (shared libraries and psa-extra.ps1
-# included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the runner
+# Runs each PowerShell step exactly as it is in sla-breach-report.yml (shared libraries psa.ps1,
+# psa-tickets.ps1 and postmark.ps1 included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the runner
 # Key Vault, Invoke-RestMethod, Get-NodeInput and Set-NodeOutput mocked. Outputs pass through JSON between
 # steps, as the runner does. Placeholder data only (Contoso, Example MSP).
 # Test variables start with T: a step runs in a child scope of this script, and a same-named step variable
@@ -8,10 +8,6 @@
 # Usage: pwsh -NoProfile -File automationai/sla-breach-report/src/test.ps1
 #        (needs node and js-yaml: JS_YAML_PATH, NODE_PATH, or npm install in automationai/_shared)
 . (Join-Path $PSScriptRoot '..\..\_shared\tests\mock.ps1')
-
-# ---- psa-extra.ps1 on its own, all six PSAs ----
-& (Get-Command pwsh).Source -NoProfile -File (Join-Path $PSScriptRoot 'test-psa-extra.ps1') | Out-Host
-Check 'psa-extra.ps1 unit tests (six PSAs) pass' ($LASTEXITCODE -eq 0)
 
 # ---- the steps, straight from the built workflow ----
 $node = (Get-Command node -ErrorAction Stop).Source
@@ -21,6 +17,7 @@ $yml = Join-Path $PSScriptRoot '..\sla-breach-report.yml'
 $js = "const y=(()=>{try{return require('js-yaml')}catch{return require(process.env.JS_YAML_PATH)}})();const d=y.load(require('fs').readFileSync(process.argv[1],'utf8'));const o={};for(const a of d.definition.activities){if(a.type==='powershell-script')o[a.id]={s:a.properties.script,p:a.properties.parameters};}console.log(JSON.stringify(o));"
 $TSteps = (& $node -e $js $yml) | ConvertFrom-Json -AsHashtable
 Check 'workflow has find and send steps, both unbound (Routine)' ($TSteps.Contains('find') -and $TSteps.Contains('send') -and -not @($TSteps.Values | Where-Object { @($_.p).Count }).Count)
+Check 'shared libraries pasted, no local copies left' ($TSteps['find'].s -like '*function Find-PsaTickets*' -and $TSteps['send'].s -like '*function Send-PmMail*' -and $TSteps['find'].s -notlike '*# >>> src/psa-extra.ps1*' -and $TSteps['send'].s -notlike '*Get-SlaSecret*' -and -not (Test-Path (Join-Path $PSScriptRoot 'psa-extra.ps1')))
 
 # ---- runner mocks ----
 $global:NodeIn = $null; $global:NodeOut = $null
@@ -109,6 +106,12 @@ Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow @{ to = 'a@example.com; b@example.com'; near_breach_percent = 95; sla_hours_by_priority = '{"medium":12}'; use_psa_sla = 'false' }
 Check 'Custom thresholds: medium 12h breaches B, PSA SLA ignored, two recipients' ($TR.find.counts.breached -ge 1 -and @($TR.out.tickets | Where-Object { $_.id -eq '1002' -and $_.state -eq 'breached' -and $_.slaSource -eq 'Default hours' }).Count -eq 1 -and $TR.find.counts.psaSla -eq 0 -and (@(Get-TPostmark)[0].Body | ConvertFrom-Json).To -eq 'a@example.com,b@example.com') ($TR.find.counts | ConvertTo-Json -Compress)
 
+# ---- 3a. from and message_stream inputs reach Postmark (Send-PmMail -From -Stream) ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ from = 'reports@example.com'; message_stream = 'reports' })
+$TPmBody = (@(Get-TPostmark))[0].Body | ConvertFrom-Json
+Check 'from and message_stream inputs override the defaults' ($TR.out.email_sent -eq $true -and $TPmBody.From -eq 'reports@example.com' -and $TPmBody.MessageStream -eq 'reports' -and $TPmBody.Tag -eq 'sla-breach-report') ($TPmBody | ConvertTo-Json -Compress)
+
 # ---- 3b. company input: only that client's tickets ----
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow ($TBody + @{ company = '5' })
@@ -140,7 +143,7 @@ $global:TCw.fail = 0
 $global:TCw.pm = 401
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow $TBody
-Check 'Postmark 401: incomplete, report kept in output, plain warning' ($TR.out.status -eq 'incomplete' -and $TR.out.email_sent -eq $false -and @($TR.out.warnings) -match 'Postmark refused the email \(HTTP 401\)' -and $TR.out.html) ($TR.out.warnings -join ' | ')
+Check 'Postmark 401: incomplete, report kept in output, plain warning' ($TR.out.status -eq 'incomplete' -and $TR.out.email_sent -eq $false -and @($TR.out.warnings) -match 'Postmark rejected the server token \(HTTP 401\)' -and $TR.out.html) ($TR.out.warnings -join ' | ')
 $global:TCw.pm = 0
 
 # ---- 7. Invalid input and no PSA ----
@@ -180,7 +183,7 @@ Reset-Mock -Secrets (Get-TSecrets autotask -NoPostmark) -Handler { param($c, $n)
 }
 $TR = Invoke-Flow $TBody
 Check 'AT: first-response due breach + default-hours near breach, waiting skipped' ($TR.out.status -eq 'success' -and $TR.find.counts.breached -eq 1 -and $TR.find.counts.nearBreach -eq 1 -and $TR.find.counts.skipped -eq 1 -and @($TR.out.tickets | Where-Object { $_.number -eq 'T20261008.0002' -and $_.technician -eq 'Unassigned' -and $_.slaSource -eq 'Default hours' }).Count -eq 1) ($TR.find.counts | ConvertTo-Json -Compress)
-Check 'AT: no Postmark secrets, output only with a plain warning; no writes' ($TR.out.email_sent -eq $false -and @($TR.out.warnings) -match 'Postmark is not set up' -and @(Get-TWrites).Count -eq 0 -and @(Get-TPostmark).Count -eq 0) ($TR.out.warnings -join ' | ')
+Check 'AT: no Postmark secrets, output only with a plain warning; no writes' ($TR.out.email_sent -eq $false -and @($TR.out.warnings) -match "Postmark isn't set up" -and @(Get-TWrites).Count -eq 0 -and @(Get-TPostmark).Count -eq 0) ($TR.out.warnings -join ' | ')
 
 # ---- 9. HaloPSA, Kaseya BMS, Syncro, Zendesk (read paths, one breach each) ----
 $TOthers = @(

@@ -1,6 +1,6 @@
 # Step 3: Email the account manager and note the ticket.
-# With confirm=false it returns a preview (status pending_confirmation) and sends nothing.
-# With confirm=true it emails the alert through Postmark, then adds an internal note saying who was told.
+# With preview=true it returns what it would send (status pending_confirmation) and sends nothing.
+# Otherwise it emails the alert through Postmark, then adds an internal note saying who was told.
 # If Postmark isn't set up or refuses the email, the internal note carries the alert instead.
 # It never changes the ticket's status, priority or assignee, and never writes a client-visible note.
 $stopState = @{ done = $false }
@@ -17,9 +17,9 @@ $to = @($ctx.recipients | Where-Object { $_ })
 $toText = if ($to.Count) { $to -join ', ' } else { 'nobody (no address is set)' }
 $matched = "$($ctx.company) is on the VIP list (matched $($ctx.match.kind) '$($ctx.match.entry)' from $($ctx.list_from))."
 
-if (-not $ctx.confirm) {
+if ($ctx.preview) {
     $stopState.done = $true
-    $msg = "Preview: ticket $id is from a VIP. Run again with confirm set to true to email $toText and add an internal note."
+    $msg = "Preview: ticket $id is from a VIP. Run again without preview to email $toText and add an internal note."
     Set-NodeOutput ([ordered]@{
             status = 'pending_confirmation'; message = $msg; public_note = ''
             internal_note = "VIP ticket alert (preview, nothing sent). $matched It would email $toText.`n`n$($ctx.alert.text)"

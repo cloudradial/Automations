@@ -33,7 +33,7 @@ const testInput = JSON.stringify({
   priority: 'High',
   triggerSource: 'manual-test',
   vip_list: 'Contoso=am@example.com',
-  confirm: false,
+  preview: true,
 }, null, 2);
 
 function psStep({ id, name: n, x, body, params, test }) {

@@ -22,7 +22,7 @@ $contact = Get-StepField $a @('contactEmail', 'contact_email', 'requesterEmail',
 $summary = Get-StepField $a @('summary', 'subject', 'title', 'TicketSubject')
 $priority = Get-StepField $a @('priority', 'Priority')
 $source = Get-StepField $a @('triggerSource', 'trigger_source')
-$confirm = (Test-StepTrue (Get-StepField $a @('confirm'))) -or (Test-StepTrue (Get-StepField $a @('approvedToWrite', 'approved_to_write')))
+$preview = Test-StepTrue (Get-StepField $a @('preview', 'dryRun', 'dry_run'))
 
 if (-not $ticketId) { Stop-Check 'incomplete' 'The request has no ticket number, so no alert was sent.' }
 if ($ticketId -notmatch '^[A-Za-z0-9-]{1,40}$') { Stop-Check 'rejected' "Ticket number '$ticketId' isn't valid, so no alert was sent." }
@@ -96,6 +96,6 @@ if (-not $url) { $null = $warnings.Add("A link to the ticket can't be built for 
 $ctx = @{
     skip = $false; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); company = $who; company_id = $companyId; contact = $contact
     summary = $summary; priority = $priority; source = $source; match = $match; list_from = $listFrom; recipients = $recipients; recipients_from = $rcpFrom
-    ticket_url = $url; confirm = $confirm; actions = @($actions); warnings = @($warnings)
+    ticket_url = $url; preview = $preview; actions = @($actions); warnings = @($warnings)
 }
 Set-NodeOutput ([ordered]@{ status = 'success'; message = "$who is on the VIP list (matched $($match.kind) '$($match.entry)')."; vip = $true; ticket_id = $ticketId; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })

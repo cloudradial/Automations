@@ -24,7 +24,7 @@ ServiceAI triage calls the **Notify VIP Ticket** Action when a new ticket looks 
 2. **Build the alert.** Writes the email: company, ticket number, summary, priority, contact and a link to the ticket in the PSA.
 3. **Email the account manager and note the ticket.** Sends the email through Postmark, then adds an **internal** note: "VIP ticket alert sent to ... by email." If Postmark isn't set up or refuses the email, the internal note carries the whole alert instead and asks the team to tell the account manager. It never changes the ticket's status, priority or assignee, and never writes anything the client can see.
 
-`confirm` defaults to `false`: the run returns the email it would send (`status: pending_confirmation`) and sends nothing. The ServiceAI Action body sends `"confirm": "true"`, because nobody is there to rerun it.
+A normal call sends the alert and adds the note. `"preview": true` returns the email it would send (`status: pending_confirmation`) and sends nothing. It only writes notes and sends emails, which the service-desk rules exempt from the confirm pattern, so a normal call acts straight away; a live webhook that previewed because its body left out a flag would be the worse failure. Duplicate guards stop a retry from acting twice.
 
 ### Why a list in a secret, not a knowledge article
 
@@ -96,7 +96,7 @@ The PSA API user needs to read tickets and their notes and add notes. If it can'
 | `alert_to` | No | Who to alert when the matching entry names nobody. Overrides `VIP-AlertTo`. |
 | `ticket_url_template`, `ticketUrl` | No | A link template with `{id}`, or the full link. |
 | `psa` | No | Overrides the `PSA-Type` secret. |
-| `confirm` | No (default `false`) | `true` sends the email and adds the note. `false` returns a preview. `approvedToWrite` works too. |
+| `preview` | No (default `false`) | `true` returns the email it would send and writes nothing. `dryRun` works too. |
 
 ## Output
 
@@ -123,8 +123,7 @@ Body:
   "contactEmail": "{{contactEmail}}",
   "summary": "{{summary}}",
   "priority": "{{priority}}",
-  "triggerSource": "serviceai-triage",
-  "confirm": "true"
+  "triggerSource": "serviceai-triage"
 }
 ```
 
@@ -135,9 +134,9 @@ The triage AI decides when to call the Action, so it may call it for a company t
 ## Import & test
 
 1. Import `vip-ticket-alert.yml`, add the secrets above to the runner vault, then **Publish** and **Deploy** to that runner.
-2. **Preview first.** In **Run**, use the first step's Test Input with a real ticket number and a company that is on `vip_list`. Leave `confirm` false. Expect `status: pending_confirmation` and the email text. Nothing is sent or written.
+2. **Preview first.** In **Run**, use the first step's Test Input with a real ticket number and a company that is on `vip_list`. Set `"preview": true`. Expect `status: pending_confirmation` and the email text. Nothing is sent or written.
 3. **Not VIP.** Run with a company that isn't on the list. Expect `status: success` and "isn't on the VIP list".
-4. **Send.** Run again with `"confirm": true` and `alert_to` set to your own address. Expect the email and an internal note on the ticket. Run it once more: expect "already sent" and no second email.
+4. **Send.** Run again without `preview`, with `alert_to` set to your own address. Expect the email and an internal note on the ticket. Run it once more: expect "already sent" and no second email.
 5. **Wire the trigger.** Enable the webhook in **Properties** (AutomationAI issues the URL and secret), redeploy, store the secret in ServiceAI as `aai_notify_vip_ticket`, and create the Action and triage rule above. Use **Send test** in the Action editor, then check **Action Runs** and the AutomationAI run history.
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `check.ps1`, `build-alert.ps1`, `send.ps1`, `step.ps1` or `psa-extra.ps1`, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs and Postmark). Never edit the `.yml` by hand.

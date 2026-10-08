@@ -80,7 +80,7 @@ function New-Body { param([hashtable]$Over) $b = @{}; foreach ($k in $base.Keys)
 
 # ---- 1. ConnectWise preview: VIP, nothing sent or written ----
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Fabrikam, Contoso = am@example.com|csm@example.com' }) $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{})
+$f = Invoke-Flow (New-Body @{ preview = $true })
 $o = $f.r.out
 Check 'preview: reached the send step' ($f.stage -eq 'send' -and -not $f.r.error) "$($f.stage) $($f.r.error)"
 Check 'preview: status pending_confirmation' ($o.status -eq 'pending_confirmation') $o.status
@@ -89,21 +89,21 @@ Check 'preview: recipients from the VIP-Companies entry' ((@($o.recipients) -joi
 Check 'preview: email text has summary, priority and ConnectWise link' ($o.email_text -like '*Summary: Email is down for the whole office*' -and $o.email_text -like '*Priority: High*' -and $o.email_text -like '*https://na.example.com/v4_6_release/services/system_io/Service/fv_sr100_request.rpt?service_recid=1001*') $o.email_text
 Check 'preview: chatReply and public_note present' ($o.chatReply -like 'Preview:*' -and $o.public_note -eq '')
 
-# ---- 2. ConnectWise confirm: Postmark email, then internal note ----
+# ---- 2. ConnectWise act: Postmark email, then internal note ----
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso=am@example.com' }) $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{ confirm = 'true' })
+$f = Invoke-Flow (New-Body @{ })
 $o = $f.r.out
 $pm = @(Get-Calls 'POST' $TPM)
 $nt = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
-Check 'cw confirm: status success, alerted' ($o.status -eq 'success' -and $o.alerted -eq $true -and $o.postmark_message_id -eq 'pm-0001') "$($o.status) $($f.r.error)"
-Check 'cw confirm: one Postmark email to the account manager' ($pm.Count -eq 1 -and (Read-Body $pm[0]).To -eq 'am@example.com' -and (Read-Body $pm[0]).Subject -like 'VIP ticket from Contoso:*' -and $pm[0].Headers['X-Postmark-Server-Token'] -eq 'pm-token') (Show-Calls)
-Check 'cw confirm: internal note on the Internal tab' ($nt.Count -eq 1 -and (Read-Body $nt[0]).internalAnalysisFlag -eq $true -and (Read-Body $nt[0]).detailDescriptionFlag -eq $false -and (Read-Body $nt[0]).text -like 'VIP ticket alert sent to am@example.com*')
-Check 'cw confirm: no other ticket change' (@(Get-WriteCalls | Where-Object { $_.Method -in @('PATCH', 'PUT') }).Count -eq 0)
-Check 'cw confirm: the token is not in the output' (($o | ConvertTo-Json -Depth 8) -notlike '*pm-token*')
+Check 'cw act: status success, alerted' ($o.status -eq 'success' -and $o.alerted -eq $true -and $o.postmark_message_id -eq 'pm-0001') "$($o.status) $($f.r.error)"
+Check 'cw act: one Postmark email to the account manager' ($pm.Count -eq 1 -and (Read-Body $pm[0]).To -eq 'am@example.com' -and (Read-Body $pm[0]).Subject -like 'VIP ticket from Contoso:*' -and $pm[0].Headers['X-Postmark-Server-Token'] -eq 'pm-token') (Show-Calls)
+Check 'cw act: internal note on the Internal tab' ($nt.Count -eq 1 -and (Read-Body $nt[0]).internalAnalysisFlag -eq $true -and (Read-Body $nt[0]).detailDescriptionFlag -eq $false -and (Read-Body $nt[0]).text -like 'VIP ticket alert sent to am@example.com*')
+Check 'cw act: no other ticket change' (@(Get-WriteCalls | Where-Object { $_.Method -in @('PATCH', 'PUT') }).Count -eq 0)
+Check 'cw act: the token is not in the output' (($o | ConvertTo-Json -Depth 8) -notlike '*pm-token*')
 
 # ---- 3. Not VIP: success, no PSA call at all ----
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Fabrikam' }) $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{ confirm = $true })
+$f = Invoke-Flow (New-Body @{ })
 $o = $f.r.out
 Check 'not VIP: status success with a reason' ($o.status -eq 'success' -and $o.vip -eq $false -and $o.message -like "*Contoso isn't on the VIP list*") "$($o.status) $($o.message) $($f.r.error)"
 Check 'not VIP: no calls made' ($Mock.Calls.Count -eq 0) (Show-Calls)
@@ -111,15 +111,15 @@ Check 'not VIP: no calls made' ($Mock.Calls.Count -eq 0) (Show-Calls)
 # ---- 4. Autotask: alert already sent for this ticket -> no second alert ----
 Reset-Mock (Get-Secrets 'autotask' @{ 'VIP-Companies' = 'Contoso'; 'VIP-AlertTo' = 'am@example.com' }) $Handler; Reset-Scenario
 $TScenario.atNotes = @([pscustomobject]@{ id = 1; description = 'VIP ticket alert sent to am@example.com by email.'; publish = 2; createDateTime = '2026-10-08T09:00:00Z' })
-$f = Invoke-Flow (New-Body @{ confirm = $true })
+$f = Invoke-Flow (New-Body @{ })
 $o = $f.r.out
 Check 'dedupe: success, not alerted again' ($o.status -eq 'success' -and $o.alerted -eq $false -and $o.message -like '*already sent*') "$($o.message) $($f.r.error)"
 Check 'dedupe: nothing sent or written' (@(Get-WriteCalls).Count -eq 0) (Show-Calls)
 
-# ---- 5. Autotask confirm: recipients from VIP-AlertTo, note Internal Only ----
+# ---- 5. Autotask act: recipients from VIP-AlertTo, note Internal Only ----
 Reset-Mock (Get-Secrets 'autotask' @{ 'VIP-Companies' = 'Contoso'; 'VIP-AlertTo' = 'am@example.com' }) $Handler; Reset-Scenario
 $TScenario.atNotes = @([pscustomobject]@{ id = 1; description = 'VIP ticket alert sent to am@example.com by email.'; publish = 1; createDateTime = '2026-10-08T09:00:00Z' })
-$f = Invoke-Flow (New-Body @{ confirm = $true; summary = '' })
+$f = Invoke-Flow (New-Body @{ summary = '' })
 $o = $f.r.out
 $atn = @(Get-Calls 'POST' "$TAT/Tickets/1001/Notes")
 Check 'autotask: a public note with the same words does not count as sent' ($o.status -eq 'success' -and $o.alerted -eq $true) "$($o.status) $($f.r.error)"
@@ -128,7 +128,7 @@ Check 'autotask: internal note (publish Internal Only)' ($atn.Count -eq 1 -and (
 
 # ---- 6. Zendesk, Postmark not set up: the alert goes in the internal note ----
 Reset-Mock (Get-Secrets 'zendesk' @{ 'VIP-Companies' = '@contoso.com=csm@example.com' } -NoPostmark) $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{ companyName = 'Contoso Ltd'; confirm = $true })
+$f = Invoke-Flow (New-Body @{ companyName = 'Contoso Ltd' })
 $o = $f.r.out
 $zn = @(Get-Calls 'PUT' "$TZD/tickets/1001")
 Check 'zendesk: matched on the contact domain' ($f.check.message -like "*matched contact domain '@contoso.com'*") $f.check.message
@@ -138,20 +138,20 @@ Check 'zendesk: warning names the Postmark secrets' (@($o.warnings | Where-Objec
 
 # ---- 7. Postmark refuses (422): fall back to the internal note ----
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso=am@example.com' }) $Handler; Reset-Scenario; $TScenario.postmarkFail = 422
-$f = Invoke-Flow (New-Body @{ confirm = $true })
+$f = Invoke-Flow (New-Body @{ })
 $o = $f.r.out
 Check 'postmark 422: success with the alert in an internal note' ($o.status -eq 'success' -and $o.alerted -eq $false -and $o.internal_note -like '*HTTP 422*Invalid email request*') "$($o.internal_note) $($f.r.error)"
 
 # ---- 8. Missing PSA permission (403) ----
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso=am@example.com' }) $Handler; Reset-Scenario; $TScenario.readFail = 403
-$f = Invoke-Flow (New-Body @{ confirm = $true })
+$f = Invoke-Flow (New-Body @{ })
 Check '403 on ticket read: stops at check with a plain error' ($f.stage -eq 'check' -and $f.r.out.status -eq 'error' -and $f.r.error -like '*ConnectWise GET /service/tickets/1001 failed (HTTP 403)*') "$($f.stage) $($f.r.error)"
 Check '403 on ticket read: nothing sent' (@(Get-WriteCalls).Count -eq 0)
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso=am@example.com' }) $Handler; Reset-Scenario; $TScenario.noteFail = 403
-$f = Invoke-Flow (New-Body @{ confirm = $true })
+$f = Invoke-Flow (New-Body @{ })
 Check '403 on the note after the email: error says the email went out' ($f.r.out.status -eq 'error' -and $f.r.out.alerted -eq $true -and $f.r.error -like '*was emailed to am@example.com, but the internal note could not be added*HTTP 403*') $f.r.error
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso' } -NoPostmark) $Handler; Reset-Scenario; $TScenario.noteFail = 403
-$f = Invoke-Flow (New-Body @{ confirm = $true })
+$f = Invoke-Flow (New-Body @{ })
 Check '403 on the note with no email: error' ($f.r.out.status -eq 'error' -and $f.r.out.alerted -eq $false -and $f.r.error -like '*HTTP 403*') $f.r.error
 
 # ---- 9. Empty and missing input: fail closed ----
@@ -170,7 +170,7 @@ Check 'no input at all: incomplete' ($c.out.status -eq 'incomplete') $c.error
 
 # ---- 10. CloudRadial shape, company id entry, alert_to input ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$cr = @{ Ticket = @{ TicketId = 1001; Questions = @(@{ Id = 'vip_list'; Value = '42' }, @{ Id = 'alert_to'; Value = 'am@example.com' }) }; Company = @{ CompanyName = 'Contoso'; CompanyPsaId = 42 } }
+$cr = @{ Ticket = @{ TicketId = 1001; Questions = @(@{ Id = 'vip_list'; Value = '42' }, @{ Id = 'alert_to'; Value = 'am@example.com' }) }; Company = @{ CompanyName = 'Contoso'; CompanyPsaId = 42 }; preview = 'true' }
 $f = Invoke-Flow $cr
 Check 'CloudRadial shape: VIP by PSA company id, preview' ($f.r.out.status -eq 'pending_confirmation' -and $f.check.message -like "*matched company id '42'*" -and (@($f.r.out.recipients) -join ',') -eq 'am@example.com') "$($f.check.message) $($f.r.error)"
 

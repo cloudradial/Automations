@@ -813,7 +813,7 @@ definition:
         $summary = Get-StepField $a @('summary', 'subject', 'title', 'TicketSubject')
         $priority = Get-StepField $a @('priority', 'Priority')
         $source = Get-StepField $a @('triggerSource', 'trigger_source')
-        $confirm = (Test-StepTrue (Get-StepField $a @('confirm'))) -or (Test-StepTrue (Get-StepField $a @('approvedToWrite', 'approved_to_write')))
+        $preview = Test-StepTrue (Get-StepField $a @('preview', 'dryRun', 'dry_run'))
 
         if (-not $ticketId) { Stop-Check 'incomplete' 'The request has no ticket number, so no alert was sent.' }
         if ($ticketId -notmatch '^[A-Za-z0-9-]{1,40}$') { Stop-Check 'rejected' "Ticket number '$ticketId' isn't valid, so no alert was sent." }
@@ -887,7 +887,7 @@ definition:
         $ctx = @{
             skip = $false; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); company = $who; company_id = $companyId; contact = $contact
             summary = $summary; priority = $priority; source = $source; match = $match; list_from = $listFrom; recipients = $recipients; recipients_from = $rcpFrom
-            ticket_url = $url; confirm = $confirm; actions = @($actions); warnings = @($warnings)
+            ticket_url = $url; preview = $preview; actions = @($actions); warnings = @($warnings)
         }
         Set-NodeOutput ([ordered]@{ status = 'success'; message = "$who is on the VIP list (matched $($match.kind) '$($match.entry)')."; vip = $true; ticket_id = $ticketId; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
       timeoutSeconds: 300
@@ -905,7 +905,7 @@ definition:
           "priority": "High",
           "triggerSource": "manual-test",
           "vip_list": "Contoso=am@example.com",
-          "confirm": false
+          "preview": true
         }
   - id: build
     name: Build the alert
@@ -1817,8 +1817,8 @@ definition:
         # ---------- end src/step.ps1 ----------
         # <<< src/step.ps1
         # Step 3: Email the account manager and note the ticket.
-        # With confirm=false it returns a preview (status pending_confirmation) and sends nothing.
-        # With confirm=true it emails the alert through Postmark, then adds an internal note saying who was told.
+        # With preview=true it returns what it would send (status pending_confirmation) and sends nothing.
+        # Otherwise it emails the alert through Postmark, then adds an internal note saying who was told.
         # If Postmark isn't set up or refuses the email, the internal note carries the alert instead.
         # It never changes the ticket's status, priority or assignee, and never writes a client-visible note.
         $stopState = @{ done = $false }
@@ -1835,9 +1835,9 @@ definition:
         $toText = if ($to.Count) { $to -join ', ' } else { 'nobody (no address is set)' }
         $matched = "$($ctx.company) is on the VIP list (matched $($ctx.match.kind) '$($ctx.match.entry)' from $($ctx.list_from))."
 
-        if (-not $ctx.confirm) {
+        if ($ctx.preview) {
             $stopState.done = $true
-            $msg = "Preview: ticket $id is from a VIP. Run again with confirm set to true to email $toText and add an internal note."
+            $msg = "Preview: ticket $id is from a VIP. Run again without preview to email $toText and add an internal note."
             Set-NodeOutput ([ordered]@{
                     status = 'pending_confirmation'; message = $msg; public_note = ''
                     internal_note = "VIP ticket alert (preview, nothing sent). $matched It would email $toText.`n`n$($ctx.alert.text)"

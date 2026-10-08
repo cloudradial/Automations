@@ -38,10 +38,11 @@ $runDate = (Get-Date).ToUniversalTime()
 $today = $runDate.ToString('d MMM yyyy', $ci)
 
 # ---- pricing (optional run input; the MSP's own approved models and labour rate) ----
-# "pricing": { "currency": "USD", "hourlyRate": 150, "showPriceToClient": false,
+# "pricing": { "currency": "USD", "hourlyRate": 150, "showPriceToClient": true,
 #   "models": { "Windows laptop": { "model": "Dell Latitude 7450", "price": 1450, "cost": 1180 }, "Windows desktop": {...},
 #               "Mac laptop": {...}, "Mac desktop": {...}, "Windows": {...}, "Mac": {...} } }
 # Without it, cards carry no prices and existing card prices are left alone.
+# Clients see the price unless showPriceToClient is false; the cost (projectUnitCost and the internal note) never shows.
 $warnings = New-Object System.Collections.ArrayList
 function Get-Number { param($v) $d = 0.0; if ($null -ne $v -and [string]$v -ne '' -and [double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float, $ci, [ref]$d) -and $d -ge 0) { return $d }; return $null }
 $Pricing = $null
@@ -50,7 +51,7 @@ if ($pin -is [string]) { if ($pin.Trim()) { try { $pin = $pin | ConvertFrom-Json
 if ($null -ne $pin) {
     $cur = ([string](Get-Prop $pin 'currency')).Trim().ToUpperInvariant(); if (-not $cur) { $cur = 'USD' }
     $sym = switch ($cur) { { $_ -in @('USD', 'CAD', 'AUD', 'NZD') } { '$' } 'GBP' { [string][char]0x00A3 } 'EUR' { [string][char]0x20AC } default { "$cur " } }
-    $Pricing = @{ symbol = $sym; hourlyRate = (Get-Number (Get-Prop $pin 'hourlyRate')); showToClient = ([string](Get-Prop $pin 'showPriceToClient') -match '^(true|yes|1)$'); models = @{} }
+    $Pricing = @{ symbol = $sym; hourlyRate = (Get-Number (Get-Prop $pin 'hourlyRate')); showToClient = ([string](Get-Prop $pin 'showPriceToClient') -notmatch '^(false|no|0)$'); models = @{} }
     $m = Get-Prop $pin 'models'
     $pairs = if ($m -is [System.Collections.IDictionary]) { @($m.GetEnumerator() | ForEach-Object { @{ k = [string]$_.Key; v = $_.Value } }) } elseif ($null -ne $m) { @($m.PSObject.Properties | ForEach-Object { @{ k = $_.Name; v = $_.Value } }) } else { @() }
     foreach ($p in $pairs) {

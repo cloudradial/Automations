@@ -82,7 +82,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   "pricing": {
     "currency": "USD",
     "hourlyRate": 150,
-    "showPriceToClient": false,
+    "showPriceToClient": true,
     "models": {
       "Windows laptop":  { "model": "Dell Latitude 7450", "price": 1450, "cost": 1180 },
       "Windows desktop": { "model": "Dell OptiPlex 7020", "price": 1050, "cost": 850 },
@@ -95,7 +95,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
 
 - **Replace and Plan replacement cards are priced** from the approved model for each computer's type:
   - The card's project price is the total.
-  - `cost` (optional) fills the card's project cost.
+  - `cost` (optional) fills the card's project cost. It's internal only and never shown to clients.
   - The internal note has the breakdown, for example "12 × Dell Latitude 7450 (Windows laptop) at $1,450 = $17,400".
 - **How device type is decided,** in this order:
   - **Mac model name:** MacBook is a laptop; iMac, Mac mini, Mac Studio and Mac Pro are desktops.
@@ -108,7 +108,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   - parts, software and licences will be quoted once a technician has checked each device
   
   Needs data cards get no cost line.
-- **Clients don't see prices** unless you set `showPriceToClient` to `true`. That turns on the card's Show price option and adds an Estimated cost section to the card body. Either way, the cards stay hidden from clients until you publish them.
+- **Clients see the price, never the cost.** By default the card's Show price option is on and the card body gets an Estimated cost section listing the models, prices and total. Set `showPriceToClient` to `false` to hide prices too. The cost only goes into the card's project cost field and the internal note. Either way, the cards stay hidden from clients until you publish them.
 - **`currency` only sets the symbol:** `USD`, `CAD`, `AUD` and `NZD` show $, `GBP` shows £, and `EUR` shows €. CloudRadial stores only the number, so use your portal's currency.
 - **The run output reports:**
   - `pricingApplied`

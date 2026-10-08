@@ -48,7 +48,7 @@ definition:
         parameters: []
         aiExtensions: []
         testInput: |-
-          {"companyId": 9, "mode": "plan", "phase": "all"}
+          {"companyId": 123, "mode": "plan", "phase": "all"}
     - id: node-1
       name: Alignment Agent
       type: agent

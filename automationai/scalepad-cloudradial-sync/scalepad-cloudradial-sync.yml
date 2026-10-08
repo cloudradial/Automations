@@ -409,7 +409,7 @@ definition:
         testInput: |-
           {
             "mode": "plan",
-            "companyId": 9
+            "companyId": 123
           }
     - id: node-sync
       name: Migrate each company

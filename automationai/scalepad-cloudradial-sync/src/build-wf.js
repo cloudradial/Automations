@@ -203,7 +203,7 @@ const activities = [
   {
     id: 'node-resolve', name: 'Match companies by name', type: 'powershell-script', position: { x: 280, y: 120 },
     // No parameter binding on purpose: an unbound first step receives the run's Trigger input (empty is fine).
-    properties: { script: resolveScript, timeoutSeconds: 300, retryCount: 0, parameters: [], aiExtensions: [], testInput: JSON.stringify({ mode: 'plan', companyId: 9 }, null, 2) },
+    properties: { script: resolveScript, timeoutSeconds: 300, retryCount: 0, parameters: [], aiExtensions: [], testInput: JSON.stringify({ mode: 'plan', companyId: 123 }, null, 2) },
   },
   {
     id: 'node-sync', name: 'Migrate each company', type: 'foreach', position: { x: 500, y: 120 },

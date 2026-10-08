@@ -38,7 +38,7 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 ## Input
 
 ```json
-{"companyId":9,"tenantId":"<client Entra tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
+{"companyId":123,"tenantId":"<client Entra tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
 ```
 
 - `companyId` — the CloudRadial company the assessment is created under (required).

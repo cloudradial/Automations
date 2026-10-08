@@ -64,7 +64,7 @@ $Handler = {
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
-        "GET $TAT/Tickets/1001/Notes" { return [pscustomobject]@{ items = @($TScenario.atNotes) } }
+        "GET $TAT/TicketNotes/query*" { return [pscustomobject]@{ items = @($TScenario.atNotes); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
         "GET $TAT/Tickets/1001" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; title = 'Server offline'; description = 'The file server is offline.'; companyID = 42; status = 1; assignedResourceID = $null } } }
         "POST $TAT/Tickets/1001/Notes" { return [pscustomobject]@{ itemId = 3001 } }
         "GET $TZD/tickets/1001/comments*" { return [pscustomobject]@{ comments = @($TScenario.zdComments) } }
@@ -86,7 +86,7 @@ Check 'preview: reached the send step' ($f.stage -eq 'send' -and -not $f.r.error
 Check 'preview: status pending_confirmation' ($o.status -eq 'pending_confirmation') $o.status
 Check 'preview: nothing sent or written' (@(Get-WriteCalls).Count -eq 0) (Show-Calls)
 Check 'preview: recipients from the VIP-Companies entry' ((@($o.recipients) -join ',') -eq 'am@example.com,csm@example.com') (@($o.recipients) -join ',')
-Check 'preview: email text has summary, priority and ConnectWise link' ($o.email_text -like '*Summary: Email is down for the whole office*' -and $o.email_text -like '*Priority: High*' -and $o.email_text -like '*https://na.example.com/v4_6_release/services/system_io/Service/fv_sr100_request.rpt?service_recid=1001*') $o.email_text
+Check 'preview: email text has summary, priority and ConnectWise link' ($o.email_text -like '*Summary: Email is down for the whole office*' -and $o.email_text -like '*Priority: High*' -and $o.email_text -like '*https://na.example.com/v4_6_release/services/system_io/Service/fv_sr100_request.rails?service_recid=1001*') $o.email_text
 Check 'preview: chatReply and public_note present' ($o.chatReply -like 'Preview:*' -and $o.public_note -eq '')
 
 # ---- 2. ConnectWise act: Postmark email, then internal note ----
@@ -100,6 +100,15 @@ Check 'cw act: one Postmark email to the account manager' ($pm.Count -eq 1 -and 
 Check 'cw act: internal note on the Internal tab' ($nt.Count -eq 1 -and (Read-Body $nt[0]).internalAnalysisFlag -eq $true -and (Read-Body $nt[0]).detailDescriptionFlag -eq $false -and (Read-Body $nt[0]).text -like 'VIP ticket alert sent to am@example.com*')
 Check 'cw act: no other ticket change' (@(Get-WriteCalls | Where-Object { $_.Method -in @('PATCH', 'PUT') }).Count -eq 0)
 Check 'cw act: the token is not in the output' (($o | ConvertTo-Json -Depth 8) -notlike '*pm-token*')
+Check 'cw act: the note carries the [vip-ticket-alert] marker' ((Read-Body $nt[0]).text -like '*[[]vip-ticket-alert]*')
+
+# ---- 2b. Rerun (ServiceAI Retry or a Routine) after a good run: nothing is sent or written twice ----
+$TWritten = (Read-Body $nt[0]).text
+Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso=am@example.com' }) $Handler; Reset-Scenario
+$TScenario.cwNotes = @([pscustomobject]@{ id = 9001; text = $TWritten; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-08T09:00:00Z' })
+$f = Invoke-Flow (New-Body @{ })
+Check 'rerun: success, already sent' ($f.r.out.status -eq 'success' -and $f.r.out.alerted -eq $false -and $f.r.out.message -like '*already sent*') "$($f.r.out.message) $($f.r.error)"
+Check 'rerun: no email and no note' (@(Get-WriteCalls).Count -eq 0) (Show-Calls)
 
 # ---- 3. Not VIP: success, no PSA call at all ----
 Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Fabrikam' }) $Handler; Reset-Scenario
@@ -110,7 +119,7 @@ Check 'not VIP: no calls made' ($Mock.Calls.Count -eq 0) (Show-Calls)
 
 # ---- 4. Autotask: alert already sent for this ticket -> no second alert ----
 Reset-Mock (Get-Secrets 'autotask' @{ 'VIP-Companies' = 'Contoso'; 'VIP-AlertTo' = 'am@example.com' }) $Handler; Reset-Scenario
-$TScenario.atNotes = @([pscustomobject]@{ id = 1; description = 'VIP ticket alert sent to am@example.com by email.'; publish = 2; createDateTime = '2026-10-08T09:00:00Z' })
+$TScenario.atNotes = @([pscustomobject]@{ id = 1; description = "VIP ticket alert sent to am@example.com by email.`n[vip-ticket-alert]"; publish = 2; createDateTime = '2026-10-08T09:00:00Z' })
 $f = Invoke-Flow (New-Body @{ })
 $o = $f.r.out
 Check 'dedupe: success, not alerted again' ($o.status -eq 'success' -and $o.alerted -eq $false -and $o.message -like '*already sent*') "$($o.message) $($f.r.error)"
@@ -133,7 +142,7 @@ $o = $f.r.out
 $zn = @(Get-Calls 'PUT' "$TZD/tickets/1001")
 Check 'zendesk: matched on the contact domain' ($f.check.message -like "*matched contact domain '@contoso.com'*") $f.check.message
 Check 'zendesk: no Postmark call, status success, not alerted' (-not @(Get-Calls 'POST' $TPM).Count -and $o.status -eq 'success' -and $o.alerted -eq $false) "$($o.status) $($f.r.error)"
-Check 'zendesk: private comment carries the alert text' ($zn.Count -eq 1 -and (Read-Body $zn[0]).ticket.comment.public -eq $false -and (Read-Body $zn[0]).ticket.comment.body -like '*Postmark is not set up*Summary:*https://example.zendesk.com/agent/tickets/1001*')
+Check 'zendesk: private comment carries the alert text' ($zn.Count -eq 1 -and (Read-Body $zn[0]).ticket.comment.public -eq $false -and (Read-Body $zn[0]).ticket.comment.body -like "*Postmark isn't set up*Summary:*https://example.zendesk.com/agent/tickets/1001*" -and (Read-Body $zn[0]).ticket.comment.body -notlike '*secrets)..*')
 Check 'zendesk: warning names the Postmark secrets' (@($o.warnings | Where-Object { $_ -like '*Postmark-ServerToken*' }).Count -eq 1)
 
 # ---- 7. Postmark refuses (422): fall back to the internal note ----

@@ -79,16 +79,17 @@ $t = Get-PsaTicket $ticketId
 if (-not $summary) { $summary = [string]$t.summary }
 if (-not $companyId) { $companyId = [string]$t.companyId }
 $null = $actions.Add("Read ticket $ticketId from $(Get-PsaName).")
-$notes = @(Get-PsaNotes $ticketId)
-$prior = @($notes | Where-Object { -not $_.public -and ([string]$_.text).TrimStart().StartsWith('VIP ticket alert') }) | Select-Object -First 1
+# The send step writes its internal note with the [vip-ticket-alert] marker; a public note with the marker doesn't count.
+$notes = @(Get-PsaTicketNotes -Id $ticketId -Newest -TextOnly)
+$prior = Test-PsaNoteMarker -Id $ticketId -Marker 'vip-ticket-alert' -Notes @($notes | Where-Object { $_.internal })
 if ($prior) {
     $why = "A VIP alert for ticket $ticketId was already sent, so it wasn't sent again."
     $ctx = @{ skip = $true; ticket_id = $ticketId; result = [ordered]@{ status = 'success'; message = $why; public_note = ''; internal_note = ''; ticket_id = $ticketId; vip = $true; alerted = $false; recipients = @(); actions = @($actions); warnings = @($warnings); chatReply = $why } }
     Set-NodeOutput ([ordered]@{ status = 'success'; message = $why; vip = $true; ticket_id = $ticketId; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
     return
 }
+# Get-PsaTicketUrl falls back to the PSA-TicketUrlTemplate secret, then the PSA's usual link.
 $tplUrl = Get-StepField $a @('ticket_url_template', 'ticketUrlTemplate')
-if (-not $tplUrl) { $tplUrl = [string](Get-PsaSecret 'PSA-TicketUrlTemplate') }
 $url = Get-StepField $a @('ticketUrl', 'ticket_url')
 if (-not $url) { $url = Get-PsaTicketUrl $ticketId $tplUrl }
 if (-not $url) { $null = $warnings.Add("A link to the ticket can't be built for $(Get-PsaName). Set the PSA-TicketUrlTemplate secret, for example https://psa.example.com/tickets/{id}.") }

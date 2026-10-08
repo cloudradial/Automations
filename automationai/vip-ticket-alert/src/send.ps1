@@ -30,28 +30,32 @@ if ($ctx.preview) {
 }
 
 $conn = Connect-Psa $ctx.psa
-$mail = Send-StepEmail -To $to -Subject ([string]$ctx.alert.subject) -Text ([string]$ctx.alert.text) -Html ([string]$ctx.alert.html) -Tag 'vip-ticket-alert'
+$mail = Send-PmMail -To $to -Subject ([string]$ctx.alert.subject) -Text ([string]$ctx.alert.text) -Html ([string]$ctx.alert.html) -Tag 'vip-ticket-alert'
+$reason = ([string]$mail.reason).TrimEnd('.')
 if ($mail.sent) {
     $null = $actions.Add("Emailed the VIP alert to $toText.")
     $note = "VIP ticket alert sent to $toText by email. $matched"
 }
 else {
-    $null = $warnings.Add("The alert email was not sent: $($mail.reason).")
-    $note = "VIP ticket alert: the email to $toText was not sent because $($mail.reason). $matched Please let the account manager know.`n`n$($ctx.alert.text)"
+    $null = $warnings.Add("The alert email was not sent: $reason.")
+    $note = "VIP ticket alert: the email to $toText was not sent because $reason. $matched Please let the account manager know.`n`n$($ctx.alert.text)"
 }
-try { Add-PsaNote -Id $id -Text $note -Title 'VIP ticket alert' }
+# The [vip-ticket-alert] marker is what step 1 looks for, so a retry or rerun never alerts twice.
+$noted = ''
+try { $noted = Add-PsaNote -Id $id -Text $note -Title 'VIP ticket alert' -Marker 'vip-ticket-alert' }
 catch {
     if (-not $mail.sent) { throw }
     # The email went out but the note didn't: say so plainly, because the note is what stops a second alert.
     $stopState.done = $true
-    $m = "The VIP alert for ticket $id was emailed to $toText, but the internal note could not be added: $($_.Exception.Message) Add the note by hand; a rerun would email again."
-    Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; vip = $true; alerted = $true; recipients = $to; postmark_message_id = [string]$mail.id; actions = @($actions); warnings = @($warnings); chatReply = $m })
+    $m = "The VIP alert for ticket $id was emailed to $toText, but the internal note could not be added: $($_.Exception.Message) Add an internal note that contains [vip-ticket-alert] by hand; without it, a rerun would email again."
+    Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; vip = $true; alerted = $true; recipients = $to; postmark_message_id = [string]$mail.messageId; actions = @($actions); warnings = @($warnings); chatReply = $m })
     throw $m
 }
-$null = $actions.Add("Added an internal note to ticket $id.")
+if ($noted -eq 'already-present') { $null = $warnings.Add("Ticket $id already had the VIP alert note (another run added it), so no second note was added.") }
+else { $null = $actions.Add("Added an internal note to ticket $id.") }
 $stopState.done = $true
 $msg = if ($mail.sent) { "VIP alert for ticket $id sent to $toText." } else { "Ticket $id is from a VIP, but the email could not be sent, so the alert is in an internal note on the ticket." }
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $note; ticket_id = $id; vip = $true; alerted = [bool]$mail.sent
-        recipients = $to; postmark_message_id = [string]$mail.id; actions = @($actions); warnings = @($warnings); chatReply = $msg
+        recipients = $to; postmark_message_id = [string]$mail.messageId; actions = @($actions); warnings = @($warnings); chatReply = $msg
     })

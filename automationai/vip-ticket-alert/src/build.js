@@ -2,7 +2,7 @@
 // libraries into it (automationai/_shared/inject.js).
 // Usage: node build.js          rewrite the .yml
 //        node build.js --check  exit 1 if the .yml is out of date
-// Edit check.ps1, build-alert.ps1, send.ps1, step.ps1 and psa-extra.ps1, never the .yml.
+// Edit check.ps1, build-alert.ps1, send.ps1 and step.ps1 (or the shared files in automationai/_shared), never the .yml.
 // Needs js-yaml: set JS_YAML_PATH (or NODE_PATH) to an existing copy, or npm install in automationai/_shared.
 const fs = require('fs');
 const path = require('path');
@@ -57,9 +57,9 @@ ${block(body, '        ')}
 }
 
 const steps = [
-  { id: 'check', name: 'Check the VIP list', body: script(['psa.ps1'], ['psa-extra.ps1', 'step.ps1'], 'check.ps1'), params: [['trigger', '{{ nodes.trigger.output }}']], test: testInput },
+  { id: 'check', name: 'Check the VIP list', body: script(['psa.ps1'], ['step.ps1'], 'check.ps1'), params: [['trigger', '{{ nodes.trigger.output }}']], test: testInput },
   { id: 'build', name: 'Build the alert', body: script([], ['step.ps1'], 'build-alert.ps1') },
-  { id: 'send', name: 'Email the account manager and note the ticket', body: script(['psa.ps1'], ['psa-extra.ps1', 'step.ps1'], 'send.ps1') },
+  { id: 'send', name: 'Email the account manager and note the ticket', body: script(['psa.ps1', 'postmark.ps1'], ['step.ps1'], 'send.ps1') },
 ];
 
 let x = 280;

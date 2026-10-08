@@ -1,6 +1,6 @@
 # ---------- src/step.ps1: helpers every step in this workflow uses ----------
 # Reading the trigger body (flat or the CloudRadial {Ticket, Company} shape), reading the previous
-# step's context, and emailing staff through Postmark. Needs _shared/psa.ps1 above it (Get-PsaSecret).
+# step's context, and escaping text for HTML. Staff email uses Send-PmMail from _shared/postmark.ps1.
 
 function Get-StepProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-StepJson { param($v) if ($null -eq $v) { return $null }; if ($v -is [string]) { if (-not $v.Trim()) { return $null }; try { return ($v | ConvertFrom-Json) } catch { return $null } }; return $v }
@@ -54,29 +54,5 @@ function Read-StepContext {
     return $ctx
 }
 
-# Emails staff through Postmark. Returns @{ sent; id; reason }. Never throws: when Postmark isn't
-# set up or refuses the message, sent is $false and reason says why, so the caller can fall back
-# to an internal note. Secrets: Postmark-ServerToken, Postmark-FromEmail, optional Postmark-ApiUrl.
-function Send-StepEmail {
-    param([string[]]$To, [string]$Subject, [string]$Text, [string]$Html = '', [string]$Tag = '')
-    $to2 = @($To | Where-Object { Test-StepEmail $_ })
-    if (-not $to2.Count) { return @{ sent = $false; id = ''; reason = 'there is no valid recipient address' } }
-    $token = Get-PsaSecret 'Postmark-ServerToken'; $from = Get-PsaSecret 'Postmark-FromEmail'; $api = Get-PsaSecret 'Postmark-ApiUrl'
-    if (-not $token -or -not $from) { return @{ sent = $false; id = ''; reason = 'Postmark is not set up (add the Postmark-ServerToken and Postmark-FromEmail secrets)' } }
-    if (-not $api) { $api = 'https://api.postmarkapp.com' }
-    $b = [ordered]@{ From = $from; To = ($to2 -join ','); Subject = $Subject; TextBody = $Text; MessageStream = 'outbound' }
-    if ($Html) { $b.HtmlBody = $Html }
-    if ($Tag) { $b.Tag = $Tag }
-    try {
-        $r = Invoke-RestMethod -Method POST -Uri "$($api.TrimEnd('/'))/email" -Headers @{ 'X-Postmark-Server-Token' = $token; Accept = 'application/json' } -Body (ConvertTo-Json -InputObject $b -Depth 5 -Compress) -ContentType 'application/json' -ErrorAction Stop
-        return @{ sent = $true; id = [string](Get-StepProp $r 'MessageID'); reason = '' }
-    }
-    catch {
-        $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-        $why = ''; try { $why = [string](Get-StepProp ($_.ErrorDetails.Message | ConvertFrom-Json) 'Message') } catch { }
-        if (-not $why) { $why = [string]$_.Exception.Message }
-        return @{ sent = $false; id = ''; reason = "Postmark refused the email$(if ($code) { " (HTTP $code)" }): $why" }
-    }
-}
 function ConvertTo-StepHtml { param([string]$s) if ($null -eq $s) { return '' }; return ($s -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;') }
 # ---------- end src/step.ps1 ----------

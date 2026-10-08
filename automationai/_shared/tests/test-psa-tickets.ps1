@@ -207,6 +207,49 @@ Invoke-WithLib @('psa.ps1', 'psa-tickets.ps1') {
     Check 'zendesk: solved range is a server filter, so a row with no solved date is kept' ((Unesc (Get-LastCall).Uri) -match 'status>=solved solved>=\S+ solved<' -and $r.Count -eq 1 -and $null -eq $r[0].closed) (Get-LastCall).Uri
 }
 
+# ======== Find-PsaTickets -OpenByStatus: open by status only, closedDateSet on the row ========
+# 11 open, 12 open status but carrying a closed date (the psa-hygiene contradiction), 13 closed.
+$WithClosedDate = @{
+    connectwise = { param($x) $x.closedDate = (Iso -10) }
+    autotask    = { param($x) $x | Add-Member -NotePropertyName completedDate -NotePropertyValue (Iso -10) }
+    halopsa     = { param($x) $x.datecleared = (Iso -10) }
+    kaseyabms   = { param($x) $x.CompletedDate = (Iso -10) }
+    syncro      = { param($x) $x | Add-Member -NotePropertyName resolved_at -NotePropertyValue (Iso -10) }
+    zendesk     = { param($x) }
+}
+foreach ($psa in $PSAS) {
+    $fx = $TicketFx[$psa]
+    $r12 = & $fx.row 12 42 $false (Iso -48) (Iso -5)
+    if ($psa -eq 'connectwise') { $r12 | Add-Member -NotePropertyName closedDate -NotePropertyValue $null }
+    & $WithClosedDate[$psa] $r12
+    $rows = @((& $fx.row 11 42 $false (Iso -48) (Iso -5)), $r12, (& $fx.row 13 42 $true (Iso -48) (Iso -5)))
+    Use-Routes $psa @(@{ m = 'GET'; u = $fx.list; r = (& $fx.wrap $rows 1 $false 3) })
+    Invoke-WithLib @('psa.ps1', 'psa-tickets.ps1') {
+        $null = Connect-Psa
+        $open = @(Find-PsaTickets -Open -CompanyId '42')
+        $uOpen = Unesc (@(Get-Calls 'GET' $fx.list)[-1].Uri)
+        $bs = @(Find-PsaTickets -OpenByStatus -CompanyId '42')
+        $uBs = Unesc (@(Get-Calls 'GET' $fx.list)[-1].Uri)
+        $ids = { param($a) (@($a | ForEach-Object { $_.id }) -join ',') }
+        $r12 = @($bs | Where-Object { $_.id -eq '12' }) | Select-Object -First 1
+        $r11 = @($bs | Where-Object { $_.id -eq '11' }) | Select-Object -First 1
+        if ($psa -in @('halopsa', 'kaseyabms')) {
+            Check "$($psa): -Open still drops the open ticket with a closed date (default unchanged)" ((& $ids $open) -eq '11') (& $ids $open)
+            Check "$($psa): -OpenByStatus keeps the open ticket with a closed date and drops the closed one" ((& $ids $bs) -eq '11,12') (& $ids $bs)
+            Check "$($psa): -OpenByStatus row says closedDateSet, open by status" ($null -ne $r12 -and $r12.closedDateSet -eq $true -and $r12.closedByStatus -eq $false -and $r12.isClosed -eq $true -and $r12.closed -is [datetime] -and $r11.closedDateSet -eq $false) ''
+        }
+        else {
+            Check "$($psa): -OpenByStatus returns the same rows as -Open" ((& $ids $bs) -eq (& $ids $open)) "$(& $ids $open) vs $(& $ids $bs)"
+            Check "$($psa): -OpenByStatus sends the same request as -Open" ($uBs -eq $uOpen) "$uOpen | $uBs"
+            Check "$($psa): rows carry closedByStatus and closedDateSet" ($null -ne $r11 -and $r11.ContainsKey('closedDateSet') -and $r11.closedDateSet -eq $false -and $r11.closedByStatus -eq $r11.isClosed) ''
+        }
+        if ($psa -eq 'halopsa') { Check 'halopsa: -OpenByStatus still sends open_only=true' ($uBs -match 'open_only=true') $uBs }
+        if ($psa -eq 'kaseyabms') { Check 'kaseyabms: -OpenByStatus leaves out Filter.ExcludeCompleted (-Open sends it)' ($uBs -notmatch 'ExcludeCompleted' -and $uOpen -match 'Filter\.ExcludeCompleted=1') "$uOpen | $uBs" }
+        $m = Get-ThrowMessage { Find-PsaTickets -OpenByStatus -Closed }
+        if ($psa -eq 'connectwise') { Check '-OpenByStatus with -Closed is refused' ($m -match 'not both') $m }
+    }
+}
+
 # ======== Resolve-PsaTicketNames ========
 Use-Routes 'zendesk' @(
     @{ m = 'GET'; u = '*/organizations/42'; r = (O @{ organization = (O @{ name = 'Contoso Ltd' }) }) }
@@ -327,6 +370,79 @@ Invoke-WithLib @('psa.ps1') {
     Check 'zendesk: the marker check skips the extra requester read' (@(Get-Calls 'GET' "$ZD/tickets/11").Count -eq 0) (Show-Calls)
     $null = @(Get-PsaTicketNotes -Id 11 -Ticket (@{ contactId = '5' }))
     Check 'zendesk: -Ticket supplies the requester, so no ticket read' (@(Get-Calls 'GET' "$ZD/tickets/11").Count -eq 0) (Show-Calls)
+}
+
+# ======== client-visible markers: public notes carry only the opaque "Ref: xxxxxxxx" ========
+# A note store per PSA that the writes go into and the reads come back from, so a rerun really re-reads.
+$NoteStore = New-Object System.Collections.ArrayList
+function Add-StoreNote { param([string]$Text, [bool]$Public) $null = $NoteStore.Add(@{ id = $NoteStore.Count + 1; text = $Text; public = $Public }) }
+$StoreFx = @{
+    connectwise = @(
+        @{ m = 'GET'; u = '*/service/tickets/11/notes[?]*'; r = { param($c, $n) , @($NoteStore | ForEach-Object { O @{ id = $_.id; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public; dateCreated = (Iso (-100 + $_.id)) } }) } },
+        @{ m = 'POST'; u = "$CW/service/tickets/11/notes"; r = { param($c, $n) $b = $c.Body | ConvertFrom-Json; Add-StoreNote $b.text ([bool]$b.detailDescriptionFlag); O @{ id = 1 } } })
+    autotask    = @(
+        @{ m = 'GET'; u = '*/TicketNotes/query[?]*'; r = { param($c, $n) O @{ items = @($NoteStore | ForEach-Object { O @{ id = $_.id; description = $_.text; publish = $(if ($_.public) { 1 } else { 2 }); createDateTime = (Iso (-100 + $_.id)) } }); pageDetails = (O @{ nextPageUrl = $null }) } } },
+        @{ m = 'POST'; u = "$AT/Tickets/11/Notes"; r = { param($c, $n) $b = $c.Body | ConvertFrom-Json; Add-StoreNote $b.description ([int]$b.publish -eq 1); O @{ itemId = 1 } } })
+    halopsa     = @(
+        @{ m = 'GET'; u = '*/api/Actions[?]ticket_id=11*'; r = { param($c, $n) O @{ actions = @($NoteStore | ForEach-Object { O @{ id = $_.id; note = $_.text; hiddenfromuser = (-not $_.public); datetime = (Iso (-100 + $_.id)); who_type = 1 } }) } } },
+        @{ m = 'POST'; u = "$HALO/Actions"; r = { param($c, $n) $b = @($c.Body | ConvertFrom-Json)[0]; Add-StoreNote $b.note (-not [bool]$b.hiddenfromuser); O @{ id = 1 } } })
+    kaseyabms   = @(
+        @{ m = 'GET'; u = '*/servicedesk/tickets/11/notes*'; r = { param($c, $n) O @{ Result = @($NoteStore | ForEach-Object { O @{ Id = $_.id; Details = $_.text; IsInternal = (-not $_.public); CreatedOn = (Iso (-100 + $_.id)) } }) } } },
+        @{ m = 'POST'; u = "$BMS/servicedesk/tickets/11/notes"; r = { param($c, $n) $b = $c.Body | ConvertFrom-Json; Add-StoreNote $b.Details (-not [bool]$b.IsInternal); O @{ Id = 1 } } })
+    syncro      = @(
+        @{ m = 'GET'; u = "$SY/tickets/11"; r = { param($c, $n) O @{ ticket = (O @{ id = 11; comments = @($NoteStore | ForEach-Object { O @{ id = $_.id; subject = 'Note'; body = $_.text; hidden = (-not $_.public); created_at = (Iso (-100 + $_.id)); user_id = 7 } }) }) } } },
+        @{ m = 'POST'; u = "$SY/tickets/11/comment"; r = { param($c, $n) $b = $c.Body | ConvertFrom-Json; Add-StoreNote $b.body (-not [bool]$b.hidden); O @{ id = 1 } } })
+    zendesk     = @(
+        @{ m = 'GET'; u = '*/tickets/11/comments*'; r = { param($c, $n) O @{ comments = @($NoteStore | ForEach-Object { O @{ id = $_.id; body = $_.text; public = $_.public; created_at = (Iso (-100 + $_.id)); author_id = 71 } }); next_page = $null } } },
+        @{ m = 'PUT'; u = "$ZD/tickets/11"; r = { param($c, $n) $b = $c.Body | ConvertFrom-Json; Add-StoreNote $b.ticket.comment.body ([bool]$b.ticket.comment.public); O @{ ticket = (O @{ id = 11 }) } } })
+}
+foreach ($psa in $PSAS) {
+    $NoteStore.Clear()
+    Use-Routes $psa $StoreFx[$psa]
+    Invoke-WithLib @('psa.ps1') {
+        $null = Connect-Psa
+        Check "$($psa): Get-PsaMarkerRef is 'Ref: ' and 8 lowercase hex of SHA-256('[marker]'), with or without brackets or case" ((Get-PsaMarkerRef 'aai-test: 1') -ceq 'Ref: 04d4cdf8' -and (Get-PsaMarkerRef '[AAI-TEST: 1]') -ceq 'Ref: 04d4cdf8') (Get-PsaMarkerRef 'aai-test: 1')
+        # 1. A public note shows only the opaque ref, never the marker text (which here holds an address on purpose).
+        $mk = 'aai-test: done pat@contoso.com'
+        $ref = Get-PsaMarkerRef $mk
+        $res = Add-PsaNote -Id 11 -Text 'Your request is complete.' -Public -Marker $mk
+        $w = @(Write-Calls)
+        $last = @($NoteStore)[-1]
+        $lines = @(([string]$last.text) -split "`n")
+        Check "$($psa): public note with -Marker is written once and ends with only 'Ref: xxxxxxxx'" ($res -eq 'written' -and $w.Count -eq 1 -and $NoteStore.Count -eq 1 -and $last.public -and $lines[-1] -ceq $ref -and $lines[-1] -cmatch '^Ref: [0-9a-f]{8}$') "$res $($w.Count) $($last.text)"
+        Check "$($psa): the public note holds no marker text, bracket or address" ($last.text -notmatch '\[' -and $last.text -notmatch 'contoso\.com' -and $last.text -notmatch 'aai-test' -and $w[0].Body -notmatch 'contoso\.com') $last.text
+        # 2. A rerun reads the notes back, finds the ref and writes nothing.
+        $res = Add-PsaNote -Id 11 -Text 'Your request is complete.' -Public -Marker $mk
+        Check "$($psa): rerun of the public note finds the ref and writes nothing" ($res -eq 'already-present' -and @(Write-Calls).Count -eq 1 -and $NoteStore.Count -eq 1) "$res $(@(Write-Calls).Count)"
+        Check "$($psa): Test-PsaNoteMarker finds the public ref, not another marker's" ((Test-PsaNoteMarker -Id 11 -Marker $mk) -and -not (Test-PsaNoteMarker -Id 11 -Marker 'aai-test: other')) ''
+        # 3. Internal notes keep the full readable marker.
+        $res = Add-PsaNote -Id 11 -Text 'Checked the printer.' -Marker 'aai-test: internal 1'
+        $last = @($NoteStore)[-1]
+        Check "$($psa): internal note still ends with [marker] and no ref" ($res -eq 'written' -and -not $last.public -and $last.text -match '\n\[aai-test: internal 1\]$' -and $last.text -notmatch 'Ref:') $last.text
+        $res = Add-PsaNote -Id 11 -Text 'Checked the printer.' -Marker 'aai-test: internal 1'
+        Check "$($psa): rerun of the internal note writes nothing" ($res -eq 'already-present' -and $NoteStore.Count -eq 2) "$res"
+        # 4. A [marker] the caller put in a public note's text is taken out.
+        $res = Add-PsaNote -Id 11 -Text "All done. [aai-test: inline 1]" -Public -Marker 'aai-test: inline 1'
+        $last = @($NoteStore)[-1]
+        Check "$($psa): a [marker] in a public note's text is replaced by the ref" ($res -eq 'written' -and $last.text -notmatch '\[' -and $last.text -match "All done\.\s*\nRef: [0-9a-f]{8}$") $last.text
+    }
+    # 5. Back-compat: a public note written before this change, with the bracketed marker, is still found.
+    $NoteStore.Clear()
+    Add-StoreNote "Your request is complete.`n[aai-test: old 1]" $true
+    Use-Routes $psa $StoreFx[$psa]
+    Invoke-WithLib @('psa.ps1') {
+        $null = Connect-Psa
+        $res = Add-PsaNote -Id 11 -Text 'Your request is complete.' -Public -Marker 'aai-test: old 1'
+        Check "$($psa): an old public note with [marker] is still found (back-compat), nothing written" ($res -eq 'already-present' -and @(Write-Calls).Count -eq 0 -and $NoteStore.Count -eq 1) "$res"
+    }
+}
+Use-Routes 'connectwise' @(@{ m = 'GET'; u = '*/service/tickets/11/notes*'; r = { param($c, $n) New-HttpError 500 '{"message":"down"}' } })
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa
+    $m = Get-ThrowMessage { Add-PsaNote -Id 11 -Text 'x' -Public -Marker 'aai-test: 4' }
+    Check 'a public Add-PsaNote -Marker still fails closed when the notes cannot be read' ($m -match "Couldn't check ticket 11" -and @(Write-Calls).Count -eq 0) $m
+    Check 'a ref inside a longer hex run is not a match' (-not (Test-PsaNoteMarker -Id 11 -Marker 'aai-test: 1' -Notes @('Ref: 04d4cdf8a'))) ''
+    Check 'a ref on its own line matches case-insensitively' (Test-PsaNoteMarker -Id 11 -Marker 'aai-test: 1' -Notes @("Thanks`nREF: 04D4CDF8")) ''
 }
 
 # ======== statuses, links, ticket numbers, company lookup, default role ========

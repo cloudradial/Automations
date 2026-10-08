@@ -27,16 +27,22 @@ try { $null = Connect-Psa (Get-PsaType ([string](Get-TeProp $opt 'psa'))) }
 catch { Stop-TeRun $te "Couldn't connect to the PSA: $($_.Exception.Message)" }
 $psaName = Get-PsaName
 
-$from = ConvertTo-PsaUtcText (Get-TeProp $opt 'range_from')
-$to = ConvertTo-PsaUtcText (Get-TeProp $opt 'range_to')
-$tickets = @()
-try { $tickets = @(Find-PsaTickets -State closed -ClosedFrom $from -ClosedTo $to -CompanyId ([string](Get-TeProp $opt 'company_id')) -Max ([int](Get-TeProp $opt 'max_tickets'))) }
+$from = Format-PsaDate (Get-TeProp $opt 'range_from')
+$to = Format-PsaDate (Get-TeProp $opt 'range_to')
+$found = @()
+try { $found = @(Find-PsaTickets -Closed -ClosedAfter $from -ClosedBefore $to -CompanyId ([string](Get-TeProp $opt 'company_id')) -Max ([int](Get-TeProp $opt 'max_tickets'))) }
 catch {
     $m = $_.Exception.Message
     if ($m -match 'HTTP 40[13]') { Stop-TeRun $te "The $psaName API account isn't allowed to read tickets ($(if ($m -match 'HTTP 401') { 'HTTP 401' } else { 'HTTP 403' })). Give it read access to service tickets and run again." }
     Stop-TeRun $te "Couldn't list the tickets closed on $(Get-TeProp $opt 'date'): $m"
 }
+# Company and technician names for the report (Autotask, Zendesk and others list only ids). A failed lookup
+# leaves a plain fallback such as "Company 5".
+Resolve-PsaTicketNames $found
+# Only the fields the next steps use, so the run output stays small (the rows also carry the raw PSA record).
+$tickets = @($found | ForEach-Object { [ordered]@{ id = $_.id; number = $_.number; summary = $_.summary; companyId = $_.companyId; companyName = $_.companyName; assigneeId = $_.assigneeId; assigneeName = $_.assigneeName; status = $_.status; closed = (Format-PsaDate $_.closed) } })
 $warn = @($te['warnings'])
+foreach ($w in @($PsaState.Warnings)) { if ($w -and $warn -notcontains $w) { $warn += $w } }
 if ($PsaState.FindTruncated) { $warn += "Stopped at $(Get-TeProp $opt 'max_tickets') closed tickets (max_tickets). Later tickets from that day were not reviewed." }
 $te['warnings'] = $warn
 $te['psa'] = $PsaState.Conn.Psa

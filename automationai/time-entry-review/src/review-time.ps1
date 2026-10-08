@@ -56,7 +56,12 @@ foreach ($t in $tickets) {
         $warn += "Couldn't read the time on ticket $($base.number): $m"
         continue
     }
-    if (-not [bool]$res.supported) { $timeSupported = $false; $timeReason = [string]$res.reason; break }
+    if (-not [bool]$res.supported) {
+        $timeSupported = $false; $timeReason = [string]$res.reason
+        if ([string]$te['psa'] -eq 'zendesk' -and $timeReason -notmatch 'zendesk_time_field_id') { $timeReason += ' Put that field id in the zendesk_time_field_id input.' }
+        break
+    }
+    foreach ($w in @($res.warnings)) { if ($w -and $warn -notcontains $w) { $warn += [string]$w } }
     $counts.tickets_checked++
     $entries = @($res.entries | Where-Object { $null -ne $_ })
     $counts.entries_read += $entries.Count
@@ -69,7 +74,7 @@ foreach ($t in $tickets) {
     }
     foreach ($e in $entries) {
         if ([double]$e.hours -le 0) { continue }
-        $who = [string]$e.who; if (-not $who) { $who = $base.assignee }
+        $who = [string]$e.member; if (-not $who) { $who = $base.assignee }
         if ($minNote -gt 0 -and [bool]$e.notesKnown) {
             $len = ([string]$e.notes).Trim().Length
             if ($len -lt $minNote) {

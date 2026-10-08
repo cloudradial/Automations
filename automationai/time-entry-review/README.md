@@ -23,7 +23,7 @@ The workflow reads your PSA and **never changes a ticket**. It works with Connec
 Steps: **Read inputs > Find closed tickets > Review time entries > Email the service manager.**
 
 1. **Read inputs** picks the day to review: `date`, or yesterday when no date is given. The day runs from midnight to midnight in `timezone` (UTC when no time zone is given).
-2. **Find closed tickets** lists every ticket closed on that day, across all companies in the PSA (or one company when `company_id` is given).
+2. **Find closed tickets** lists every ticket closed on that day, across all companies in the PSA (or one company when `company_id` is given). Where the PSA lists only ids, it looks up the company and technician names once each (a failed lookup shows "Company 5" or "Technician 29").
 3. **Review time entries** reads each ticket's time and flags three things:
    - **No time logged:** the ticket was closed with no time entry, or only zero-hour entries.
    - **Short note:** a time entry whose note is shorter than `min_note_chars` characters (20 by default). When a PSA has both a note and an internal note on the entry, the longer one counts.
@@ -90,6 +90,6 @@ There's no `confirm` input, because this workflow never writes to the PSA.
 2. Run it by hand with a day you know had closed tickets, for example `{"date": "2026-10-07", "to": "you@example-msp.com"}`. Check the email against the PSA: each flagged ticket should really have no time, a short note, or no billable setting. Nothing in the PSA changes.
 3. **Attach a Routine:** Routines > New, pick this workflow and a daily schedule (for example `0 7 * * *`, 07:00 UTC). A Routine sends no input, so set the `ServiceManager-Email` secret, and remember the day is counted in UTC unless you run it with a `timezone`. A Routine runs the deployed version, so redeploy after every edit.
 
-To change the steps, edit `src/*.ps1`, then run `node src/build.js` (it pastes in `_shared/psa.ps1` and this folder's `psa-extra.ps1` and `mail.ps1`) and `pwsh -NoProfile -File src/test.ps1`. Never edit the `.yml` by hand.
+To change the steps, edit `src/*.ps1`, then run `node src/build.js` (it pastes in `_shared/psa.ps1`, `_shared/psa-tickets.ps1` and `_shared/postmark.ps1`) and `pwsh -NoProfile -File src/test.ps1`. Never edit the `.yml` by hand.
 
-`src/psa-extra.ps1` (ticket lists, time entries and contacts for six PSAs) is shared word for word with `automationai/psa-hygiene` and is a candidate to move into `_shared`. The calls in it that haven't been proven by a live run are marked `Unverified` in the file.
+The ticket list and time entry calls come from `_shared/psa-tickets.ps1`, and the email from `_shared/postmark.ps1`. The PSA calls that haven't been proven by a live run are marked `Unverified` there.

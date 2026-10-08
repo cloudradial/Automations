@@ -77,6 +77,7 @@ function Invoke-RestMethod {
     if ($u -eq "$at/Tickets/entityInformation/fields") { return J @{ fields = @(@{ name = 'status'; picklistValues = @(@{ value = '1'; label = 'New'; isActive = $true }, @{ value = '5'; label = 'Complete'; isActive = $true }) }) } }
     if ($u -like "$at/Tickets/query[?]*") { return J @{ items = @(Get-TicketsFor 'at'); pageDetails = @{ count = 3; nextPageUrl = $null } } }
     if ($u -like "$at/Companies/query[?]*") { return J @{ items = @(@{ id = 5; companyName = 'Contoso' }) } }
+    if ($u -eq "$at/Resources/29") { return J @{ item = @{ id = 29; firstName = 'Jordan'; lastName = 'Lee' } } }
     if ($u -like "$at/TimeEntries/query[?]*") {
         if ($d -match '"value":101') { return J @{ items = @(@{ id = 1; hoursWorked = 1.5; summaryNotes = $LongNote; internalNotes = $null; isNonBillable = $false; resourceID = 29; dateWorked = (Get-At 9) }) } }
         if ($d -match '"value":103') { return J @{ items = @(@{ id = 3; hoursWorked = 0.25; summaryNotes = 'done'; internalNotes = ''; isNonBillable = $null; resourceID = 29; dateWorked = (Get-At 9) }) } }
@@ -187,6 +188,7 @@ foreach ($case in @(@('autotask', 'Autotask'), @('halopsa', 'HaloPSA'), @('kasey
 }
 $r = Invoke-Workflow @{ date = $DayText; psa = 'autotask' }
 Check 'autotask: company name resolved' (@($r.out.findings)[0].company -eq 'Contoso') @($r.out.findings)[0].company
+Check 'autotask: technician name looked up for the ticket closed with no time' (@($r.out.findings | Where-Object { $_.issue -eq 'no_time' })[0].technician -eq 'Jordan Lee') ($r.out.findings | ConvertTo-Json -Depth 4 -Compress)
 $r = Invoke-Workflow @{ date = $DayText; psa = 'syncro' }
 Check 'syncro: non-labour line item is not time' ((Get-Issues $r.out 'no_time') -contains '102') ''
 Check 'syncro: line items read only when there is no timer' (@(Get-Calls GET 'https://examplemsp.syncro.test/api/v1/tickets/102').Count -eq 1 -and @(Get-Calls GET 'https://examplemsp.syncro.test/api/v1/tickets/101').Count -eq 0) ''
@@ -227,7 +229,7 @@ Check 'empty: subject without count' ((@(Get-Calls POST 'https://api.postmark.te
 $r = Invoke-Workflow @{ date = $DayText; to = 'service.manager@example-msp.test' } @{ 'Postmark-ServerToken' = $null }
 $o = $r.out
 Check 'no postmark: success, not emailed' ($o.status -eq 'success' -and @($o.emailed_to).Count -eq 0) $o.status
-Check 'no postmark: warning names the secret' ((@($o.warnings) -join ' ') -match "Postmark isn't set up \(missing Postmark-ServerToken\)") (@($o.warnings) -join ' | ')
+Check 'no postmark: warning names the secret' ((@($o.warnings) -join ' ') -match "Postmark isn't set up \(add the Postmark-ServerToken secret\)") (@($o.warnings) -join ' | ')
 Check 'no postmark: report_html in output' ($o.report_html -match '<table' -and $o.message -match 'not emailed') $o.message
 Check 'no postmark: no calls to Postmark' (@(Get-Calls POST 'https://api.postmark.test/email').Count -eq 0) ''
 

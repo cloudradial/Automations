@@ -96,7 +96,8 @@ function main(argv) {
   const scripts = doc.definition.activities.filter((a) => a.type === 'powershell-script');
   if (scripts.length !== steps.length) throw new Error('Wrong number of steps after build');
   if (doc.automationsWorkflow !== 1 || doc.definition.startActivityId !== 'start') throw new Error('Workflow header is wrong after build');
-  const was = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
+  // Compare without line endings, so a CRLF checkout still counts as current.
+  const was = fs.existsSync(out) ? fs.readFileSync(out, 'utf8').replace(/\r\n/g, '\n') : '';
   const same = was === next;
   console.log(`${NAME}.yml: ${scripts.length} steps${same ? ' current' : check ? ' OUT OF DATE' : ' written'}`);
   if (!same && !check) fs.writeFileSync(out, next);

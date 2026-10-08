@@ -1595,8 +1595,13 @@ definition:
                   'connectwise' {
                       # Unverified: not in PSA.md yet. Uses the documented conditions syntax (strings in double quotes).
                       $q = $n.Replace('\', '\\').Replace('"', '\"')
-                      $rows = @(Invoke-Psa GET "/company/companies?conditions=$(ConvertTo-PsaQuery "name=`"$q`" and deletedFlag=false")&pageSize=25")
-                      if (-not @($rows | Where-Object { $null -ne $_ }).Count) { $rows = @(Invoke-Psa GET "/company/companies?conditions=$(ConvertTo-PsaQuery "name contains `"$q`" and deletedFlag=false")&pageSize=25") }
+                      # Build each condition first: an escaped quote inside a string inside $(...) ends the outer string.
+                      $exactCond = ConvertTo-PsaQuery ('name="' + $q + '" and deletedFlag=false')
+                      $rows = @(Invoke-Psa GET "/company/companies?conditions=$exactCond&pageSize=25")
+                      if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                          $likeCond = ConvertTo-PsaQuery ('name contains "' + $q + '" and deletedFlag=false')
+                          $rows = @(Invoke-Psa GET "/company/companies?conditions=$likeCond&pageSize=25")
+                      }
                   }
                   'autotask' {
                       # From the at_query_companies extension descriptor.

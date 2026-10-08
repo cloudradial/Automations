@@ -31,7 +31,7 @@ Three PowerShell steps, no AI. It previews by default and changes nothing until 
    - **Portal banner token.** The CloudRadial API has **no news, announcement or banner resource** (checked against the v2 Swagger). So the notice goes into a company token, `@ServiceStatus` by default, as `"<service>: <message>"`. Put `@ServiceStatus` in the portal's home page banner or announcement content once, and every company's portal shows its own value. The first broadcast also creates an empty partner-level `@ServiceStatus`, so a portal with no outage shows nothing instead of the literal token.
    - **Service Status article.** One knowledge base article per company, `Service status: <service>`, in the `Service Status` category, pinned to the portal front page. A later broadcast for the same service updates it instead of adding another.
    - **Email (off by default).** With `emailContacts: true`, each company's primary contact is read from the PSA (through the company's PSA link in CloudRadial) and gets one email of their own through Postmark. Without the Postmark secrets nothing is emailed, and the ticket note lists who would have been.
-   - **Problem ticket.** With `problemTicketId` (or `ticketId`), an internal note lists who ran it, every company and why it was included, what changed for each, the contacts, the client message and any warnings. Written through the shared six-PSA adapter.
+   - **Problem ticket.** With `problemTicketId` (or `ticketId`), an internal note lists who ran it, every company and why it was included, what changed for each, the contacts, the client message and any warnings. Written through the shared six-PSA adapter. The note ends with a marker built from the mode, the service and the client message, so a ServiceAI **Retry** or a repeated run finds it already on the ticket and doesn't add it again. A new message (an update) gets its own note.
 
    A company whose banner already shows this exact notice is skipped, so a retried run (ServiceAI **Retry** replays the request) doesn't email anyone twice. The changes run in order and stop at the first failure, and the note says what ran and what didn't.
 
@@ -116,12 +116,12 @@ Add `"problemTicketId": "<ticket number>"` to the body (and as an optional param
 4. **Resolve it.** Run with `mode: resolved`, the same `companies` and `confirm: true`. Expect the token cleared, the article marked `(resolved)` and unpinned, and a second internal note.
 5. **Wire the trigger.** Enable the webhook in **Properties**, redeploy, add the webhook secret to the ServiceAI Secrets manager as `aai_outage_broadcast`, and create the **Outage Broadcast** Action above. On the first ServiceAI run, read `received_keys` to find the field that carries the signed-in technician and record it in `reference/build-kit/TRIGGERS.md`.
 
-> Webhook secrets are stripped from this export, so AutomationAI issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `identify.ps1`, `broadcast.ps1` or `psa-extra.ps1`, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked CloudRadial, PSAs and Postmark). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so AutomationAI issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `identify.ps1` or `broadcast.ps1`, run `node src/build.js` (it also pastes the PSA, Postmark, CloudRadial and plan code from `automationai/_shared/`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked CloudRadial, PSAs and Postmark). Never edit the `.yml` by hand.
 
 ### Not yet proven live
 
 - The token write body (`type: "String"`) and that an empty `value` clears a company token.
 - That a company `service` row always carries its `companyId` (the installing endpoint's company is the fallback), and that the OData `contains(tolower(name), ...)` filter works on `service`.
 - That the OData `token` list accepts a `name eq` filter.
-- Every PSA's primary-contact lookup in `src/psa-extra.ps1` (marked `Unverified`). It is a candidate to move into `_shared/psa.ps1`.
+- Every PSA's primary-contact lookup (`Get-PsaPrimaryContact` in `_shared/psa-tickets.ps1`, marked `Unverified` or `Vendor docs` there).
 - The ServiceAI field that names the signed-in technician.

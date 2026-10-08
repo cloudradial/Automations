@@ -1,5 +1,5 @@
 # Strict-mode harness for Outage / Incident Broadcast.
-# Runs each PowerShell step exactly as it is in outage-broadcast.yml (shared libraries and psa-extra included),
+# Runs each PowerShell step exactly as it is in outage-broadcast.yml (shared libraries included),
 # through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the runner Key Vault,
 # Invoke-RestMethod, Get-NodeInput and Set-NodeOutput mocked. Outputs pass through JSON between steps,
 # as the runner does. Placeholder data only (Contoso, Fabrikam, Northwind, Example MSP).
@@ -68,6 +68,7 @@ function Reset-TScenario {
             [pscustomobject]@{ serviceId = 12; companyId = 2; name = 'Contoso Hosted PBX Agent' }
             [pscustomobject]@{ serviceId = 13; companyId = 3; name = 'Contoso Hosted PBX Agent' })
         installed = @(11, 12); crForbidden = $false; noteForbidden = $false
+        notes = (New-Object System.Collections.ArrayList)
     }
 }
 Reset-TScenario
@@ -92,7 +93,8 @@ $Handler = {
         "POST $TCR/v2/token" { return [pscustomobject]@{ success = $true } }
         "POST $TCR/v2/article" { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ articleId = 777 } } }
         "PUT $TCR/v2/article/*" { return [pscustomobject]@{ success = $true } }
-        "POST $TCW/service/tickets/4242/notes" { if ($S.noteForbidden) { New-HttpError 403 '{"message":"Member does not have access to add notes."}' }; return [pscustomobject]@{ id = 1 } }
+        "GET $TCW/service/tickets/4242/notes[?]*" { return @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
+        "POST $TCW/service/tickets/4242/notes" { if ($S.noteForbidden) { New-HttpError 403 '{"message":"Member does not have access to add notes."}' }; $null = $S.notes.Add((Read-Body $c).text); return [pscustomobject]@{ id = 1 } }
         "GET $TCW/company/companies/101" { return [pscustomobject]@{ id = 101; defaultContact = [pscustomobject]@{ id = 55 } } }
         "GET $TCW/company/companies/102" { return [pscustomobject]@{ id = 102; defaultContact = $null } }
         "GET $TCW/company/contacts/55" { return [pscustomobject]@{ id = 55; firstName = 'Megan'; lastName = 'Bowen'; communicationItems = @([pscustomobject]@{ communicationType = 'Phone'; value = '555 0100'; defaultFlag = $true }, [pscustomobject]@{ communicationType = 'Email'; value = 'megan.bowen@contoso.com'; defaultFlag = $true }) } }
@@ -100,8 +102,10 @@ $Handler = {
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
-        "POST $TAT/Tickets/4242/Notes" { return [pscustomobject]@{ itemId = 3 } }
-        "PUT $TZD/tickets/4242" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 4242 } } }
+        "GET $TAT/TicketNotes/query[?]*" { return [pscustomobject]@{ items = @($S.notes | ForEach-Object { [pscustomobject]@{ id = 3; description = $_; publish = 2 } }); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
+        "POST $TAT/Tickets/4242/Notes" { $null = $S.notes.Add((Read-Body $c).description); return [pscustomobject]@{ itemId = 3 } }
+        "GET $TZD/tickets/4242/comments[?]*" { return [pscustomobject]@{ comments = @($S.notes | ForEach-Object { [pscustomobject]@{ id = 5; body = $_; public = $false } }); next_page = $null } }
+        "PUT $TZD/tickets/4242" { $null = $S.notes.Add((Read-Body $c).ticket.comment.body); return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 4242 } } }
         "POST $TPM" { return [pscustomobject]@{ ErrorCode = 0; Message = 'OK'; MessageID = 'm1' } }
     }
     throw "Unexpected call in test: $k"
@@ -139,6 +143,17 @@ $note = @(Get-Calls 'POST' "$TCW/service/tickets/4242/notes")
 Check 'cw confirm: one internal note on problem ticket 4242' ($note.Count -eq 1 -and (Read-Body $note[0]).internalAnalysisFlag -eq $true -and (Read-Body $note[0]).text -like '*Affected companies (2)*' -and $o.note_written -eq $true) (Show-Calls)
 Check 'cw confirm: no email without emailContacts' (@(Get-Calls 'POST' $TPM).Count -eq 0)
 Check 'cw confirm: actions recorded' (@($o.actions).Count -ge 6) (@($o.actions).Count)
+Check 'cw confirm: the note ends with its retry marker' ($o.note_marker -like 'outage-broadcast broadcast *' -and (Read-Body $note[0]).text.TrimEnd().EndsWith("[$($o.note_marker)]")) "$($o.note_marker) :: $((Read-Body $note[0]).text)"
+
+# ---- 2b. Rerun of the same confirmed broadcast (ServiceAI Retry): the problem ticket note is not written twice ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ problemTicketId = '4242'; confirm = $true })
+$o2 = $f.r.out
+Check 'rerun: same marker, no second note on the problem ticket' ($o2.note_marker -eq $o.note_marker -and @(Get-Calls 'POST' "$TCW/service/tickets/4242/notes").Count -eq 0 -and $global:TS.notes.Count -eq 1 -and $o2.note_written -eq $false) (Show-Calls)
+Check 'rerun: the action says the note was already there' ((@($o2.actions | ForEach-Object { $_.result }) -join ' ') -like '*already on the ticket*') ($o2.actions | ConvertTo-Json -Compress)
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody @{ problemTicketId = '4242'; confirm = $true; message = 'Calls are back for most users. Next update at 3 PM.' })
+Check 'rerun: a new client message is a new note' ($f.r.out.note_written -eq $true -and $global:TS.notes.Count -eq 2 -and $f.r.out.note_marker -ne $o.note_marker) (Show-Calls)
 
 # ---- 3. Confirm with Autotask, emailContacts and Postmark: one email per company to its own contact ----
 Reset-Mock (Get-TSecrets 'autotask' -Postmark) $Handler; Reset-TScenario
@@ -151,6 +166,9 @@ Check 'at email: Postmark token header and From secret used' ($mails[0].Headers[
 Check 'at email: email names no other client' ((Read-Body $mails[0]).TextBody -notlike '*Fabrikam*' -and (Read-Body $mails[1]).TextBody -notlike '*Contoso,*')
 $atNote = @(Get-Calls 'POST' "$TAT/Tickets/4242/Notes")
 Check 'at email: Autotask internal note (publish Internal Only) lists the recipients' ($atNote.Count -eq 1 -and (Read-Body $atNote[0]).publish -eq 2 -and (Read-Body $atNote[0]).description -like '*megan.bowen@contoso.com*') (Show-Calls)
+Reset-Mock (Get-TSecrets 'autotask' -Postmark) $Handler
+$f = Invoke-Flow (New-TBody @{ problemTicketId = '4242'; confirm = 'true'; emailContacts = 'yes' })
+Check 'at rerun: no second Autotask note' (@(Get-Calls 'POST' "$TAT/Tickets/4242/Notes").Count -eq 0 -and $global:TS.notes.Count -eq 1) (Show-Calls)
 
 # ---- 4. emailContacts on but no Postmark secrets: other writes run, nobody is emailed, a warning says why ----
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
@@ -185,6 +203,9 @@ Check 'resolved: Fabrikam article marked resolved and unpinned' ($put.Count -eq 
 $zd = @(Get-Calls 'PUT' "$TZD/tickets/4242")
 Check 'resolved: Zendesk private comment on the problem ticket' ($zd.Count -eq 1 -and (Read-Body $zd[0]).ticket.comment.public -eq $false -and (Read-Body $zd[0]).ticket.comment.body -like '*Outage broadcast (resolved)*') (Show-Calls)
 Check 'resolved: no new article created' (@(Get-Calls 'POST' "$TCR/v2/article").Count -eq 0)
+Reset-Mock (Get-TSecrets 'zendesk') $Handler
+$f = Invoke-Flow (New-TBody @{ mode = 'resolved'; message = ''; problemTicketId = '4242'; confirm = $true })
+Check 'resolved rerun: no second Zendesk comment' (@(Get-Calls 'PUT' "$TZD/tickets/4242").Count -eq 0 -and $global:TS.notes.Count -eq 1) (Show-Calls)
 
 # ---- 7. Company group and named companies ----
 Reset-Mock (Get-TSecrets 'none') $Handler; Reset-TScenario

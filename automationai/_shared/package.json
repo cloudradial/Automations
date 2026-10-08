@@ -1,0 +1,11 @@
+{
+  "name": "automationai-shared",
+  "private": true,
+  "description": "Shared PowerShell libraries for AutomationAI workflows, plus inject.js, which pastes them into workflow files. Not an extension.",
+  "scripts": {
+    "test": "pwsh -NoProfile -File tests/run.ps1"
+  },
+  "devDependencies": {
+    "js-yaml": "^5.4.2"
+  }
+}

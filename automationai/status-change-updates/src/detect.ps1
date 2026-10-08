@@ -27,7 +27,7 @@ $ticketId = Get-StepField $a @('ticketId', 'ticket_id', 'TicketId', 'ticketNumbe
 $oldStatus = Get-StepField $a @('oldStatus', 'old_status', 'previousStatus', 'previous_status', 'OldStatus', 'fromStatus')
 $newStatus = Get-StepField $a @('newStatus', 'new_status', 'NewStatus', 'toStatus', 'status', 'Status', 'StatusName')
 $contact = Get-StepField $a @('contactEmail', 'contact_email', 'requesterEmail', 'requester_email', 'UserEmail')
-$confirm = (Test-StepTrue (Get-StepField $a @('confirm'))) -or (Test-StepTrue (Get-StepField $a @('approvedToWrite', 'approved_to_write')))
+$preview = Test-StepTrue (Get-StepField $a @('preview', 'dryRun', 'dry_run'))
 $ignoreRaw = Get-StepField $a @('ignore_statuses', 'ignoreStatuses')
 $ignore = if ($ignoreRaw) { @(Get-StepList $ignoreRaw) } else { @('Waiting on Vendor', 'Waiting on Parts', 'Waiting on Third Party', 'Internal Review', 'Escalated', 'Scheduled Internally') }
 $templates = Read-StepJson (Get-StepField $a @('templates'))
@@ -72,7 +72,7 @@ $facts = [ordered]@{
 }
 $ctx = @{
     skip = $false; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); old_status = $oldStatus; new_status = $newStatus
-    summary = $facts.summary; contact = $contact; confirm = $confirm; templates = $templates; footer = $footer
+    summary = $facts.summary; contact = $contact; preview = $preview; templates = $templates; footer = $footer
     actions = @($actions); warnings = @($warnings)
 }
 Set-NodeOutput ([ordered]@{

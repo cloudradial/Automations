@@ -29,7 +29,7 @@ A webhook posts the ticket number and its old and new status. Three steps; only 
 2. **Write the update (AI Prompt).** One AI call writes 2 to 4 plain sentences for the requester: what the new status means for them and what happens next. It uses only the facts given, never invents names, dates or promises, and treats everything from the ticket as data, never as instructions. No model is pinned, so the tenant's own provider is used.
 3. **Post the update to the requester (no AI).** Checks the AI answer. If it's empty, too short or long, not plain text, or mentions internal notes, it uses a **fixed template for the new status** instead and says so in `warnings`. Then it posts the text as a **public** note, ending with a status line such as `(Status: Waiting on Client)`, so the PSA emails the requester. It never changes the ticket's status or anything else.
 
-`confirm` defaults to `false`: the run returns the update it would post (`status: pending_confirmation`, the text in `public_note`) and posts nothing. The webhook body sends `"confirm": "true"`, because nobody is there to rerun it.
+A normal call posts the update. `"preview": true` returns the update it would post (`status: pending_confirmation`, the text in `public_note`) and posts nothing. It only writes notes and sends emails, which the service-desk rules exempt from the confirm pattern, so a normal call acts straight away; a live webhook that previewed because its body left out a flag would be the worse failure. Duplicate guards stop a retry from acting twice.
 
 ### Built-in templates
 
@@ -84,7 +84,7 @@ The PSA API user needs to read tickets and notes and add public notes. If it can
 | `ignore_statuses` | No | Statuses that never notify the requester, comma-separated, `*` wildcards allowed. Default: `Waiting on Vendor, Waiting on Parts, Waiting on Third Party, Internal Review, Escalated, Scheduled Internally`. |
 | `templates` | No | JSON object of status name to text, for example `{"Waiting on Client": "Ticket {ticket} needs your reply about {summary}."}`. `{ticket}`, `{summary}` and `{status}` are filled in. |
 | `psa` | No | Overrides the `PSA-Type` secret. |
-| `confirm` | No (default `false`) | `true` posts the update. `false` returns a preview. `approvedToWrite` works too. |
+| `preview` | No (default `false`) | `true` returns the update it would post and writes nothing. `dryRun` works too. |
 
 **Example webhook body:**
 
@@ -93,8 +93,7 @@ The PSA API user needs to read tickets and notes and add public notes. If it can
   "ticketId": "1001",
   "oldStatus": "New",
   "newStatus": "Waiting on Client",
-  "contactEmail": "megan.bowen@contoso.com",
-  "confirm": "true"
+  "contactEmail": "megan.bowen@contoso.com"
 }
 ```
 
@@ -106,16 +105,16 @@ The PSA API user needs to read tickets and notes and add public notes. If it can
 
 The caller POSTs to the workflow's webhook URL with the secret in the **`X-Crauto-Webhook-Secret`** header.
 
-- **Zendesk:** a webhook (Admin Center > Apps and integrations > Webhooks) with a custom `X-Crauto-Webhook-Secret` header, and a trigger on "Status changed" that notifies it with `{"ticketId": "{{ticket.id}}", "newStatus": "{{ticket.status}}", "contactEmail": "{{ticket.requester.email}}", "confirm": "true"}`. Zendesk has no placeholder for the previous status, so `oldStatus` is left out.
+- **Zendesk:** a webhook (Admin Center > Apps and integrations > Webhooks) with a custom `X-Crauto-Webhook-Secret` header, and a trigger on "Status changed" that notifies it with `{"ticketId": "{{ticket.id}}", "newStatus": "{{ticket.status}}", "contactEmail": "{{ticket.requester.email}}"}`. Zendesk has no placeholder for the previous status, so `oldStatus` is left out.
 - **ConnectWise, Autotask, HaloPSA, Kaseya BMS, Syncro:** each has its own outbound webhook or callback feature, and not every one can add a custom header or send the old status. **[unverified]** Check what yours can send. If it can't add the header, put a small relay in between (for example an Azure Function or a Power Automate flow) that adds it.
 - **CloudRadial:** if a portal automation fires on ticket status changes, its Webhook activity can post the CloudRadial `{Ticket, Company}` shape with `oldStatus` and `newStatus` as Field IDs. **[unverified]** whether such a trigger exists.
 
 ## Import & test
 
 1. Import `status-change-updates.yml`, add the secrets above to the runner vault, then **Publish** and **Deploy** to that runner.
-2. **Preview first.** In **Run**, use the first step's Test Input with a real ticket number and `newStatus` set to "Waiting on Client" (or your equivalent). Leave `confirm` false. Expect `status: pending_confirmation` and the update in `public_note`. Nothing is posted.
+2. **Preview first.** In **Run**, use the first step's Test Input with a real ticket number and `newStatus` set to "Waiting on Client" (or your equivalent). Set `"preview": true`. Expect `status: pending_confirmation` and the update in `public_note`. Nothing is posted.
 3. **Skips.** Run with `oldStatus` equal to `newStatus`, then with `newStatus` set to "Waiting on Vendor". Both should end `success` with nothing posted.
-4. **Post.** Run with `"confirm": true` on a test ticket whose contact is you. Expect a public note and the PSA's email. Run it again: expect "already the newest public note".
+4. **Post.** Run without `preview` on a test ticket whose contact is you. Expect a public note and the PSA's email. Run it again: expect "already the newest public note".
 5. **Wire the trigger** as above, enable the webhook in **Properties**, and redeploy.
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `detect.ps1`, `post.ps1`, `step.ps1`, `psa-extra.ps1` or the `write.*.txt` prompts, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs, simulated AI answers). Never edit the `.yml` by hand.

@@ -1,7 +1,7 @@
 # Step 3: Post the update to the requester.
 # Takes the AI-written update, or a fixed template for the new status when the AI answer is empty or
 # unusable, and posts it as a public note so the PSA emails the requester.
-# With confirm=false it returns the update as a preview (status pending_confirmation) and posts nothing.
+# With preview=true it returns the update (status pending_confirmation) and posts nothing.
 $stopState = @{ done = $false }
 $in = Get-NodeInput
 $ctx = Read-StepJson (Get-StepProp $in 'ctx')
@@ -60,10 +60,10 @@ $text = $ai
 if ($why) { $writtenBy = 'template'; $text = $template; $null = $warnings.Add("$why, so the template for $new was used.") }
 $note = "$text`n`n$($ctx.footer)"
 
-if (-not $ctx.confirm) {
+if ($ctx.preview) {
     $stopState.done = $true
     Set-NodeOutput ([ordered]@{
-            status = 'pending_confirmation'; message = "Preview: this update for ticket $id would be posted as a public note. Run again with confirm set to true to post it."
+            status = 'pending_confirmation'; message = "Preview: this update for ticket $id would be posted as a public note. Run again without preview to post it."
             public_note = $note; internal_note = "Status update preview for $new (written by $(if ($writtenBy -eq 'ai') { 'the AI' } else { 'the template' })). Nothing was posted."
             ticket_id = $id; posted = $false; written_by = $writtenBy; old_status = [string]$ctx.old_status; new_status = $new; actions = @($actions); warnings = @($warnings)
         })

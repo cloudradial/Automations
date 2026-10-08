@@ -83,7 +83,7 @@ function New-Body { param([hashtable]$Over) $b = @{}; foreach ($k in $base.Keys)
 
 # ---- 1. ConnectWise preview: AI text, nothing posted, internal notes kept out ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{}) $TAiGood
+$f = Invoke-Flow (New-Body @{ preview = $true }) $TAiGood
 $o = $f.r.out
 Check 'preview: status pending_confirmation, written by the AI' ($o.status -eq 'pending_confirmation' -and $o.written_by -eq 'ai') "$($o.status) $($f.r.error)"
 Check 'preview: public_note is the AI text plus the status line' ($o.public_note -eq "$TAiGood`n`n(Status: Waiting on Client)") $o.public_note
@@ -92,18 +92,18 @@ $facts = $f.detect.facts_json | ConvertFrom-Json
 Check 'facts: latest public notes and the request, newest first' ($facts.recent_public_updates[0] -like 'Could you send a photo*' -and $facts.request -like 'The printer on floor 2*' -and $facts.new_status -eq 'Waiting on Client' -and $facts.skip -eq $false)
 Check 'facts: the internal note never reaches the AI' ($f.detect.facts_json -notlike '*RMA 5531*' -and $f.detect.facts_json -notlike '*240 USD*')
 
-# ---- 2. ConnectWise confirm: public note on the Discussion tab ----
+# ---- 2. ConnectWise act: public note on the Discussion tab ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{ confirm = 'true' }) ([pscustomobject]@{ update = $TAiGood })
+$f = Invoke-Flow (New-Body @{ }) ([pscustomobject]@{ update = $TAiGood })
 $o = $f.r.out
 $nt = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
-Check 'cw confirm: success, posted, AI object answer read' ($o.status -eq 'success' -and $o.posted -eq $true -and $o.written_by -eq 'ai') "$($o.status) $($f.r.error)"
-Check 'cw confirm: public note (Discussion), not internal' ($nt.Count -eq 1 -and (Read-Body $nt[0]).detailDescriptionFlag -eq $true -and (Read-Body $nt[0]).internalAnalysisFlag -eq $false -and (Read-Body $nt[0]).text -like '*(Status: Waiting on Client)')
-Check 'cw confirm: no status or other ticket change' (@(Get-WriteCalls).Count -eq 1)
+Check 'cw act: success, posted, AI object answer read' ($o.status -eq 'success' -and $o.posted -eq $true -and $o.written_by -eq 'ai') "$($o.status) $($f.r.error)"
+Check 'cw act: public note (Discussion), not internal' ($nt.Count -eq 1 -and (Read-Body $nt[0]).detailDescriptionFlag -eq $true -and (Read-Body $nt[0]).internalAnalysisFlag -eq $false -and (Read-Body $nt[0]).text -like '*(Status: Waiting on Client)')
+Check 'cw act: no status or other ticket change' (@(Get-WriteCalls).Count -eq 1)
 
 # ---- 3. Autotask, status ids, empty AI answer -> template ----
 Reset-Mock (Get-Secrets 'autotask') $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{ oldStatus = '1'; newStatus = '5'; confirm = $true }) ''
+$f = Invoke-Flow (New-Body @{ oldStatus = '1'; newStatus = '5' }) ''
 $o = $f.r.out
 $atn = @(Get-Calls 'POST' "$TAT/Tickets/1001/Notes")
 Check 'autotask: status ids read as names' ($o.old_status -eq 'New' -and $o.new_status -eq 'Complete') "$($o.old_status) $($o.new_status) $($f.r.error)"
@@ -128,26 +128,26 @@ Check 'templates input wins over the built-in set' ($f.r.out.public_note -like '
 
 # ---- 5. Skips: unchanged, ignored, already posted ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$f = Invoke-Flow (New-Body @{ oldStatus = 'waiting on client'; confirm = $true }) $TAiGood
+$f = Invoke-Flow (New-Body @{ oldStatus = 'waiting on client' }) $TAiGood
 Check 'old == new: success, nothing posted, no PSA call' ($f.r.out.status -eq 'success' -and $f.r.out.posted -eq $false -and $f.r.out.message -like '*still Waiting on Client*' -and $Mock.Calls.Count -eq 0) "$($f.r.out.message) $(Show-Calls)"
-$f = Invoke-Flow (New-Body @{ newStatus = 'Waiting on Vendor'; confirm = $true }) $TAiGood
+$f = Invoke-Flow (New-Body @{ newStatus = 'Waiting on Vendor' }) $TAiGood
 Check 'default ignore list: Waiting on Vendor skipped' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*internal status*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
-$f = Invoke-Flow (New-Body @{ newStatus = 'Parts Ordered'; ignore_statuses = 'Parts*, Internal Review'; confirm = $true }) $TAiGood
+$f = Invoke-Flow (New-Body @{ newStatus = 'Parts Ordered'; ignore_statuses = 'Parts*, Internal Review' }) $TAiGood
 Check 'custom ignore list with a wildcard' ($f.r.out.message -like '*Parts Ordered is an internal status*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
 $TScenario.cwNotes = @([pscustomobject]@{ id = 4; text = "Earlier update.`n`n(Status: Waiting on Client)"; internalAnalysisFlag = $false; detailDescriptionFlag = $true; resolutionFlag = $false; dateCreated = '2026-10-08T12:00:00Z' }) + $TCwNotesDefault
-$f = Invoke-Flow (New-Body @{ confirm = $true }) $TAiGood
+$f = Invoke-Flow (New-Body @{ }) $TAiGood
 Check 'already posted for this status: skipped (safe ServiceAI or webhook retry)' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*already the newest public note*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
 
 # ---- 6. Zendesk: no old status, new status read from the ticket, public comment ----
 Reset-Mock (Get-Secrets 'zendesk') $Handler; Reset-Scenario
-$f = Invoke-Flow @{ ticketId = '1001'; confirm = $true } 'Thanks for your patience. Ticket 1001 is waiting for a reply from you before we set up the new laptop.'
+$f = Invoke-Flow @{ ticketId = '1001' } 'Thanks for your patience. Ticket 1001 is waiting for a reply from you before we set up the new laptop.'
 $zn = @(Get-Calls 'PUT' "$TZD/tickets/1001")
 Check 'zendesk: status from the ticket, public comment' ($f.r.out.new_status -eq 'pending' -and $zn.Count -eq 1 -and (Read-Body $zn[0]).ticket.comment.public -eq $true -and (Read-Body $zn[0]).ticket.comment.body -like '*(Status: pending)') "$($f.r.out.new_status) $($f.r.error)"
 Check 'zendesk: warning when no contactEmail is sent' (@($f.r.out.warnings | Where-Object { $_ -like '*No contactEmail*' }).Count -eq 1)
 
 # ---- 7. Missing PSA permission (403) on the note ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.noteFail = 403
-$f = Invoke-Flow (New-Body @{ confirm = $true }) $TAiGood
+$f = Invoke-Flow (New-Body @{ }) $TAiGood
 Check '403: error with a plain message naming the call' ($f.r.out.status -eq 'error' -and $f.r.out.posted -eq $false -and $f.r.error -like '*ConnectWise POST /service/tickets/1001/notes failed (HTTP 403)*') $f.r.error
 
 # ---- 8. Empty and missing input: fail closed ----
@@ -165,7 +165,7 @@ Check 'post with no context: error' ($p.out.status -eq 'error' -and $p.error -li
 
 # ---- 9. CloudRadial shape ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
-$cr = @{ Ticket = @{ TicketId = 1001; Questions = @(@{ Id = 'oldStatus'; Value = 'New' }, @{ Id = 'newStatus'; Value = 'Waiting on Client' }) }; Company = @{ CompanyName = 'Contoso' } }
+$cr = @{ Ticket = @{ TicketId = 1001; Questions = @(@{ Id = 'oldStatus'; Value = 'New' }, @{ Id = 'newStatus'; Value = 'Waiting on Client' }) }; Company = @{ CompanyName = 'Contoso' }; preview = 'true' }
 $f = Invoke-Flow $cr $TAiGood
 Check 'CloudRadial shape: preview built' ($f.r.out.status -eq 'pending_confirmation' -and $f.r.out.ticket_id -eq '1001' -and $f.r.out.old_status -eq 'New') "$($f.r.out.status) $($f.r.error)"
 

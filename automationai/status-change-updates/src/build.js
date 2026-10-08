@@ -32,7 +32,7 @@ const testInput = JSON.stringify({
   contactEmail: 'megan.bowen@contoso.com',
   ignore_statuses: '',
   psa: '',
-  confirm: false,
+  preview: true,
 }, null, 2);
 
 // One AI call, no tools. The ai-prompt property names follow the Phishing Report Triage workflow and are

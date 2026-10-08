@@ -1,0 +1,2388 @@
+automationsWorkflow: 1
+name: Time Entry Review
+description: 'Daily, read-only review of the tickets closed yesterday in any of six PSAs: flags tickets closed with no time logged, time entries with short notes, and time entries with no billable setting, then emails a plain table to the service manager through Postmark. Never changes a ticket.'
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 200
+    properties:
+      # Manual run or daily Routine: the first step reads Get-NodeInput, so the webhook stays off.
+      webhookEnabled: false
+  - id: node-inputs
+    name: Read inputs
+    type: powershell-script
+    position:
+      x: 280
+      y: 200
+    properties:
+      script: |-
+        # === NODE: Read inputs ===
+        # Reads the run input and fills in defaults. A daily Routine sends no input, so every field is optional:
+        #   date                   the day to review, yyyy-MM-dd (default: yesterday in `timezone`, or in UTC)
+        #   timezone               optional time zone for that day, for example "Eastern Standard Time" or "America/New_York"
+        #   min_note_chars         a time entry note shorter than this is flagged (default 20, 0 turns the check off)
+        #   check_billable         flag time entries with no billable setting, where the PSA has one (default true)
+        #   to                     comma-separated email addresses for the report (default: the ServiceManager-Email secret)
+        #   company_id             optional PSA company id: review only that company's tickets
+        #   zendesk_time_field_id  Zendesk only: the Time Tracking app's "Total time spent (sec)" ticket field id
+        #   max_tickets            stop after this many closed tickets (default 500)
+        #   psa                    optional PSA override (default: the PSA-Type secret)
+        # This workflow only reads the PSA. It never changes a ticket.
+        # A value CloudRadial left as a literal @token (for example "@date") counts as not given.
+        $ErrorActionPreference = 'Stop'
+        function Get-TeProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-TeText {
+            param($o, [string[]]$Names)
+            foreach ($n in $Names) {
+                $v = Get-TeProp $o $n
+                if ($null -eq $v) { continue }
+                if ($v -is [array]) { $v = (@($v | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }) -join ',') }
+                if ($v -is [datetime]) { $v = $v.ToString('yyyy-MM-dd') }
+                $t = ([string]$v).Trim()
+                if ($t -ne '' -and -not $t.StartsWith('@')) { return $t }
+            }
+            return ''
+        }
+        function Test-TeYes { param([string]$v, [bool]$Default) if ([string]::IsNullOrWhiteSpace($v)) { return $Default }; return (@('true', 'yes', 'y', '1') -contains $v.Trim().ToLowerInvariant()) }
+        function Get-TeSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Stop-TeInput {
+            param([string]$Msg)
+            Set-NodeOutput ([ordered]@{ status = 'incomplete'; message = $Msg; public_note = ''; internal_note = "Time entry review did not run: $Msg"; ticket_id = ''; actions = @(); warnings = @() })
+            throw $Msg
+        }
+        function Get-TeWhole {
+            param([string]$Text, [string]$Name, [int]$Default, [int]$Min, [int]$Maxv)
+            if ($Text -eq '') { return $Default }
+            if ($Text -notmatch '^\d+$' -or [int64]$Text -lt $Min -or [int64]$Text -gt $Maxv) { Stop-TeInput "$Name must be a whole number from $Min to $Maxv (it was '$Text'). Nothing was read." }
+            return [int]$Text
+        }
+
+        $runIn = Get-NodeInput
+        foreach ($k in @('trigger', 'body', 'input')) { $w = Get-TeProp $runIn $k; if ($null -ne $w) { $runIn = $w } }
+        if ($runIn -is [string]) {
+            if ([string]::IsNullOrWhiteSpace($runIn)) { $runIn = $null }
+            else { try { $runIn = $runIn | ConvertFrom-Json } catch { Stop-TeInput 'The run input is text that is not valid JSON.' } }
+        }
+
+        # ---- Time zone and day ----
+        $tzText = Get-TeText $runIn @('timezone', 'timeZone', 'time_zone', 'tz')
+        $tz = [TimeZoneInfo]::Utc
+        if ($tzText -ne '') {
+            try { $tz = [TimeZoneInfo]::FindSystemTimeZoneById($tzText) }
+            catch { Stop-TeInput "timezone '$tzText' isn't a time zone this runner knows. Use a name like 'Eastern Standard Time' or 'America/New_York', or leave it empty for UTC." }
+        }
+        $dateText = Get-TeText $runIn @('date', 'day', 'review_date')
+        $day = [datetime]::MinValue
+        if ($dateText -eq '') {
+            $nowLocal = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz)
+            $day = $nowLocal.Date.AddDays(-1)
+        }
+        else {
+            if (-not [datetime]::TryParseExact($dateText, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$day)) { Stop-TeInput "date must look like 2026-10-07 (it was '$dateText')." }
+            $todayLocal = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).Date
+            if ($day -gt $todayLocal) { Stop-TeInput "date $dateText is in the future." }
+            if ($day -lt $todayLocal.AddDays(-366)) { Stop-TeInput "date $dateText is more than a year ago." }
+        }
+        $startLocal = [datetime]::SpecifyKind($day, [DateTimeKind]::Unspecified)
+        $fromUtc = [TimeZoneInfo]::ConvertTimeToUtc($startLocal, $tz)
+        $toUtc = [TimeZoneInfo]::ConvertTimeToUtc($startLocal.AddDays(1), $tz)
+
+        $minNote = Get-TeWhole (Get-TeText $runIn @('min_note_chars', 'minNoteChars')) 'min_note_chars' 20 0 2000
+        $maxTickets = Get-TeWhole (Get-TeText $runIn @('max_tickets', 'maxTickets')) 'max_tickets' 500 1 5000
+        $checkBillable = Test-TeYes (Get-TeText $runIn @('check_billable', 'checkBillable')) $true
+
+        $companyId = Get-TeText $runIn @('company_id', 'companyId', 'psa_company_id')
+        if ($companyId -ne '' -and $companyId -notmatch '^\d+$') { Stop-TeInput "company_id must be the PSA's company number (it was '$companyId')." }
+        $zdField = Get-TeText $runIn @('zendesk_time_field_id', 'zendeskTimeFieldId')
+        if ($zdField -ne '' -and $zdField -notmatch '^\d+$') { Stop-TeInput "zendesk_time_field_id must be a number (it was '$zdField')." }
+
+        # ---- Recipients ----
+        $toText = Get-TeText $runIn @('to', 'email', 'recipients')
+        $warnings = @()
+        if ($toText -eq '') { $sec = Get-TeSecret 'ServiceManager-Email'; if (-not [string]::IsNullOrWhiteSpace($sec)) { $toText = $sec.Trim() } }
+        $to = @()
+        foreach ($part in ($toText -split '[,;\s]+')) {
+            $t = $part.Trim().Trim('"', "'", '<', '>')
+            if ($t -eq '') { continue }
+            if ($t -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { if ($to -notcontains $t.ToLowerInvariant()) { $to += $t.ToLowerInvariant() } }
+            else { Stop-TeInput "'$t' in to isn't an email address." }
+        }
+        if (-not $to.Count) { $warnings += 'No recipient (the to input or the ServiceManager-Email secret), so the report is only in the run output.' }
+
+        Set-NodeOutput ([ordered]@{
+                status        = 'running'
+                message       = ''
+                public_note   = ''
+                internal_note = ''
+                ticket_id     = ''
+                actions       = @()
+                warnings      = @($warnings)
+                inputs        = [ordered]@{
+                    date                  = $day.ToString('yyyy-MM-dd')
+                    timezone              = $(if ($tzText -ne '') { $tz.Id } else { 'UTC' })
+                    range_from            = $fromUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    range_to              = $toUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    min_note_chars        = $minNote
+                    check_billable        = $checkBillable
+                    to                    = @($to)
+                    company_id            = $companyId
+                    zendesk_time_field_id = $zdField
+                    max_tickets           = $maxTickets
+                    psa                   = (Get-TeText $runIn @('psa', 'PSA'))
+                }
+            })
+      timeoutSeconds: 120
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+      testInput: |-
+        {
+          "date": "",
+          "timezone": "",
+          "min_note_chars": 20,
+          "check_billable": true,
+          "to": "",
+          "company_id": "",
+          "zendesk_time_field_id": "",
+          "max_tickets": 500,
+          "psa": ""
+        }
+  - id: node-find
+    name: Find closed tickets
+    type: powershell-script
+    position:
+      x: 480
+      y: 200
+    properties:
+      script: |-
+        # >>> _shared/psa.ps1 (generated by _shared/inject.js; edit the source, not this block)
+        # ---------- _shared/psa.ps1: one adapter for six PSAs ----------
+        # ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+        # Edit this file, then run: node automationai/_shared/inject.js <automation-folder>
+        # The source of each call, and whether it has been checked, is in reference/build-kit/PSA.md.
+        # Calls marked "Unverified" below have not been proven by a live run; check them before the first live write.
+        # Secrets use the same Key Vault names as each PSA's catalog extension.
+        # All state lives in the $PsaState hashtable and is changed in place, because the runner
+        # runs a step in a child scope where $script: variables don't behave.
+
+        $PsaState = @{
+            Conn       = $null
+            Picklists  = @{}
+            MaxRetries = 4
+            Secrets    = @{
+                connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')
+                autotask    = @('Autotask-ApiUrl', 'Autotask-ApiIntegrationCode', 'Autotask-Username', 'Autotask-Secret')
+                halopsa     = @('Halo-ApiUrl', 'Halo-ClientId', 'Halo-ClientSecret')
+                kaseyabms   = @('KaseyaBMS-ApiUrl', 'KaseyaBMS-Username', 'KaseyaBMS-Password', 'KaseyaBMS-CompanyName')
+                syncro      = @('Syncro-ApiUrl', 'Syncro-ApiKey')
+                zendesk     = @('Zendesk-BaseUrl', 'Zendesk-Email', 'Zendesk-ApiToken')
+            }
+            Names      = @{ connectwise = 'ConnectWise'; autotask = 'Autotask'; halopsa = 'HaloPSA'; kaseyabms = 'Kaseya BMS'; syncro = 'Syncro'; zendesk = 'Zendesk' }
+        }
+
+        # ---- small helpers (all Psa-prefixed so they don't clash with other shared files) ----
+        function Get-PsaSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Get-PsaProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-PsaPath { param($o, [string]$Path) foreach ($n in $Path -split '\.') { $o = Get-PsaProp $o $n; if ($null -eq $o) { return $null } }; return $o }
+        function Test-PsaBlank { param($v) return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -eq '0') }
+        function ConvertTo-PsaQuery { param([string]$s) return [uri]::EscapeDataString($s) }
+        function Get-PsaText { param([string]$s, [int]$Max) if ($null -eq $s) { return '' }; if ($s.Length -gt $Max) { return $s.Substring(0, $Max) }; return $s }
+        function Get-PsaName { if ($null -eq $PsaState.Conn) { return 'the PSA' }; return $PsaState.Names[$PsaState.Conn.Psa] }
+        function Get-PsaConn { if ($null -eq $PsaState.Conn) { throw 'Call Connect-Psa before any other PSA function.' }; return $PsaState.Conn }
+        # ConnectWise conditions quote strings and leave numbers bare.
+        function Get-PsaCwOwner { param([string]$u) if ($u -match '^\d+$') { return "owner/id=$u" }; return "owner/identifier=`"$u`"" }
+        function Get-PsaHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
+        function Get-PsaRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+        function Get-PsaErrorText { param($Err) $d = $null; try { if ($Err.ErrorDetails -and $Err.ErrorDetails.Message) { $d = $Err.ErrorDetails.Message } } catch { }; if (-not $d) { $d = [string]$Err.Exception.Message }; return $d }
+
+        # Normalizes a priority hint to critical, high, medium or low ('' when blank).
+        function Get-PsaPriorityHint {
+            param([string]$Hint)
+            $h = ([string]$Hint).Trim().ToLowerInvariant()
+            if (-not $h) { return '' }
+            if ($h -match '^(critical|urgent|emergency|p?1)$') { return 'critical' }
+            if ($h -match '^(high|p?2)$') { return 'high' }
+            if ($h -match '^(medium|normal|moderate|p?3)$') { return 'medium' }
+            if ($h -match '^(low|p?4)$') { return 'low' }
+            throw "Priority '$Hint' isn't one of: critical, high, medium, low."
+        }
+        $PsaState.PriorityPatterns = @{
+            critical = @('(?i)critical', '(?i)urgent', '(?i)emergency', '(?i)\b(p|priority\s*)1\b')
+            high     = @('(?i)high', '(?i)\b(p|priority\s*)2\b')
+            medium   = @('(?i)medium', '(?i)normal', '(?i)moderate', '(?i)\b(p|priority\s*)3\b')
+            low      = @('(?i)low', '(?i)\b(p|priority\s*)4\b')
+        }
+        # The first item whose label property matches one of the patterns, in pattern order.
+        function Select-PsaByLabel {
+            param($Items, [string]$LabelProp, [string[]]$Patterns)
+            foreach ($p in $Patterns) {
+                $hit = @($Items | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ $LabelProp) -match $p }) | Select-Object -First 1
+                if ($hit) { return $hit }
+            }
+            return $null
+        }
+
+        # Which PSA: the run's psa input, then the PSA-Type secret, then ConnectWise when its secrets are
+        # set (so runners set up before PSA-Type existed keep working). '' means none is configured.
+        function Get-PsaType {
+            param([string]$Requested)
+            $v = $Requested; if ([string]::IsNullOrWhiteSpace($v) -or $v.StartsWith('@')) { $v = Get-PsaSecret 'PSA-Type' }
+            if ([string]::IsNullOrWhiteSpace($v)) { if (Get-PsaSecret 'CW-ApiUrl') { return 'connectwise' }; return '' }
+            $v = $v.Trim().ToLowerInvariant()
+            $alias = @{ 'cw' = 'connectwise'; 'connectwise-manage' = 'connectwise'; 'connectwise psa' = 'connectwise'; 'connectwise manage' = 'connectwise'; 'autotask-psa' = 'autotask'; 'datto autotask' = 'autotask'; 'halo' = 'halopsa'; 'halo-psa' = 'halopsa'; 'kaseya' = 'kaseyabms'; 'kaseya-bms' = 'kaseyabms'; 'kaseya bms' = 'kaseyabms'; 'bms' = 'kaseyabms'; 'syncromsp' = 'syncro'; 'zendesk-ticketing' = 'zendesk' }
+            if ($alias.ContainsKey($v)) { $v = $alias[$v] }
+            if (-not $PsaState.Secrets.ContainsKey($v)) { throw "PSA '$v' isn't supported. Use one of: $(($PsaState.Secrets.Keys | Sort-Object) -join ', ')." }
+            return $v
+        }
+
+        # Reads the PSA's secrets, mints a token where the PSA needs one, and keeps the connection in $PsaState.
+        # With no -Psa it uses Get-PsaType. Returns @{ Psa; Base; Headers }.
+        function Connect-Psa {
+            param([string]$Psa)
+            if ([string]::IsNullOrWhiteSpace($Psa)) { $Psa = Get-PsaType ''; if (-not $Psa) { throw 'No PSA is set up. Add the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro or zendesk) to the runner Key Vault.' } }
+            $Psa = $Psa.Trim().ToLowerInvariant()
+            if (-not $PsaState.Secrets.ContainsKey($Psa)) { $Psa = Get-PsaType $Psa }
+            $v = @{}; $missing = @()
+            foreach ($n in $PsaState.Secrets[$Psa]) { $v[$n] = Get-PsaSecret $n; if ([string]::IsNullOrWhiteSpace($v[$n])) { $missing += $n } }
+            if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+            $json = 'application/json'
+            $c = $null
+            switch ($Psa) {
+                'connectwise' {
+                    $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['CW-CompanyID'])+$($v['CW-PublicKey']):$($v['CW-PrivateKey'])"))
+                    $c = @{ Base = $v['CW-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Basic $b"; clientId = $v['CW-ClientId']; Accept = $json } }
+                }
+                'autotask' {
+                    $c = @{ Base = ($v['Autotask-ApiUrl'].TrimEnd('/') -replace '/atservicesrest/v1\.0$', '') + '/atservicesrest/v1.0'
+                        Headers = @{ ApiIntegrationCode = $v['Autotask-ApiIntegrationCode']; UserName = $v['Autotask-Username']; Secret = $v['Autotask-Secret']; Accept = $json } }
+                }
+                'halopsa' {
+                    $base = $v['Halo-ApiUrl'].TrimEnd('/') -replace '/api$', ''
+                    $form = "grant_type=client_credentials&client_id=$([uri]::EscapeDataString($v['Halo-ClientId']))&client_secret=$([uri]::EscapeDataString($v['Halo-ClientSecret']))&scope=all"
+                    $tok = $null
+                    try { $tok = Invoke-RestMethod -Method POST -Uri "$base/auth/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop }
+                    catch {
+                        # Some instances run a separate auth server; /api/authinfo names it.
+                        $info = Invoke-RestMethod -Method GET -Uri "$base/api/authinfo" -ErrorAction Stop
+                        $authUrl = [string](Get-PsaProp $info 'auth_url'); if (-not $authUrl) { throw "HaloPSA sign-in failed and /api/authinfo named no auth server: $(Get-PsaErrorText $_)" }
+                        $tok = Invoke-RestMethod -Method POST -Uri "$($authUrl.TrimEnd('/'))/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
+                    }
+                    $access = Get-PsaProp $tok 'access_token'; if (-not $access) { throw 'HaloPSA sign-in returned no access_token. Check the Halo-* secrets.' }
+                    $c = @{ Base = "$base/api"; Headers = @{ Authorization = "Bearer $access"; Accept = $json } }
+                }
+                'kaseyabms' {
+                    $base = $v['KaseyaBMS-ApiUrl'].TrimEnd('/') -replace '/v2$', ''
+                    # Unverified: the GrantType value 'password' (PSA.md).
+                    $r = Invoke-RestMethod -Method POST -Uri "$base/v2/security/authenticate" -Form @{ UserName = $v['KaseyaBMS-Username']; Password = $v['KaseyaBMS-Password']; Tenant = $v['KaseyaBMS-CompanyName']; GrantType = 'password' } -ErrorAction Stop
+                    $token = Get-PsaPath $r 'Result.AccessToken'; if (-not $token) { $token = Get-PsaPath $r 'result.accessToken' }
+                    if (-not $token) { throw 'Kaseya BMS sign-in returned no Result.AccessToken. Check the KaseyaBMS-* secrets.' }
+                    $c = @{ Base = "$base/v2"; Headers = @{ Authorization = "Bearer $token"; Accept = $json } }
+                }
+                'syncro' { $c = @{ Base = $v['Syncro-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Bearer $($v['Syncro-ApiKey'])"; Accept = $json } } }
+                'zendesk' {
+                    # Unverified: whether the Zendesk-BaseUrl secret already ends in /api/v2, so it is added when missing.
+                    $base = $v['Zendesk-BaseUrl'].TrimEnd('/'); if ($base -notmatch '/api/v2$') { $base += '/api/v2' }
+                    $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['Zendesk-Email'])/token:$($v['Zendesk-ApiToken'])"))
+                    $c = @{ Base = $base; Headers = @{ Authorization = "Basic $b"; Accept = $json } }
+                }
+            }
+            $c.Psa = $Psa
+            $PsaState.Conn = $c
+            $PsaState.Picklists = @{}
+            return $c
+        }
+
+        # One call to the connected PSA. Path is relative to the API base (or a full URL).
+        # Retries 429 (and 502, 503, 504 on GET) honoring Retry-After; other errors throw a plain message.
+        function Invoke-Psa {
+            param([string]$Method, [string]$Path, $Body = $null, [string]$ContentType = 'application/json')
+            $c = Get-PsaConn
+            $uri = if ($Path -match '^https?://') { $Path } else { "$($c.Base)$Path" }
+            for ($i = 1; $i -le $PsaState.MaxRetries; $i++) {
+                $p = @{ Method = $Method; Uri = $uri; Headers = $c.Headers; ErrorAction = 'Stop' }
+                if ($null -ne $Body) { $p.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 10 -Compress }); $p.ContentType = $ContentType }
+                try { return Invoke-RestMethod @p }
+                catch {
+                    $code = Get-PsaHttpStatus $_
+                    if (($code -eq 429 -or ($Method -eq 'GET' -and $code -in @(502, 503, 504))) -and $i -lt $PsaState.MaxRetries) { Start-Sleep -Seconds (Get-PsaRetryAfter $_ $i); continue }
+                    throw "$(Get-PsaName) $Method $Path failed$(if ($code) { " (HTTP $code)" }): $(Get-PsaErrorText $_)"
+                }
+            }
+        }
+
+        # Autotask picklists are per tenant: match on the label, never a hard-coded number.
+        function Get-PsaAtPicklist {
+            param([string]$Entity, [string]$Field)
+            if (-not $PsaState.Picklists.ContainsKey($Entity)) { $PsaState.Picklists[$Entity] = @(Get-PsaProp (Invoke-Psa GET "/$Entity/entityInformation/fields") 'fields') }
+            $f = @($PsaState.Picklists[$Entity] | Where-Object { [string](Get-PsaProp $_ 'name') -eq $Field }) | Select-Object -First 1
+            return @(Get-PsaProp $f 'picklistValues' | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'isActive') -ne $false })
+        }
+        function Select-PsaAtValue {
+            param($Values, [string[]]$Patterns)
+            $hit = Select-PsaByLabel $Values 'label' $Patterns
+            if ($hit) { return (Get-PsaProp $hit 'value') }
+            return $null
+        }
+        function Get-PsaAtCompleteStatuses {
+            $v = @(Get-PsaAtPicklist 'Tickets' 'status' | Where-Object { [string](Get-PsaProp $_ 'label') -match '(?i)complete' } | ForEach-Object { [int](Get-PsaProp $_ 'value') })
+            if (-not $v.Count) { $v = @(5) }
+            return $v
+        }
+
+        # Normalized ticket: @{ id; summary; description; companyId; status; assigneeId; assigneeIds; raw }.
+        function Get-PsaTicket {
+            param([string]$Id)
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' {
+                    $t = Invoke-Psa GET "/service/tickets/$Id"
+                    $desc = ''
+                    try { $n = @(Invoke-Psa GET "/service/tickets/$Id/notes?orderBy=$(ConvertTo-PsaQuery 'id asc')&pageSize=1"); if ($n.Count -and $null -ne $n[0]) { $desc = [string](Get-PsaProp $n[0] 'text') } } catch { }
+                    $owner = Get-PsaProp $t 'owner'
+                    $a = @(@((Get-PsaProp $owner 'identifier'), (Get-PsaProp $owner 'id')) | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'summary'); description = $desc; companyId = [string](Get-PsaPath $t 'company.id'); status = [string](Get-PsaPath $t 'status.name'); assigneeId = $(if ($a.Count) { $a[0] } else { '' }); assigneeIds = $a; raw = $t }
+                }
+                'autotask' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/Tickets/$Id") 'item'
+                    if ($null -eq $t) { throw "Autotask returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'assignedResourceID'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'title'); description = [string](Get-PsaProp $t 'description'); companyId = [string](Get-PsaProp $t 'companyID'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'halopsa' {
+                    $t = Invoke-Psa GET "/Tickets/$($Id)?includedetails=true"
+                    $a = Get-PsaProp $t 'agent_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'summary'); description = [string](Get-PsaProp $t 'details'); companyId = [string](Get-PsaProp $t 'client_id'); status = [string](Get-PsaProp $t 'status_id'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'kaseyabms' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/servicedesk/tickets/$Id") 'Result'
+                    if ($null -eq $t) { throw "Kaseya BMS returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'AssigneeId'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'Title'); description = [string](Get-PsaProp $t 'Details'); companyId = [string](Get-PsaProp $t 'AccountId'); status = [string](Get-PsaProp $t 'StatusName'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'syncro' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$Id") 'ticket'
+                    if ($null -eq $t) { throw "Syncro returned no ticket $Id." }
+                    $cm = @(Get-PsaProp $t 'comments' | Where-Object { $null -ne $_ })
+                    $desc = if ($cm.Count) { [string](Get-PsaProp $cm[0] 'body') } else { '' }
+                    $pt = [string](Get-PsaProp $t 'problem_type'); if ($pt) { $desc = "Issue type: $pt`n$desc" }
+                    $a = Get-PsaProp $t 'user_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'subject'); description = $desc; companyId = [string](Get-PsaProp $t 'customer_id'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'zendesk' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$Id") 'ticket'
+                    if ($null -eq $t) { throw "Zendesk returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'assignee_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'subject'); description = [string](Get-PsaProp $t 'description'); companyId = [string](Get-PsaProp $t 'organization_id'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+            }
+        }
+
+        # Creates a ticket and returns @{ id; raw }.
+        #   -CompanyId  the PSA's own company id (Find-PsaCompany resolves a name to it)
+        #   -Priority   a hint: critical, high, medium or low. It is matched to the tenant's priority list where the PSA has one.
+        #   -Queue      optional board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro) or group id (Zendesk)
+        #   -Extra      optional hashtable of raw PSA fields merged into the body, for tenant-specific required ids
+        function New-PsaTicket {
+            param([string]$CompanyId, [string]$Summary, [string]$Description = '', [string]$Priority = '', [string]$Queue = '', [hashtable]$Extra = @{})
+            $c = Get-PsaConn
+            if ([string]::IsNullOrWhiteSpace($CompanyId)) { throw 'New-PsaTicket needs a company id. Use Find-PsaCompany to look one up by name.' }
+            if ([string]::IsNullOrWhiteSpace($Summary)) { throw 'New-PsaTicket needs a summary.' }
+            $hint = Get-PsaPriorityHint $Priority
+            $pats = @(); if ($hint) { $pats = $PsaState.PriorityPatterns[$hint] }
+            $isNum = $Queue -match '^\d+$'
+            $id = $null; $raw = $null
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Body and /service/priorities lookup from the CW swagger clients.
+                    $b = [ordered]@{ summary = (Get-PsaText $Summary 100); company = @{ id = [int]$CompanyId }; initialDescription = $Description }
+                    if ($Queue) { $b.board = $(if ($isNum) { @{ id = [int]$Queue } } else { @{ name = $Queue } }) }
+                    if ($hint) { $pr = Select-PsaByLabel @(Invoke-Psa GET '/service/priorities?pageSize=100') 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/service/tickets' $b
+                    $id = Get-PsaProp $raw 'id'
+                }
+                'autotask' {
+                    # From the at_create_ticket extension descriptor: title, companyID, status, priority and dueDateTime are required.
+                    $status = Get-PsaSecret 'Autotask-NewStatusId'
+                    if (-not $status) { $status = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'status') @('^New$', '(?i)^new') }
+                    if (-not $status) { $status = 1 }
+                    $prio = $null
+                    if ($hint) { $prio = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'priority') $pats }
+                    if ($null -eq $prio) { $def = @(Get-PsaAtPicklist 'Tickets' 'priority' | Where-Object { (Get-PsaProp $_ 'isDefaultValue') -eq $true }) | Select-Object -First 1; if ($def) { $prio = Get-PsaProp $def 'value' } }
+                    if ($null -eq $prio) { $prio = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'priority') $PsaState.PriorityPatterns['medium'] }
+                    if ($null -eq $prio) { throw 'Could not find an Autotask ticket priority. Pass -Priority, or -Extra @{ priority = <id> }.' }
+                    $due = (Get-Date).ToUniversalTime().AddDays($(switch ($hint) { 'critical' { 0.25 } 'high' { 1 } 'low' { 7 } default { 3 } }))
+                    $b = [ordered]@{ companyID = [long]$CompanyId; title = (Get-PsaText $Summary 255); description = (Get-PsaText $Description 8000); status = [int]$status; priority = [int]$prio; dueDateTime = $due.ToString('yyyy-MM-ddTHH:mm:ssZ') }
+                    if ($Queue) {
+                        $qv = if ($isNum) { $Queue } else { Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'queueID') @("^$([regex]::Escape($Queue))$") }
+                        if ($null -eq $qv) { throw "Autotask has no ticket queue named '$Queue'." }
+                        $b.queueID = [int]$qv
+                    }
+                    $bc = Get-PsaSecret 'Autotask-BillingCodeId'; if ($bc) { $b.billingCodeID = [long]$bc }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/Tickets' $b
+                    $id = Get-PsaProp $raw 'itemId'
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. Halo priority ids are per tenant; 1 to 4 are the out-of-box Critical to Low.
+                    $b = [ordered]@{ summary = $Summary; details = $Description; client_id = [long]$CompanyId }
+                    if ($hint) { $b.priority_id = @{ critical = 1; high = 2; medium = 3; low = 4 }[$hint] }
+                    if ($Queue) { if ($isNum) { $b.team_id = [long]$Queue } else { $b.team = $Queue } }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/Tickets' @($b)
+                    $first = @($raw)[0]
+                    $id = Get-PsaProp $first 'id'
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. BMS needs tenant ids for status, type, source and priority; they come from
+                    # the optional KaseyaBMS-NewStatusId, -TicketTypeId, -TicketSourceId, -PriorityId and -QueueId secrets, or -Extra.
+                    $b = [ordered]@{ Title = $Summary; Details = $Description; AccountId = [long]$CompanyId; OpenDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+                    foreach ($pair in @(@('StatusId', 'KaseyaBMS-NewStatusId'), @('TypeId', 'KaseyaBMS-TicketTypeId'), @('SourceId', 'KaseyaBMS-TicketSourceId'), @('PriorityId', 'KaseyaBMS-PriorityId'), @('QueueId', 'KaseyaBMS-QueueId'))) {
+                        $sv = Get-PsaSecret $pair[1]; if ($sv -and $sv -match '^\d+$') { $b[$pair[0]] = [int]$sv }
+                    }
+                    if ($Queue) { if (-not $isNum) { throw 'Kaseya BMS needs a numeric queue id for -Queue.' }; $b.QueueId = [int]$Queue }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/servicedesk/tickets' $b
+                    $id = Get-PsaPath $raw 'Result.Id'; if ($null -eq $id) { $id = Get-PsaProp $raw 'Result' }
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. Syncro takes the description as the first comment, and priority as a label.
+                    $b = [ordered]@{ customer_id = [long]$CompanyId; subject = $Summary; status = 'New'; comments_attributes = @(@{ subject = 'Initial Issue'; body = $(if ($Description) { $Description } else { $Summary }); hidden = $false; do_not_email = $true }) }
+                    if ($hint) { $b.priority = @{ critical = '0 Urgent'; high = '1 High'; medium = '2 Normal'; low = '3 Low' }[$hint] }
+                    if ($Queue) { $b.problem_type = $Queue }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/tickets' $b
+                    $id = Get-PsaPath $raw 'ticket.id'
+                }
+                'zendesk' {
+                    # Unverified: not in PSA.md yet. Zendesk priorities are fixed: urgent, high, normal, low.
+                    $t = [ordered]@{ subject = $Summary; comment = @{ body = $(if ($Description) { $Description } else { $Summary }) }; organization_id = [long]$CompanyId }
+                    if ($hint) { $t.priority = @{ critical = 'urgent'; high = 'high'; medium = 'normal'; low = 'low' }[$hint] }
+                    if ($Queue) { if (-not $isNum) { throw 'Zendesk needs a numeric group id for -Queue.' }; $t.group_id = [long]$Queue }
+                    foreach ($k in $Extra.Keys) { $t[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/tickets' @{ ticket = $t }
+                    $id = Get-PsaPath $raw 'ticket.id'
+                }
+            }
+            if (Test-PsaBlank $id) { throw "$(Get-PsaName) accepted the new ticket but returned no id." }
+            return @{ id = [string]$id; raw = $raw }
+        }
+
+        # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
+        # Throws when the PSA rejects it.
+        function Add-PsaNote {
+            param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal)
+            $c = Get-PsaConn
+            $pub = [bool]$Public
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
+                    $null = Invoke-Psa POST "/service/tickets/$Id/notes" @{ text = $Text; internalAnalysisFlag = (-not $pub); detailDescriptionFlag = $pub; resolutionFlag = $false }
+                }
+                'autotask' {
+                    $pv = $null
+                    if ($pub) {
+                        # Unverified: which publish label makes a note client-visible. Tries "All Autotask Users" style labels.
+                        $pv = Get-PsaSecret 'Autotask-NotePublicPublishId'
+                        if (-not $pv) { $pv = Select-PsaAtValue (Get-PsaAtPicklist 'TicketNotes' 'publish') @('(?i)^All Autotask Users$', '(?i)^All', '(?i)public') }
+                    }
+                    else {
+                        $pv = Get-PsaSecret 'Autotask-NotePublishId'
+                        if (-not $pv) { $pv = Select-PsaAtValue (Get-PsaAtPicklist 'TicketNotes' 'publish') @('^Internal Only$', 'Internal') }
+                    }
+                    $type = Get-PsaSecret 'Autotask-NoteTypeId'
+                    if (-not $type) { $vals = @(Get-PsaAtPicklist 'TicketNotes' 'noteType' | Where-Object { [string](Get-PsaProp $_ 'value') -ne '13' -and [string](Get-PsaProp $_ 'label') -notmatch 'Workflow' }); $type = Select-PsaAtValue $vals @('Internal', 'Task Detail', 'Detail', '.') }
+                    if ($null -eq $pv -or $null -eq $type) { throw 'Could not find the Autotask note publish and type values. Set the Autotask-NotePublishId and Autotask-NoteTypeId secrets.' }
+                    $null = Invoke-Psa POST "/Tickets/$Id/Notes" @{ ticketID = [long]$Id; title = $Title; description = $Text; noteType = [int]$type; publish = [int]$pv }
+                }
+                'halopsa' {
+                    # Unverified: outcome ids are per tenant; 7 is the built-in Private Note. Halo-NoteOutcomeId overrides it.
+                    $outcome = Get-PsaSecret $(if ($pub) { 'Halo-PublicNoteOutcomeId' } else { 'Halo-NoteOutcomeId' })
+                    if (-not $outcome) { $outcome = Get-PsaSecret 'Halo-NoteOutcomeId' }
+                    if (-not $outcome) { $outcome = 7 }
+                    $null = Invoke-Psa POST '/Actions' @(@{ ticket_id = [long]$Id; note = $Text; hiddenfromuser = (-not $pub); outcome_id = [int]$outcome })
+                }
+                'kaseyabms' {
+                    # Unverified: how to list note types, so the KaseyaBMS-NoteTypeId secret supplies one.
+                    $type = Get-PsaSecret 'KaseyaBMS-NoteTypeId'
+                    if (-not $type) { throw 'Kaseya BMS notes need a note type id. Set the KaseyaBMS-NoteTypeId secret.' }
+                    $null = Invoke-Psa POST "/servicedesk/tickets/$Id/notes" @{ Details = $Text; IsInternal = (-not $pub); NoteDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); TypeId = [int]$type }
+                }
+                'syncro' { $null = Invoke-Psa POST "/tickets/$Id/comment" @{ subject = $Title; body = $Text; hidden = (-not $pub); do_not_email = (-not $pub) } }
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ comment = @{ body = $Text; public = $pub } } } }
+            }
+        }
+
+        # Assigns the ticket. Autotask also needs the resource's role id.
+        function Set-PsaAssignee {
+            param([string]$Id, [string]$UserId, [string]$RoleId = '')
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' {
+                    $val = if ($UserId -match '^\d+$') { @{ id = [int]$UserId } } else { @{ identifier = $UserId } }
+                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'owner'; value = $val })
+                }
+                'autotask' {
+                    if (-not $RoleId) { throw 'Autotask needs the resource role id as well as the resource id.' }
+                    $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; assignedResourceID = [long]$UserId; assignedResourceRoleID = [long]$RoleId })
+                }
+                'halopsa' { $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; agent_id = [long]$UserId }) }
+                'kaseyabms' { $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/AssigneeId'; value = [long]$UserId }) }
+                'syncro' { $null = Invoke-Psa PUT "/tickets/$Id" @{ user_id = [long]$UserId } }
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ assignee_id = [long]$UserId } } }
+            }
+        }
+
+        # Closes or reopens a ticket. -StatusName picks an exact status (a name, or an id for HaloPSA and Kaseya BMS).
+        # Returns the status that was set.
+        function Set-PsaStatus {
+            param([string]$Id, [ValidateSet('closed', 'open')][string]$State = 'closed', [string]$StatusName = '')
+            $c = Get-PsaConn
+            $closed = $State -eq 'closed'
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Statuses belong to the ticket's board; closedStatus and defaultFlag pick one.
+                    $t = Invoke-Psa GET "/service/tickets/$Id"
+                    $boardId = Get-PsaPath $t 'board.id'
+                    if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
+                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })
+                    $st = $null
+                    if ($StatusName) { $st = @($all | Where-Object { [string](Get-PsaProp $_ 'name') -eq $StatusName }) | Select-Object -First 1 }
+                    elseif ($closed) { $cl = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true }); $st = Select-PsaByLabel $cl 'name' @('(?i)resolved', '(?i)closed', '(?i)complete', '.') }
+                    else { $op = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -ne $true }); $st = @($op | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1; if (-not $st) { $st = Select-PsaByLabel $op 'name' @('(?i)^new', '(?i)open', '.') } }
+                    if (-not $st) { throw "No $(if ($StatusName) { "'$StatusName'" } else { $State }) status on ConnectWise board $boardId." }
+                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'status'; value = @{ id = [int](Get-PsaProp $st 'id') } })
+                    return [string](Get-PsaProp $st 'name')
+                }
+                'autotask' {
+                    # Unverified: not in PSA.md yet. Uses the status picklist (Complete = 5 and New = 1 by default) and at_update_ticket's PATCH.
+                    $vals = Get-PsaAtPicklist 'Tickets' 'status'
+                    $pats = if ($StatusName) { @("^$([regex]::Escape($StatusName))$") } elseif ($closed) { @('(?i)^complete$', '(?i)complete') } else { @('(?i)^new$', '(?i)in progress') }
+                    $hit = Select-PsaByLabel $vals 'label' $pats
+                    $sv = if ($hit) { Get-PsaProp $hit 'value' } elseif ($StatusName) { $null } elseif ($closed) { 5 } else { 1 }
+                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'." }
+                    $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$sv })
+                    return $(if ($hit) { [string](Get-PsaProp $hit 'label') } else { [string]$sv })
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. 9 (Closed) and 1 (New) are Halo's out-of-box ids; Halo-ClosedStatusId and Halo-OpenStatusId override them.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
+                    if (-not $sv) { $sv = $(if ($closed) { 9 } else { 1 }) }
+                    if ([string]$sv -notmatch '^\d+$') { throw 'HaloPSA needs a numeric status id.' }
+                    $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; status_id = [int]$sv })
+                    return [string]$sv
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. Status ids are per tenant: KaseyaBMS-ClosedStatusId and KaseyaBMS-OpenStatusId.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
+                    if (-not $sv -or [string]$sv -notmatch '^\d+$') { throw "Kaseya BMS needs a status id. Set the KaseyaBMS-$(if ($closed) { 'Closed' } else { 'Open' })StatusId secret." }
+                    $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/StatusId'; value = [int]$sv })
+                    return [string]$sv
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. Resolved and New are Syncro's default status labels.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { 'Resolved' } else { 'New' }
+                    $null = Invoke-Psa PUT "/tickets/$Id" @{ status = $sv }
+                    return $sv
+                }
+                'zendesk' {
+                    # The API can't set closed directly; solved closes on Zendesk's own schedule.
+                    $sv = if ($StatusName) { $StatusName.ToLowerInvariant() } elseif ($closed) { 'solved' } else { 'open' }
+                    $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ status = $sv } }
+                    return $sv
+                }
+            }
+        }
+
+        # Looks a company up by name. Returns @(@{ id; name; exact; raw }) with exact (case-insensitive) matches first.
+        function Find-PsaCompany {
+            param([string]$Name)
+            $c = Get-PsaConn
+            $n = ([string]$Name).Trim()
+            if (-not $n) { throw 'Find-PsaCompany needs a name.' }
+            $rows = @(); $idProp = 'id'; $nameProp = 'name'
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Uses the documented conditions syntax (strings in double quotes).
+                    $q = $n.Replace('\', '\\').Replace('"', '\"')
+                    # Build each condition first: an escaped quote inside a string inside $(...) ends the outer string.
+                    $exactCond = ConvertTo-PsaQuery ('name="' + $q + '" and deletedFlag=false')
+                    $rows = @(Invoke-Psa GET "/company/companies?conditions=$exactCond&pageSize=25")
+                    if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                        $likeCond = ConvertTo-PsaQuery ('name contains "' + $q + '" and deletedFlag=false')
+                        $rows = @(Invoke-Psa GET "/company/companies?conditions=$likeCond&pageSize=25")
+                    }
+                }
+                'autotask' {
+                    # From the at_query_companies extension descriptor.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'companyName'; value = $n }) }
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items')
+                    if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                        $s = @{ filter = @([ordered]@{ op = 'contains'; field = 'companyName'; value = $n }) }
+                        $rows = @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items')
+                    }
+                    $nameProp = 'companyName'
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. GET /api/Client?search= (halo_query_clients) returns { clients: [...] }.
+                    $r = Invoke-Psa GET "/Client?search=$(ConvertTo-PsaQuery $n)&count=50"
+                    $rows = @(Get-PsaProp $r 'clients'); if (-not @($rows | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $rows = @($r) }
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. The account list filter name is a guess; results are filtered here as well.
+                    $r = Invoke-Psa GET "/crm/accounts?Filter.Name=$(ConvertTo-PsaQuery $n)"
+                    $rows = @(Get-PsaProp $r 'Result'); $idProp = 'Id'; $nameProp = 'Name'
+                    if (@($rows | Where-Object { $null -ne $_ -and $null -eq (Get-PsaProp $_ 'Name') -and $null -ne (Get-PsaProp $_ 'AccountName') }).Count) { $nameProp = 'AccountName' }
+                    $rows = @($rows | Where-Object { $null -ne $_ -and ([string](Get-PsaProp $_ $nameProp)).IndexOf($n, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. GET /customers?query= returns { customers: [...] } with business_name.
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/customers?query=$(ConvertTo-PsaQuery $n)") 'customers'); $nameProp = 'business_name'
+                }
+                'zendesk' {
+                    # Unverified: not in PSA.md yet. Organization autocomplete matches names that start with the text.
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/organizations/autocomplete?name=$(ConvertTo-PsaQuery $n)") 'organizations')
+                }
+            }
+            $out = @(foreach ($r in @($rows | Where-Object { $null -ne $_ })) {
+                    $nm = [string](Get-PsaProp $r $nameProp)
+                    if (-not $nm -and $c.Psa -eq 'syncro') { $nm = [string](Get-PsaProp $r 'fullname') }
+                    @{ id = [string](Get-PsaProp $r $idProp); name = $nm; exact = ($nm.Trim() -ieq $n); raw = $r }
+                })
+            return @(@($out | Where-Object { $_.exact }) + @($out | Where-Object { -not $_.exact }))
+        }
+
+        # How many open tickets the technician has: an int, or $null when this PSA can't count.
+        function Get-PsaOpenCount {
+            param([string]$UserId)
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' { return [int](Get-PsaProp (Invoke-Psa GET "/service/tickets/count?conditions=$(ConvertTo-PsaQuery "$(Get-PsaCwOwner $UserId) and closedFlag=false")") 'count') }
+                'autotask' {
+                    # Unverified: the queryCount field name (PSA.md).
+                    $f = @([ordered]@{ op = 'eq'; field = 'assignedResourceID'; value = [long]$UserId }) + @(Get-PsaAtCompleteStatuses | ForEach-Object { [ordered]@{ op = 'noteq'; field = 'status'; value = $_ } })
+                    $r = Invoke-Psa GET "/Tickets/query/count?search=$(ConvertTo-PsaQuery (@{ filter = $f } | ConvertTo-Json -Depth 6 -Compress))"
+                    $n = Get-PsaProp $r 'queryCount'; if ($null -eq $n) { return $null }; return [int]$n
+                }
+                'halopsa' { $n = Get-PsaProp (Invoke-Psa GET "/Tickets?agent_id=$UserId&open_only=true&pageinate=true&page_size=1&page_no=1") 'record_count'; if ($null -eq $n) { return $null }; return [int]$n }
+                'kaseyabms' { return $null }
+                'syncro' {
+                    $r = Invoke-Psa GET "/tickets?user_id=$UserId&status=$(ConvertTo-PsaQuery 'Not Closed')&page=1"
+                    $te = Get-PsaPath $r 'meta.total_entries'; if ($null -ne $te) { return [int]$te }
+                    $n = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ }).Count; $pages = [int](Get-PsaPath $r 'meta.total_pages')
+                    for ($p = 2; $p -le [Math]::Min($pages, 10); $p++) { $n += @(Get-PsaProp (Invoke-Psa GET "/tickets?user_id=$UserId&status=$(ConvertTo-PsaQuery 'Not Closed')&page=$p") 'tickets' | Where-Object { $null -ne $_ }).Count }
+                    if ($pages -gt 10) { return $null }
+                    return $n
+                }
+                'zendesk' { return [int](Get-PsaProp (Invoke-Psa GET "/search/count?query=$(ConvertTo-PsaQuery "type:ticket assignee:$UserId status<solved")") 'count') }
+            }
+        }
+
+        # The newest ticket currently assigned to the technician: a date, [datetime]::MinValue
+        # when they have none, or $null when this PSA can't tell.
+        function Get-PsaLastAssigned {
+            param([string]$UserId)
+            $c = Get-PsaConn
+            $none = [datetime]::MinValue
+            $date = { param($v) if (Test-PsaBlank $v) { $none } else { [datetime]::Parse([string]$v, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal) } }
+            switch ($c.Psa) {
+                'connectwise' { $r = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery (Get-PsaCwOwner $UserId))&orderBy=$(ConvertTo-PsaQuery 'dateEntered desc')&pageSize=1&fields=id,dateEntered" | Where-Object { $null -ne $_ }); if (-not $r.Count) { return $none }; return (& $date (Get-PsaProp $r[0] 'dateEntered')) }
+                'autotask' {
+                    # The query API can't sort, so take the highest id from the last 90 days.
+                    $since = (Get-Date).ToUniversalTime().AddDays(-90).ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'assignedResourceID'; value = [long]$UserId }, [ordered]@{ op = 'gt'; field = 'createDate'; value = $since }); IncludeFields = @('id', 'createDate'); MaxRecords = 500 }
+                    $r = Invoke-Psa GET "/Tickets/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))"
+                    $top = @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ } | Sort-Object { [long](Get-PsaProp $_ 'id') } -Descending) | Select-Object -First 1
+                    if (-not $top) { return $none }; return (& $date (Get-PsaProp $top 'createDate'))
+                }
+                'halopsa' { $t = @(Get-PsaProp (Invoke-Psa GET "/Tickets?agent_id=$UserId&order=dateoccurred&orderdesc=true&pageinate=true&page_size=1&page_no=1") 'tickets' | Where-Object { $null -ne $_ }); if (-not $t.Count) { return $none }; return (& $date (Get-PsaProp $t[0] 'dateoccurred')) }
+                'kaseyabms' { return $null }
+                'syncro' {
+                    $latest = $none
+                    for ($p = 1; $p -le 10; $p++) {
+                        $r = Invoke-Psa GET "/tickets?user_id=$UserId&page=$p"
+                        foreach ($t in @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })) { $d = & $date (Get-PsaProp $t 'created_at'); if ($d -gt $latest) { $latest = $d } }
+                        if ($p -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                    return $latest
+                }
+                'zendesk' { $t = @(Get-PsaProp (Invoke-Psa GET "/search?query=$(ConvertTo-PsaQuery "type:ticket assignee:$UserId")&sort_by=created_at&sort_order=desc&per_page=1") 'results' | Where-Object { $null -ne $_ }); if (-not $t.Count) { return $none }; return (& $date (Get-PsaProp $t[0] 'created_at')) }
+            }
+        }
+        # ---------- end _shared/psa.ps1 ----------
+        # <<< _shared/psa.ps1
+        # >>> src/psa-extra.ps1 (generated by src/build.js; edit the source, not this block)
+        # ---------- src/psa-extra.ps1: ticket lists, time entries and contacts for six PSAs ----------
+        # Adds what _shared/psa.ps1 doesn't have yet: listing tickets by state and date, reading a ticket's
+        # time entries, listing a company's contacts and setting a ticket's contact.
+        # The identical file ships in automationai/time-entry-review/src and automationai/psa-hygiene/src.
+        # It is a candidate to move into automationai/_shared/psa.ps1.
+        # Needs _shared/psa.ps1 pasted above it (Invoke-Psa, Get-PsaProp, Get-PsaAtPicklist and $PsaState).
+        # Every call carries a source note. "Unverified" means it is not in reference/build-kit/PSA.md and has not
+        # been proven by a live run; check it before relying on it. "Vendor docs" means it was checked against the
+        # vendor's published API spec (Kaseya BMS and Syncro swagger) but not yet run live.
+
+        $PsaState.FindTruncated = $false
+
+        function ConvertTo-PsaUtcText {
+            param($v)
+            if ($null -eq $v) { return '' }
+            $d = [datetime]::MinValue
+            if ($v -is [datetime]) { $d = $v }
+            else {
+                $s = ([string]$v).Trim()
+                if (-not $s) { return '' }
+                $styles = ([Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+                if (-not [datetime]::TryParse($s, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$d)) { return '' }
+            }
+            if ($d.Kind -eq [DateTimeKind]::Local) { $d = $d.ToUniversalTime() }
+            # HaloPSA writes 1900-01-01 for an empty date.
+            if ($d.Year -lt 1901) { return '' }
+            return $d.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        }
+        function ConvertFrom-PsaHtml {
+            param([string]$s)
+            if ([string]::IsNullOrEmpty($s)) { return '' }
+            $t = [System.Net.WebUtility]::HtmlDecode(($s -replace '<[^>]+>', ' '))
+            return (($t -replace '\s+', ' ').Trim())
+        }
+        function Get-PsaBlankable { param($v) if (Test-PsaBlank $v) { return '' }; return [string]$v }
+        function New-PsaTicketRow {
+            param($Id, $Number, $Summary, $CompanyId, $CompanyName, $ContactId, $ContactName, $Status, [bool]$Closed, $ClosedDate, $Created, $Updated, $AssigneeId, $AssigneeName)
+            return [ordered]@{
+                id = [string]$Id; number = $(if (Test-PsaBlank $Number) { [string]$Id } else { [string]$Number }); summary = [string]$Summary
+                companyId = (Get-PsaBlankable $CompanyId); companyName = [string]$CompanyName
+                contactId = (Get-PsaBlankable $ContactId); contactName = [string]$ContactName
+                status = [string]$Status; closed = $Closed; closedDate = (ConvertTo-PsaUtcText $ClosedDate)
+                createdDate = (ConvertTo-PsaUtcText $Created); updatedDate = (ConvertTo-PsaUtcText $Updated)
+                assigneeId = (Get-PsaBlankable $AssigneeId); assigneeName = [string]$AssigneeName
+            }
+        }
+
+        # Lists tickets. Returns @(normalized rows): id, number, summary, companyId, companyName, contactId, contactName,
+        # status, closed, closedDate, createdDate, updatedDate, assigneeId, assigneeName (dates are UTC text or '').
+        #   -State open       every ticket that isn't closed
+        #   -State closed     tickets closed from -ClosedFrom (inclusive) to -ClosedTo (exclusive), both UTC
+        #   -CompanyId        only this PSA company
+        #   -Max              stop after this many; $PsaState.FindTruncated says whether it stopped early
+        function Find-PsaTickets {
+            param([ValidateSet('open', 'closed')][string]$State = 'open', [string]$ClosedFrom = '', [string]$ClosedTo = '', [string]$CompanyId = '', [int]$Max = 1000)
+            $c = Get-PsaConn
+            $PsaState.FindTruncated = $false
+            $closed = $State -eq 'closed'
+            $from = $null; $to = $null
+            if ($closed) {
+                if (-not $ClosedFrom -or -not $ClosedTo) { throw 'Find-PsaTickets -State closed needs -ClosedFrom and -ClosedTo.' }
+                $from = [datetime]::Parse((ConvertTo-PsaUtcText $ClosedFrom), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
+                $to = [datetime]::Parse((ConvertTo-PsaUtcText $ClosedTo), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
+            }
+            $fromIso = if ($closed) { $from.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' }
+            $toIso = if ($closed) { $to.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' }
+            if ($CompanyId -and $CompanyId -notmatch '^\d+$') { throw "The PSA company id must be a number (it was '$CompanyId')." }
+            $rows = New-Object System.Collections.ArrayList
+            $full = { $rows.Count -ge $Max }
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: the closedDate and closedFlag conditions with [datetime] values, and _info.lastUpdated.
+                    $cond = if ($closed) { "closedFlag=true and closedDate>=[$fromIso] and closedDate<[$toIso]" } else { 'closedFlag=false' }
+                    if ($CompanyId) { $cond += " and company/id=$CompanyId" }
+                    for ($page = 1; $page -le 100; $page++) {
+                        $r = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery $cond)&orderBy=$(ConvertTo-PsaQuery 'id asc')&pageSize=200&page=$page" | Where-Object { $null -ne $_ })
+                        foreach ($t in $r) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') $null (Get-PsaProp $t 'summary') (Get-PsaPath $t 'company.id') (Get-PsaPath $t 'company.name') (Get-PsaPath $t 'contact.id') (Get-PsaPath $t 'contact.name') (Get-PsaPath $t 'status.name') ([bool](Get-PsaProp $t 'closedFlag')) (Get-PsaProp $t 'closedDate') (Get-PsaPath $t '_info.dateEntered') (Get-PsaPath $t '_info.lastUpdated') (Get-PsaPath $t 'owner.identifier') (Get-PsaPath $t 'owner.name')))
+                        }
+                        if ($PsaState.FindTruncated -or $r.Count -lt 200) { break }
+                    }
+                }
+                'autotask' {
+                    # Unverified: filtering on completedDate and lastActivityDate, and following pageDetails.nextPageUrl.
+                    $done = @(Get-PsaAtCompleteStatuses)
+                    $labels = @{}; foreach ($v in @(Get-PsaAtPicklist 'Tickets' 'status')) { $labels[[string](Get-PsaProp $v 'value')] = [string](Get-PsaProp $v 'label') }
+                    $f = @()
+                    if ($closed) { $f += [ordered]@{ op = 'gte'; field = 'completedDate'; value = $fromIso }; $f += [ordered]@{ op = 'lt'; field = 'completedDate'; value = $toIso } }
+                    else { foreach ($s in $done) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $s } } }
+                    if ($CompanyId) { $f += [ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$CompanyId } }
+                    $path = "/Tickets/query?search=$(ConvertTo-PsaQuery (@{ filter = $f; MaxRecords = 500 } | ConvertTo-Json -Depth 6 -Compress))"
+                    for ($page = 1; $page -le 100 -and $path; $page++) {
+                        $r = Invoke-Psa GET $path
+                        foreach ($t in @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ })) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $st = [string](Get-PsaProp $t 'status')
+                            $isClosed = $done -contains [int](Get-PsaProp $t 'status')
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') (Get-PsaProp $t 'ticketNumber') (Get-PsaProp $t 'title') (Get-PsaProp $t 'companyID') '' (Get-PsaProp $t 'contactID') '' $(if ($labels.ContainsKey($st)) { $labels[$st] } else { $st }) $isClosed (Get-PsaProp $t 'completedDate') (Get-PsaProp $t 'createDate') (Get-PsaProp $t 'lastActivityDate') (Get-PsaProp $t 'assignedResourceID') ''))
+                        }
+                        if ($PsaState.FindTruncated) { break }
+                        $path = [string](Get-PsaPath $r 'pageDetails.nextPageUrl')
+                    }
+                    # Company names for the report. Unverified: the "in" filter operator on Companies.
+                    $ids = @($rows | ForEach-Object { $_.companyId } | Where-Object { $_ } | Sort-Object -Unique)
+                    if ($ids.Count) {
+                        $names = @{}
+                        try {
+                            for ($i = 0; $i -lt $ids.Count; $i += 200) {
+                                $chunk = @($ids | Select-Object -Skip $i -First 200 | ForEach-Object { [long]$_ })
+                                $s = @{ filter = @([ordered]@{ op = 'in'; field = 'id'; value = $chunk }); IncludeFields = @('id', 'companyName') }
+                                foreach ($co in @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))") 'items' | Where-Object { $null -ne $_ })) { $names[[string](Get-PsaProp $co 'id')] = [string](Get-PsaProp $co 'companyName') }
+                            }
+                        }
+                        catch { }
+                        foreach ($row in $rows) { if ($row.companyId -and $names.ContainsKey($row.companyId)) { $row.companyName = $names[$row.companyId] } }
+                    }
+                }
+                'halopsa' {
+                    # Unverified: open_only, closed_only with datesearch=datecleared and startdate/enddate, and the list's field names.
+                    $q = if ($closed) { "closed_only=true&datesearch=datecleared&startdate=$(ConvertTo-PsaQuery $fromIso)&enddate=$(ConvertTo-PsaQuery $toIso)" } else { 'open_only=true' }
+                    if ($CompanyId) { $q += "&client_id=$CompanyId" }
+                    for ($page = 1; $page -le 100; $page++) {
+                        $r = Invoke-Psa GET "/Tickets?$q&pageinate=true&page_size=100&page_no=$page"
+                        $list = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })
+                        foreach ($t in $list) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $cd = Get-PsaProp $t 'datecleared'
+                            if ($closed) { $cdt = ConvertTo-PsaUtcText $cd; if ($cdt -and ($cdt -lt $fromIso -or $cdt -ge $toIso)) { continue } }
+                            $status = Get-PsaProp $t 'status_name'; if (-not $status) { $status = Get-PsaProp $t 'status_id' }
+                            $upd = Get-PsaProp $t 'lastactiondate'; if (-not (ConvertTo-PsaUtcText $upd)) { $upd = Get-PsaProp $t 'last_update' }
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') $null (Get-PsaProp $t 'summary') (Get-PsaProp $t 'client_id') (Get-PsaProp $t 'client_name') (Get-PsaProp $t 'user_id') (Get-PsaProp $t 'user_name') $status $closed $cd (Get-PsaProp $t 'dateoccurred') $upd (Get-PsaProp $t 'agent_id') (Get-PsaProp $t 'agent_name')))
+                        }
+                        if ($PsaState.FindTruncated -or $list.Count -lt 100) { break }
+                    }
+                }
+                'kaseyabms' {
+                    # Vendor docs: Filter.CompletedDateFrom/To, Filter.ExcludeCompleted (int), Filter.AccountIds, PageSize, PageNumber
+                    # and the Result fields. Unverified live: the date format and whether CompletedDateTo is inclusive.
+                    $q = if ($closed) { "Filter.CompletedDateFrom=$(ConvertTo-PsaQuery $fromIso)&Filter.CompletedDateTo=$(ConvertTo-PsaQuery $toIso)" } else { 'Filter.ExcludeCompleted=1' }
+                    if ($CompanyId) { $q += "&Filter.AccountIds=$CompanyId" }
+                    for ($page = 1; $page -le 100; $page++) {
+                        $r = Invoke-Psa GET "/servicedesk/tickets?$q&PageSize=100&PageNumber=$page"
+                        $list = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
+                        foreach ($t in $list) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $cd = Get-PsaProp $t 'CompletedDate'
+                            if ($closed) { $cdt = ConvertTo-PsaUtcText $cd; if ($cdt -and ($cdt -lt $fromIso -or $cdt -ge $toIso)) { continue } }
+                            $upd = Get-PsaProp $t 'LastActivityUpdate'; if (-not (ConvertTo-PsaUtcText $upd)) { $upd = Get-PsaProp $t 'ModifiedOn' }
+                            $cr = Get-PsaProp $t 'OpenDate'; if (-not (ConvertTo-PsaUtcText $cr)) { $cr = Get-PsaProp $t 'CreatedOn' }
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'Id') (Get-PsaProp $t 'TicketNumber') (Get-PsaProp $t 'Title') (Get-PsaProp $t 'AccountId') (Get-PsaProp $t 'AccountName') (Get-PsaProp $t 'ContactId') (Get-PsaProp $t 'ContactName') (Get-PsaProp $t 'StatusName') $closed $cd $cr $upd (Get-PsaProp $t 'AssigneeId') (Get-PsaProp $t 'AssigneeName')))
+                        }
+                        $total = [int](Get-PsaProp $r 'TotalRecords')
+                        if ($PsaState.FindTruncated -or $list.Count -lt 100 -or ($total -gt 0 -and $page * 100 -ge $total)) { break }
+                    }
+                }
+                'syncro' {
+                    # Vendor docs: resolved_after, status "Not Closed", customer_id, 25 per page with meta.total_pages.
+                    # Unverified: that "Resolved" is the only closed status. resolved_after takes a date, so the range is re-checked here.
+                    $q = if ($closed) { "resolved_after=$($from.AddDays(-1).ToString('yyyy-MM-dd'))" } else { "status=$(ConvertTo-PsaQuery 'Not Closed')" }
+                    if ($CompanyId) { $q += "&customer_id=$CompanyId" }
+                    for ($page = 1; $page -le 200; $page++) {
+                        $r = Invoke-Psa GET "/tickets?$q&page=$page"
+                        foreach ($t in @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $cd = Get-PsaProp $t 'resolved_at'
+                            if ($closed) { $cdt = ConvertTo-PsaUtcText $cd; if (-not $cdt -or $cdt -lt $fromIso -or $cdt -ge $toIso) { continue } }
+                            $st = [string](Get-PsaProp $t 'status')
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') (Get-PsaProp $t 'number') (Get-PsaProp $t 'subject') (Get-PsaProp $t 'customer_id') (Get-PsaProp $t 'customer_business_then_name') (Get-PsaProp $t 'contact_id') (Get-PsaProp $t 'contact_fullname') $st ($closed -or $st -eq 'Resolved') $cd (Get-PsaProp $t 'created_at') (Get-PsaProp $t 'updated_at') (Get-PsaProp $t 'user_id') (Get-PsaPath $t 'user.full_name')))
+                        }
+                        if ($PsaState.FindTruncated -or $page -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                }
+                'zendesk' {
+                    # Unverified: the solved>/solved< search terms with a UTC time. Search returns at most 1,000 results,
+                    # and a ticket has no solved date of its own (it is in ticket metrics), so closedDate stays empty.
+                    $q = if ($closed) { "type:ticket status>=solved solved>$($from.AddSeconds(-1).ToString('yyyy-MM-ddTHH:mm:ssZ')) solved<$toIso" } else { 'type:ticket status<solved' }
+                    if ($CompanyId) { $q += " organization:$CompanyId" }
+                    $path = "/search?query=$(ConvertTo-PsaQuery $q)&sort_by=created_at&sort_order=asc&per_page=100"
+                    for ($page = 1; $page -le 10 -and $path; $page++) {
+                        $r = Invoke-Psa GET $path
+                        foreach ($t in @(Get-PsaProp $r 'results' | Where-Object { $null -ne $_ })) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $st = [string](Get-PsaProp $t 'status')
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') $null (Get-PsaProp $t 'subject') (Get-PsaProp $t 'organization_id') '' (Get-PsaProp $t 'requester_id') '' $st ($st -in @('solved', 'closed')) $null (Get-PsaProp $t 'created_at') (Get-PsaProp $t 'updated_at') (Get-PsaProp $t 'assignee_id') ''))
+                        }
+                        if ($PsaState.FindTruncated) { break }
+                        $path = [string](Get-PsaProp $r 'next_page')
+                    }
+                }
+            }
+            return @($rows)
+        }
+
+        # A ticket's time entries. Returns @{ supported; entries; reason }:
+        #   supported  $false when this PSA can't report time (Zendesk without -ZendeskTimeFieldId); reason says why
+        #   entries    @(@{ id; hours; notes; notesKnown; billable ($true, $false or $null when not set); billableKnown; who; date })
+        #              notesKnown and billableKnown are $false when the PSA has no such field for that entry.
+        function Get-PsaTimeEntries {
+            param([string]$TicketId, [string]$ZendeskTimeFieldId = '')
+            $c = Get-PsaConn
+            $out = New-Object System.Collections.ArrayList
+            $add = {
+                param($Id, $Hours, $Notes, [bool]$NotesKnown, $Billable, [bool]$BillableKnown, $Who, $Date)
+                $h = 0.0; try { $h = [double]$Hours } catch { }
+                $null = $out.Add([ordered]@{ id = [string]$Id; hours = [Math]::Round($h, 2); notes = [string]$Notes; notesKnown = $NotesKnown; billable = $Billable; billableKnown = $BillableKnown; who = [string]$Who; date = (ConvertTo-PsaUtcText $Date) })
+            }
+            $longer = { param($a, $b) $x = ([string]$a).Trim(); $y = ([string]$b).Trim(); if ($x.Length -ge $y.Length) { $x } else { $y } }
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: /time/entries with chargeToType and chargeToId conditions; billableOption values Billable, DoNotBill, NoCharge, NoDefault.
+                    $cond = "chargeToType=`"ServiceTicket`" and chargeToId=$TicketId"
+                    foreach ($e in @(Invoke-Psa GET "/time/entries?conditions=$(ConvertTo-PsaQuery $cond)&pageSize=1000" | Where-Object { $null -ne $_ })) {
+                        $bo = [string](Get-PsaProp $e 'billableOption')
+                        $b = if ($bo -eq 'Billable') { $true } elseif ($bo -in @('DoNotBill', 'NoCharge')) { $false } else { $null }
+                        $who = Get-PsaPath $e 'member.name'; if (-not $who) { $who = Get-PsaPath $e 'member.identifier' }
+                        & $add (Get-PsaProp $e 'id') (Get-PsaProp $e 'actualHours') (& $longer (Get-PsaProp $e 'notes') (Get-PsaProp $e 'internalNotes')) $true $b $true $who (Get-PsaProp $e 'timeStart')
+                    }
+                }
+                'autotask' {
+                    # Unverified: TimeEntries query on ticketID, and hoursWorked, summaryNotes, internalNotes, isNonBillable.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'ticketID'; value = [long]$TicketId }) }
+                    foreach ($e in @(Get-PsaProp (Invoke-Psa GET "/TimeEntries/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items' | Where-Object { $null -ne $_ })) {
+                        $nb = Get-PsaProp $e 'isNonBillable'
+                        $b = if ($null -eq $nb) { $null } else { -not [bool]$nb }
+                        & $add (Get-PsaProp $e 'id') (Get-PsaProp $e 'hoursWorked') (& $longer (Get-PsaProp $e 'summaryNotes') (Get-PsaProp $e 'internalNotes')) $true $b $true (Get-PsaProp $e 'resourceID') (Get-PsaProp $e 'dateWorked')
+                    }
+                }
+                'halopsa' {
+                    # Unverified: /Actions?ticket_id with excludesys, timetaken in hours, and actionchargehours/actionnonchargehours
+                    # as the billable split. Only actions with time count as time entries.
+                    $r = Invoke-Psa GET "/Actions?ticket_id=$TicketId&excludesys=true"
+                    $list = @(Get-PsaProp $r 'actions'); if (-not @($list | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $list = @($r) }
+                    foreach ($e in @($list | Where-Object { $null -ne $_ })) {
+                        $h = 0.0; try { $h = [double](Get-PsaProp $e 'timetaken') } catch { }
+                        if ($h -le 0) { continue }
+                        $ch = 0.0; $nch = 0.0; try { $ch = [double](Get-PsaProp $e 'actionchargehours') } catch { }; try { $nch = [double](Get-PsaProp $e 'actionnonchargehours') } catch { }
+                        $b = if ($ch -gt 0) { $true } elseif ($nch -gt 0) { $false } else { $null }
+                        $note = Get-PsaProp $e 'note'; if (-not $note) { $note = Get-PsaProp $e 'note_html' }
+                        & $add (Get-PsaProp $e 'id') $h (ConvertFrom-PsaHtml ([string]$note)) $true $b $true (Get-PsaProp $e 'who') (Get-PsaProp $e 'datetime')
+                    }
+                }
+                'kaseyabms' {
+                    # Vendor docs: GET /v2/timelogs with Filter.TicketId, and Timespent, Notes, InternalNotes, IsBillable.
+                    # Unverified live: that Timespent is in hours.
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/timelogs?Filter.TicketId=$TicketId&PageSize=100&PageNumber=$page"
+                        $list = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
+                        foreach ($e in $list) {
+                            $ib = Get-PsaProp $e 'IsBillable'
+                            & $add (Get-PsaProp $e 'Id') (Get-PsaProp $e 'Timespent') (& $longer (Get-PsaProp $e 'Notes') (Get-PsaProp $e 'InternalNotes')) $true $(if ($null -eq $ib) { $null } else { [bool]$ib }) $true ("$(Get-PsaProp $e 'FirstName') $(Get-PsaProp $e 'LastName')".Trim()) (Get-PsaProp $e 'StartDate')
+                        }
+                        if ($list.Count -lt 100) { break }
+                    }
+                }
+                'syncro' {
+                    # Vendor docs: GET /ticket_timers?ticket_id with active_duration (seconds), billable and notes.
+                    # Unverified: labour charged straight as ticket line items (no timer) is read from the ticket's line_items
+                    # when the name looks like labour or time, with quantity as hours.
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/ticket_timers?ticket_id=$TicketId&page=$page"
+                        foreach ($e in @(Get-PsaProp $r 'ticket_timers' | Where-Object { $null -ne $_ })) {
+                            $sec = 0.0; try { $sec = [double](Get-PsaProp $e 'active_duration') } catch { }
+                            $bl = Get-PsaProp $e 'billable'
+                            & $add (Get-PsaProp $e 'id') ($sec / 3600) (Get-PsaProp $e 'notes') $true $(if ($null -eq $bl) { $null } else { [bool]$bl }) $true (Get-PsaProp $e 'user_id') (Get-PsaProp $e 'start_time')
+                        }
+                        if ($page -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                    if (-not $out.Count) {
+                        $t = Get-PsaProp (Invoke-Psa GET "/tickets/$TicketId") 'ticket'
+                        foreach ($li in @(Get-PsaProp $t 'line_items' | Where-Object { $null -ne $_ })) {
+                            $nm = "$(Get-PsaProp $li 'name') $(Get-PsaProp $li 'item')"
+                            if ($nm -notmatch '(?i)labou?r|hour|time') { continue }
+                            & $add "line-$(Get-PsaProp $li 'id')" (Get-PsaProp $li 'quantity') (Get-PsaProp $li 'description') $true $true $true '' (Get-PsaProp $li 'created_at')
+                        }
+                    }
+                }
+                'zendesk' {
+                    # Zendesk has no native time entries. The Time Tracking app keeps the ticket's total seconds in a custom
+                    # field; with that field's id the ticket counts as having time when the total is above zero. Notes and the
+                    # billable flag aren't available. Unverified: that the field holds whole seconds.
+                    if (-not $ZendeskTimeFieldId) { return @{ supported = $false; entries = @(); reason = 'Zendesk has no native time entries. Give zendesk_time_field_id (the Time Tracking app''s "Total time spent (sec)" field id) to check for tickets closed with no time.' } }
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$TicketId") 'ticket'
+                    $f = @(Get-PsaProp $t 'custom_fields' | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ 'id') -eq $ZendeskTimeFieldId }) | Select-Object -First 1
+                    $sec = 0.0; if ($f) { try { $sec = [double](Get-PsaProp $f 'value') } catch { } }
+                    if ($sec -gt 0) { & $add "zd-$TicketId" ($sec / 3600) '' $false $null $false '' (Get-PsaProp $t 'updated_at') }
+                }
+            }
+            return @{ supported = $true; entries = @($out); reason = '' }
+        }
+
+        # A company's active contacts. Returns @{ primarySupported; contacts = @(@{ id; name; email; primary }) }.
+        # primarySupported is $false for PSAs with no primary-contact flag (Syncro, Zendesk); primary is then always $false.
+        function Get-PsaCompanyContacts {
+            param([string]$CompanyId)
+            $c = Get-PsaConn
+            if ($CompanyId -notmatch '^\d+$') { throw "Get-PsaCompanyContacts needs a numeric company id (it was '$CompanyId')." }
+            $list = New-Object System.Collections.ArrayList
+            $supported = $true
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: company.defaultContact as the primary contact, and the contacts conditions.
+                    $co = Invoke-Psa GET "/company/companies/$CompanyId"
+                    $def = [string](Get-PsaPath $co 'defaultContact.id')
+                    $cond = "company/id=$CompanyId and inactiveFlag=false"
+                    foreach ($p in @(Invoke-Psa GET "/company/contacts?conditions=$(ConvertTo-PsaQuery $cond)&pageSize=1000" | Where-Object { $null -ne $_ })) {
+                        $id = [string](Get-PsaProp $p 'id')
+                        $null = $list.Add([ordered]@{ id = $id; name = "$(Get-PsaProp $p 'firstName') $(Get-PsaProp $p 'lastName')".Trim(); email = ''; primary = (($def -and $id -eq $def) -or (Get-PsaProp $p 'defaultFlag') -eq $true) })
+                    }
+                }
+                'autotask' {
+                    # Unverified: Contacts query on companyID and isActive, and the primaryContact flag.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$CompanyId }, [ordered]@{ op = 'eq'; field = 'isActive'; value = 1 }) }
+                    foreach ($p in @(Get-PsaProp (Invoke-Psa GET "/Contacts/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items' | Where-Object { $null -ne $_ })) {
+                        $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = "$(Get-PsaProp $p 'firstName') $(Get-PsaProp $p 'lastName')".Trim(); email = [string](Get-PsaProp $p 'emailAddress'); primary = ((Get-PsaProp $p 'primaryContact') -eq $true) })
+                    }
+                }
+                'halopsa' {
+                    # Unverified: /Users?client_id and the isprimarycontact flag name.
+                    $r = Invoke-Psa GET "/Users?client_id=$CompanyId&count=500"
+                    $users = @(Get-PsaProp $r 'users'); if (-not @($users | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $users = @($r) }
+                    foreach ($p in @($users | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })) {
+                        $pri = ((Get-PsaProp $p 'isprimarycontact') -eq $true) -or ((Get-PsaProp $p 'is_primary_contact') -eq $true)
+                        $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'emailaddress'); primary = $pri })
+                    }
+                }
+                'kaseyabms' {
+                    # Vendor docs: GET /v2/crm/contacts/summary with Filter.AccountId and Filter.IsActive; IsPoc marks the point of contact.
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/crm/contacts/summary?Filter.AccountId=$CompanyId&Filter.IsActive=true&PageSize=100&PageNumber=$page"
+                        $rs = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
+                        foreach ($p in $rs) {
+                            $em = @(Get-PsaProp $p 'Emails' | Where-Object { $null -ne $_ }) | Select-Object -First 1
+                            $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'Id'); name = "$(Get-PsaProp $p 'FirstName') $(Get-PsaProp $p 'LastName')".Trim(); email = [string](Get-PsaProp $em 'EmailAddress'); primary = ((Get-PsaProp $p 'IsPoc') -eq $true) })
+                        }
+                        if ($rs.Count -lt 100) { break }
+                    }
+                }
+                'syncro' {
+                    # Vendor docs: GET /contacts?customer_id. Syncro contacts have no primary flag.
+                    $supported = $false
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/contacts?customer_id=$CompanyId&page=$page"
+                        foreach ($p in @(Get-PsaProp $r 'contacts' | Where-Object { $null -ne $_ })) { $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'email'); primary = $false }) }
+                        if ($page -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                }
+                'zendesk' {
+                    # Unverified: GET /organizations/{id}/users. Zendesk organizations have no primary contact.
+                    $supported = $false
+                    foreach ($p in @(Get-PsaProp (Invoke-Psa GET "/organizations/$CompanyId/users?per_page=100") 'users' | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'active') -ne $false })) {
+                        $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'email'); primary = $false })
+                    }
+                }
+            }
+            return @{ primarySupported = $supported; contacts = @($list) }
+        }
+
+        # Sets a ticket's contact (the requester in Zendesk). Throws when the PSA rejects it.
+        function Set-PsaTicketContact {
+            param([string]$Id, [string]$ContactId)
+            $c = Get-PsaConn
+            if ($ContactId -notmatch '^\d+$') { throw "Set-PsaTicketContact needs a numeric contact id (it was '$ContactId')." }
+            switch ($c.Psa) {
+                # Unverified: json-patch on contact, the same shape as owner (PSA.md).
+                'connectwise' { $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'contact'; value = @{ id = [int]$ContactId } }) }
+                # Unverified: PATCH /Tickets with contactID, the at_update_ticket shape.
+                'autotask' { $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; contactID = [long]$ContactId }) }
+                # Unverified: POST /Tickets with user_id updates the end user.
+                'halopsa' { $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; user_id = [long]$ContactId }) }
+                # Vendor docs: PATCH /v2/servicedesk/tickets/{id} json-patch; ContactId is a ticket field. Unverified live.
+                'kaseyabms' { $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/ContactId'; value = [long]$ContactId }) }
+                # Vendor docs: PUT /tickets/{id} takes contact_id in a flat body. Unverified live.
+                'syncro' { $null = Invoke-Psa PUT "/tickets/$Id" @{ contact_id = [long]$ContactId } }
+                # Vendor docs: requester_id on the ticket. Unverified live.
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ requester_id = [long]$ContactId } } }
+            }
+        }
+        # ---------- end src/psa-extra.ps1 ----------
+        # <<< src/psa-extra.ps1
+
+        # === NODE: Find closed tickets ===
+        # Lists the tickets closed on the review day (read-only) in whichever of the six PSAs is set up.
+        $ErrorActionPreference = 'Stop'
+        function Get-TeProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-TeState {
+            param([string[]]$Need)
+            $raw = Get-NodeInput
+            if ($null -ne $raw -and $null -eq (Get-TeProp $raw 'inputs') -and $null -ne (Get-TeProp $raw 'output')) { $raw = Get-TeProp $raw 'output' }
+            $st = [ordered]@{}
+            if ($raw -is [System.Collections.IDictionary]) { foreach ($k in $raw.Keys) { $st[[string]$k] = $raw[$k] } }
+            elseif ($null -ne $raw) { foreach ($p in $raw.PSObject.Properties) { $st[$p.Name] = $p.Value } }
+            foreach ($k in @('status', 'message', 'public_note', 'internal_note', 'ticket_id')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { $st[$k] = '' } }
+            foreach ($k in @('actions', 'warnings')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { $st[$k] = @() } else { $st[$k] = @($st[$k]) } }
+            foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the previous step (no '$k')." } }
+            return $st
+        }
+        function Stop-TeRun {
+            param($St, [string]$Msg)
+            $St['status'] = 'error'; $St['message'] = $Msg; $St['internal_note'] = "Time entry review stopped: $Msg"
+            Set-NodeOutput $St
+            throw $Msg
+        }
+
+        $te = Read-TeState @('inputs')
+        $opt = $te['inputs']
+        try { $null = Connect-Psa (Get-PsaType ([string](Get-TeProp $opt 'psa'))) }
+        catch { Stop-TeRun $te "Couldn't connect to the PSA: $($_.Exception.Message)" }
+        $psaName = Get-PsaName
+
+        $from = ConvertTo-PsaUtcText (Get-TeProp $opt 'range_from')
+        $to = ConvertTo-PsaUtcText (Get-TeProp $opt 'range_to')
+        $tickets = @()
+        try { $tickets = @(Find-PsaTickets -State closed -ClosedFrom $from -ClosedTo $to -CompanyId ([string](Get-TeProp $opt 'company_id')) -Max ([int](Get-TeProp $opt 'max_tickets'))) }
+        catch {
+            $m = $_.Exception.Message
+            if ($m -match 'HTTP 40[13]') { Stop-TeRun $te "The $psaName API account isn't allowed to read tickets ($(if ($m -match 'HTTP 401') { 'HTTP 401' } else { 'HTTP 403' })). Give it read access to service tickets and run again." }
+            Stop-TeRun $te "Couldn't list the tickets closed on $(Get-TeProp $opt 'date'): $m"
+        }
+        $warn = @($te['warnings'])
+        if ($PsaState.FindTruncated) { $warn += "Stopped at $(Get-TeProp $opt 'max_tickets') closed tickets (max_tickets). Later tickets from that day were not reviewed." }
+        $te['warnings'] = $warn
+        $te['psa'] = $PsaState.Conn.Psa
+        $te['psa_name'] = $psaName
+        $te['tickets'] = @($tickets)
+        $te['actions'] = @($te['actions']) + "Listed $($tickets.Count) ticket(s) closed in $psaName between $from and $to."
+        Set-NodeOutput $te
+      timeoutSeconds: 600
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-review
+    name: Review time entries
+    type: powershell-script
+    position:
+      x: 680
+      y: 200
+    properties:
+      script: |-
+        # >>> _shared/psa.ps1 (generated by _shared/inject.js; edit the source, not this block)
+        # ---------- _shared/psa.ps1: one adapter for six PSAs ----------
+        # ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+        # Edit this file, then run: node automationai/_shared/inject.js <automation-folder>
+        # The source of each call, and whether it has been checked, is in reference/build-kit/PSA.md.
+        # Calls marked "Unverified" below have not been proven by a live run; check them before the first live write.
+        # Secrets use the same Key Vault names as each PSA's catalog extension.
+        # All state lives in the $PsaState hashtable and is changed in place, because the runner
+        # runs a step in a child scope where $script: variables don't behave.
+
+        $PsaState = @{
+            Conn       = $null
+            Picklists  = @{}
+            MaxRetries = 4
+            Secrets    = @{
+                connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')
+                autotask    = @('Autotask-ApiUrl', 'Autotask-ApiIntegrationCode', 'Autotask-Username', 'Autotask-Secret')
+                halopsa     = @('Halo-ApiUrl', 'Halo-ClientId', 'Halo-ClientSecret')
+                kaseyabms   = @('KaseyaBMS-ApiUrl', 'KaseyaBMS-Username', 'KaseyaBMS-Password', 'KaseyaBMS-CompanyName')
+                syncro      = @('Syncro-ApiUrl', 'Syncro-ApiKey')
+                zendesk     = @('Zendesk-BaseUrl', 'Zendesk-Email', 'Zendesk-ApiToken')
+            }
+            Names      = @{ connectwise = 'ConnectWise'; autotask = 'Autotask'; halopsa = 'HaloPSA'; kaseyabms = 'Kaseya BMS'; syncro = 'Syncro'; zendesk = 'Zendesk' }
+        }
+
+        # ---- small helpers (all Psa-prefixed so they don't clash with other shared files) ----
+        function Get-PsaSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Get-PsaProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-PsaPath { param($o, [string]$Path) foreach ($n in $Path -split '\.') { $o = Get-PsaProp $o $n; if ($null -eq $o) { return $null } }; return $o }
+        function Test-PsaBlank { param($v) return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -eq '0') }
+        function ConvertTo-PsaQuery { param([string]$s) return [uri]::EscapeDataString($s) }
+        function Get-PsaText { param([string]$s, [int]$Max) if ($null -eq $s) { return '' }; if ($s.Length -gt $Max) { return $s.Substring(0, $Max) }; return $s }
+        function Get-PsaName { if ($null -eq $PsaState.Conn) { return 'the PSA' }; return $PsaState.Names[$PsaState.Conn.Psa] }
+        function Get-PsaConn { if ($null -eq $PsaState.Conn) { throw 'Call Connect-Psa before any other PSA function.' }; return $PsaState.Conn }
+        # ConnectWise conditions quote strings and leave numbers bare.
+        function Get-PsaCwOwner { param([string]$u) if ($u -match '^\d+$') { return "owner/id=$u" }; return "owner/identifier=`"$u`"" }
+        function Get-PsaHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
+        function Get-PsaRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+        function Get-PsaErrorText { param($Err) $d = $null; try { if ($Err.ErrorDetails -and $Err.ErrorDetails.Message) { $d = $Err.ErrorDetails.Message } } catch { }; if (-not $d) { $d = [string]$Err.Exception.Message }; return $d }
+
+        # Normalizes a priority hint to critical, high, medium or low ('' when blank).
+        function Get-PsaPriorityHint {
+            param([string]$Hint)
+            $h = ([string]$Hint).Trim().ToLowerInvariant()
+            if (-not $h) { return '' }
+            if ($h -match '^(critical|urgent|emergency|p?1)$') { return 'critical' }
+            if ($h -match '^(high|p?2)$') { return 'high' }
+            if ($h -match '^(medium|normal|moderate|p?3)$') { return 'medium' }
+            if ($h -match '^(low|p?4)$') { return 'low' }
+            throw "Priority '$Hint' isn't one of: critical, high, medium, low."
+        }
+        $PsaState.PriorityPatterns = @{
+            critical = @('(?i)critical', '(?i)urgent', '(?i)emergency', '(?i)\b(p|priority\s*)1\b')
+            high     = @('(?i)high', '(?i)\b(p|priority\s*)2\b')
+            medium   = @('(?i)medium', '(?i)normal', '(?i)moderate', '(?i)\b(p|priority\s*)3\b')
+            low      = @('(?i)low', '(?i)\b(p|priority\s*)4\b')
+        }
+        # The first item whose label property matches one of the patterns, in pattern order.
+        function Select-PsaByLabel {
+            param($Items, [string]$LabelProp, [string[]]$Patterns)
+            foreach ($p in $Patterns) {
+                $hit = @($Items | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ $LabelProp) -match $p }) | Select-Object -First 1
+                if ($hit) { return $hit }
+            }
+            return $null
+        }
+
+        # Which PSA: the run's psa input, then the PSA-Type secret, then ConnectWise when its secrets are
+        # set (so runners set up before PSA-Type existed keep working). '' means none is configured.
+        function Get-PsaType {
+            param([string]$Requested)
+            $v = $Requested; if ([string]::IsNullOrWhiteSpace($v) -or $v.StartsWith('@')) { $v = Get-PsaSecret 'PSA-Type' }
+            if ([string]::IsNullOrWhiteSpace($v)) { if (Get-PsaSecret 'CW-ApiUrl') { return 'connectwise' }; return '' }
+            $v = $v.Trim().ToLowerInvariant()
+            $alias = @{ 'cw' = 'connectwise'; 'connectwise-manage' = 'connectwise'; 'connectwise psa' = 'connectwise'; 'connectwise manage' = 'connectwise'; 'autotask-psa' = 'autotask'; 'datto autotask' = 'autotask'; 'halo' = 'halopsa'; 'halo-psa' = 'halopsa'; 'kaseya' = 'kaseyabms'; 'kaseya-bms' = 'kaseyabms'; 'kaseya bms' = 'kaseyabms'; 'bms' = 'kaseyabms'; 'syncromsp' = 'syncro'; 'zendesk-ticketing' = 'zendesk' }
+            if ($alias.ContainsKey($v)) { $v = $alias[$v] }
+            if (-not $PsaState.Secrets.ContainsKey($v)) { throw "PSA '$v' isn't supported. Use one of: $(($PsaState.Secrets.Keys | Sort-Object) -join ', ')." }
+            return $v
+        }
+
+        # Reads the PSA's secrets, mints a token where the PSA needs one, and keeps the connection in $PsaState.
+        # With no -Psa it uses Get-PsaType. Returns @{ Psa; Base; Headers }.
+        function Connect-Psa {
+            param([string]$Psa)
+            if ([string]::IsNullOrWhiteSpace($Psa)) { $Psa = Get-PsaType ''; if (-not $Psa) { throw 'No PSA is set up. Add the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro or zendesk) to the runner Key Vault.' } }
+            $Psa = $Psa.Trim().ToLowerInvariant()
+            if (-not $PsaState.Secrets.ContainsKey($Psa)) { $Psa = Get-PsaType $Psa }
+            $v = @{}; $missing = @()
+            foreach ($n in $PsaState.Secrets[$Psa]) { $v[$n] = Get-PsaSecret $n; if ([string]::IsNullOrWhiteSpace($v[$n])) { $missing += $n } }
+            if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+            $json = 'application/json'
+            $c = $null
+            switch ($Psa) {
+                'connectwise' {
+                    $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['CW-CompanyID'])+$($v['CW-PublicKey']):$($v['CW-PrivateKey'])"))
+                    $c = @{ Base = $v['CW-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Basic $b"; clientId = $v['CW-ClientId']; Accept = $json } }
+                }
+                'autotask' {
+                    $c = @{ Base = ($v['Autotask-ApiUrl'].TrimEnd('/') -replace '/atservicesrest/v1\.0$', '') + '/atservicesrest/v1.0'
+                        Headers = @{ ApiIntegrationCode = $v['Autotask-ApiIntegrationCode']; UserName = $v['Autotask-Username']; Secret = $v['Autotask-Secret']; Accept = $json } }
+                }
+                'halopsa' {
+                    $base = $v['Halo-ApiUrl'].TrimEnd('/') -replace '/api$', ''
+                    $form = "grant_type=client_credentials&client_id=$([uri]::EscapeDataString($v['Halo-ClientId']))&client_secret=$([uri]::EscapeDataString($v['Halo-ClientSecret']))&scope=all"
+                    $tok = $null
+                    try { $tok = Invoke-RestMethod -Method POST -Uri "$base/auth/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop }
+                    catch {
+                        # Some instances run a separate auth server; /api/authinfo names it.
+                        $info = Invoke-RestMethod -Method GET -Uri "$base/api/authinfo" -ErrorAction Stop
+                        $authUrl = [string](Get-PsaProp $info 'auth_url'); if (-not $authUrl) { throw "HaloPSA sign-in failed and /api/authinfo named no auth server: $(Get-PsaErrorText $_)" }
+                        $tok = Invoke-RestMethod -Method POST -Uri "$($authUrl.TrimEnd('/'))/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
+                    }
+                    $access = Get-PsaProp $tok 'access_token'; if (-not $access) { throw 'HaloPSA sign-in returned no access_token. Check the Halo-* secrets.' }
+                    $c = @{ Base = "$base/api"; Headers = @{ Authorization = "Bearer $access"; Accept = $json } }
+                }
+                'kaseyabms' {
+                    $base = $v['KaseyaBMS-ApiUrl'].TrimEnd('/') -replace '/v2$', ''
+                    # Unverified: the GrantType value 'password' (PSA.md).
+                    $r = Invoke-RestMethod -Method POST -Uri "$base/v2/security/authenticate" -Form @{ UserName = $v['KaseyaBMS-Username']; Password = $v['KaseyaBMS-Password']; Tenant = $v['KaseyaBMS-CompanyName']; GrantType = 'password' } -ErrorAction Stop
+                    $token = Get-PsaPath $r 'Result.AccessToken'; if (-not $token) { $token = Get-PsaPath $r 'result.accessToken' }
+                    if (-not $token) { throw 'Kaseya BMS sign-in returned no Result.AccessToken. Check the KaseyaBMS-* secrets.' }
+                    $c = @{ Base = "$base/v2"; Headers = @{ Authorization = "Bearer $token"; Accept = $json } }
+                }
+                'syncro' { $c = @{ Base = $v['Syncro-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Bearer $($v['Syncro-ApiKey'])"; Accept = $json } } }
+                'zendesk' {
+                    # Unverified: whether the Zendesk-BaseUrl secret already ends in /api/v2, so it is added when missing.
+                    $base = $v['Zendesk-BaseUrl'].TrimEnd('/'); if ($base -notmatch '/api/v2$') { $base += '/api/v2' }
+                    $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['Zendesk-Email'])/token:$($v['Zendesk-ApiToken'])"))
+                    $c = @{ Base = $base; Headers = @{ Authorization = "Basic $b"; Accept = $json } }
+                }
+            }
+            $c.Psa = $Psa
+            $PsaState.Conn = $c
+            $PsaState.Picklists = @{}
+            return $c
+        }
+
+        # One call to the connected PSA. Path is relative to the API base (or a full URL).
+        # Retries 429 (and 502, 503, 504 on GET) honoring Retry-After; other errors throw a plain message.
+        function Invoke-Psa {
+            param([string]$Method, [string]$Path, $Body = $null, [string]$ContentType = 'application/json')
+            $c = Get-PsaConn
+            $uri = if ($Path -match '^https?://') { $Path } else { "$($c.Base)$Path" }
+            for ($i = 1; $i -le $PsaState.MaxRetries; $i++) {
+                $p = @{ Method = $Method; Uri = $uri; Headers = $c.Headers; ErrorAction = 'Stop' }
+                if ($null -ne $Body) { $p.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 10 -Compress }); $p.ContentType = $ContentType }
+                try { return Invoke-RestMethod @p }
+                catch {
+                    $code = Get-PsaHttpStatus $_
+                    if (($code -eq 429 -or ($Method -eq 'GET' -and $code -in @(502, 503, 504))) -and $i -lt $PsaState.MaxRetries) { Start-Sleep -Seconds (Get-PsaRetryAfter $_ $i); continue }
+                    throw "$(Get-PsaName) $Method $Path failed$(if ($code) { " (HTTP $code)" }): $(Get-PsaErrorText $_)"
+                }
+            }
+        }
+
+        # Autotask picklists are per tenant: match on the label, never a hard-coded number.
+        function Get-PsaAtPicklist {
+            param([string]$Entity, [string]$Field)
+            if (-not $PsaState.Picklists.ContainsKey($Entity)) { $PsaState.Picklists[$Entity] = @(Get-PsaProp (Invoke-Psa GET "/$Entity/entityInformation/fields") 'fields') }
+            $f = @($PsaState.Picklists[$Entity] | Where-Object { [string](Get-PsaProp $_ 'name') -eq $Field }) | Select-Object -First 1
+            return @(Get-PsaProp $f 'picklistValues' | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'isActive') -ne $false })
+        }
+        function Select-PsaAtValue {
+            param($Values, [string[]]$Patterns)
+            $hit = Select-PsaByLabel $Values 'label' $Patterns
+            if ($hit) { return (Get-PsaProp $hit 'value') }
+            return $null
+        }
+        function Get-PsaAtCompleteStatuses {
+            $v = @(Get-PsaAtPicklist 'Tickets' 'status' | Where-Object { [string](Get-PsaProp $_ 'label') -match '(?i)complete' } | ForEach-Object { [int](Get-PsaProp $_ 'value') })
+            if (-not $v.Count) { $v = @(5) }
+            return $v
+        }
+
+        # Normalized ticket: @{ id; summary; description; companyId; status; assigneeId; assigneeIds; raw }.
+        function Get-PsaTicket {
+            param([string]$Id)
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' {
+                    $t = Invoke-Psa GET "/service/tickets/$Id"
+                    $desc = ''
+                    try { $n = @(Invoke-Psa GET "/service/tickets/$Id/notes?orderBy=$(ConvertTo-PsaQuery 'id asc')&pageSize=1"); if ($n.Count -and $null -ne $n[0]) { $desc = [string](Get-PsaProp $n[0] 'text') } } catch { }
+                    $owner = Get-PsaProp $t 'owner'
+                    $a = @(@((Get-PsaProp $owner 'identifier'), (Get-PsaProp $owner 'id')) | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'summary'); description = $desc; companyId = [string](Get-PsaPath $t 'company.id'); status = [string](Get-PsaPath $t 'status.name'); assigneeId = $(if ($a.Count) { $a[0] } else { '' }); assigneeIds = $a; raw = $t }
+                }
+                'autotask' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/Tickets/$Id") 'item'
+                    if ($null -eq $t) { throw "Autotask returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'assignedResourceID'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'title'); description = [string](Get-PsaProp $t 'description'); companyId = [string](Get-PsaProp $t 'companyID'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'halopsa' {
+                    $t = Invoke-Psa GET "/Tickets/$($Id)?includedetails=true"
+                    $a = Get-PsaProp $t 'agent_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'summary'); description = [string](Get-PsaProp $t 'details'); companyId = [string](Get-PsaProp $t 'client_id'); status = [string](Get-PsaProp $t 'status_id'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'kaseyabms' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/servicedesk/tickets/$Id") 'Result'
+                    if ($null -eq $t) { throw "Kaseya BMS returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'AssigneeId'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'Title'); description = [string](Get-PsaProp $t 'Details'); companyId = [string](Get-PsaProp $t 'AccountId'); status = [string](Get-PsaProp $t 'StatusName'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'syncro' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$Id") 'ticket'
+                    if ($null -eq $t) { throw "Syncro returned no ticket $Id." }
+                    $cm = @(Get-PsaProp $t 'comments' | Where-Object { $null -ne $_ })
+                    $desc = if ($cm.Count) { [string](Get-PsaProp $cm[0] 'body') } else { '' }
+                    $pt = [string](Get-PsaProp $t 'problem_type'); if ($pt) { $desc = "Issue type: $pt`n$desc" }
+                    $a = Get-PsaProp $t 'user_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'subject'); description = $desc; companyId = [string](Get-PsaProp $t 'customer_id'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'zendesk' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$Id") 'ticket'
+                    if ($null -eq $t) { throw "Zendesk returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'assignee_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'subject'); description = [string](Get-PsaProp $t 'description'); companyId = [string](Get-PsaProp $t 'organization_id'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+            }
+        }
+
+        # Creates a ticket and returns @{ id; raw }.
+        #   -CompanyId  the PSA's own company id (Find-PsaCompany resolves a name to it)
+        #   -Priority   a hint: critical, high, medium or low. It is matched to the tenant's priority list where the PSA has one.
+        #   -Queue      optional board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro) or group id (Zendesk)
+        #   -Extra      optional hashtable of raw PSA fields merged into the body, for tenant-specific required ids
+        function New-PsaTicket {
+            param([string]$CompanyId, [string]$Summary, [string]$Description = '', [string]$Priority = '', [string]$Queue = '', [hashtable]$Extra = @{})
+            $c = Get-PsaConn
+            if ([string]::IsNullOrWhiteSpace($CompanyId)) { throw 'New-PsaTicket needs a company id. Use Find-PsaCompany to look one up by name.' }
+            if ([string]::IsNullOrWhiteSpace($Summary)) { throw 'New-PsaTicket needs a summary.' }
+            $hint = Get-PsaPriorityHint $Priority
+            $pats = @(); if ($hint) { $pats = $PsaState.PriorityPatterns[$hint] }
+            $isNum = $Queue -match '^\d+$'
+            $id = $null; $raw = $null
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Body and /service/priorities lookup from the CW swagger clients.
+                    $b = [ordered]@{ summary = (Get-PsaText $Summary 100); company = @{ id = [int]$CompanyId }; initialDescription = $Description }
+                    if ($Queue) { $b.board = $(if ($isNum) { @{ id = [int]$Queue } } else { @{ name = $Queue } }) }
+                    if ($hint) { $pr = Select-PsaByLabel @(Invoke-Psa GET '/service/priorities?pageSize=100') 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/service/tickets' $b
+                    $id = Get-PsaProp $raw 'id'
+                }
+                'autotask' {
+                    # From the at_create_ticket extension descriptor: title, companyID, status, priority and dueDateTime are required.
+                    $status = Get-PsaSecret 'Autotask-NewStatusId'
+                    if (-not $status) { $status = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'status') @('^New$', '(?i)^new') }
+                    if (-not $status) { $status = 1 }
+                    $prio = $null
+                    if ($hint) { $prio = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'priority') $pats }
+                    if ($null -eq $prio) { $def = @(Get-PsaAtPicklist 'Tickets' 'priority' | Where-Object { (Get-PsaProp $_ 'isDefaultValue') -eq $true }) | Select-Object -First 1; if ($def) { $prio = Get-PsaProp $def 'value' } }
+                    if ($null -eq $prio) { $prio = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'priority') $PsaState.PriorityPatterns['medium'] }
+                    if ($null -eq $prio) { throw 'Could not find an Autotask ticket priority. Pass -Priority, or -Extra @{ priority = <id> }.' }
+                    $due = (Get-Date).ToUniversalTime().AddDays($(switch ($hint) { 'critical' { 0.25 } 'high' { 1 } 'low' { 7 } default { 3 } }))
+                    $b = [ordered]@{ companyID = [long]$CompanyId; title = (Get-PsaText $Summary 255); description = (Get-PsaText $Description 8000); status = [int]$status; priority = [int]$prio; dueDateTime = $due.ToString('yyyy-MM-ddTHH:mm:ssZ') }
+                    if ($Queue) {
+                        $qv = if ($isNum) { $Queue } else { Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'queueID') @("^$([regex]::Escape($Queue))$") }
+                        if ($null -eq $qv) { throw "Autotask has no ticket queue named '$Queue'." }
+                        $b.queueID = [int]$qv
+                    }
+                    $bc = Get-PsaSecret 'Autotask-BillingCodeId'; if ($bc) { $b.billingCodeID = [long]$bc }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/Tickets' $b
+                    $id = Get-PsaProp $raw 'itemId'
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. Halo priority ids are per tenant; 1 to 4 are the out-of-box Critical to Low.
+                    $b = [ordered]@{ summary = $Summary; details = $Description; client_id = [long]$CompanyId }
+                    if ($hint) { $b.priority_id = @{ critical = 1; high = 2; medium = 3; low = 4 }[$hint] }
+                    if ($Queue) { if ($isNum) { $b.team_id = [long]$Queue } else { $b.team = $Queue } }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/Tickets' @($b)
+                    $first = @($raw)[0]
+                    $id = Get-PsaProp $first 'id'
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. BMS needs tenant ids for status, type, source and priority; they come from
+                    # the optional KaseyaBMS-NewStatusId, -TicketTypeId, -TicketSourceId, -PriorityId and -QueueId secrets, or -Extra.
+                    $b = [ordered]@{ Title = $Summary; Details = $Description; AccountId = [long]$CompanyId; OpenDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+                    foreach ($pair in @(@('StatusId', 'KaseyaBMS-NewStatusId'), @('TypeId', 'KaseyaBMS-TicketTypeId'), @('SourceId', 'KaseyaBMS-TicketSourceId'), @('PriorityId', 'KaseyaBMS-PriorityId'), @('QueueId', 'KaseyaBMS-QueueId'))) {
+                        $sv = Get-PsaSecret $pair[1]; if ($sv -and $sv -match '^\d+$') { $b[$pair[0]] = [int]$sv }
+                    }
+                    if ($Queue) { if (-not $isNum) { throw 'Kaseya BMS needs a numeric queue id for -Queue.' }; $b.QueueId = [int]$Queue }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/servicedesk/tickets' $b
+                    $id = Get-PsaPath $raw 'Result.Id'; if ($null -eq $id) { $id = Get-PsaProp $raw 'Result' }
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. Syncro takes the description as the first comment, and priority as a label.
+                    $b = [ordered]@{ customer_id = [long]$CompanyId; subject = $Summary; status = 'New'; comments_attributes = @(@{ subject = 'Initial Issue'; body = $(if ($Description) { $Description } else { $Summary }); hidden = $false; do_not_email = $true }) }
+                    if ($hint) { $b.priority = @{ critical = '0 Urgent'; high = '1 High'; medium = '2 Normal'; low = '3 Low' }[$hint] }
+                    if ($Queue) { $b.problem_type = $Queue }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/tickets' $b
+                    $id = Get-PsaPath $raw 'ticket.id'
+                }
+                'zendesk' {
+                    # Unverified: not in PSA.md yet. Zendesk priorities are fixed: urgent, high, normal, low.
+                    $t = [ordered]@{ subject = $Summary; comment = @{ body = $(if ($Description) { $Description } else { $Summary }) }; organization_id = [long]$CompanyId }
+                    if ($hint) { $t.priority = @{ critical = 'urgent'; high = 'high'; medium = 'normal'; low = 'low' }[$hint] }
+                    if ($Queue) { if (-not $isNum) { throw 'Zendesk needs a numeric group id for -Queue.' }; $t.group_id = [long]$Queue }
+                    foreach ($k in $Extra.Keys) { $t[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/tickets' @{ ticket = $t }
+                    $id = Get-PsaPath $raw 'ticket.id'
+                }
+            }
+            if (Test-PsaBlank $id) { throw "$(Get-PsaName) accepted the new ticket but returned no id." }
+            return @{ id = [string]$id; raw = $raw }
+        }
+
+        # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
+        # Throws when the PSA rejects it.
+        function Add-PsaNote {
+            param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal)
+            $c = Get-PsaConn
+            $pub = [bool]$Public
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
+                    $null = Invoke-Psa POST "/service/tickets/$Id/notes" @{ text = $Text; internalAnalysisFlag = (-not $pub); detailDescriptionFlag = $pub; resolutionFlag = $false }
+                }
+                'autotask' {
+                    $pv = $null
+                    if ($pub) {
+                        # Unverified: which publish label makes a note client-visible. Tries "All Autotask Users" style labels.
+                        $pv = Get-PsaSecret 'Autotask-NotePublicPublishId'
+                        if (-not $pv) { $pv = Select-PsaAtValue (Get-PsaAtPicklist 'TicketNotes' 'publish') @('(?i)^All Autotask Users$', '(?i)^All', '(?i)public') }
+                    }
+                    else {
+                        $pv = Get-PsaSecret 'Autotask-NotePublishId'
+                        if (-not $pv) { $pv = Select-PsaAtValue (Get-PsaAtPicklist 'TicketNotes' 'publish') @('^Internal Only$', 'Internal') }
+                    }
+                    $type = Get-PsaSecret 'Autotask-NoteTypeId'
+                    if (-not $type) { $vals = @(Get-PsaAtPicklist 'TicketNotes' 'noteType' | Where-Object { [string](Get-PsaProp $_ 'value') -ne '13' -and [string](Get-PsaProp $_ 'label') -notmatch 'Workflow' }); $type = Select-PsaAtValue $vals @('Internal', 'Task Detail', 'Detail', '.') }
+                    if ($null -eq $pv -or $null -eq $type) { throw 'Could not find the Autotask note publish and type values. Set the Autotask-NotePublishId and Autotask-NoteTypeId secrets.' }
+                    $null = Invoke-Psa POST "/Tickets/$Id/Notes" @{ ticketID = [long]$Id; title = $Title; description = $Text; noteType = [int]$type; publish = [int]$pv }
+                }
+                'halopsa' {
+                    # Unverified: outcome ids are per tenant; 7 is the built-in Private Note. Halo-NoteOutcomeId overrides it.
+                    $outcome = Get-PsaSecret $(if ($pub) { 'Halo-PublicNoteOutcomeId' } else { 'Halo-NoteOutcomeId' })
+                    if (-not $outcome) { $outcome = Get-PsaSecret 'Halo-NoteOutcomeId' }
+                    if (-not $outcome) { $outcome = 7 }
+                    $null = Invoke-Psa POST '/Actions' @(@{ ticket_id = [long]$Id; note = $Text; hiddenfromuser = (-not $pub); outcome_id = [int]$outcome })
+                }
+                'kaseyabms' {
+                    # Unverified: how to list note types, so the KaseyaBMS-NoteTypeId secret supplies one.
+                    $type = Get-PsaSecret 'KaseyaBMS-NoteTypeId'
+                    if (-not $type) { throw 'Kaseya BMS notes need a note type id. Set the KaseyaBMS-NoteTypeId secret.' }
+                    $null = Invoke-Psa POST "/servicedesk/tickets/$Id/notes" @{ Details = $Text; IsInternal = (-not $pub); NoteDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); TypeId = [int]$type }
+                }
+                'syncro' { $null = Invoke-Psa POST "/tickets/$Id/comment" @{ subject = $Title; body = $Text; hidden = (-not $pub); do_not_email = (-not $pub) } }
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ comment = @{ body = $Text; public = $pub } } } }
+            }
+        }
+
+        # Assigns the ticket. Autotask also needs the resource's role id.
+        function Set-PsaAssignee {
+            param([string]$Id, [string]$UserId, [string]$RoleId = '')
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' {
+                    $val = if ($UserId -match '^\d+$') { @{ id = [int]$UserId } } else { @{ identifier = $UserId } }
+                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'owner'; value = $val })
+                }
+                'autotask' {
+                    if (-not $RoleId) { throw 'Autotask needs the resource role id as well as the resource id.' }
+                    $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; assignedResourceID = [long]$UserId; assignedResourceRoleID = [long]$RoleId })
+                }
+                'halopsa' { $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; agent_id = [long]$UserId }) }
+                'kaseyabms' { $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/AssigneeId'; value = [long]$UserId }) }
+                'syncro' { $null = Invoke-Psa PUT "/tickets/$Id" @{ user_id = [long]$UserId } }
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ assignee_id = [long]$UserId } } }
+            }
+        }
+
+        # Closes or reopens a ticket. -StatusName picks an exact status (a name, or an id for HaloPSA and Kaseya BMS).
+        # Returns the status that was set.
+        function Set-PsaStatus {
+            param([string]$Id, [ValidateSet('closed', 'open')][string]$State = 'closed', [string]$StatusName = '')
+            $c = Get-PsaConn
+            $closed = $State -eq 'closed'
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Statuses belong to the ticket's board; closedStatus and defaultFlag pick one.
+                    $t = Invoke-Psa GET "/service/tickets/$Id"
+                    $boardId = Get-PsaPath $t 'board.id'
+                    if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
+                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })
+                    $st = $null
+                    if ($StatusName) { $st = @($all | Where-Object { [string](Get-PsaProp $_ 'name') -eq $StatusName }) | Select-Object -First 1 }
+                    elseif ($closed) { $cl = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true }); $st = Select-PsaByLabel $cl 'name' @('(?i)resolved', '(?i)closed', '(?i)complete', '.') }
+                    else { $op = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -ne $true }); $st = @($op | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1; if (-not $st) { $st = Select-PsaByLabel $op 'name' @('(?i)^new', '(?i)open', '.') } }
+                    if (-not $st) { throw "No $(if ($StatusName) { "'$StatusName'" } else { $State }) status on ConnectWise board $boardId." }
+                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'status'; value = @{ id = [int](Get-PsaProp $st 'id') } })
+                    return [string](Get-PsaProp $st 'name')
+                }
+                'autotask' {
+                    # Unverified: not in PSA.md yet. Uses the status picklist (Complete = 5 and New = 1 by default) and at_update_ticket's PATCH.
+                    $vals = Get-PsaAtPicklist 'Tickets' 'status'
+                    $pats = if ($StatusName) { @("^$([regex]::Escape($StatusName))$") } elseif ($closed) { @('(?i)^complete$', '(?i)complete') } else { @('(?i)^new$', '(?i)in progress') }
+                    $hit = Select-PsaByLabel $vals 'label' $pats
+                    $sv = if ($hit) { Get-PsaProp $hit 'value' } elseif ($StatusName) { $null } elseif ($closed) { 5 } else { 1 }
+                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'." }
+                    $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$sv })
+                    return $(if ($hit) { [string](Get-PsaProp $hit 'label') } else { [string]$sv })
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. 9 (Closed) and 1 (New) are Halo's out-of-box ids; Halo-ClosedStatusId and Halo-OpenStatusId override them.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
+                    if (-not $sv) { $sv = $(if ($closed) { 9 } else { 1 }) }
+                    if ([string]$sv -notmatch '^\d+$') { throw 'HaloPSA needs a numeric status id.' }
+                    $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; status_id = [int]$sv })
+                    return [string]$sv
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. Status ids are per tenant: KaseyaBMS-ClosedStatusId and KaseyaBMS-OpenStatusId.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
+                    if (-not $sv -or [string]$sv -notmatch '^\d+$') { throw "Kaseya BMS needs a status id. Set the KaseyaBMS-$(if ($closed) { 'Closed' } else { 'Open' })StatusId secret." }
+                    $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/StatusId'; value = [int]$sv })
+                    return [string]$sv
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. Resolved and New are Syncro's default status labels.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { 'Resolved' } else { 'New' }
+                    $null = Invoke-Psa PUT "/tickets/$Id" @{ status = $sv }
+                    return $sv
+                }
+                'zendesk' {
+                    # The API can't set closed directly; solved closes on Zendesk's own schedule.
+                    $sv = if ($StatusName) { $StatusName.ToLowerInvariant() } elseif ($closed) { 'solved' } else { 'open' }
+                    $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ status = $sv } }
+                    return $sv
+                }
+            }
+        }
+
+        # Looks a company up by name. Returns @(@{ id; name; exact; raw }) with exact (case-insensitive) matches first.
+        function Find-PsaCompany {
+            param([string]$Name)
+            $c = Get-PsaConn
+            $n = ([string]$Name).Trim()
+            if (-not $n) { throw 'Find-PsaCompany needs a name.' }
+            $rows = @(); $idProp = 'id'; $nameProp = 'name'
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Uses the documented conditions syntax (strings in double quotes).
+                    $q = $n.Replace('\', '\\').Replace('"', '\"')
+                    # Build each condition first: an escaped quote inside a string inside $(...) ends the outer string.
+                    $exactCond = ConvertTo-PsaQuery ('name="' + $q + '" and deletedFlag=false')
+                    $rows = @(Invoke-Psa GET "/company/companies?conditions=$exactCond&pageSize=25")
+                    if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                        $likeCond = ConvertTo-PsaQuery ('name contains "' + $q + '" and deletedFlag=false')
+                        $rows = @(Invoke-Psa GET "/company/companies?conditions=$likeCond&pageSize=25")
+                    }
+                }
+                'autotask' {
+                    # From the at_query_companies extension descriptor.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'companyName'; value = $n }) }
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items')
+                    if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                        $s = @{ filter = @([ordered]@{ op = 'contains'; field = 'companyName'; value = $n }) }
+                        $rows = @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items')
+                    }
+                    $nameProp = 'companyName'
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. GET /api/Client?search= (halo_query_clients) returns { clients: [...] }.
+                    $r = Invoke-Psa GET "/Client?search=$(ConvertTo-PsaQuery $n)&count=50"
+                    $rows = @(Get-PsaProp $r 'clients'); if (-not @($rows | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $rows = @($r) }
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. The account list filter name is a guess; results are filtered here as well.
+                    $r = Invoke-Psa GET "/crm/accounts?Filter.Name=$(ConvertTo-PsaQuery $n)"
+                    $rows = @(Get-PsaProp $r 'Result'); $idProp = 'Id'; $nameProp = 'Name'
+                    if (@($rows | Where-Object { $null -ne $_ -and $null -eq (Get-PsaProp $_ 'Name') -and $null -ne (Get-PsaProp $_ 'AccountName') }).Count) { $nameProp = 'AccountName' }
+                    $rows = @($rows | Where-Object { $null -ne $_ -and ([string](Get-PsaProp $_ $nameProp)).IndexOf($n, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. GET /customers?query= returns { customers: [...] } with business_name.
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/customers?query=$(ConvertTo-PsaQuery $n)") 'customers'); $nameProp = 'business_name'
+                }
+                'zendesk' {
+                    # Unverified: not in PSA.md yet. Organization autocomplete matches names that start with the text.
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/organizations/autocomplete?name=$(ConvertTo-PsaQuery $n)") 'organizations')
+                }
+            }
+            $out = @(foreach ($r in @($rows | Where-Object { $null -ne $_ })) {
+                    $nm = [string](Get-PsaProp $r $nameProp)
+                    if (-not $nm -and $c.Psa -eq 'syncro') { $nm = [string](Get-PsaProp $r 'fullname') }
+                    @{ id = [string](Get-PsaProp $r $idProp); name = $nm; exact = ($nm.Trim() -ieq $n); raw = $r }
+                })
+            return @(@($out | Where-Object { $_.exact }) + @($out | Where-Object { -not $_.exact }))
+        }
+
+        # How many open tickets the technician has: an int, or $null when this PSA can't count.
+        function Get-PsaOpenCount {
+            param([string]$UserId)
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' { return [int](Get-PsaProp (Invoke-Psa GET "/service/tickets/count?conditions=$(ConvertTo-PsaQuery "$(Get-PsaCwOwner $UserId) and closedFlag=false")") 'count') }
+                'autotask' {
+                    # Unverified: the queryCount field name (PSA.md).
+                    $f = @([ordered]@{ op = 'eq'; field = 'assignedResourceID'; value = [long]$UserId }) + @(Get-PsaAtCompleteStatuses | ForEach-Object { [ordered]@{ op = 'noteq'; field = 'status'; value = $_ } })
+                    $r = Invoke-Psa GET "/Tickets/query/count?search=$(ConvertTo-PsaQuery (@{ filter = $f } | ConvertTo-Json -Depth 6 -Compress))"
+                    $n = Get-PsaProp $r 'queryCount'; if ($null -eq $n) { return $null }; return [int]$n
+                }
+                'halopsa' { $n = Get-PsaProp (Invoke-Psa GET "/Tickets?agent_id=$UserId&open_only=true&pageinate=true&page_size=1&page_no=1") 'record_count'; if ($null -eq $n) { return $null }; return [int]$n }
+                'kaseyabms' { return $null }
+                'syncro' {
+                    $r = Invoke-Psa GET "/tickets?user_id=$UserId&status=$(ConvertTo-PsaQuery 'Not Closed')&page=1"
+                    $te = Get-PsaPath $r 'meta.total_entries'; if ($null -ne $te) { return [int]$te }
+                    $n = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ }).Count; $pages = [int](Get-PsaPath $r 'meta.total_pages')
+                    for ($p = 2; $p -le [Math]::Min($pages, 10); $p++) { $n += @(Get-PsaProp (Invoke-Psa GET "/tickets?user_id=$UserId&status=$(ConvertTo-PsaQuery 'Not Closed')&page=$p") 'tickets' | Where-Object { $null -ne $_ }).Count }
+                    if ($pages -gt 10) { return $null }
+                    return $n
+                }
+                'zendesk' { return [int](Get-PsaProp (Invoke-Psa GET "/search/count?query=$(ConvertTo-PsaQuery "type:ticket assignee:$UserId status<solved")") 'count') }
+            }
+        }
+
+        # The newest ticket currently assigned to the technician: a date, [datetime]::MinValue
+        # when they have none, or $null when this PSA can't tell.
+        function Get-PsaLastAssigned {
+            param([string]$UserId)
+            $c = Get-PsaConn
+            $none = [datetime]::MinValue
+            $date = { param($v) if (Test-PsaBlank $v) { $none } else { [datetime]::Parse([string]$v, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal) } }
+            switch ($c.Psa) {
+                'connectwise' { $r = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery (Get-PsaCwOwner $UserId))&orderBy=$(ConvertTo-PsaQuery 'dateEntered desc')&pageSize=1&fields=id,dateEntered" | Where-Object { $null -ne $_ }); if (-not $r.Count) { return $none }; return (& $date (Get-PsaProp $r[0] 'dateEntered')) }
+                'autotask' {
+                    # The query API can't sort, so take the highest id from the last 90 days.
+                    $since = (Get-Date).ToUniversalTime().AddDays(-90).ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'assignedResourceID'; value = [long]$UserId }, [ordered]@{ op = 'gt'; field = 'createDate'; value = $since }); IncludeFields = @('id', 'createDate'); MaxRecords = 500 }
+                    $r = Invoke-Psa GET "/Tickets/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))"
+                    $top = @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ } | Sort-Object { [long](Get-PsaProp $_ 'id') } -Descending) | Select-Object -First 1
+                    if (-not $top) { return $none }; return (& $date (Get-PsaProp $top 'createDate'))
+                }
+                'halopsa' { $t = @(Get-PsaProp (Invoke-Psa GET "/Tickets?agent_id=$UserId&order=dateoccurred&orderdesc=true&pageinate=true&page_size=1&page_no=1") 'tickets' | Where-Object { $null -ne $_ }); if (-not $t.Count) { return $none }; return (& $date (Get-PsaProp $t[0] 'dateoccurred')) }
+                'kaseyabms' { return $null }
+                'syncro' {
+                    $latest = $none
+                    for ($p = 1; $p -le 10; $p++) {
+                        $r = Invoke-Psa GET "/tickets?user_id=$UserId&page=$p"
+                        foreach ($t in @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })) { $d = & $date (Get-PsaProp $t 'created_at'); if ($d -gt $latest) { $latest = $d } }
+                        if ($p -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                    return $latest
+                }
+                'zendesk' { $t = @(Get-PsaProp (Invoke-Psa GET "/search?query=$(ConvertTo-PsaQuery "type:ticket assignee:$UserId")&sort_by=created_at&sort_order=desc&per_page=1") 'results' | Where-Object { $null -ne $_ }); if (-not $t.Count) { return $none }; return (& $date (Get-PsaProp $t[0] 'created_at')) }
+            }
+        }
+        # ---------- end _shared/psa.ps1 ----------
+        # <<< _shared/psa.ps1
+        # >>> src/psa-extra.ps1 (generated by src/build.js; edit the source, not this block)
+        # ---------- src/psa-extra.ps1: ticket lists, time entries and contacts for six PSAs ----------
+        # Adds what _shared/psa.ps1 doesn't have yet: listing tickets by state and date, reading a ticket's
+        # time entries, listing a company's contacts and setting a ticket's contact.
+        # The identical file ships in automationai/time-entry-review/src and automationai/psa-hygiene/src.
+        # It is a candidate to move into automationai/_shared/psa.ps1.
+        # Needs _shared/psa.ps1 pasted above it (Invoke-Psa, Get-PsaProp, Get-PsaAtPicklist and $PsaState).
+        # Every call carries a source note. "Unverified" means it is not in reference/build-kit/PSA.md and has not
+        # been proven by a live run; check it before relying on it. "Vendor docs" means it was checked against the
+        # vendor's published API spec (Kaseya BMS and Syncro swagger) but not yet run live.
+
+        $PsaState.FindTruncated = $false
+
+        function ConvertTo-PsaUtcText {
+            param($v)
+            if ($null -eq $v) { return '' }
+            $d = [datetime]::MinValue
+            if ($v -is [datetime]) { $d = $v }
+            else {
+                $s = ([string]$v).Trim()
+                if (-not $s) { return '' }
+                $styles = ([Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+                if (-not [datetime]::TryParse($s, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$d)) { return '' }
+            }
+            if ($d.Kind -eq [DateTimeKind]::Local) { $d = $d.ToUniversalTime() }
+            # HaloPSA writes 1900-01-01 for an empty date.
+            if ($d.Year -lt 1901) { return '' }
+            return $d.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        }
+        function ConvertFrom-PsaHtml {
+            param([string]$s)
+            if ([string]::IsNullOrEmpty($s)) { return '' }
+            $t = [System.Net.WebUtility]::HtmlDecode(($s -replace '<[^>]+>', ' '))
+            return (($t -replace '\s+', ' ').Trim())
+        }
+        function Get-PsaBlankable { param($v) if (Test-PsaBlank $v) { return '' }; return [string]$v }
+        function New-PsaTicketRow {
+            param($Id, $Number, $Summary, $CompanyId, $CompanyName, $ContactId, $ContactName, $Status, [bool]$Closed, $ClosedDate, $Created, $Updated, $AssigneeId, $AssigneeName)
+            return [ordered]@{
+                id = [string]$Id; number = $(if (Test-PsaBlank $Number) { [string]$Id } else { [string]$Number }); summary = [string]$Summary
+                companyId = (Get-PsaBlankable $CompanyId); companyName = [string]$CompanyName
+                contactId = (Get-PsaBlankable $ContactId); contactName = [string]$ContactName
+                status = [string]$Status; closed = $Closed; closedDate = (ConvertTo-PsaUtcText $ClosedDate)
+                createdDate = (ConvertTo-PsaUtcText $Created); updatedDate = (ConvertTo-PsaUtcText $Updated)
+                assigneeId = (Get-PsaBlankable $AssigneeId); assigneeName = [string]$AssigneeName
+            }
+        }
+
+        # Lists tickets. Returns @(normalized rows): id, number, summary, companyId, companyName, contactId, contactName,
+        # status, closed, closedDate, createdDate, updatedDate, assigneeId, assigneeName (dates are UTC text or '').
+        #   -State open       every ticket that isn't closed
+        #   -State closed     tickets closed from -ClosedFrom (inclusive) to -ClosedTo (exclusive), both UTC
+        #   -CompanyId        only this PSA company
+        #   -Max              stop after this many; $PsaState.FindTruncated says whether it stopped early
+        function Find-PsaTickets {
+            param([ValidateSet('open', 'closed')][string]$State = 'open', [string]$ClosedFrom = '', [string]$ClosedTo = '', [string]$CompanyId = '', [int]$Max = 1000)
+            $c = Get-PsaConn
+            $PsaState.FindTruncated = $false
+            $closed = $State -eq 'closed'
+            $from = $null; $to = $null
+            if ($closed) {
+                if (-not $ClosedFrom -or -not $ClosedTo) { throw 'Find-PsaTickets -State closed needs -ClosedFrom and -ClosedTo.' }
+                $from = [datetime]::Parse((ConvertTo-PsaUtcText $ClosedFrom), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
+                $to = [datetime]::Parse((ConvertTo-PsaUtcText $ClosedTo), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
+            }
+            $fromIso = if ($closed) { $from.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' }
+            $toIso = if ($closed) { $to.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' }
+            if ($CompanyId -and $CompanyId -notmatch '^\d+$') { throw "The PSA company id must be a number (it was '$CompanyId')." }
+            $rows = New-Object System.Collections.ArrayList
+            $full = { $rows.Count -ge $Max }
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: the closedDate and closedFlag conditions with [datetime] values, and _info.lastUpdated.
+                    $cond = if ($closed) { "closedFlag=true and closedDate>=[$fromIso] and closedDate<[$toIso]" } else { 'closedFlag=false' }
+                    if ($CompanyId) { $cond += " and company/id=$CompanyId" }
+                    for ($page = 1; $page -le 100; $page++) {
+                        $r = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery $cond)&orderBy=$(ConvertTo-PsaQuery 'id asc')&pageSize=200&page=$page" | Where-Object { $null -ne $_ })
+                        foreach ($t in $r) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') $null (Get-PsaProp $t 'summary') (Get-PsaPath $t 'company.id') (Get-PsaPath $t 'company.name') (Get-PsaPath $t 'contact.id') (Get-PsaPath $t 'contact.name') (Get-PsaPath $t 'status.name') ([bool](Get-PsaProp $t 'closedFlag')) (Get-PsaProp $t 'closedDate') (Get-PsaPath $t '_info.dateEntered') (Get-PsaPath $t '_info.lastUpdated') (Get-PsaPath $t 'owner.identifier') (Get-PsaPath $t 'owner.name')))
+                        }
+                        if ($PsaState.FindTruncated -or $r.Count -lt 200) { break }
+                    }
+                }
+                'autotask' {
+                    # Unverified: filtering on completedDate and lastActivityDate, and following pageDetails.nextPageUrl.
+                    $done = @(Get-PsaAtCompleteStatuses)
+                    $labels = @{}; foreach ($v in @(Get-PsaAtPicklist 'Tickets' 'status')) { $labels[[string](Get-PsaProp $v 'value')] = [string](Get-PsaProp $v 'label') }
+                    $f = @()
+                    if ($closed) { $f += [ordered]@{ op = 'gte'; field = 'completedDate'; value = $fromIso }; $f += [ordered]@{ op = 'lt'; field = 'completedDate'; value = $toIso } }
+                    else { foreach ($s in $done) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $s } } }
+                    if ($CompanyId) { $f += [ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$CompanyId } }
+                    $path = "/Tickets/query?search=$(ConvertTo-PsaQuery (@{ filter = $f; MaxRecords = 500 } | ConvertTo-Json -Depth 6 -Compress))"
+                    for ($page = 1; $page -le 100 -and $path; $page++) {
+                        $r = Invoke-Psa GET $path
+                        foreach ($t in @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ })) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $st = [string](Get-PsaProp $t 'status')
+                            $isClosed = $done -contains [int](Get-PsaProp $t 'status')
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') (Get-PsaProp $t 'ticketNumber') (Get-PsaProp $t 'title') (Get-PsaProp $t 'companyID') '' (Get-PsaProp $t 'contactID') '' $(if ($labels.ContainsKey($st)) { $labels[$st] } else { $st }) $isClosed (Get-PsaProp $t 'completedDate') (Get-PsaProp $t 'createDate') (Get-PsaProp $t 'lastActivityDate') (Get-PsaProp $t 'assignedResourceID') ''))
+                        }
+                        if ($PsaState.FindTruncated) { break }
+                        $path = [string](Get-PsaPath $r 'pageDetails.nextPageUrl')
+                    }
+                    # Company names for the report. Unverified: the "in" filter operator on Companies.
+                    $ids = @($rows | ForEach-Object { $_.companyId } | Where-Object { $_ } | Sort-Object -Unique)
+                    if ($ids.Count) {
+                        $names = @{}
+                        try {
+                            for ($i = 0; $i -lt $ids.Count; $i += 200) {
+                                $chunk = @($ids | Select-Object -Skip $i -First 200 | ForEach-Object { [long]$_ })
+                                $s = @{ filter = @([ordered]@{ op = 'in'; field = 'id'; value = $chunk }); IncludeFields = @('id', 'companyName') }
+                                foreach ($co in @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))") 'items' | Where-Object { $null -ne $_ })) { $names[[string](Get-PsaProp $co 'id')] = [string](Get-PsaProp $co 'companyName') }
+                            }
+                        }
+                        catch { }
+                        foreach ($row in $rows) { if ($row.companyId -and $names.ContainsKey($row.companyId)) { $row.companyName = $names[$row.companyId] } }
+                    }
+                }
+                'halopsa' {
+                    # Unverified: open_only, closed_only with datesearch=datecleared and startdate/enddate, and the list's field names.
+                    $q = if ($closed) { "closed_only=true&datesearch=datecleared&startdate=$(ConvertTo-PsaQuery $fromIso)&enddate=$(ConvertTo-PsaQuery $toIso)" } else { 'open_only=true' }
+                    if ($CompanyId) { $q += "&client_id=$CompanyId" }
+                    for ($page = 1; $page -le 100; $page++) {
+                        $r = Invoke-Psa GET "/Tickets?$q&pageinate=true&page_size=100&page_no=$page"
+                        $list = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })
+                        foreach ($t in $list) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $cd = Get-PsaProp $t 'datecleared'
+                            if ($closed) { $cdt = ConvertTo-PsaUtcText $cd; if ($cdt -and ($cdt -lt $fromIso -or $cdt -ge $toIso)) { continue } }
+                            $status = Get-PsaProp $t 'status_name'; if (-not $status) { $status = Get-PsaProp $t 'status_id' }
+                            $upd = Get-PsaProp $t 'lastactiondate'; if (-not (ConvertTo-PsaUtcText $upd)) { $upd = Get-PsaProp $t 'last_update' }
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') $null (Get-PsaProp $t 'summary') (Get-PsaProp $t 'client_id') (Get-PsaProp $t 'client_name') (Get-PsaProp $t 'user_id') (Get-PsaProp $t 'user_name') $status $closed $cd (Get-PsaProp $t 'dateoccurred') $upd (Get-PsaProp $t 'agent_id') (Get-PsaProp $t 'agent_name')))
+                        }
+                        if ($PsaState.FindTruncated -or $list.Count -lt 100) { break }
+                    }
+                }
+                'kaseyabms' {
+                    # Vendor docs: Filter.CompletedDateFrom/To, Filter.ExcludeCompleted (int), Filter.AccountIds, PageSize, PageNumber
+                    # and the Result fields. Unverified live: the date format and whether CompletedDateTo is inclusive.
+                    $q = if ($closed) { "Filter.CompletedDateFrom=$(ConvertTo-PsaQuery $fromIso)&Filter.CompletedDateTo=$(ConvertTo-PsaQuery $toIso)" } else { 'Filter.ExcludeCompleted=1' }
+                    if ($CompanyId) { $q += "&Filter.AccountIds=$CompanyId" }
+                    for ($page = 1; $page -le 100; $page++) {
+                        $r = Invoke-Psa GET "/servicedesk/tickets?$q&PageSize=100&PageNumber=$page"
+                        $list = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
+                        foreach ($t in $list) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $cd = Get-PsaProp $t 'CompletedDate'
+                            if ($closed) { $cdt = ConvertTo-PsaUtcText $cd; if ($cdt -and ($cdt -lt $fromIso -or $cdt -ge $toIso)) { continue } }
+                            $upd = Get-PsaProp $t 'LastActivityUpdate'; if (-not (ConvertTo-PsaUtcText $upd)) { $upd = Get-PsaProp $t 'ModifiedOn' }
+                            $cr = Get-PsaProp $t 'OpenDate'; if (-not (ConvertTo-PsaUtcText $cr)) { $cr = Get-PsaProp $t 'CreatedOn' }
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'Id') (Get-PsaProp $t 'TicketNumber') (Get-PsaProp $t 'Title') (Get-PsaProp $t 'AccountId') (Get-PsaProp $t 'AccountName') (Get-PsaProp $t 'ContactId') (Get-PsaProp $t 'ContactName') (Get-PsaProp $t 'StatusName') $closed $cd $cr $upd (Get-PsaProp $t 'AssigneeId') (Get-PsaProp $t 'AssigneeName')))
+                        }
+                        $total = [int](Get-PsaProp $r 'TotalRecords')
+                        if ($PsaState.FindTruncated -or $list.Count -lt 100 -or ($total -gt 0 -and $page * 100 -ge $total)) { break }
+                    }
+                }
+                'syncro' {
+                    # Vendor docs: resolved_after, status "Not Closed", customer_id, 25 per page with meta.total_pages.
+                    # Unverified: that "Resolved" is the only closed status. resolved_after takes a date, so the range is re-checked here.
+                    $q = if ($closed) { "resolved_after=$($from.AddDays(-1).ToString('yyyy-MM-dd'))" } else { "status=$(ConvertTo-PsaQuery 'Not Closed')" }
+                    if ($CompanyId) { $q += "&customer_id=$CompanyId" }
+                    for ($page = 1; $page -le 200; $page++) {
+                        $r = Invoke-Psa GET "/tickets?$q&page=$page"
+                        foreach ($t in @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $cd = Get-PsaProp $t 'resolved_at'
+                            if ($closed) { $cdt = ConvertTo-PsaUtcText $cd; if (-not $cdt -or $cdt -lt $fromIso -or $cdt -ge $toIso) { continue } }
+                            $st = [string](Get-PsaProp $t 'status')
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') (Get-PsaProp $t 'number') (Get-PsaProp $t 'subject') (Get-PsaProp $t 'customer_id') (Get-PsaProp $t 'customer_business_then_name') (Get-PsaProp $t 'contact_id') (Get-PsaProp $t 'contact_fullname') $st ($closed -or $st -eq 'Resolved') $cd (Get-PsaProp $t 'created_at') (Get-PsaProp $t 'updated_at') (Get-PsaProp $t 'user_id') (Get-PsaPath $t 'user.full_name')))
+                        }
+                        if ($PsaState.FindTruncated -or $page -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                }
+                'zendesk' {
+                    # Unverified: the solved>/solved< search terms with a UTC time. Search returns at most 1,000 results,
+                    # and a ticket has no solved date of its own (it is in ticket metrics), so closedDate stays empty.
+                    $q = if ($closed) { "type:ticket status>=solved solved>$($from.AddSeconds(-1).ToString('yyyy-MM-ddTHH:mm:ssZ')) solved<$toIso" } else { 'type:ticket status<solved' }
+                    if ($CompanyId) { $q += " organization:$CompanyId" }
+                    $path = "/search?query=$(ConvertTo-PsaQuery $q)&sort_by=created_at&sort_order=asc&per_page=100"
+                    for ($page = 1; $page -le 10 -and $path; $page++) {
+                        $r = Invoke-Psa GET $path
+                        foreach ($t in @(Get-PsaProp $r 'results' | Where-Object { $null -ne $_ })) {
+                            if (& $full) { $PsaState.FindTruncated = $true; break }
+                            $st = [string](Get-PsaProp $t 'status')
+                            $null = $rows.Add((New-PsaTicketRow (Get-PsaProp $t 'id') $null (Get-PsaProp $t 'subject') (Get-PsaProp $t 'organization_id') '' (Get-PsaProp $t 'requester_id') '' $st ($st -in @('solved', 'closed')) $null (Get-PsaProp $t 'created_at') (Get-PsaProp $t 'updated_at') (Get-PsaProp $t 'assignee_id') ''))
+                        }
+                        if ($PsaState.FindTruncated) { break }
+                        $path = [string](Get-PsaProp $r 'next_page')
+                    }
+                }
+            }
+            return @($rows)
+        }
+
+        # A ticket's time entries. Returns @{ supported; entries; reason }:
+        #   supported  $false when this PSA can't report time (Zendesk without -ZendeskTimeFieldId); reason says why
+        #   entries    @(@{ id; hours; notes; notesKnown; billable ($true, $false or $null when not set); billableKnown; who; date })
+        #              notesKnown and billableKnown are $false when the PSA has no such field for that entry.
+        function Get-PsaTimeEntries {
+            param([string]$TicketId, [string]$ZendeskTimeFieldId = '')
+            $c = Get-PsaConn
+            $out = New-Object System.Collections.ArrayList
+            $add = {
+                param($Id, $Hours, $Notes, [bool]$NotesKnown, $Billable, [bool]$BillableKnown, $Who, $Date)
+                $h = 0.0; try { $h = [double]$Hours } catch { }
+                $null = $out.Add([ordered]@{ id = [string]$Id; hours = [Math]::Round($h, 2); notes = [string]$Notes; notesKnown = $NotesKnown; billable = $Billable; billableKnown = $BillableKnown; who = [string]$Who; date = (ConvertTo-PsaUtcText $Date) })
+            }
+            $longer = { param($a, $b) $x = ([string]$a).Trim(); $y = ([string]$b).Trim(); if ($x.Length -ge $y.Length) { $x } else { $y } }
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: /time/entries with chargeToType and chargeToId conditions; billableOption values Billable, DoNotBill, NoCharge, NoDefault.
+                    $cond = "chargeToType=`"ServiceTicket`" and chargeToId=$TicketId"
+                    foreach ($e in @(Invoke-Psa GET "/time/entries?conditions=$(ConvertTo-PsaQuery $cond)&pageSize=1000" | Where-Object { $null -ne $_ })) {
+                        $bo = [string](Get-PsaProp $e 'billableOption')
+                        $b = if ($bo -eq 'Billable') { $true } elseif ($bo -in @('DoNotBill', 'NoCharge')) { $false } else { $null }
+                        $who = Get-PsaPath $e 'member.name'; if (-not $who) { $who = Get-PsaPath $e 'member.identifier' }
+                        & $add (Get-PsaProp $e 'id') (Get-PsaProp $e 'actualHours') (& $longer (Get-PsaProp $e 'notes') (Get-PsaProp $e 'internalNotes')) $true $b $true $who (Get-PsaProp $e 'timeStart')
+                    }
+                }
+                'autotask' {
+                    # Unverified: TimeEntries query on ticketID, and hoursWorked, summaryNotes, internalNotes, isNonBillable.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'ticketID'; value = [long]$TicketId }) }
+                    foreach ($e in @(Get-PsaProp (Invoke-Psa GET "/TimeEntries/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items' | Where-Object { $null -ne $_ })) {
+                        $nb = Get-PsaProp $e 'isNonBillable'
+                        $b = if ($null -eq $nb) { $null } else { -not [bool]$nb }
+                        & $add (Get-PsaProp $e 'id') (Get-PsaProp $e 'hoursWorked') (& $longer (Get-PsaProp $e 'summaryNotes') (Get-PsaProp $e 'internalNotes')) $true $b $true (Get-PsaProp $e 'resourceID') (Get-PsaProp $e 'dateWorked')
+                    }
+                }
+                'halopsa' {
+                    # Unverified: /Actions?ticket_id with excludesys, timetaken in hours, and actionchargehours/actionnonchargehours
+                    # as the billable split. Only actions with time count as time entries.
+                    $r = Invoke-Psa GET "/Actions?ticket_id=$TicketId&excludesys=true"
+                    $list = @(Get-PsaProp $r 'actions'); if (-not @($list | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $list = @($r) }
+                    foreach ($e in @($list | Where-Object { $null -ne $_ })) {
+                        $h = 0.0; try { $h = [double](Get-PsaProp $e 'timetaken') } catch { }
+                        if ($h -le 0) { continue }
+                        $ch = 0.0; $nch = 0.0; try { $ch = [double](Get-PsaProp $e 'actionchargehours') } catch { }; try { $nch = [double](Get-PsaProp $e 'actionnonchargehours') } catch { }
+                        $b = if ($ch -gt 0) { $true } elseif ($nch -gt 0) { $false } else { $null }
+                        $note = Get-PsaProp $e 'note'; if (-not $note) { $note = Get-PsaProp $e 'note_html' }
+                        & $add (Get-PsaProp $e 'id') $h (ConvertFrom-PsaHtml ([string]$note)) $true $b $true (Get-PsaProp $e 'who') (Get-PsaProp $e 'datetime')
+                    }
+                }
+                'kaseyabms' {
+                    # Vendor docs: GET /v2/timelogs with Filter.TicketId, and Timespent, Notes, InternalNotes, IsBillable.
+                    # Unverified live: that Timespent is in hours.
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/timelogs?Filter.TicketId=$TicketId&PageSize=100&PageNumber=$page"
+                        $list = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
+                        foreach ($e in $list) {
+                            $ib = Get-PsaProp $e 'IsBillable'
+                            & $add (Get-PsaProp $e 'Id') (Get-PsaProp $e 'Timespent') (& $longer (Get-PsaProp $e 'Notes') (Get-PsaProp $e 'InternalNotes')) $true $(if ($null -eq $ib) { $null } else { [bool]$ib }) $true ("$(Get-PsaProp $e 'FirstName') $(Get-PsaProp $e 'LastName')".Trim()) (Get-PsaProp $e 'StartDate')
+                        }
+                        if ($list.Count -lt 100) { break }
+                    }
+                }
+                'syncro' {
+                    # Vendor docs: GET /ticket_timers?ticket_id with active_duration (seconds), billable and notes.
+                    # Unverified: labour charged straight as ticket line items (no timer) is read from the ticket's line_items
+                    # when the name looks like labour or time, with quantity as hours.
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/ticket_timers?ticket_id=$TicketId&page=$page"
+                        foreach ($e in @(Get-PsaProp $r 'ticket_timers' | Where-Object { $null -ne $_ })) {
+                            $sec = 0.0; try { $sec = [double](Get-PsaProp $e 'active_duration') } catch { }
+                            $bl = Get-PsaProp $e 'billable'
+                            & $add (Get-PsaProp $e 'id') ($sec / 3600) (Get-PsaProp $e 'notes') $true $(if ($null -eq $bl) { $null } else { [bool]$bl }) $true (Get-PsaProp $e 'user_id') (Get-PsaProp $e 'start_time')
+                        }
+                        if ($page -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                    if (-not $out.Count) {
+                        $t = Get-PsaProp (Invoke-Psa GET "/tickets/$TicketId") 'ticket'
+                        foreach ($li in @(Get-PsaProp $t 'line_items' | Where-Object { $null -ne $_ })) {
+                            $nm = "$(Get-PsaProp $li 'name') $(Get-PsaProp $li 'item')"
+                            if ($nm -notmatch '(?i)labou?r|hour|time') { continue }
+                            & $add "line-$(Get-PsaProp $li 'id')" (Get-PsaProp $li 'quantity') (Get-PsaProp $li 'description') $true $true $true '' (Get-PsaProp $li 'created_at')
+                        }
+                    }
+                }
+                'zendesk' {
+                    # Zendesk has no native time entries. The Time Tracking app keeps the ticket's total seconds in a custom
+                    # field; with that field's id the ticket counts as having time when the total is above zero. Notes and the
+                    # billable flag aren't available. Unverified: that the field holds whole seconds.
+                    if (-not $ZendeskTimeFieldId) { return @{ supported = $false; entries = @(); reason = 'Zendesk has no native time entries. Give zendesk_time_field_id (the Time Tracking app''s "Total time spent (sec)" field id) to check for tickets closed with no time.' } }
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$TicketId") 'ticket'
+                    $f = @(Get-PsaProp $t 'custom_fields' | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ 'id') -eq $ZendeskTimeFieldId }) | Select-Object -First 1
+                    $sec = 0.0; if ($f) { try { $sec = [double](Get-PsaProp $f 'value') } catch { } }
+                    if ($sec -gt 0) { & $add "zd-$TicketId" ($sec / 3600) '' $false $null $false '' (Get-PsaProp $t 'updated_at') }
+                }
+            }
+            return @{ supported = $true; entries = @($out); reason = '' }
+        }
+
+        # A company's active contacts. Returns @{ primarySupported; contacts = @(@{ id; name; email; primary }) }.
+        # primarySupported is $false for PSAs with no primary-contact flag (Syncro, Zendesk); primary is then always $false.
+        function Get-PsaCompanyContacts {
+            param([string]$CompanyId)
+            $c = Get-PsaConn
+            if ($CompanyId -notmatch '^\d+$') { throw "Get-PsaCompanyContacts needs a numeric company id (it was '$CompanyId')." }
+            $list = New-Object System.Collections.ArrayList
+            $supported = $true
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: company.defaultContact as the primary contact, and the contacts conditions.
+                    $co = Invoke-Psa GET "/company/companies/$CompanyId"
+                    $def = [string](Get-PsaPath $co 'defaultContact.id')
+                    $cond = "company/id=$CompanyId and inactiveFlag=false"
+                    foreach ($p in @(Invoke-Psa GET "/company/contacts?conditions=$(ConvertTo-PsaQuery $cond)&pageSize=1000" | Where-Object { $null -ne $_ })) {
+                        $id = [string](Get-PsaProp $p 'id')
+                        $null = $list.Add([ordered]@{ id = $id; name = "$(Get-PsaProp $p 'firstName') $(Get-PsaProp $p 'lastName')".Trim(); email = ''; primary = (($def -and $id -eq $def) -or (Get-PsaProp $p 'defaultFlag') -eq $true) })
+                    }
+                }
+                'autotask' {
+                    # Unverified: Contacts query on companyID and isActive, and the primaryContact flag.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$CompanyId }, [ordered]@{ op = 'eq'; field = 'isActive'; value = 1 }) }
+                    foreach ($p in @(Get-PsaProp (Invoke-Psa GET "/Contacts/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items' | Where-Object { $null -ne $_ })) {
+                        $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = "$(Get-PsaProp $p 'firstName') $(Get-PsaProp $p 'lastName')".Trim(); email = [string](Get-PsaProp $p 'emailAddress'); primary = ((Get-PsaProp $p 'primaryContact') -eq $true) })
+                    }
+                }
+                'halopsa' {
+                    # Unverified: /Users?client_id and the isprimarycontact flag name.
+                    $r = Invoke-Psa GET "/Users?client_id=$CompanyId&count=500"
+                    $users = @(Get-PsaProp $r 'users'); if (-not @($users | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $users = @($r) }
+                    foreach ($p in @($users | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })) {
+                        $pri = ((Get-PsaProp $p 'isprimarycontact') -eq $true) -or ((Get-PsaProp $p 'is_primary_contact') -eq $true)
+                        $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'emailaddress'); primary = $pri })
+                    }
+                }
+                'kaseyabms' {
+                    # Vendor docs: GET /v2/crm/contacts/summary with Filter.AccountId and Filter.IsActive; IsPoc marks the point of contact.
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/crm/contacts/summary?Filter.AccountId=$CompanyId&Filter.IsActive=true&PageSize=100&PageNumber=$page"
+                        $rs = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
+                        foreach ($p in $rs) {
+                            $em = @(Get-PsaProp $p 'Emails' | Where-Object { $null -ne $_ }) | Select-Object -First 1
+                            $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'Id'); name = "$(Get-PsaProp $p 'FirstName') $(Get-PsaProp $p 'LastName')".Trim(); email = [string](Get-PsaProp $em 'EmailAddress'); primary = ((Get-PsaProp $p 'IsPoc') -eq $true) })
+                        }
+                        if ($rs.Count -lt 100) { break }
+                    }
+                }
+                'syncro' {
+                    # Vendor docs: GET /contacts?customer_id. Syncro contacts have no primary flag.
+                    $supported = $false
+                    for ($page = 1; $page -le 20; $page++) {
+                        $r = Invoke-Psa GET "/contacts?customer_id=$CompanyId&page=$page"
+                        foreach ($p in @(Get-PsaProp $r 'contacts' | Where-Object { $null -ne $_ })) { $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'email'); primary = $false }) }
+                        if ($page -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                }
+                'zendesk' {
+                    # Unverified: GET /organizations/{id}/users. Zendesk organizations have no primary contact.
+                    $supported = $false
+                    foreach ($p in @(Get-PsaProp (Invoke-Psa GET "/organizations/$CompanyId/users?per_page=100") 'users' | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'active') -ne $false })) {
+                        $null = $list.Add([ordered]@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'email'); primary = $false })
+                    }
+                }
+            }
+            return @{ primarySupported = $supported; contacts = @($list) }
+        }
+
+        # Sets a ticket's contact (the requester in Zendesk). Throws when the PSA rejects it.
+        function Set-PsaTicketContact {
+            param([string]$Id, [string]$ContactId)
+            $c = Get-PsaConn
+            if ($ContactId -notmatch '^\d+$') { throw "Set-PsaTicketContact needs a numeric contact id (it was '$ContactId')." }
+            switch ($c.Psa) {
+                # Unverified: json-patch on contact, the same shape as owner (PSA.md).
+                'connectwise' { $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'contact'; value = @{ id = [int]$ContactId } }) }
+                # Unverified: PATCH /Tickets with contactID, the at_update_ticket shape.
+                'autotask' { $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; contactID = [long]$ContactId }) }
+                # Unverified: POST /Tickets with user_id updates the end user.
+                'halopsa' { $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; user_id = [long]$ContactId }) }
+                # Vendor docs: PATCH /v2/servicedesk/tickets/{id} json-patch; ContactId is a ticket field. Unverified live.
+                'kaseyabms' { $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/ContactId'; value = [long]$ContactId }) }
+                # Vendor docs: PUT /tickets/{id} takes contact_id in a flat body. Unverified live.
+                'syncro' { $null = Invoke-Psa PUT "/tickets/$Id" @{ contact_id = [long]$ContactId } }
+                # Vendor docs: requester_id on the ticket. Unverified live.
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ requester_id = [long]$ContactId } } }
+            }
+        }
+        # ---------- end src/psa-extra.ps1 ----------
+        # <<< src/psa-extra.ps1
+
+        # === NODE: Review time entries ===
+        # Reads each closed ticket's time entries (read-only) and flags:
+        #   no_time           the ticket was closed with no time logged (or only zero-hour entries)
+        #   short_note        a time entry whose note is shorter than min_note_chars
+        #   missing_billable  a time entry with no billable setting, where the PSA has one
+        $ErrorActionPreference = 'Stop'
+        function Get-TeProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-TeState {
+            param([string[]]$Need)
+            $raw = Get-NodeInput
+            if ($null -ne $raw -and $null -eq (Get-TeProp $raw 'inputs') -and $null -ne (Get-TeProp $raw 'output')) { $raw = Get-TeProp $raw 'output' }
+            $st = [ordered]@{}
+            if ($raw -is [System.Collections.IDictionary]) { foreach ($k in $raw.Keys) { $st[[string]$k] = $raw[$k] } }
+            elseif ($null -ne $raw) { foreach ($p in $raw.PSObject.Properties) { $st[$p.Name] = $p.Value } }
+            foreach ($k in @('status', 'message', 'public_note', 'internal_note', 'ticket_id')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { $st[$k] = '' } }
+            foreach ($k in @('actions', 'warnings', 'tickets')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { $st[$k] = @() } else { $st[$k] = @($st[$k]) } }
+            foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the previous step (no '$k')." } }
+            return $st
+        }
+        function Stop-TeRun {
+            param($St, [string]$Msg)
+            $St['status'] = 'error'; $St['message'] = $Msg; $St['internal_note'] = "Time entry review stopped: $Msg"
+            Set-NodeOutput $St
+            throw $Msg
+        }
+        function Get-TeShort { param([string]$s, [int]$n) $s = ($s -replace '\s+', ' ').Trim(); if ($s.Length -gt $n) { return $s.Substring(0, $n - 1) + '...' }; return $s }
+
+        $te = Read-TeState @('inputs', 'psa')
+        $opt = $te['inputs']
+        $minNote = [int](Get-TeProp $opt 'min_note_chars')
+        $checkBillable = [bool](Get-TeProp $opt 'check_billable')
+        $zdField = [string](Get-TeProp $opt 'zendesk_time_field_id')
+        $tickets = @($te['tickets'] | Where-Object { $null -ne $_ })
+        $warn = @($te['warnings'])
+        $findings = New-Object System.Collections.ArrayList
+        $counts = [ordered]@{ tickets_closed = $tickets.Count; tickets_checked = 0; no_time = 0; short_note = 0; missing_billable = 0; entries_read = 0; unreadable = 0 }
+        $timeSupported = $true; $timeReason = ''
+
+        if ($tickets.Count) {
+            try { $null = Connect-Psa ([string]$te['psa']) }
+            catch { Stop-TeRun $te "Couldn't connect to the PSA: $($_.Exception.Message)" }
+        }
+        $psaName = Get-PsaName
+
+        foreach ($t in $tickets) {
+            $tid = [string](Get-TeProp $t 'id')
+            $base = [ordered]@{ ticket_id = $tid; number = [string](Get-TeProp $t 'number'); summary = (Get-TeShort ([string](Get-TeProp $t 'summary')) 80); company = [string](Get-TeProp $t 'companyName'); companyId = [string](Get-TeProp $t 'companyId'); assignee = [string](Get-TeProp $t 'assigneeName') }
+            if (-not $base.assignee) { $base.assignee = [string](Get-TeProp $t 'assigneeId') }
+            if (-not $base.company -and $base.companyId) { $base.company = "Company $($base.companyId)" }
+            $res = $null
+            try { $res = Get-PsaTimeEntries -TicketId $tid -ZendeskTimeFieldId $zdField }
+            catch {
+                $m = $_.Exception.Message
+                if ($m -match 'HTTP 40[13]') { Stop-TeRun $te "The $psaName API account isn't allowed to read time entries ($(if ($m -match 'HTTP 401') { 'HTTP 401' } else { 'HTTP 403' })). Give it read access to time entries and run again." }
+                $counts.unreadable++
+                $warn += "Couldn't read the time on ticket $($base.number): $m"
+                continue
+            }
+            if (-not [bool]$res.supported) { $timeSupported = $false; $timeReason = [string]$res.reason; break }
+            $counts.tickets_checked++
+            $entries = @($res.entries | Where-Object { $null -ne $_ })
+            $counts.entries_read += $entries.Count
+            $hours = 0.0; foreach ($e in $entries) { $hours += [double]$e.hours }
+            if ($hours -le 0) {
+                $counts.no_time++
+                $f = [ordered]@{}; foreach ($k in $base.Keys) { $f[$k] = $base[$k] }
+                $f.issue = 'no_time'; $f.detail = 'Closed with no time logged.'; $f.technician = $base.assignee; $f.hours = 0; $f.entry_id = ''
+                $null = $findings.Add($f)
+            }
+            foreach ($e in $entries) {
+                if ([double]$e.hours -le 0) { continue }
+                $who = [string]$e.who; if (-not $who) { $who = $base.assignee }
+                if ($minNote -gt 0 -and [bool]$e.notesKnown) {
+                    $len = ([string]$e.notes).Trim().Length
+                    if ($len -lt $minNote) {
+                        $counts.short_note++
+                        $f = [ordered]@{}; foreach ($k in $base.Keys) { $f[$k] = $base[$k] }
+                        $f.issue = 'short_note'
+                        $f.detail = $(if ($len -eq 0) { 'Time entry has no note.' } else { "Time entry note is only $len characters: `"$(Get-TeShort ([string]$e.notes) 60)`"" })
+                        $f.technician = $who; $f.hours = [double]$e.hours; $f.entry_id = [string]$e.id
+                        $null = $findings.Add($f)
+                    }
+                }
+                if ($checkBillable -and [bool]$e.billableKnown -and $null -eq $e.billable) {
+                    $counts.missing_billable++
+                    $f = [ordered]@{}; foreach ($k in $base.Keys) { $f[$k] = $base[$k] }
+                    $f.issue = 'missing_billable'; $f.detail = 'Time entry has no billable setting.'; $f.technician = $who; $f.hours = [double]$e.hours; $f.entry_id = [string]$e.id
+                    $null = $findings.Add($f)
+                }
+            }
+        }
+        if (-not $timeSupported) { $warn += $timeReason }
+
+        $te['warnings'] = $warn
+        $te['findings'] = @($findings)
+        $te['counts'] = $counts
+        $te['time_supported'] = $timeSupported
+        $te['time_reason'] = $timeReason
+        $te['actions'] = @($te['actions']) + $(if ($timeSupported) { "Read $($counts.entries_read) time entr$(if ($counts.entries_read -eq 1) { 'y' } else { 'ies' }) on $($counts.tickets_checked) ticket(s)." } else { "Skipped the time check: $timeReason" })
+        Set-NodeOutput $te
+      timeoutSeconds: 1800
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: node-send
+    name: Email the service manager
+    type: powershell-script
+    position:
+      x: 880
+      y: 200
+    properties:
+      script: |-
+        # >>> src/mail.ps1 (generated by src/build.js; edit the source, not this block)
+        # ---------- src/mail.ps1: staff email through Postmark ----------
+        # The identical file ships in automationai/time-entry-review/src and automationai/psa-hygiene/src.
+        # Same secret names as the Postmark catalog extension and automationai/deliver-result:
+        #   Postmark-ServerToken (required), Postmark-FromEmail (required, a verified sender), Postmark-ApiUrl (optional,
+        #   default https://api.postmarkapp.com).
+        # Send-PmMail returns @{ configured; sent; reason; messageId } and never throws, so a report still finishes
+        # when email fails. configured is $false when the token or sender is missing.
+        function Get-PmSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Get-PmProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Test-PmConfigured { return (-not [string]::IsNullOrWhiteSpace((Get-PmSecret 'Postmark-ServerToken')) -and -not [string]::IsNullOrWhiteSpace((Get-PmSecret 'Postmark-FromEmail'))) }
+
+        function Send-PmMail {
+            param([string[]]$To, [string]$Subject, [string]$Html, [string]$Text = '', [string]$Stream = 'outbound')
+            $token = Get-PmSecret 'Postmark-ServerToken'
+            $from = Get-PmSecret 'Postmark-FromEmail'
+            if ([string]::IsNullOrWhiteSpace($token) -or [string]::IsNullOrWhiteSpace($from)) {
+                $miss = @(@('Postmark-ServerToken', 'Postmark-FromEmail') | Where-Object { [string]::IsNullOrWhiteSpace((Get-PmSecret $_)) })
+                return @{ configured = $false; sent = $false; reason = "Postmark isn't set up (missing $($miss -join ' and '))."; messageId = '' }
+            }
+            $rcpt = @($To | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if (-not $rcpt.Count) { return @{ configured = $true; sent = $false; reason = 'No recipient was given.'; messageId = '' } }
+            $api = Get-PmSecret 'Postmark-ApiUrl'; if ([string]::IsNullOrWhiteSpace($api)) { $api = 'https://api.postmarkapp.com' }
+            $body = [ordered]@{ From = $from.Trim(); To = ($rcpt -join ','); Subject = $Subject; HtmlBody = $Html; MessageStream = $Stream }
+            if ($Text) { $body.TextBody = $Text }
+            $h = @{ 'X-Postmark-Server-Token' = $token.Trim(); Accept = 'application/json' }
+            for ($i = 1; $i -le 3; $i++) {
+                try {
+                    $r = Invoke-RestMethod -Method POST -Uri "$($api.TrimEnd('/'))/email" -Headers $h -Body (ConvertTo-Json -InputObject $body -Depth 5 -Compress) -ContentType 'application/json' -ErrorAction Stop
+                    $code = Get-PmProp $r 'ErrorCode'
+                    if ($null -ne $code -and [int]$code -ne 0) { return @{ configured = $true; sent = $false; reason = "Postmark refused the email: $(Get-PmProp $r 'Message')"; messageId = '' } }
+                    return @{ configured = $true; sent = $true; reason = ''; messageId = [string](Get-PmProp $r 'MessageID') }
+                }
+                catch {
+                    $status = 0; try { $status = [int]$_.Exception.Response.StatusCode } catch { }
+                    if (($status -eq 429 -or $status -ge 500) -and $i -lt 3) { Start-Sleep -Seconds (2 * $i); continue }
+                    $d = $null; try { if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $d = $_.ErrorDetails.Message } } catch { }
+                    if (-not $d) { $d = [string]$_.Exception.Message }
+                    $msg = $d; try { $j = $d | ConvertFrom-Json -ErrorAction Stop; $m = Get-PmProp $j 'Message'; if ($m) { $msg = [string]$m } } catch { }
+                    $why = if ($status -eq 401) { 'Postmark rejected the server token (HTTP 401). Check the Postmark-ServerToken secret.' } else { "Postmark couldn't send the email$(if ($status) { " (HTTP $status)" }): $msg" }
+                    return @{ configured = $true; sent = $false; reason = $why; messageId = '' }
+                }
+            }
+            return @{ configured = $true; sent = $false; reason = 'Postmark kept refusing the email.'; messageId = '' }
+        }
+        # ---------- end src/mail.ps1 ----------
+        # <<< src/mail.ps1
+
+        # === NODE: Email the service manager ===
+        # Builds a plain table of the findings and emails it through Postmark to the `to` recipients.
+        # Without Postmark (or without a recipient) the report stays in the run output as report_html and report_text.
+        # Never writes to a ticket.
+        $ErrorActionPreference = 'Stop'
+        function Get-TeProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Read-TeState {
+            $raw = Get-NodeInput
+            if ($null -ne $raw -and $null -eq (Get-TeProp $raw 'inputs') -and $null -ne (Get-TeProp $raw 'output')) { $raw = Get-TeProp $raw 'output' }
+            $st = [ordered]@{}
+            if ($raw -is [System.Collections.IDictionary]) { foreach ($k in $raw.Keys) { $st[[string]$k] = $raw[$k] } }
+            elseif ($null -ne $raw) { foreach ($p in $raw.PSObject.Properties) { $st[$p.Name] = $p.Value } }
+            foreach ($k in @('status', 'message', 'public_note', 'internal_note', 'ticket_id', 'psa_name', 'time_reason')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { $st[$k] = '' } }
+            foreach ($k in @('actions', 'warnings', 'findings')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { $st[$k] = @() } else { $st[$k] = @($st[$k]) } }
+            foreach ($k in @('inputs', 'counts', 'time_supported')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the Review time entries step (no '$k')." } }
+            return $st
+        }
+        function ConvertTo-TeHtml { param($v) return [System.Net.WebUtility]::HtmlEncode([string]$v) }
+        function Get-TePlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1) { return "1 $one" }; return "$n $many" }
+        function Get-TeDay { param($v) if ($v -is [datetime]) { return $v.ToString('yyyy-MM-dd') }; return [string]$v }
+
+        $te = Read-TeState
+        $opt = $te['inputs']
+        $cnt = $te['counts']
+        $day = Get-TeDay (Get-TeProp $opt 'date')
+        $tzName = [string](Get-TeProp $opt 'timezone')
+        $psaName = [string]$te['psa_name']; if (-not $psaName) { $psaName = 'the PSA' }
+        $minNote = [int](Get-TeProp $opt 'min_note_chars')
+        $to = @(Get-TeProp $opt 'to' | Where-Object { $_ })
+        $findings = @($te['findings'] | Where-Object { $null -ne $_ })
+        $warnings = @($te['warnings'])
+        $actions = @($te['actions'])
+        $timeOk = [bool]$te['time_supported']
+        $closedN = [int](Get-TeProp $cnt 'tickets_closed')
+        $noTime = [int](Get-TeProp $cnt 'no_time'); $short = [int](Get-TeProp $cnt 'short_note'); $noBill = [int](Get-TeProp $cnt 'missing_billable')
+
+        # ---- Summary sentence ----
+        $dayText = "$day ($tzName)"
+        $summary = ''
+        if ($closedN -eq 0) { $summary = "No tickets were closed in $psaName on $dayText." }
+        elseif (-not $timeOk) { $summary = "$(Get-TePlural $closedN 'ticket was' 'tickets were') closed in $psaName on $dayText, but their time couldn't be checked: $($te['time_reason'])" }
+        elseif (-not $findings.Count) { $summary = "All $(Get-TePlural $closedN 'ticket' 'tickets') closed in $psaName on $dayText have time logged with notes of at least $minNote characters$(if ([bool](Get-TeProp $opt 'check_billable')) { ' and a billable setting' })." }
+        else {
+            $parts = @()
+            if ($noTime) { $parts += "$(Get-TePlural $noTime 'was' 'were') closed with no time logged" }
+            if ($short) { $parts += "$(Get-TePlural $short 'time entry has' 'time entries have') a note shorter than $minNote characters" }
+            if ($noBill) { $parts += "$(Get-TePlural $noBill 'time entry has' 'time entries have') no billable setting" }
+            $lead = "Of the $(Get-TePlural $closedN 'ticket' 'tickets') closed in $psaName on $dayText, "
+            $summary = $lead + ($parts -join '; ') + '.'
+            if ($noTime -and -not $short -and -not $noBill) { $summary = "$(Get-TePlural $noTime 'ticket' 'tickets') of the $closedN closed in $psaName on $dayText $(if ($noTime -eq 1) { 'was' } else { 'were' }) closed with no time logged." }
+        }
+
+        # ---- Plain table ----
+        $issueText = @{ no_time = 'No time logged'; short_note = 'Short note'; missing_billable = 'No billable setting' }
+        $order = @{ no_time = 0; short_note = 1; missing_billable = 2 }
+        $rows = @($findings | Sort-Object { $order[[string](Get-TeProp $_ 'issue')] }, { [string](Get-TeProp $_ 'technician') }, { [string](Get-TeProp $_ 'number') })
+        $sb = New-Object System.Text.StringBuilder
+        $null = $sb.Append("<p>$(ConvertTo-TeHtml $summary)</p>")
+        if ($rows.Count) {
+            $null = $sb.Append('<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px"><tr><th>Ticket</th><th>Company</th><th>Summary</th><th>Technician</th><th>Issue</th><th>Hours</th><th>Detail</th></tr>')
+            foreach ($r in $rows) {
+                $null = $sb.Append("<tr><td>$(ConvertTo-TeHtml (Get-TeProp $r 'number'))</td><td>$(ConvertTo-TeHtml (Get-TeProp $r 'company'))</td><td>$(ConvertTo-TeHtml (Get-TeProp $r 'summary'))</td><td>$(ConvertTo-TeHtml (Get-TeProp $r 'technician'))</td><td>$(ConvertTo-TeHtml $issueText[[string](Get-TeProp $r 'issue')])</td><td>$(ConvertTo-TeHtml (Get-TeProp $r 'hours'))</td><td>$(ConvertTo-TeHtml (Get-TeProp $r 'detail'))</td></tr>")
+            }
+            $null = $sb.Append('</table>')
+        }
+        if ($warnings.Count) { $null = $sb.Append('<p>Notes:</p><ul>'); foreach ($w in $warnings) { $null = $sb.Append("<li>$(ConvertTo-TeHtml $w)</li>") }; $null = $sb.Append('</ul>') }
+        $null = $sb.Append('<p>This report only reads the PSA. Nothing was changed.</p>')
+        $html = $sb.ToString()
+        $text = $summary
+        if ($rows.Count) { $text += "`n`n" + ((@($rows | ForEach-Object { "Ticket $(Get-TeProp $_ 'number') ($(Get-TeProp $_ 'company')), $(Get-TeProp $_ 'technician'): $(Get-TeProp $_ 'detail')" })) -join "`n") }
+        $subject = "Time entry review for $day$(if ($findings.Count) { ": $(Get-TePlural $findings.Count 'item' 'items') to check" } else { '' })"
+
+        # ---- Send ----
+        $sent = $false
+        if ($to.Count) {
+            $mail = Send-PmMail -To $to -Subject $subject -Html $html -Text $text
+            if ($mail.sent) { $sent = $true; $actions += "Emailed the report to $($to -join ', ')." }
+            elseif (-not $mail.configured) { $warnings += "$($mail.reason) The report is only in the run output." }
+            else { $warnings += "$($mail.reason) The report is only in the run output." }
+        }
+
+        $status = 'success'
+        if ($closedN -gt 0 -and -not $timeOk) { $status = 'incomplete' }
+        $message = $summary
+        if ($sent) { $message += " The list was emailed to $($to -join ', ')." }
+        elseif ($findings.Count -or -not $timeOk) { $message += ' The list is in the run output (report_html); it was not emailed.' }
+
+        $emailed = @(); if ($sent) { $emailed = @($to) }
+        $out = [ordered]@{
+            status        = $status
+            message       = $message
+            public_note   = ''
+            internal_note = "Time entry review for $dayText in $psaName. $message Read-only: no ticket was changed."
+            ticket_id     = ''
+            actions       = @($actions)
+            warnings      = @($warnings)
+            date          = $day
+            timezone      = $tzName
+            counts        = $cnt
+            findings      = @($rows)
+            emailed_to    = @($emailed)
+            report_html   = $html
+            report_text   = $text
+        }
+        Set-NodeOutput $out
+      timeoutSeconds: 300
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 1080
+      y: 200
+  connections:
+  - source: start
+    target: node-inputs
+    sourceHandle: null
+  - source: node-inputs
+    target: node-find
+    sourceHandle: null
+  - source: node-find
+    target: node-review
+    sourceHandle: null
+  - source: node-review
+    target: node-send
+    sourceHandle: null
+  - source: node-send
+    target: end
+    sourceHandle: null
+  startActivityId: start

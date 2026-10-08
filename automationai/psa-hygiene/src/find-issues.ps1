@@ -24,7 +24,7 @@ function Stop-PhRun {
     Set-NodeOutput $St
     throw $Msg
 }
-function Get-PhUtc { param($v) $s = ConvertTo-PsaUtcText $v; if (-not $s) { return $null }; return [datetime]::Parse($s, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
+function Get-PhUtc { param($v) return (ConvertTo-PsaDate $v) }
 function Get-PhShort { param([string]$s, [int]$n) $s = ($s -replace '\s+', ' ').Trim(); if ($s.Length -gt $n) { return $s.Substring(0, $n - 1) + '...' }; return $s }
 
 $ph = Read-PhState @('inputs')
@@ -37,13 +37,17 @@ $psaName = Get-PsaName
 $psa = $PsaState.Conn.Psa
 
 $open = @()
-try { $open = @(Find-PsaTickets -State open -CompanyId ([string](Get-PhProp $opt 'company_id')) -Max ([int](Get-PhProp $opt 'max_tickets'))) }
+try { $open = @(Find-PsaTickets -Open -CompanyId ([string](Get-PhProp $opt 'company_id')) -Max ([int](Get-PhProp $opt 'max_tickets'))) }
 catch {
     $m = $_.Exception.Message
     if ($m -match 'HTTP 40[13]') { Stop-PhRun $ph "The $psaName API account isn't allowed to read tickets ($(if ($m -match 'HTTP 401') { 'HTTP 401' } else { 'HTTP 403' })). Give it read access to service tickets and run again. Nothing was changed." }
     Stop-PhRun $ph "Couldn't list the open tickets: $m Nothing was changed."
 }
+# Company and technician names for the report (Autotask, Zendesk and others list only ids). A failed lookup
+# leaves a plain fallback such as "Company 5".
+Resolve-PsaTicketNames $open
 $warn = @($ph['warnings'])
+foreach ($w in @($PsaState.Warnings)) { if ($w -and $warn -notcontains $w) { $warn += $w } }
 if ($PsaState.FindTruncated) { $warn += "Stopped at $(Get-PhProp $opt 'max_tickets') open tickets (max_tickets), so later tickets were not checked." }
 $checkContacts = $psa -ne 'syncro'
 if (-not $checkContacts) { $warn += 'Syncro tickets without a contact are addressed to the customer record itself, so missing contacts were not checked.' }
@@ -52,10 +56,10 @@ $now = [datetime]::UtcNow
 $issues = New-Object System.Collections.ArrayList
 $counts = [ordered]@{ open_tickets = $open.Count; stale = 0; missing_contact = 0; wrong_status = 0; tickets_with_issues = 0 }
 foreach ($t in $open) {
-    $base = [ordered]@{ ticket_id = [string]$t.id; number = [string]$t.number; summary = (Get-PhShort ([string]$t.summary) 80); companyId = [string]$t.companyId; company = [string]$t.companyName; status = [string]$t.status; assignee = $(if ($t.assigneeName) { [string]$t.assigneeName } else { [string]$t.assigneeId }) }
+    $base = [ordered]@{ ticket_id = [string]$t.id; number = [string]$t.number; summary = (Get-PhShort ([string]$t.summary) 80); companyId = [string]$t.companyId; company = [string]$t.companyName; status = [string]$t.status; assignee = $(if ($t.assigneeId -and $t.assigneeName) { [string]$t.assigneeName } else { [string]$t.assigneeId }) }
     if (-not $base.company -and $base.companyId) { $base.company = "Company $($base.companyId)" }
     $hit = $false
-    $updated = Get-PhUtc $t.updatedDate; $created = Get-PhUtc $t.createdDate
+    $updated = Get-PhUtc $t.updated; $created = Get-PhUtc $t.created
     $last = if ($null -ne $updated) { $updated } else { $created }
     if ($null -ne $last) {
         $days = [int][Math]::Floor(($now - $last).TotalDays)
@@ -70,7 +74,7 @@ foreach ($t in $open) {
         $f.category = 'missing_contact'; $f.days = $(if ($null -ne $created) { [int][Math]::Floor(($now - $created).TotalDays) } else { 0 }); $f.detail = 'No contact on the ticket.'
         $null = $issues.Add($f); $counts.missing_contact++; $hit = $true
     }
-    $closedAt = Get-PhUtc $t.closedDate
+    $closedAt = Get-PhUtc $t.closed
     if ($null -ne $closedAt) {
         $f = [ordered]@{}; foreach ($k in $base.Keys) { $f[$k] = $base[$k] }
         $f.category = 'wrong_status'; $f.days = [int][Math]::Floor(($now - $closedAt).TotalDays); $f.detail = "Has a closed date ($($closedAt.ToString('yyyy-MM-dd'))) but its status '$($base.status)' is open."

@@ -2,7 +2,7 @@
 # Emails the report to the `to` recipients through Postmark, keeps a copy in YOUR OWN company's Report Archive
 # "PSA Hygiene" when archive_company_id is set (Compliance > Reports, admins only; never a client company and
 # never the knowledge base), and returns the result. If Postmark isn't set up and ticket_id is given, the summary
-# goes on that ticket as an internal note instead. Anything that can't be delivered becomes a warning, and the
+# goes on that ticket as an internal note instead, once per day and set of inputs (a marker stops a retry adding it twice). Anything that can't be delivered becomes a warning, and the
 # report stays in the run output as report_html.
 $ErrorActionPreference = 'Stop'
 function Get-PhProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -18,6 +18,7 @@ function Read-PhState {
     return $st
 }
 function ConvertTo-PhHtml { param($v) return [System.Net.WebUtility]::HtmlEncode([string]$v) }
+function Get-PhHash { param([string]$s) $h = [System.Security.Cryptography.SHA256]::Create(); try { return (-join @($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)) | Select-Object -First 6 | ForEach-Object { $_.ToString('x2') })) } finally { $h.Dispose() } }
 function Get-PhPlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1) { return "1 $one" }; return "$n $many" }
 
 $ph = Read-PhState
@@ -137,8 +138,14 @@ if (-not $sent -and -not $pmConfigured -and $noteTicket) {
         $lines = @("PSA hygiene check: $message")
         foreach ($i in @($issues | Select-Object -First 50)) { $lines += "- Ticket $(Get-PhProp $i 'number') ($(Get-PhProp $i 'company')): $(Get-PhProp $i 'detail')" }
         if ($issues.Count -gt 50) { $lines += "And $($issues.Count - 50) more in the workflow run output." }
-        Add-PsaNote -Id $noteTicket -Text ($lines -join "`n") -Title 'PSA hygiene check'
-        $noted = $true; $actions += "Added the summary to ticket $noteTicket as an internal note."
+        # Retry guard: the same day and the same inputs give the same marker, so a ServiceAI Retry or a re-run Routine
+        # finds the note already on the ticket and adds nothing. A run with other settings (or a confirm run) gets its own.
+        $inKey = (@('company_id', 'stale_days', 'unassigned_hours', 'max_tickets', 'confirm') | ForEach-Object { "$_=$([string](Get-PhProp $opt $_))" }) -join '|'
+        $inKey += "|fix=$(@(Get-PhProp $opt 'fix') -join ',')"
+        $marker = "psa-hygiene $($today.ToString('yyyy-MM-dd')) $(Get-PhHash $inKey)"
+        $nr = Add-PsaNote -Id $noteTicket -Text ($lines -join "`n") -Title 'PSA hygiene check' -Marker $marker
+        $noted = $true
+        $actions += $(if ($nr -eq 'already-present') { "The summary was already on ticket $noteTicket from an earlier run today, so it wasn't added again." } else { "Added the summary to ticket $noteTicket as an internal note." })
     }
     catch { $warnings += "Couldn't add the internal note to ticket $($noteTicket): $($_.Exception.Message)" }
 }

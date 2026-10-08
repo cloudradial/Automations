@@ -19,7 +19,7 @@ $Steps = @{}; foreach ($s in $StepIds) { $Steps[$s] = Get-Content -Raw (Join-Pat
 Remove-Item -Recurse -Force $tmp
 
 $Tally = @{ pass = 0; fail = 0 }
-$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{} }
+$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{}; Notes = (New-Object System.Collections.ArrayList) }
 function Get-AzKeyVaultSecret { [CmdletBinding()] param($VaultName, $Name, [switch]$AsPlainText) if ($Mock.Secrets.Contains($Name)) { return $Mock.Secrets[$Name] }; return $null }
 function Start-Sleep { [CmdletBinding()] param([double]$Seconds = 0, [int]$Milliseconds = 0) }
 function Get-NodeInput { return $global:NodeIn }
@@ -90,7 +90,8 @@ function Invoke-RestMethod {
         if ($d -match 'company/id=5 ') { return @(J @{ id = 9; firstName = 'Pat'; lastName = 'Example' }; J @{ id = 10; firstName = 'Sam'; lastName = 'Example' }) }
         return @(J @{ id = 11; firstName = 'Alex'; lastName = 'Fabrikam'; defaultFlag = $true }; J @{ id = 12; firstName = 'Jo'; lastName = 'Fabrikam'; defaultFlag = $true })
     }
-    if ($u -like "$cw/service/tickets/*/notes" -and $m -eq 'POST') { return [pscustomobject]@{ id = 1 } }
+    if ($u -like "$cw/service/tickets/*/notes[?]*" -and $m -eq 'GET') { return @($Mock.Notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
+    if ($u -like "$cw/service/tickets/*/notes" -and $m -eq 'POST') { $null = $Mock.Notes.Add(($Body | ConvertFrom-Json).text); return [pscustomobject]@{ id = 1 } }
     if ($u -like "$cw/service/tickets/*" -and $m -eq 'PATCH') { return [pscustomobject]@{ id = 1 } }
     # Autotask
     $at = 'https://webservices.example-msp.test/atservicesrest/v1.0'
@@ -204,13 +205,15 @@ Check 'autotask: company names resolved' (@($o.issues | Where-Object { $_.ticket
 # 4. HaloPSA and Kaseya BMS confirm.
 $r = Invoke-Workflow @{ psa = 'halopsa'; fix = 'missing_contact'; confirm = $true }
 $o = $r.out
-Check 'halo: findings' ($r.error -eq '' -and (Get-Cat $o 'stale') -eq '201' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '204,205') "$(Get-Cat $o 'wrong_status') $($r.error)"
+# HaloPSA and Kaseya BMS: _shared/psa-tickets.ps1 counts a ticket with a closed date as closed, so -Open drops
+# 204 (closed date on an open ticket) and only the unassigned ticket 205 is a wrong status there.
+Check 'halo: findings' ($r.error -eq '' -and (Get-Cat $o 'stale') -eq '201' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '205') "$(Get-Cat $o 'wrong_status') $($r.error)"
 $pw = @(Get-PsaWrites)
 Check 'halo: POST Tickets user_id 9 on 202' ($pw.Count -eq 1 -and @($pw[0].Body | ConvertFrom-Json)[0].user_id -eq 9) (@($pw | ForEach-Object { $_.Body }) -join '; ')
 Check 'halo: 203 skipped, no primary' (@($o.fix.skipped)[0].reason -match 'no primary contact') ''
 $r = Invoke-Workflow @{ psa = 'kaseyabms'; fix = 'missing_contact'; confirm = $true }
 $o = $r.out
-Check 'bms: findings' ($r.error -eq '' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '204,205') "$($r.error)"
+Check 'bms: findings' ($r.error -eq '' -and (Get-Cat $o 'missing_contact') -eq '202,203' -and (Get-Cat $o 'wrong_status') -eq '205') "$($r.error)"
 $pw = @(Get-PsaWrites)
 Check 'bms: PATCH ContactId 9 on 202' ($pw.Count -eq 1 -and $pw[0].Uri -like '*/v2/servicedesk/tickets/202' -and @($pw[0].Body | ConvertFrom-Json)[0].path -eq '/ContactId') (@($pw | ForEach-Object { "$($_.Uri) $($_.Body)" }) -join '; ')
 
@@ -256,12 +259,20 @@ $r = Invoke-Workflow $null @{ 'CloudRadial-CompanyId' = '9' }
 Check 'routine: a client CloudRadial-CompanyId is never used for the archive' ($r.error -eq '' -and @(Get-Calls POST 'https://portal.example-msp.test/*').Count -eq 0 -and @(Get-Calls GET 'https://portal.example-msp.test/*').Count -eq 0) ''
 
 # 11. No Postmark: internal note fallback on the given ticket.
+$Mock.Notes.Clear()
 $r = Invoke-Workflow @{ ticket_id = '9001'; to = 'service.manager@example-msp.test' } @{ 'Postmark-ServerToken' = $null }
 $o = $r.out
 $note = @(Get-Calls POST 'https://cw.example-msp.test/*/service/tickets/9001/notes')
 Check 'no postmark: internal note on 9001' ($note.Count -eq 1 -and ($note[0].Body | ConvertFrom-Json).internalAnalysisFlag -eq $true -and ($note[0].Body | ConvertFrom-Json).text -match 'Ticket 201') ''
-Check 'no postmark: warning names the secret' ((@($o.warnings) -join ' ') -match 'missing Postmark-ServerToken') (@($o.warnings) -join ' | ')
+Check 'no postmark: warning names the secret' ((@($o.warnings) -join ' ') -match 'add the Postmark-ServerToken secret') (@($o.warnings) -join ' | ')
 Check 'no postmark, no archive: report_html kept' ($o.report_html -match '<table') ''
+Check 'no postmark: the note ends with its retry marker' (($note[0].Body | ConvertFrom-Json).text.TrimEnd() -match '\[psa-hygiene \d{4}-\d{2}-\d{2} [0-9a-f]{12}\]$') ($note[0].Body | ConvertFrom-Json).text
+# Rerun of the same request (ServiceAI Retry or the Routine run again): the summary note is not added twice.
+$r = Invoke-Workflow @{ ticket_id = '9001'; to = 'service.manager@example-msp.test' } @{ 'Postmark-ServerToken' = $null }
+Check 'rerun: no second summary note on 9001' (@(Get-Calls POST 'https://cw.example-msp.test/*/service/tickets/9001/notes').Count -eq 0 -and $Mock.Notes.Count -eq 1 -and ((@($r.out.actions) -join ' ') -match 'already on ticket 9001')) (@($r.out.actions) -join ' | ')
+# A run with other settings is a different report, so it gets its own note.
+$r = Invoke-Workflow @{ ticket_id = '9001'; to = 'service.manager@example-msp.test'; stale_days = 30 } @{ 'Postmark-ServerToken' = $null }
+Check 'rerun with other settings: one new note' (@(Get-Calls POST 'https://cw.example-msp.test/*/service/tickets/9001/notes').Count -eq 1 -and $Mock.Notes.Count -eq 2) ''
 
 # 12. Nothing delivered at all: report only in the output.
 $r = Invoke-Workflow @{} @{ 'Postmark-ServerToken' = $null }

@@ -9,10 +9,9 @@
 # <<< _shared/graph.ps1
 
 $in = Get-NodeInput
-function Get-LrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
-$days = [int](Get-LrProp $in 'days'); if ($days -le 0) { $days = 60 }
+$days = [int](Get-GraphProp $in 'days'); if ($days -le 0) { $days = 60 }
 $overrides = @{}
-$po = Get-LrProp $in 'price_overrides'
+$po = Get-GraphProp $in 'price_overrides'
 if ($po -is [System.Collections.IDictionary]) { foreach ($k in $po.Keys) { $overrides[([string]$k).ToUpperInvariant()] = [double]$po[$k] } }
 elseif ($null -ne $po) { foreach ($p in $po.PSObject.Properties) { $overrides[$p.Name.ToUpperInvariant()] = [double]$p.Value } }
 $warnings = New-Object System.Collections.ArrayList
@@ -94,9 +93,9 @@ catch {
 }
 $skuMap = @{}
 foreach ($s in $skus) {
-    $sid = [string](Get-LrProp $s 'skuId'); $part = [string](Get-LrProp $s 'skuPartNumber')
+    $sid = [string](Get-GraphProp $s 'skuId'); $part = [string](Get-GraphProp $s 'skuPartNumber')
     if (-not $sid -or -not $part) { continue }
-    $applies = [string](Get-LrProp $s 'appliesTo')
+    $applies = [string](Get-GraphProp $s 'appliesTo')
     $u = $part.ToUpperInvariant()
     $free = (Test-LrFreeSku $part) -or ($applies -and $applies -ne 'User')
     $name = $part; $price = $null; $source = 'unknown'
@@ -122,14 +121,14 @@ try {
     $csv = Invoke-Graph -Method GET -Path "/v1.0/reports/getMailboxUsageDetail(period='D90')" -Permission 'Reports.Read.All'
     if ($csv -is [byte[]]) { $csv = [Text.Encoding]::UTF8.GetString($csv) }
     $rows = @(([string]$csv).TrimStart([char]0xFEFF) | ConvertFrom-Csv)
-    $named = @($rows | Where-Object { ([string](Get-LrProp $_ 'User Principal Name')) -like '*@*' })
+    $named = @($rows | Where-Object { ([string](Get-GraphProp $_ 'User Principal Name')) -like '*@*' })
     if ($rows.Count -and -not $named.Count) {
         $null = $warnings.Add('Mailbox activity was not used because Microsoft 365 reports hide user names in this tenant. To include it, turn off "Display concealed user, group, and site names in all reports" in the Microsoft 365 admin center under Settings > Org settings > Reports.')
     }
     else {
         foreach ($r in $named) {
-            $upn = ([string](Get-LrProp $r 'User Principal Name')).ToLowerInvariant()
-            $mailbox[$upn] = ConvertTo-LrDate (Get-LrProp $r 'Last Activity Date')
+            $upn = ([string](Get-GraphProp $r 'User Principal Name')).ToLowerInvariant()
+            $mailbox[$upn] = ConvertTo-LrDate (Get-GraphProp $r 'Last Activity Date')
         }
         $mailboxChecked = $true
     }
@@ -144,19 +143,19 @@ $found = New-Object System.Collections.ArrayList
 $licensedUsers = 0
 foreach ($usr in $users) {
     $paid = @()
-    foreach ($al in @(Get-LrProp $usr 'assignedLicenses')) {
-        $sid = ([string](Get-LrProp $al 'skuId')).ToLowerInvariant()
+    foreach ($al in @(Get-GraphProp $usr 'assignedLicenses')) {
+        $sid = ([string](Get-GraphProp $al 'skuId')).ToLowerInvariant()
         if ($sid -and $skuMap.ContainsKey($sid) -and -not $skuMap[$sid].free) { $paid += $skuMap[$sid] }
     }
     if (-not $paid.Count) { continue }
     $licensedUsers++
-    $upn = [string](Get-LrProp $usr 'userPrincipalName')
-    $ae = Get-LrProp $usr 'accountEnabled'
+    $upn = [string](Get-GraphProp $usr 'userPrincipalName')
+    $ae = Get-GraphProp $usr 'accountEnabled'
     $enabled = ($null -eq $ae -or [bool]$ae)
-    $sia = Get-LrProp $usr 'signInActivity'
-    $lastSignIn = Get-LrLatest @((ConvertTo-LrDate (Get-LrProp $sia 'lastSignInDateTime')), (ConvertTo-LrDate (Get-LrProp $sia 'lastNonInteractiveSignInDateTime')), (ConvertTo-LrDate (Get-LrProp $sia 'lastSuccessfulSignInDateTime')))
+    $sia = Get-GraphProp $usr 'signInActivity'
+    $lastSignIn = Get-LrLatest @((ConvertTo-LrDate (Get-GraphProp $sia 'lastSignInDateTime')), (ConvertTo-LrDate (Get-GraphProp $sia 'lastNonInteractiveSignInDateTime')), (ConvertTo-LrDate (Get-GraphProp $sia 'lastSuccessfulSignInDateTime')))
     $lastMail = $null; if ($upn -and $mailbox.ContainsKey($upn.ToLowerInvariant())) { $lastMail = $mailbox[$upn.ToLowerInvariant()] }
-    $created = ConvertTo-LrDate (Get-LrProp $usr 'createdDateTime')
+    $created = ConvertTo-LrDate (Get-GraphProp $usr 'createdDateTime')
     $reason = ''
     if (-not $enabled) { $reason = 'disabled' }
     else {
@@ -168,7 +167,7 @@ foreach ($usr in $users) {
     $known = @($paid | Where-Object { $null -ne $_.price })
     $monthly = 0.0; foreach ($k in $known) { $monthly += [double]$k.price }
     $null = $found.Add([ordered]@{
-            name           = [string](Get-LrProp $usr 'displayName')
+            name           = [string](Get-GraphProp $usr 'displayName')
             upn            = $upn
             enabled        = $enabled
             reason         = $reason
@@ -191,8 +190,8 @@ foreach ($r in $rowsOut) {
 Set-NodeOutput ([ordered]@{
         status          = 'ok'
         days            = $days
-        company_id      = [int](Get-LrProp $in 'company_id')
-        preview         = [bool](Get-LrProp $in 'preview')
+        company_id      = [int](Get-GraphProp $in 'company_id')
+        preview         = [bool](Get-GraphProp $in 'preview')
         tenantId        = $tenantId
         checkedOn       = $now.ToString('yyyy-MM-dd')
         licensedUsers   = $licensedUsers

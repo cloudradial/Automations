@@ -8,11 +8,10 @@
 # <<< _shared/cloudradial.ps1
 
 $in = Get-NodeInput
-function Get-LrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Enc { param($s) return [System.Net.WebUtility]::HtmlEncode([string]$s) }
 function Money { param([double]$v) return '$' + $v.ToString('N2', [System.Globalization.CultureInfo]::InvariantCulture) }
 $warnings = New-Object System.Collections.ArrayList
-foreach ($w in @(Get-LrProp $in 'warnings')) { if ($w) { $null = $warnings.Add([string]$w) } }
+foreach ($w in @(Get-CrProp $in 'warnings')) { if ($w) { $null = $warnings.Add([string]$w) } }
 
 function Stop-LrCard {
     param([string]$Why)
@@ -23,22 +22,22 @@ function Stop-LrCard {
 $CardSubject = 'Reclaim unused Microsoft 365 licences'
 $CardKey = 'license-reclamation'
 $MaxRows = 50
-$days = [int](Get-LrProp $in 'days')
-$preview = [bool](Get-LrProp $in 'preview')
-$tenantId = [string](Get-LrProp $in 'tenantId')
-$checkedOn = [string](Get-LrProp $in 'checkedOn')
-$users = @(Get-LrProp $in 'users' | Where-Object { $null -ne $_ })
-$licenceCount = [int](Get-LrProp $in 'licenceCount')
-$saving = [double](Get-LrProp $in 'monthlySaving')
-$disabledCount = [int](Get-LrProp $in 'disabledCount')
-$unknownSkus = @(Get-LrProp $in 'unknownPriceSkus' | Where-Object { $_ })
+$days = [int](Get-CrProp $in 'days')
+$preview = [bool](Get-CrProp $in 'preview')
+$tenantId = [string](Get-CrProp $in 'tenantId')
+$checkedOn = [string](Get-CrProp $in 'checkedOn')
+$users = @(Get-CrProp $in 'users' | Where-Object { $null -ne $_ })
+$licenceCount = [int](Get-CrProp $in 'licenceCount')
+$saving = [double](Get-CrProp $in 'monthlySaving')
+$disabledCount = [int](Get-CrProp $in 'disabledCount')
+$unknownSkus = @(Get-CrProp $in 'unknownPriceSkus' | Where-Object { $_ })
 
 try { $null = Connect-Cr } catch { Stop-LrCard ([string]$_.Exception.Message) }
 
 # ---- which CloudRadial company: the run's company_id, then the CloudRadial-CompanyId secret, then the tenant match ----
 $tenantFields = @('tenantId', 'companyTenantId', 'officeTenantId', 'm365TenantId', 'azureTenantId', 'microsoftTenantId')
-function Get-LrTenantOf { param($co) foreach ($f in $tenantFields) { $v = [string](Get-LrProp $co $f); if ($v -match '^[0-9a-fA-F-]{36}$') { return $v.ToLowerInvariant() } }; return '' }
-$companyId = [int](Get-LrProp $in 'company_id')
+function Get-LrTenantOf { param($co) foreach ($f in $tenantFields) { $v = [string](Get-CrProp $co $f); if ($v -match '^[0-9a-fA-F-]{36}$') { return $v.ToLowerInvariant() } }; return '' }
+$companyId = [int](Get-CrProp $in 'company_id')
 $how = 'company_id input'
 if ($companyId -le 0) {
     $sec = [string](Get-CrSecret 'CloudRadial-CompanyId')
@@ -53,12 +52,12 @@ try {
     else {
         $all = @(Get-CrAll '/v2/odata/company')
         $hits = @($all | Where-Object { $tenantId -and (Get-LrTenantOf $_) -eq $tenantId.ToLowerInvariant() })
-        if ($hits.Count -eq 1) { $company = $hits[0]; $companyId = [int](Get-LrProp $company 'companyId'); $how = 'Microsoft 365 tenant match' }
+        if ($hits.Count -eq 1) { $company = $hits[0]; $companyId = [int](Get-CrProp $company 'companyId'); $how = 'Microsoft 365 tenant match' }
         else { Stop-LrCard "Couldn't tell which CloudRadial company Microsoft 365 tenant $tenantId belongs to. Set company_id on the run, or add the CloudRadial-CompanyId secret to this runner's Key Vault." }
     }
 }
 catch { if ($_.Exception.Message -match "^(CloudRadial company|Couldn't tell)") { throw }; Stop-LrCard "Couldn't read the CloudRadial company: $($_.Exception.Message)" }
-$companyName = [string](Get-LrProp $company 'name'); if (-not $companyName) { $companyName = "company $companyId" }
+$companyName = [string](Get-CrProp $company 'name'); if (-not $companyName) { $companyName = "company $companyId" }
 
 # Never write one tenant's users onto another company's card.
 $coTenant = Get-LrTenantOf $company
@@ -69,10 +68,10 @@ if ($coTenant -and $tenantId -and $coTenant -ne $tenantId.ToLowerInvariant()) {
 # ---- the card ----
 $cards = @()
 try { $cards = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId") } catch { Stop-LrCard "Couldn't read the Planner cards for $($companyName): $($_.Exception.Message)" }
-$ovUsed = @(Get-LrProp $in 'overridesUsed' | Where-Object { $_ })
+$ovUsed = @(Get-CrProp $in 'overridesUsed' | Where-Object { $_ })
 $probe = Set-CrPlannerCard -CompanyId $companyId -Subject $CardSubject -Key $CardKey -Existing $cards -Fields @{ body = '' } -Preview
 $exists = ($probe.action -eq 'would-update')
-$internal = "Internal: CloudRadial company $companyId (chosen by $how), Microsoft 365 tenant $tenantId. Checked on $checkedOn with a $days-day threshold; $([int](Get-LrProp $in 'licensedUsers')) users with a paid licence were checked. Mailbox activity used: $(if ([bool](Get-LrProp $in 'mailboxChecked')) { 'yes' } else { 'no' }). Price overrides: $(if ($ovUsed.Count) { $ovUsed -join ', ' } else { 'none' }). Marker: $CardKey."
+$internal = "Internal: CloudRadial company $companyId (chosen by $how), Microsoft 365 tenant $tenantId. Checked on $checkedOn with a $days-day threshold; $([int](Get-CrProp $in 'licensedUsers')) users with a paid licence were checked. Mailbox activity used: $(if ([bool](Get-CrProp $in 'mailboxChecked')) { 'yes' } else { 'no' }). Price overrides: $(if ($ovUsed.Count) { $ovUsed -join ', ' } else { 'none' }). Marker: $CardKey."
 
 if (-not $users.Count) {
     $msg = "Every paid Microsoft 365 licence at $companyName was used in the last $days days, so there is nothing to reclaim."
@@ -103,11 +102,11 @@ if ($unknownSkus.Count) { $null = $sb.Append(" The price of $(Enc ($unknownSkus 
 $null = $sb.Append('</p><p>Nothing has been removed. Review the list with the client, then remove or reassign the licences in the Microsoft 365 admin center.</p>')
 $null = $sb.Append('<table><thead><tr><th>User</th><th>Licence</th><th>Last sign-in</th><th>Status</th></tr></thead><tbody>')
 foreach ($u in @($users | Select-Object -First $MaxRows)) {
-    $lics = @(@(Get-LrProp $u 'licences') | ForEach-Object { $p = Get-LrProp $_ 'price'; "$(Enc (Get-LrProp $_ 'name')) ($(if ($null -ne $p) { Money ([double]$p) } else { 'price unknown' }))" }) -join '<br>'
-    $last = [string](Get-LrProp $u 'lastSignIn'); if (-not $last) { $last = 'Never' }
-    $st = switch ([string](Get-LrProp $u 'reason')) { 'disabled' { 'Disabled but licensed' } 'never' { 'Never signed in' } default { 'Inactive' } }
-    $mb = [string](Get-LrProp $u 'lastMailbox'); if ($mb) { $st = "$st (mailbox last used $mb)" }
-    $who = Enc (Get-LrProp $u 'name'); $upn = [string](Get-LrProp $u 'upn'); if ($upn) { $who = "$who<br>$(Enc $upn)" }
+    $lics = @(@(Get-CrProp $u 'licences') | ForEach-Object { $p = Get-CrProp $_ 'price'; "$(Enc (Get-CrProp $_ 'name')) ($(if ($null -ne $p) { Money ([double]$p) } else { 'price unknown' }))" }) -join '<br>'
+    $last = [string](Get-CrProp $u 'lastSignIn'); if (-not $last) { $last = 'Never' }
+    $st = switch ([string](Get-CrProp $u 'reason')) { 'disabled' { 'Disabled but licensed' } 'never' { 'Never signed in' } default { 'Inactive' } }
+    $mb = [string](Get-CrProp $u 'lastMailbox'); if ($mb) { $st = "$st (mailbox last used $mb)" }
+    $who = Enc (Get-CrProp $u 'name'); $upn = [string](Get-CrProp $u 'upn'); if ($upn) { $who = "$who<br>$(Enc $upn)" }
     $null = $sb.Append("<tr><td>$who</td><td>$lics</td><td>$(Enc $last)</td><td>$(Enc $st)</td></tr>")
 }
 $null = $sb.Append('</tbody></table>')

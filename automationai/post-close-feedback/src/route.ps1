@@ -48,22 +48,26 @@ if ($ctx.preview) {
 }
 
 $conn = Connect-Psa $ctx.psa
-$mail = @{ sent = $false; id = ''; reason = '' }
+$mail = @{ sent = $false; messageId = ''; reason = '' }
 if ($low) {
-    $mail = Send-StepEmail -To $managers -Subject $subject -Text $mailText -Tag 'post-close-feedback'
+    $mail = Send-PmMail -To $managers -Subject $subject -Text $mailText -Tag 'post-close-feedback'
+    $reason = ([string]$mail.reason).TrimEnd('.')
     if ($mail.sent) { $null = $actions.Add("Emailed the service manager ($mgrText) about the low score."); $null = $noteLines.Add("This is at or below the alert threshold of $($ctx.threshold), so the service manager ($mgrText) was emailed.") }
-    else { $null = $warnings.Add("The service manager email was not sent: $($mail.reason)."); $null = $noteLines.Add("This is at or below the alert threshold of $($ctx.threshold), but the service manager email was not sent because $($mail.reason). Please follow up with the requester.") }
+    else { $null = $warnings.Add("The service manager email was not sent: $reason."); $null = $noteLines.Add("This is at or below the alert threshold of $($ctx.threshold), but the service manager email was not sent because $reason. Please follow up with the requester.") }
 }
 $note = $noteLines -join "`n"
-try { Add-PsaNote -Id $id -Text $note -Title 'Satisfaction score' }
+# The [csat-score] marker is what step 1 looks for, so a retry or rerun never records the score twice.
+$noted = ''
+try { $noted = Add-PsaNote -Id $id -Text $note -Title 'Satisfaction score' -Marker 'csat-score' }
 catch {
     if (-not $mail.sent) { throw }
     $stopState.done = $true
-    $m = "The service manager was emailed about ticket $id, but the internal note could not be added: $($_.Exception.Message) Add the note by hand; a rerun would email again."
+    $m = "The service manager was emailed about ticket $id, but the internal note could not be added: $($_.Exception.Message) Add an internal note that contains [csat-score] by hand; without it, a rerun would email again."
     Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $true; actions = @($actions); warnings = @($warnings) })
     throw $m
 }
-$null = $actions.Add("Added an internal note with the score to ticket $id.")
+if ($noted -eq 'already-present') { $null = $warnings.Add("Ticket $id already had a score note (another run added it), so no second note was added.") }
+else { $null = $actions.Add("Added an internal note with the score to ticket $id.") }
 
 # ---- optional: record it as CloudRadial feedback for the CSAT report ----
 $crId = [string]$ctx.cr_company_id
@@ -90,6 +94,6 @@ elseif ($low) { "Ticket $id was rated $score out of $max. The service manager em
 else { "Ticket $id was rated $score out of $max. The score was noted on the ticket." }
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true
-        score = $score; low_score = $low; manager_emailed = [bool]$mail.sent; postmark_message_id = [string]$mail.id; cloudradial_recorded = $crRecorded
+        score = $score; low_score = $low; manager_emailed = [bool]$mail.sent; postmark_message_id = [string]$mail.messageId; cloudradial_recorded = $crRecorded
         actions = @($actions); warnings = @($warnings)
     })

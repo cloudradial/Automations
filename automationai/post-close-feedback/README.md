@@ -22,7 +22,7 @@ One workflow with **two entry points**, chosen by the `mode` input. Three steps,
 
 **`mode: survey` (the default): a ticket closed.**
 
-1. **Read the request.** Reads the ticket and its notes through the shared six-PSA adapter. It stops quietly (`status: success`, nothing posted) when the ticket was closed as a duplicate, spam, merged or cancelled (status or `close_reason`), or when a survey was already posted on it, so a webhook retry never sends twice.
+1. **Read the request.** Reads the ticket and its notes through the shared six-PSA adapter. It stops quietly (`status: success`, nothing posted) when the ticket was closed as a duplicate, spam, merged or cancelled (status or `close_reason`), or when a survey was already posted on it (a public note with its first line, "How did we do on ticket ..."), so a webhook retry or a ServiceAI **Action Runs** Retry never sends twice. In score mode it also stops when an internal note marked `[csat-score]` is already on the ticket.
 2. **Send the survey.** Posts a **public** note, so the PSA emails the requester:
 
    ```
@@ -44,9 +44,9 @@ One workflow with **two entry points**, chosen by the `mode` input. Three steps,
 
 1. **Read the request.** Checks the score is a whole number from 1 to `score_max`, that a survey was actually posted on this ticket (so nobody can score a ticket that was never surveyed), and that no score was recorded before (only the first answer counts).
 2. **Send the survey.** Nothing to do in score mode.
-3. **Route low scores.** When the score is at or below `threshold` (default 2 out of 5), it emails the service manager through Postmark with the score, the comment and a link to the ticket. Every score, high or low, is then added as an **internal** note ("Satisfaction score received: 2 out of 5 ..."). If Postmark isn't set up, the note says the email wasn't sent and asks the team to follow up. When a CloudRadial company id is sent, it also records the score as CloudRadial **feedback** (see below).
+3. **Route low scores.** When the score is at or below `threshold` (default 2 out of 5), it emails the service manager through Postmark (`Send-PmMail` from the shared `_shared/postmark.ps1`) with the score, the comment and a link to the ticket. Every score, high or low, is then added as an **internal** note ("Satisfaction score received: 2 out of 5 ...") ending with the `[csat-score]` marker. The note is written with `Add-PsaNote -Marker`, so a note that is already there is never added again. If Postmark isn't set up, the note says the email wasn't sent and asks the team to follow up. When a CloudRadial company id is sent, it also records the score as CloudRadial **feedback** (see below).
 
-A normal call posts and sends. `"preview": true` returns what it would post or send (`status: pending_confirmation`) and writes nothing. It only writes notes and sends emails, which the service-desk rules exempt from the confirm pattern, so a normal call acts straight away; a live webhook that previewed because its body left out a flag would be the worse failure. Duplicate guards stop a retry from acting twice.
+A normal call posts and sends. `"preview": true` returns what it would post or send (`status: pending_confirmation`) and writes nothing. It only writes notes and sends emails, which the service-desk rules exempt from the confirm pattern, so a normal call acts straight away; a live webhook that previewed because its body left out a flag would be the worse failure. The survey's first line and the `[csat-score]` marker stop a retry from acting twice.
 
 ### Where the survey links go
 
@@ -148,10 +148,10 @@ The caller POSTs to the workflow's webhook URL with the secret in the **`X-Craut
 5. **Score.** Run with `"mode": "score"`, the same ticket, `"score": "1"`, and `"service_manager_email"` set to your address (no `preview`). Expect the low-score email and an internal note. Run it again: expect "already recorded". Try a ticket with no survey: expect `rejected`.
 6. **Wire the triggers** as above, enable the webhook in **Properties**, and redeploy.
 
-> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `survey.ps1`, `route.ps1`, `step.ps1` or `psa-extra.ps1`, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs, Postmark and CloudRadial). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `survey.ps1`, `route.ps1` or `step.ps1`, run `node src/build.js` (it pastes in `_shared/psa.ps1`, `_shared/cloudradial.ps1` and `_shared/postmark.ps1`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs, Postmark and CloudRadial). Never edit the `.yml` by hand.
 
 ### Not yet proven live
 
 - `POST /v2/feedback`: the request shape is from the public v2 spec, but the meaning of `sentiment` and how the portal shows an API-created record aren't confirmed.
 - **Whether the PSA emails the requester** for an API-added public note, and whether a note on a closed ticket reopens it, depend on each PSA's settings (ConnectWise board email settings, Autotask notification templates, HaloPSA outcomes).
-- The ticket notes read (`Get-PsaNotes`), status-name lookup (`Get-PsaStatusName`) and ticket links (`Get-PsaTicketUrl`) in `src/psa-extra.ps1` for every PSA except where marked, and ConnectWise public notes on the Discussion tab. Each is marked `Unverified` in the source. `psa-extra.ps1` is a candidate to move into `_shared/psa.ps1`.
+- The ticket notes read (`Get-PsaTicketNotes`) for Autotask and HaloPSA, the HaloPSA status-name lookup (`Get-PsaStatusName`), the built-in ticket links (`Get-PsaTicketUrl`) for ConnectWise, Autotask, HaloPSA and Syncro, and ConnectWise public notes on the Discussion tab, all in `_shared/psa.ps1`. Each is marked `Unverified` in the shared source. Set the `PSA-TicketUrlTemplate` secret if a link is wrong.

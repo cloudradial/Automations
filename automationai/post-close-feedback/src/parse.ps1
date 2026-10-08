@@ -57,13 +57,13 @@ $null = $actions.Add("Read ticket $ticketId from $(Get-PsaName).")
 # A portal form sends @CompanyPsaId, which the requester can't change: the ticket must belong to that company.
 $psaCo = Get-StepField $a @('company_psa_id', 'CompanyPsaId')
 if ($psaCo -and [string]$t.companyId -and $psaCo -ne [string]$t.companyId) { Stop-Parse 'rejected' "Ticket $ticketId belongs to a different company, so nothing was done." $ticketId $mode }
-$notes = @(Get-PsaNotes $ticketId)
-$marker = "How did we do on ticket $ticketId"
-$surveySent = @($notes | Where-Object { $_.public -and ([string]$_.text).Contains($marker) }).Count -gt 0
-$tplUrl = [string](Get-PsaSecret 'PSA-TicketUrlTemplate')
+$notes = @(Get-PsaTicketNotes -Id $ticketId -Newest -TextOnly)
+# The survey is a public note, so its own first line is the guard (a [marker] would show to the client).
+$surveyLine = "How did we do on ticket $ticketId"
+$surveySent = @($notes | Where-Object { $_.public -and ([string]$_.text).Contains($surveyLine) }).Count -gt 0
 $ctx = @{
     skip = $false; mode = $mode; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); summary = [string]$t.summary; company_id = [string]$t.companyId
-    contact = $contact; preview = $preview; score_max = $scoreMax; ticket_url = (Get-PsaTicketUrl $ticketId $tplUrl); actions = @($actions); warnings = @($warnings)
+    contact = $contact; preview = $preview; score_max = $scoreMax; ticket_url = (Get-PsaTicketUrl $ticketId); actions = @($actions); warnings = @($warnings)
 }
 
 if ($mode -eq 'survey') {
@@ -89,7 +89,8 @@ if ($mode -eq 'survey') {
 # ---- score mode ----
 $requireSurvey = $true; $rs = Get-StepField $a @('require_survey', 'requireSurvey'); if ($rs) { $requireSurvey = Test-StepTrue $rs }
 if ($requireSurvey -and -not $surveySent) { Stop-Parse 'rejected' "No survey was sent for ticket $ticketId, so the score wasn't accepted." $ticketId $mode }
-$prior = @($notes | Where-Object { -not $_.public -and ([string]$_.text).TrimStart().StartsWith('Satisfaction score received') }).Count -gt 0
+# Step 3 writes the score note with the [csat-score] marker; a public note with the marker doesn't count.
+$prior = Test-PsaNoteMarker -Id $ticketId -Marker 'csat-score' -Notes @($notes | Where-Object { $_.internal })
 if ($prior) { Skip-Parse "A score for ticket $ticketId was already recorded, so this one was ignored." $ticketId $mode; return }
 $managers = @(Get-StepList (Get-StepField $a @('service_manager_email', 'serviceManagerEmail')))
 if (-not $managers.Count) { $managers = @(Get-StepList ([string](Get-PsaSecret 'CSAT-ServiceManagerEmail'))) }

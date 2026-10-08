@@ -65,7 +65,7 @@ $Handler = {
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
         "GET $TAT/Tickets/entityInformation/fields" { return [pscustomobject]@{ fields = @([pscustomobject]@{ name = 'status'; picklistValues = @([pscustomobject]@{ value = '5'; label = 'Complete'; isActive = $true }, [pscustomobject]@{ value = '14'; label = 'Duplicate'; isActive = $true }) }) } }
-        "GET $TAT/Tickets/1001/Notes" { return [pscustomobject]@{ items = @($TScenario.atNotes) } }
+        "GET $TAT/TicketNotes/query*" { return [pscustomobject]@{ items = @($TScenario.atNotes); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
         "GET $TAT/Tickets/1001" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; title = 'Printer out of toner'; description = 'Toner low.'; companyID = 42; status = 5; assignedResourceID = $null } } }
         "POST $TAT/Tickets/1001/Notes" { return [pscustomobject]@{ itemId = 3001 } }
         "GET $TZD/tickets/1001/comments*" { return [pscustomobject]@{ comments = @($TScenario.zdComments) } }
@@ -134,6 +134,13 @@ Check 'low score: success, manager emailed' ($o.status -eq 'success' -and $o.low
 Check 'low score: Postmark email to the service manager with the comment and link' ($pm.Count -eq 1 -and (Read-Body $pm[0]).To -eq 'servicemanager@examplemsp.example' -and (Read-Body $pm[0]).Subject -eq 'Low satisfaction score on ticket 1001: 2 out of 5' -and (Read-Body $pm[0]).TextBody -like '*Took three days*service_recid=1001*')
 Check 'low score: internal note records score and email' ($nt.Count -eq 1 -and (Read-Body $nt[0]).internalAnalysisFlag -eq $true -and (Read-Body $nt[0]).text -like 'Satisfaction score received: 2 out of 5 from megan.bowen@contoso.com.*Comment: Took three days*service manager (servicemanager@examplemsp.example) was emailed*')
 Check 'low score: no client-visible note' (-not @($nt | Where-Object { (Read-Body $_).detailDescriptionFlag }).Count)
+Check 'low score: the note carries the [csat-score] marker' ((Read-Body $nt[0]).text -like '*[[]csat-score]*')
+
+# ---- 6b. Rerun (ServiceAI Retry or a repeated survey click) after a good run: nothing is sent or written twice ----
+$TWritten = (Read-Body $nt[0]).text
+Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @((New-CwNote $TWritten $false 6), (New-CwNote $TSurveyNote $true))
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '2'; comment = 'Took three days to hear back.'; contactEmail = 'megan.bowen@contoso.com' }
+Check 'rerun: score already recorded, no email and no note' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*already recorded*' -and @(Get-WriteCalls).Count -eq 0) "$($f.r.out.message) $(Show-Calls)"
 
 # ---- 7. High score: note only ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
@@ -152,7 +159,7 @@ $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
 Check 'no survey sent: rejected' ($f.stage -eq 'parse' -and $f.r.out.status -eq 'rejected' -and $f.r.error -like '*No survey was sent*' -and @(Get-WriteCalls).Count -eq 0) $f.r.error
 $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1'; require_survey = 'false' }
 Check 'require_survey false: accepted' ($f.r.out.status -eq 'success') $f.r.error
-Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @((New-CwNote 'Satisfaction score received: 4 out of 5.' $false 6), (New-CwNote $TSurveyNote $true))
+Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @((New-CwNote "Satisfaction score received: 4 out of 5.`n[csat-score]" $false 6), (New-CwNote $TSurveyNote $true))
 $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
 Check 'already scored: ignored, nothing sent' ($f.r.out.status -eq 'success' -and $f.r.out.message -like '*already recorded*' -and @(Get-WriteCalls).Count -eq 0) $f.r.out.message
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
@@ -171,7 +178,7 @@ Check 'score mode with no score: incomplete' ($f.r.out.status -eq 'incomplete') 
 # ---- 10. Low score, Postmark not set up: the note asks the team to follow up ----
 Reset-Mock (Get-Secrets 'connectwise' -Drop @('Postmark-ServerToken')) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
 $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
-Check 'no Postmark: success, not emailed, note asks for follow-up' ($f.r.out.status -eq 'success' -and $f.r.out.manager_emailed -eq $false -and $f.r.out.internal_note -like '*email was not sent because Postmark is not set up*follow up*') $f.r.out.internal_note
+Check 'no Postmark: success, not emailed, note asks for follow-up' ($f.r.out.status -eq 'success' -and $f.r.out.manager_emailed -eq $false -and $f.r.out.internal_note -like "*email was not sent because Postmark isn't set up*follow up*" -and $f.r.out.internal_note -notlike '*secret)..*') $f.r.out.internal_note
 
 # ---- 11. Autotask low score recorded as CloudRadial feedback ----
 Reset-Mock (Get-Secrets 'autotask' @{ 'CloudRadial-BaseUrl' = $TCR; 'CloudRadial-PublicKey' = 'crpub'; 'CloudRadial-PrivateKey' = 'crpriv' }) $Handler; Reset-Scenario

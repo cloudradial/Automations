@@ -34,6 +34,7 @@ Three PowerShell steps, no AI. The judgment (which article fits the ticket) is S
    In `reply` mode it checks that this workflow sent an article on the ticket (the marker in its internal note), that the reply came from that contact when `replyFrom` is sent, and that the reply **clearly says it's fixed**.
 3. **Send or close, and note it.**
    - **Send:** a **public note** on the ticket, so the PSA emails the contact: a short greeting, the article title and link, and "Reply 'fixed' and we'll close this ticket. If it doesn't help, just reply and a technician will carry on." Then an internal note with the confidence, the checks, and a marker line that reply mode looks for.
+   - **Retry guard:** every note this workflow writes ends with a short marker in brackets (for example `[Ref: troubleshooting article 321]` on the public note and `[AAI-TA sent 321]` on the internal one). Before writing, it looks for that marker on the ticket, so a ServiceAI **Retry** never writes the same note twice, even when the first run stopped between the public and the internal note. A different reply from the contact gets its own note.
    - **Close (reply mode, clear yes):** closes the ticket through the shared six-PSA adapter (ConnectWise closed status, Autotask Complete, HaloPSA Closed, Kaseya BMS closed status id, Syncro Resolved, Zendesk solved), adds a short public note ("Reply here if the problem comes back"), and an internal note.
    - **Anything else** (low confidence, wrong company, unpublished, unclear reply, no article sent): no client-facing change, and an **internal note saying what was decided and why**. Only true repeats (already sent, already closed) and an unknown ticket write nothing.
 
@@ -131,11 +132,11 @@ None. This workflow doesn't call Microsoft Graph. The CloudRadial API keys need 
 4. **Reply.** Run with `mode: reply`, the same `ticketId` and `replyText: "Still not working"`. Expect `decision: not-clear`, an internal note, the ticket still open. Then `replyText: "Fixed, thanks"`: expect `decision: close`, the ticket closed, a short public note and an internal note.
 5. **Wire the triggers.** Enable the webhook in **Properties**, redeploy, add the secret to the ServiceAI Secrets manager as `aai_send_troubleshooting_article`, and create both Actions and both triage rules above. Watch **Action Runs** on the first live ticket.
 
-> Webhook secrets are stripped from this export, so AutomationAI issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `check.ps1`, `act.ps1` or `psa-extra.ps1`, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked CloudRadial and PSAs). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so AutomationAI issues a new URL and secret on import. The step logic lives in `src/`: edit `parse.ps1`, `check.ps1` or `act.ps1`, run `node src/build.js` (it also pastes the PSA and CloudRadial code from `automationai/_shared/`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked CloudRadial and PSAs). Never edit the `.yml` by hand.
 
 ### Not yet proven live
 
 - Whether ServiceAI triage fires an Action on a customer **reply** (not only on a new ticket). If it doesn't, the reply entry point needs another caller (for example a PSA workflow rule).
 - The shape of `GET /v2/article/{id}` (a bare article or wrapped in `data`; both are read), and how MSP-wide articles are stored (company 0 is assumed; `mspCompanyId` covers a partner company).
 - The portal's article link format. Links with `/kb/article/<id>`, `/article/<id>` or `?articleId=<id>` are matched by id; others need `allowedLinkHosts`.
-- The note reads in `src/psa-extra.ps1` for Autotask, HaloPSA and Kaseya BMS (marked `Unverified`), and the shared adapter's public-note and close calls (marked `Unverified` in `_shared/psa.ps1`). `psa-extra.ps1` is a candidate to move into `_shared/psa.ps1`.
+- The shared adapter's note reads for Autotask and HaloPSA, and its public-note and close calls (marked `Unverified` in `_shared/psa.ps1`).

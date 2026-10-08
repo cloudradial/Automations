@@ -1,6 +1,6 @@
 # Strict-mode harness for Dynamic Troubleshooting Article Delivery.
-# Runs each PowerShell step exactly as it is in troubleshooting-article-delivery.yml (shared libraries and
-# psa-extra included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the
+# Runs each PowerShell step exactly as it is in troubleshooting-article-delivery.yml (shared libraries
+# included), through & ([scriptblock]::Create(...)) under Set-StrictMode -Version Latest, with the
 # runner Key Vault, Invoke-RestMethod, Get-NodeInput and Set-NodeOutput mocked. Outputs pass through JSON
 # between steps, as the runner does. Placeholder data only (Contoso, Fabrikam, Example MSP).
 # Test variables start with T: a step runs in a child scope of this script, and a same-named step
@@ -81,7 +81,7 @@ $Handler = {
         "GET $TCW/service/tickets/12345" { return [pscustomobject]@{ id = 12345; summary = 'Outlook will not open'; company = [pscustomobject]@{ id = 101 }; status = [pscustomobject]@{ name = $S.ticketStatus }; board = [pscustomobject]@{ id = 1 }; owner = $null } }
         "GET $TCW/service/tickets/404" { New-HttpError 404 '{"message":"Ticket not found"}' }
         "GET $TCW/service/tickets/12345/notes[?]*" { return @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
-        "POST $TCW/service/tickets/12345/notes" { if ($S.publicForbidden -and $c.Body -like '*"detailDescriptionFlag":true*') { New-HttpError 403 '{"message":"Member cannot add discussion notes."}' }; return [pscustomobject]@{ id = 2 } }
+        "POST $TCW/service/tickets/12345/notes" { if ($S.publicForbidden -and $c.Body -like '*"detailDescriptionFlag":true*') { New-HttpError 403 '{"message":"Member cannot add discussion notes."}' }; $S.notes = @($S.notes) + @((Read-Body $c).text); return [pscustomobject]@{ id = 2 } }
         # Autotask ticket 555
         "GET $TAT/Tickets/555" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 555; title = 'Printer offline'; description = ''; companyID = 101; status = 1; assignedResourceID = $null } } }
         "GET $TAT/TicketNotes/query[?]*" { return [pscustomobject]@{ items = @($S.notes | ForEach-Object { [pscustomobject]@{ title = 'Troubleshooting article sent'; description = $_ } }) } }
@@ -90,11 +90,11 @@ $Handler = {
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
         "GET $TAT/Tickets/entityInformation/fields" { return [pscustomobject]@{ fields = @([pscustomobject]@{ name = 'status'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'New'; isActive = $true }, [pscustomobject]@{ value = '5'; label = 'Complete'; isActive = $true }) }) } }
         "PATCH $TAT/Tickets" { return [pscustomobject]@{ itemId = 555 } }
-        "POST $TAT/Tickets/555/Notes" { return [pscustomobject]@{ itemId = 9 } }
+        "POST $TAT/Tickets/555/Notes" { $S.notes = @($S.notes) + @((Read-Body $c).description); return [pscustomobject]@{ itemId = 9 } }
         # Zendesk ticket 777
         "GET $TZD/tickets/777" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 777; subject = 'VPN drops'; description = ''; organization_id = 101; status = 'open'; assignee_id = $null } } }
         "GET $TZD/tickets/777/comments[?]*" { return [pscustomobject]@{ comments = @($S.notes | ForEach-Object { [pscustomobject]@{ body = $_; public = $false } }) } }
-        "PUT $TZD/tickets/777" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 777 } } }
+        "PUT $TZD/tickets/777" { $TB = Read-Body $c; if ($TB.ticket.PSObject.Properties['comment']) { $S.notes = @($S.notes) + @($TB.ticket.comment.body) }; return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 777 } } }
     }
     throw "Unexpected call in test: $k"
 }
@@ -113,6 +113,7 @@ Check 'send: one public (Discussion) note and one internal note' ($TN.Count -eq 
 Check "send: public note has the link, greets by first name and says Reply 'fixed' and we'll close this" ($TN[0].text -like "*$TUrl*" -and $TN[0].text -like 'Hi Megan,*' -and $TN[0].text -like "*Reply 'fixed' and we'll close this ticket*") $TN[0].text
 Check 'send: internal note carries the marker reply mode looks for' ($TN[1].text -like "*$TMarker*" -and $TN[1].text -like '*confidence 0.9*') $TN[1].text
 Check 'send: no status change' (-not @(Get-Calls 'PATCH' "$TCW/*").Count)
+Check 'send: public and internal notes end with their retry markers' ($TN[0].text.TrimEnd().EndsWith('[Ref: troubleshooting article 321]') -and $TN[1].text.TrimEnd().EndsWith('[AAI-TA sent 321]')) "$($TN[0].text) :: $($TN[1].text)"
 Check 'send: no em dash in the output' (-not (($o | ConvertTo-Json -Depth 10).Contains([string][char]0x2014)))
 
 # ---- 2. Dry run: everything checked, nothing written ----
@@ -135,6 +136,21 @@ Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
 $global:TS.notes = @("Troubleshooting article sent.`n$TMarker")
 $f = Invoke-Flow (New-TBody $TSend)
 Check 'retry: already-sent, success, no writes at all' ($f.r.out.decision -eq 'already-sent' -and $f.r.out.status -eq 'success' -and @(Get-TWrites).Count -eq 0) "$($f.r.out.decision) $(Show-Calls)"
+
+# ---- 4b. Rerun after the public note was posted but the internal note wasn't: no second public note ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
+$global:TS.notes = @("Hi Megan, while a technician looks at your ticket...`n[Ref: troubleshooting article 321]")
+$f = Invoke-Flow (New-TBody $TSend)
+$TN = @(Get-TCwNotes)
+Check 'rerun after a half-finished send: only the internal note is written' ($f.r.out.decision -eq 'send' -and $TN.Count -eq 1 -and $TN[0].internalAnalysisFlag -eq $true -and $TN[0].text -like "*$TMarker*") (Show-Calls)
+Check 'rerun after a half-finished send: the action says the public note was already there' ((@($f.r.out.actions | ForEach-Object { $_.result }) -join ' ') -like '*already on the ticket*') ($f.r.out.actions | ConvertTo-Json -Compress)
+
+# ---- 4c. Rerun of a decision that writes only an internal note (low confidence): nothing written twice ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
+$null = Invoke-Flow (New-TBody $TSend @{ confidence = '60%' })
+Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$f = Invoke-Flow (New-TBody $TSend @{ confidence = '60%' })
+Check 'rerun of low confidence: no second internal note' ($f.r.out.decision -eq 'low-confidence' -and @(Get-TCwNotes).Count -eq 0 -and @($global:TS.notes).Count -eq 1) (Show-Calls)
 
 # ---- 5. Article checks ----
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
@@ -219,6 +235,13 @@ foreach ($TReply in @('Still not working', 'fixed?', 'It works now but Outlook i
     $TAtNotes = @(Get-Calls 'POST' "$TAT/Tickets/555/Notes" | ForEach-Object { Read-Body $_ })
     Check "reply '$TReply': not closed, one internal note" ($f.r.out.decision -eq 'not-clear' -and $f.r.out.closed -eq $false -and -not @(Get-Calls 'PATCH' "$TAT/Tickets").Count -and $TAtNotes.Count -eq 1 -and $TAtNotes[0].publish -eq 2) "$($f.r.out.decision) $($f.r.out.reason)"
 }
+$TFirst = @($global:TS.notes).Count
+Reset-Mock (Get-TSecrets 'autotask') $Handler
+$f = Invoke-Flow @{ mode = 'reply'; ticketId = '555'; replyText = 'Not fixed' }
+Check "rerun of the same reply: no second note" (@(Get-Calls 'POST' "$TAT/Tickets/555/Notes").Count -eq 0 -and @($global:TS.notes).Count -eq $TFirst) (Show-Calls)
+Reset-Mock (Get-TSecrets 'autotask') $Handler
+$f = Invoke-Flow @{ mode = 'reply'; ticketId = '555'; replyText = 'Still broken after a restart' }
+Check "a different reply: one new internal note" (@(Get-Calls 'POST' "$TAT/Tickets/555/Notes").Count -eq 1) (Show-Calls)
 Reset-Mock (Get-TSecrets 'autotask') $Handler; Reset-TScenario
 $f = Invoke-Flow @{ mode = 'reply'; ticketId = '555'; replyText = 'fixed' }
 Check 'reply with no article sent: no-op, internal note, not closed' ($f.r.out.decision -eq 'no-article-sent' -and -not @(Get-Calls 'PATCH' "$TAT/Tickets").Count -and @(Get-Calls 'POST' "$TAT/Tickets/555/Notes").Count -eq 1) $f.r.out.reason

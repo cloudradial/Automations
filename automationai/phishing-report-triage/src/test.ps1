@@ -76,7 +76,13 @@ $TMsg = @{
         body = [pscustomobject]@{ contentType = 'html'; content = '<p>Hello.</p><a href="https://www.fabrikam.example/october">Read more</a>' }
     }
 }
-$TScenario = @{ message = 'bad'; graph403 = $false; empty = $false; atCompany = 42 }
+$TScenario = @{ message = 'bad'; graph403 = $false; empty = $false; atCompany = 42; findFail = $false }
+$TState = @{ notes = @{}; tickets = (New-Object System.Collections.ArrayList) }
+function Add-TNote { param([string]$TicketId, $Note) if (-not $TState.notes.Contains($TicketId)) { $TState.notes[$TicketId] = New-Object System.Collections.ArrayList }; $null = $TState.notes[$TicketId].Add($Note) }
+function Get-TNotes { param([string]$TicketId) if ($TState.notes.Contains($TicketId)) { return @($TState.notes[$TicketId]) }; return @() }
+function Get-TNoteCount { $n = 0; foreach ($k in $TState.notes.Keys) { $n += $TState.notes[$k].Count }; return $n }
+# A new scenario: fresh secrets, calls, tickets and notes. A rerun of the same scenario clears only the calls.
+function Reset-T { param([string]$P) Reset-Mock (Get-Secrets $P) $Handler; $TState.notes = @{}; $TState.tickets.Clear() }
 
 $Handler = {
     param($c, $n)
@@ -97,16 +103,28 @@ $Handler = {
         "GET $TCW/company/companies*" { return @([pscustomobject]@{ id = 43; name = 'Contoso Ltd' }, [pscustomobject]@{ id = 42; name = 'Contoso' }) }
         "GET $TCW/service/tickets/777/notes*" { return @([pscustomobject]@{ id = 1; text = "Please check this.`n---------- Forwarded message ----------`nFrom: Microsoft 365 Security <alerts@c0ntoso.com>`nSubject: Your password expires today`nMessage-ID: <phish-0001@c0ntoso.com>" }) }
         "GET $TCW/service/tickets/777" { return [pscustomobject]@{ id = 777; summary = 'FW: Your password expires today'; company = [pscustomobject]@{ id = 42 }; owner = $null; status = [pscustomobject]@{ name = 'New' } } }
-        "POST $TCW/service/tickets" { return [pscustomobject]@{ id = 501 } }
-        "POST $TCW/service/tickets/501/notes" { return [pscustomobject]@{ id = 9001 } }
+        # Tickets and notes the workflow writes are kept in $TState, so a rerun sees what the first run wrote.
+        "POST $TCW/service/tickets" {
+            $null = $TState.tickets.Add([pscustomobject]@{ id = 501; summary = (Read-Body $c).summary; company = [pscustomobject]@{ id = 42 }; closedFlag = $false; dateEntered = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); status = [pscustomobject]@{ name = 'New' } })
+            return [pscustomobject]@{ id = 501 }
+        }
+        "GET $TCW/service/tickets[?]*" { if ($TScenario.findFail) { New-HttpError 403 '{"message":"Not allowed"}' }; if ($c.Uri -like '*page=1') { return @($TState.tickets) }; return @() }
+        "POST $TCW/service/tickets/*/notes" { $b = Read-Body $c; Add-TNote ($c.Uri -replace '^.*/tickets/(\d+)/notes$', '$1') ([pscustomobject]@{ id = 9001; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag }); return [pscustomobject]@{ id = 9001 } }
+        "GET $TCW/service/tickets/*/notes*" { if ($c.Uri -like '*page=1') { return @(Get-TNotes ($c.Uri -replace '^.*/tickets/(\d+)/notes.*$', '$1')) }; return @() }
+        "GET $TAT/TicketNotes/query*" { return [pscustomobject]@{ items = @(Get-TNotes '12345'); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
         "GET $TAT/Tickets/12345" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 12345; title = 'Suspicious email'; description = 'Reported by Megan'; companyID = $TScenario.atCompany; status = 1; assignedResourceID = $null } } }
-        "POST $TAT/Tickets/12345/Notes" { return [pscustomobject]@{ itemId = 3001 } }
+        "POST $TAT/Tickets/12345/Notes" { $b = Read-Body $c; Add-TNote '12345' ([pscustomobject]@{ id = 3001; title = $b.title; description = $b.description; publish = $b.publish }); return [pscustomobject]@{ itemId = 3001 } }
         "GET $TZD/organizations/autocomplete*" { return [pscustomobject]@{ organizations = @([pscustomobject]@{ id = 42; name = 'Contoso' }) } }
-        "POST $TZD/tickets" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 506 } } }
-        "PUT $TZD/tickets/506" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 506 } } }
+        "POST $TZD/tickets" {
+            $null = $TState.tickets.Add([pscustomobject]@{ id = 506; subject = (Read-Body $c).ticket.subject; organization_id = 42; status = 'new'; created_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') })
+            return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 506 } }
+        }
+        "PUT $TZD/tickets/506" { $cm = (Read-Body $c).ticket.comment; Add-TNote '506' ([pscustomobject]@{ id = 7001; body = $cm.body; public = $cm.public; author_id = 1 }); return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 506 } } }
+        "GET $TZD/tickets/506/comments*" { return [pscustomobject]@{ comments = @(Get-TNotes '506'); next_page = $null } }
+        "GET $TZD/search*" { return [pscustomobject]@{ results = @($TState.tickets); next_page = $null } }
     }
     throw "Unexpected call in test: $k"
 }
@@ -120,7 +138,7 @@ $base = @{ reporter_upn = 'megan.bowen@contoso.com'; message_id = '<phish-0001@c
 function New-Body { param([hashtable]$Over) $b = @{}; foreach ($k in $base.Keys) { $b[$k] = $base[$k] }; foreach ($k in $Over.Keys) { $b[$k] = $Over[$k] }; return $b }
 
 # ---- 1. ConnectWise preview: malicious, nothing written, purge drafted ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler; $TScenario.message = 'bad'; $TScenario.graph403 = $false; $TScenario.empty = $false
+Reset-T 'connectwise'; $TScenario.message = 'bad'; $TScenario.graph403 = $false; $TScenario.empty = $false
 $f = Invoke-Flow (New-Body @{}) $aiMal
 $o = $f.r.out
 Check 'preview: reached the ticket step' ($f.stage -eq 'ticket' -and -not $f.r.error) $f.r.error
@@ -145,7 +163,7 @@ Check 'enrich: the email body text is not copied out' ($f.enrich.enrichment_json
 if ($env:SHOW_NOTE) { Write-Host "--- internal note (scenario 1) ---`n$($o.internal_note)`n--- message: $($o.message)`n--- public: $($o.public_note)" }
 
 # ---- 2. ConnectWise confirm: ticket opened high priority, note internal ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler
+Reset-T 'connectwise'
 $f = Invoke-Flow (New-Body @{ confirm = $true }) $aiMal
 $o = $f.r.out
 $create = @(Get-Calls 'POST' "$TCW/service/tickets")
@@ -155,9 +173,19 @@ Check 'cw confirm: ticket for Contoso (42) at high priority' ($create.Count -eq 
 Check 'cw confirm: ticket description holds no findings' ((Read-Body $create[0]).initialDescription -notlike '*DMARC*')
 Check 'cw confirm: findings note is internal and carries the draft' ($noteCall.Count -eq 1 -and (Read-Body $noteCall[0]).internalAnalysisFlag -eq $true -and (Read-Body $noteCall[0]).detailDescriptionFlag -eq $false -and (Read-Body $noteCall[0]).text -like '*New-ComplianceSearch*')
 Check 'cw confirm: no purge, delete or move call was made' (Test-NoPurge) (Show-Calls)
+$TLast = @(([string](Read-Body $noteCall[0]).text) -split "`n")[-1]
+Check 'cw confirm: note ends with a marker that is only a code (no names, addresses or domains)' ($TLast -match '^\[phishing-report-triage: [0-9a-f]{8}\]$') $TLast
+Check 'cw confirm: public note has no marker, ref or address' ($o.public_note -notmatch '\[|Ref:|@|c0ntoso') $o.public_note
+# 2b. ServiceAI Retry of the same run: finds ticket 501 by its marker, opens no second ticket, adds no second note.
+$Mock.Calls.Clear()
+$f = Invoke-Flow (New-Body @{ confirm = $true }) $aiMal
+$o = $f.r.out
+Check 'cw rerun: success on the same ticket 501' ($o.status -eq 'success' -and $o.ticket_id -eq '501' -and $o.message -like '*opened by an earlier run*') "$($o.status) $($o.ticket_id) $($o.message) $($f.r.error)"
+Check 'cw rerun: no second ticket and no second note' (-not @(Get-Calls 'POST' "$TCW/service/tickets").Count -and -not @(Get-Calls 'POST' "$TCW/service/tickets/*/notes").Count -and (Get-TNoteCount) -eq 1) (Show-Calls)
+Check 'cw rerun: actions say the note was already there' (@($o.actions | Where-Object { $_ -like '*already there*' }).Count -eq 1) ($o.actions -join ' | ')
 
 # ---- 3. Autotask confirm on an existing ticket: likely safe, fenced AI JSON ----
-Reset-Mock (Get-Secrets 'autotask') $Handler; $TScenario.message = 'good'; $TScenario.atCompany = 42
+Reset-T 'autotask'; $TScenario.message = 'good'; $TScenario.atCompany = 42
 $f = Invoke-Flow (New-Body @{ message_id = '<news-77@fabrikam.example>'; ticket_id = '12345'; psa_company_id = '42'; company_name = ''; confirm = 'true' }) $aiSafeFenced
 $o = $f.r.out
 $atNote = @(Get-Calls 'POST' "$TAT/Tickets/12345/Notes")
@@ -165,9 +193,12 @@ Check 'autotask: status success on ticket 12345' ($o.status -eq 'success' -and $
 Check 'autotask: verdict likely-safe from fenced AI JSON' ($o.verdict -eq 'likely-safe' -and $o.classified_by -eq 'ai')
 Check 'autotask: internal note (publish Internal Only, not a workflow note type)' ($atNote.Count -eq 1 -and (Read-Body $atNote[0]).publish -eq 2 -and (Read-Body $atNote[0]).noteType -eq 1)
 Check 'autotask: no new ticket and no purge draft' (-not @(Get-Calls 'POST' "$TAT/Tickets").Count -and -not $o.purge_drafted -and $o.internal_note -notlike '*ComplianceSearch*')
+$Mock.Calls.Clear()
+$f = Invoke-Flow (New-Body @{ message_id = '<news-77@fabrikam.example>'; ticket_id = '12345'; psa_company_id = '42'; company_name = ''; confirm = 'true' }) $aiSafeFenced
+Check 'autotask rerun: success, no second note' ($f.r.out.status -eq 'success' -and -not @(Get-Calls 'POST' "$TAT/Tickets/12345/Notes").Count -and (Get-TNoteCount) -eq 1) "$($f.r.out.status) $($f.r.error) $(Show-Calls)"
 
 # ---- 4. Zendesk confirm: unreadable AI answer falls back to the rules score ----
-Reset-Mock (Get-Secrets 'zendesk') $Handler; $TScenario.message = 'bad'
+Reset-T 'zendesk'; $TScenario.message = 'bad'
 $f = Invoke-Flow (New-Body @{ confirm = $true }) 'I think this one is probably bad but I am not sure.'
 $o = $f.r.out
 $zc = @(Get-Calls 'POST' "$TZD/tickets")
@@ -175,18 +206,21 @@ $zn = @(Get-Calls 'PUT' "$TZD/tickets/506")
 Check 'zendesk: rules fallback used' ($o.classified_by -eq 'rules' -and $o.verdict -eq 'malicious' -and @($o.warnings | Where-Object { $_ -like '*rules score was used*' }).Count -eq 1) "$($o.classified_by) $($o.verdict) $($f.r.error)"
 Check 'zendesk: ticket for organization 42 at high priority' ($zc.Count -eq 1 -and (Read-Body $zc[0]).ticket.priority -eq 'high' -and (Read-Body $zc[0]).ticket.organization_id -eq 42)
 Check 'zendesk: findings note is private' ($zn.Count -eq 1 -and (Read-Body $zn[0]).ticket.comment.public -eq $false -and (Read-Body $zn[0]).ticket.comment.body -like '*New-ComplianceSearch*')
+$Mock.Calls.Clear()
+$f2 = Invoke-Flow (New-Body @{ confirm = $true }) 'I think this one is probably bad but I am not sure.'
+Check 'zendesk rerun: same ticket 506, no second ticket or comment' ($f2.r.out.ticket_id -eq '506' -and -not @(Get-Calls 'POST' "$TZD/tickets").Count -and -not @(Get-Calls 'PUT' "$TZD/tickets/506").Count -and (Get-TNoteCount) -eq 1) "$($f2.r.out.status) $($f2.r.error) $(Show-Calls)"
 $t = Invoke-Step 'ticket' $null @{ enrichment = $f.enrich.enrichment_json; request = $f.enrich.request_json; rules = $f.enrich.rules_json; warnings_json = '[]'; classification = '' }
 Check 'zendesk: empty AI answer -> rules' ($t.out.classified_by -eq 'rules' -and @($t.out.warnings | Where-Object { $_ -like '*was empty*' }).Count -eq 1) $t.error
 
 # ---- 5. Missing Mail.Read: 403 names the permission ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler; $TScenario.graph403 = $true
+Reset-T 'connectwise'; $TScenario.graph403 = $true
 $f = Invoke-Flow (New-Body @{}) $aiMal
 Check '403: stops at the lookup naming Mail.Read' ($f.stage -eq 'enrich' -and $f.r.error -like '*Mail.Read*' -and $f.r.out.status -eq 'error') "$($f.stage) $($f.r.error)"
 Check '403: nothing written' (@(Get-WriteCalls).Count -eq 0)
 $TScenario.graph403 = $false
 
 # ---- 6. Empty result: the email isn't in the mailbox ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler; $TScenario.empty = $true
+Reset-T 'connectwise'; $TScenario.empty = $true
 $f = Invoke-Flow (New-Body @{}) '{"verdict":"suspicious","confidence":0,"reasons":["The email was not found, so it could not be checked."]}'
 $o = $f.r.out
 Check 'empty: verdict unknown, preview, no purge' ($o.verdict -eq 'unknown' -and $o.status -eq 'pending_confirmation' -and -not $o.purge_drafted) "$($o.verdict) $($o.status) $($f.r.error)"
@@ -195,7 +229,7 @@ Check 'empty: medium priority planned' (@($o.planned)[0] -like 'Open a medium pr
 $TScenario.empty = $false
 
 # ---- 7. Parse: fail closed, literal @tokens, CloudRadial shape ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler
+Reset-T 'connectwise'
 $p = Invoke-Step 'parse' ([pscustomobject]@{ reporter_upn = '@UserEmail'; message_id = '<x@y.example>' })
 Check 'parse: literal @UserEmail counts as missing -> incomplete' ($p.error -like '*reporter was not identified*' -and $p.out.status -eq 'incomplete') $p.error
 $p = Invoke-Step 'parse' ([pscustomobject]@{ reporter_upn = 'megan.bowen@contoso.com' })
@@ -212,20 +246,27 @@ Check 'parse: ticket only -> forwarded From, Subject and Message-ID read from th
 Check 'parse: ticket lookup made no writes' (@(Get-WriteCalls).Count -eq 0)
 
 # ---- 8. Scope: wrong tenant, wrong company, unknown reporter ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler
+Reset-T 'connectwise'
 $f = Invoke-Flow (New-Body @{ company_tenant_id = '99999999-8888-7777-6666-555555555555' }) $aiMal
 Check 'scope: another tenant -> rejected before any mailbox read' ($f.stage -eq 'enrich' -and $f.r.out.status -eq 'rejected' -and -not @(Get-Calls 'GET' "$TGraph/users/u1/messages*").Count) $f.r.error
 $f = Invoke-Flow (New-Body @{ reporter_upn = 'nobody@contoso.com' }) $aiMal
 Check 'scope: reporter not in the tenant -> rejected' ($f.r.out.status -eq 'rejected') $f.r.error
-Reset-Mock (Get-Secrets 'autotask') $Handler; $TScenario.atCompany = 99
+Reset-T 'autotask'; $TScenario.atCompany = 99
 $f = Invoke-Flow (New-Body @{ ticket_id = '12345'; psa_company_id = '42'; confirm = $true }) $aiMal
 Check 'scope: ticket of another company -> rejected, no note' ($f.r.out.status -eq 'rejected' -and -not @(Get-Calls 'POST' "$TAT/Tickets/12345/Notes").Count) "$($f.r.out.status) $($f.r.error)"
 $TScenario.atCompany = 42
 
 # ---- 9. AI and rules two levels apart -> suspicious for a person ----
-Reset-Mock (Get-Secrets 'connectwise') $Handler; $TScenario.message = 'bad'
+Reset-T 'connectwise'; $TScenario.message = 'bad'
 $f = Invoke-Flow (New-Body @{}) $aiSafe
 $o = $f.r.out
 Check 'disagree: AI likely-safe vs rules malicious -> suspicious, no purge' ($o.verdict -eq 'suspicious' -and -not $o.purge_drafted -and @($o.warnings | Where-Object { $_ -like '*AI said likely-safe*' }).Count -eq 1) "$($o.verdict) $($f.r.error)"
+
+# ---- 10. The earlier-run lookup fails: a warning, and the ticket is still opened ----
+Reset-T 'connectwise'; $TScenario.findFail = $true
+$f = Invoke-Flow (New-Body @{ confirm = $true }) $aiMal
+$o = $f.r.out
+Check 'lookup failure: ticket still opened, with a warning' ($o.status -eq 'success' -and @(Get-Calls 'POST' "$TCW/service/tickets").Count -eq 1 -and @($o.warnings | Where-Object { $_ -like '*earlier run*' }).Count -eq 1) "$($o.status) $($f.r.error) $($o.warnings -join ' | ')"
+$TScenario.findFail = $false
 
 Complete-Test

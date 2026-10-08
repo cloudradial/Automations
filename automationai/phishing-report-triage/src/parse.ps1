@@ -9,7 +9,6 @@
 # <<< _shared/psa.ps1
 $ErrorActionPreference = 'Stop'
 
-function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Stop-Report {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
     Set-NodeOutput ([ordered]@{
@@ -24,20 +23,20 @@ function Stop-Report {
 $raw = Get-NodeInput
 if ($null -eq $raw) { Stop-Report 'incomplete' 'No input was received. Send reporter_upn plus message_id, or subject and sender.' }
 if ($raw -is [string]) { try { $raw = $raw | ConvertFrom-Json } catch { Stop-Report 'incomplete' 'The input was text that is not valid JSON.' } }
-$wrap = Get-Prop $raw 'trigger'; if ($null -ne $wrap) { $raw = $wrap; if ($raw -is [string]) { try { $raw = $raw | ConvertFrom-Json } catch { Stop-Report 'incomplete' 'The trigger body was text that is not valid JSON.' } } }
+$wrap = Get-PsaProp $raw 'trigger'; if ($null -ne $wrap) { $raw = $wrap; if ($raw -is [string]) { try { $raw = $raw | ConvertFrom-Json } catch { Stop-Report 'incomplete' 'The trigger body was text that is not valid JSON.' } } }
 
 # Collect every simple value, then the CloudRadial nested answers on top.
 $answers = @{}
 if ($raw -is [System.Collections.IDictionary]) { foreach ($k in @($raw.Keys)) { $answers[[string]$k] = $raw[$k] } }
 else { foreach ($p in $raw.PSObject.Properties) { $answers[$p.Name] = $p.Value } }
-$crTicket = Get-Prop $raw 'Ticket'
+$crTicket = Get-PsaProp $raw 'Ticket'
 if ($null -ne $crTicket) {
-    foreach ($q in @(Get-Prop $crTicket 'Questions')) { $qid = [string](Get-Prop $q 'Id'); if ($qid) { $answers[$qid] = Get-Prop $q 'Value' } }
-    $tid = Get-Prop $crTicket 'TicketId'; if ($null -ne $tid) { $answers['ticket_id'] = $tid }
+    foreach ($q in @(Get-PsaProp $crTicket 'Questions')) { $qid = [string](Get-PsaProp $q 'Id'); if ($qid) { $answers[$qid] = Get-PsaProp $q 'Value' } }
+    $tid = Get-PsaProp $crTicket 'TicketId'; if ($null -ne $tid) { $answers['ticket_id'] = $tid }
 }
-$crCompany = Get-Prop $raw 'Company'
+$crCompany = Get-PsaProp $raw 'Company'
 if ($null -ne $crCompany) {
-    foreach ($pair in @(@('CompanyTenantId', 'company_tenant_id'), @('CompanyName', 'company_name'), @('CompanyPsaId', 'psa_company_id'))) { $v = Get-Prop $crCompany $pair[0]; if ($null -ne $v) { $answers[$pair[1]] = $v } }
+    foreach ($pair in @(@('CompanyTenantId', 'company_tenant_id'), @('CompanyName', 'company_name'), @('CompanyPsaId', 'psa_company_id'))) { $v = Get-PsaProp $crCompany $pair[0]; if ($null -ne $v) { $answers[$pair[1]] = $v } }
 }
 function Get-Field {
     param([string[]]$Names)

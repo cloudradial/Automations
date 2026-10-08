@@ -10,7 +10,6 @@
 # <<< _shared/graph.ps1
 $ErrorActionPreference = 'Stop'
 
-function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 $stopState = @{ done = $false }
 function Stop-Lookup {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
@@ -66,19 +65,19 @@ function ConvertTo-ODataString { param([string]$s) return $s.Replace("'", "''") 
 # ---- input ----
 $in = Get-NodeInput
 $req = $null
-$rj = Get-Prop $in 'request_json'
+$rj = Get-GraphProp $in 'request_json'
 if ($rj -is [string] -and $rj) { $req = $rj | ConvertFrom-Json }
-if ($null -eq $req) { $req = Get-Prop $in 'request' }
+if ($null -eq $req) { $req = Get-GraphProp $in 'request' }
 if ($null -eq $req) { Stop-Lookup 'error' 'The previous step passed no request. Run the workflow from the start.' }
-$reporter = [string](Get-Prop $req 'reporter_upn')
-$ticketId = [string](Get-Prop $req 'ticket_id')
+$reporter = [string](Get-GraphProp $req 'reporter_upn')
+$ticketId = [string](Get-GraphProp $req 'ticket_id')
 $warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
-foreach ($w in @(Get-Prop $in 'warnings')) { if ($w) { $null = $warnings.Add([string]$w) } }
+foreach ($w in @(Get-GraphProp $in 'warnings')) { if ($w) { $null = $warnings.Add([string]$w) } }
 
 # ---- sign in, and keep to this company's tenant ----
 $g = Connect-Graph
-$tenantWanted = [string](Get-Prop $req 'company_tenant_id')
+$tenantWanted = [string](Get-GraphProp $req 'company_tenant_id')
 if ($tenantWanted -match '^[0-9a-fA-F-]{36}$') {
     if ($tenantWanted.ToLowerInvariant() -ne $g.TenantId.ToLowerInvariant()) { Stop-Lookup 'rejected' "The report came from tenant $tenantWanted, but this runner's Microsoft 365 app is for tenant $($g.TenantId). Nothing was looked up, to keep one client's mail out of another client's ticket." $ticketId }
 }
@@ -86,41 +85,41 @@ else { $null = $warnings.Add('No company tenant id was sent, so the tenant check
 
 $user = Get-GraphUser -Id $reporter -Select 'id,userPrincipalName,displayName,mail'
 if ($null -eq $user) { Stop-Lookup 'rejected' "The reporter $reporter isn't a user in this Microsoft 365 tenant. Nothing was looked up." $ticketId }
-$uid = [string](Get-Prop $user 'id')
-$reporterDomain = Get-Domain ([string](Get-Prop $user 'userPrincipalName'))
+$uid = [string](Get-GraphProp $user 'id')
+$reporterDomain = Get-Domain ([string](Get-GraphProp $user 'userPrincipalName'))
 $orgDomains = New-Object System.Collections.ArrayList
-foreach ($d in @($reporterDomain, (Get-Domain ([string](Get-Prop $user 'mail'))))) { if ($d -and -not $orgDomains.Contains($d)) { $null = $orgDomains.Add($d) } }
+foreach ($d in @($reporterDomain, (Get-Domain ([string](Get-GraphProp $user 'mail'))))) { if ($d -and -not $orgDomains.Contains($d)) { $null = $orgDomains.Add($d) } }
 $null = $actions.Add("Found the reporter $reporter in Microsoft 365.")
 
 # ---- find the message ----
 $sel = 'id,internetMessageId,subject,from,sender,replyTo,receivedDateTime,hasAttachments,parentFolderId'
 $base = "/v1.0/users/$uid/messages"
 $perm = 'Mail.Read'
-$msgId = [string](Get-Prop $req 'message_id')
-$subject = [string](Get-Prop $req 'subject')
-$senderIn = [string](Get-Prop $req 'sender')
+$msgId = [string](Get-GraphProp $req 'message_id')
+$subject = [string](Get-GraphProp $req 'subject')
+$senderIn = [string](Get-GraphProp $req 'sender')
 $hits = @()
 $how = ''
 if ($msgId) {
     $flt = [uri]::EscapeDataString("internetMessageId eq '$(ConvertTo-ODataString $msgId)'")
-    $hits = @(Get-Prop (Invoke-Graph GET "$($base)?`$filter=$flt&`$select=$sel&`$top=5" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
+    $hits = @(Get-GraphProp (Invoke-Graph GET "$($base)?`$filter=$flt&`$select=$sel&`$top=5" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
     $how = 'its Internet Message-ID'
 }
 if (-not $hits.Count -and $senderIn) {
     $since = (Get-Date).ToUniversalTime().AddDays(-30).ToString('yyyy-MM-ddTHH:mm:ssZ')
     $flt = [uri]::EscapeDataString("from/emailAddress/address eq '$(ConvertTo-ODataString $senderIn)' and receivedDateTime ge $since")
-    $hits = @(Get-Prop (Invoke-Graph GET "$($base)?`$filter=$flt&`$select=$sel&`$top=50" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
-    if ($subject) { $hits = @($hits | Where-Object { ([string](Get-Prop $_ 'subject')).IndexOf($subject, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) }
+    $hits = @(Get-GraphProp (Invoke-Graph GET "$($base)?`$filter=$flt&`$select=$sel&`$top=50" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
+    if ($subject) { $hits = @($hits | Where-Object { ([string](Get-GraphProp $_ 'subject')).IndexOf($subject, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) }
     $how = 'its sender' + $(if ($subject) { ' and subject' } else { '' })
 }
 if (-not $hits.Count -and $subject -and -not $senderIn) {
     $q = [uri]::EscapeDataString("`"subject:$($subject.Replace('"', ''))`"")
-    $hits = @(Get-Prop (Invoke-Graph GET "$($base)?`$search=$q&`$select=$sel&`$top=25" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
+    $hits = @(Get-GraphProp (Invoke-Graph GET "$($base)?`$search=$q&`$select=$sel&`$top=25" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
     $how = 'its subject'
 }
 # Leave out the reporter's own copies (a forward to the help desk sits in Sent Items).
-$hits = @($hits | Where-Object { ([string](Get-Prop (Get-Prop (Get-Prop $_ 'from') 'emailAddress') 'address')).ToLowerInvariant() -ne $reporter.ToLowerInvariant() })
-$hits = @($hits | Sort-Object { $v = Get-Prop $_ 'receivedDateTime'; if ($v -is [datetime]) { $v } else { try { [datetime]$v } catch { [datetime]::MinValue } } } -Descending)
+$hits = @($hits | Where-Object { ([string](Get-GraphProp (Get-GraphProp (Get-GraphProp $_ 'from') 'emailAddress') 'address')).ToLowerInvariant() -ne $reporter.ToLowerInvariant() })
+$hits = @($hits | Sort-Object { $v = Get-GraphProp $_ 'receivedDateTime'; if ($v -is [datetime]) { $v } else { try { [datetime]$v } catch { [datetime]::MinValue } } } -Descending)
 
 $e = [ordered]@{
     found = $false; located_by = $how; matches = $hits.Count
@@ -142,25 +141,25 @@ if (-not $hits.Count) {
 else {
     if ($hits.Count -gt 1) { $null = $warnings.Add("$($hits.Count) emails matched; the newest was used.") }
     $m = $hits[0]
-    $mid = [string](Get-Prop $m 'id')
+    $mid = [string](Get-GraphProp $m 'id')
     $full = Invoke-Graph GET "$base/$mid`?`$select=$sel,internetMessageHeaders,body" -Permission $perm -Headers @{ Prefer = 'outlook.body-content-type="html"' }
     $e.found = $true
-    $e.subject = [string](Get-Prop $full 'subject')
-    $rcv = Get-Prop $full 'receivedDateTime'
+    $e.subject = [string](Get-GraphProp $full 'subject')
+    $rcv = Get-GraphProp $full 'receivedDateTime'
     $e.received = if ($rcv -is [datetime]) { $rcv.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') } else { [string]$rcv }
-    $e.internet_message_id = [string](Get-Prop $full 'internetMessageId')
-    $fromEa = Get-Prop (Get-Prop $full 'from') 'emailAddress'
-    $e.from_name = [string](Get-Prop $fromEa 'name')
-    $e.from_address = ([string](Get-Prop $fromEa 'address')).ToLowerInvariant()
+    $e.internet_message_id = [string](Get-GraphProp $full 'internetMessageId')
+    $fromEa = Get-GraphProp (Get-GraphProp $full 'from') 'emailAddress'
+    $e.from_name = [string](Get-GraphProp $fromEa 'name')
+    $e.from_address = ([string](Get-GraphProp $fromEa 'address')).ToLowerInvariant()
     $e.from_domain = Get-Domain $e.from_address
-    $e.sender_address = ([string](Get-Prop (Get-Prop (Get-Prop $full 'sender') 'emailAddress') 'address')).ToLowerInvariant()
-    $e.reply_to = @(@(Get-Prop $full 'replyTo') | Where-Object { $null -ne $_ } | ForEach-Object { ([string](Get-Prop (Get-Prop $_ 'emailAddress') 'address')).ToLowerInvariant() } | Where-Object { $_ })
+    $e.sender_address = ([string](Get-GraphProp (Get-GraphProp (Get-GraphProp $full 'sender') 'emailAddress') 'address')).ToLowerInvariant()
+    $e.reply_to = @(@(Get-GraphProp $full 'replyTo') | Where-Object { $null -ne $_ } | ForEach-Object { ([string](Get-GraphProp (Get-GraphProp $_ 'emailAddress') 'address')).ToLowerInvariant() } | Where-Object { $_ })
     $null = $actions.Add("Found the email in $reporter's mailbox by $how.")
 
     # -- headers --
-    $headers = @(Get-Prop $full 'internetMessageHeaders' | Where-Object { $null -ne $_ })
-    $ar = @($headers | Where-Object { [string](Get-Prop $_ 'name') -ieq 'Authentication-Results' } | ForEach-Object { [string](Get-Prop $_ 'value') })
-    $rp = @($headers | Where-Object { [string](Get-Prop $_ 'name') -ieq 'Return-Path' } | ForEach-Object { [string](Get-Prop $_ 'value') })
+    $headers = @(Get-GraphProp $full 'internetMessageHeaders' | Where-Object { $null -ne $_ })
+    $ar = @($headers | Where-Object { [string](Get-GraphProp $_ 'name') -ieq 'Authentication-Results' } | ForEach-Object { [string](Get-GraphProp $_ 'value') })
+    $rp = @($headers | Where-Object { [string](Get-GraphProp $_ 'name') -ieq 'Return-Path' } | ForEach-Object { [string](Get-GraphProp $_ 'value') })
     if ($rp.Count) { $e.return_path = ($rp[0].Trim('<', '>', ' ')).ToLowerInvariant() }
     if ($ar.Count) {
         $a = $ar[0]
@@ -197,7 +196,7 @@ else {
     if ($fromDom -match '^xn--|\.xn--') { $null = $flags.Add("The sender domain $fromDom uses look-alike (punycode) characters."); $score += 2 }
 
     # -- links --
-    $html = [string](Get-Prop (Get-Prop $full 'body') 'content')
+    $html = [string](Get-GraphProp (Get-GraphProp $full 'body') 'content')
     $urls = New-Object System.Collections.ArrayList
     $textMismatch = New-Object System.Collections.ArrayList
     foreach ($am in [regex]::Matches($html, '(?is)<a\b[^>]*?href\s*=\s*["'']([^"'']+)["''][^>]*>(.*?)</a>')) {
@@ -229,8 +228,8 @@ else {
     if ($textMismatch.Count) { $null = $flags.Add("Link text shows one site but points to another ($(@($textMismatch | Select-Object -First 3) -join '; '))."); $score += 2 }
 
     # -- attachments (names and types only; content is never downloaded) --
-    if ((Get-Prop $full 'hasAttachments') -eq $true -or (Get-Prop $m 'hasAttachments') -eq $true -or $html -match '(?i)cid:') {
-        $atts = @(Get-Prop (Invoke-Graph GET "$base/$mid/attachments?`$select=name,contentType,size,isInline" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
+    if ((Get-GraphProp $full 'hasAttachments') -eq $true -or (Get-GraphProp $m 'hasAttachments') -eq $true -or $html -match '(?i)cid:') {
+        $atts = @(Get-GraphProp (Invoke-Graph GET "$base/$mid/attachments?`$select=name,contentType,size,isInline" -Permission $perm) 'value' | Where-Object { $null -ne $_ })
         $risk = @{
             executable = @('exe', 'scr', 'msi', 'bat', 'cmd', 'com', 'cpl', 'pif', 'js', 'jse', 'vbs', 'vbe', 'wsf', 'wsh', 'ps1', 'hta', 'lnk', 'jar', 'reg', 'dll', 'appx', 'msix')
             macro      = @('docm', 'dotm', 'xlsm', 'xltm', 'xlam', 'xlsb', 'pptm', 'potm', 'ppam', 'sldm')
@@ -244,15 +243,15 @@ else {
         $labels = @{ executable = 'a program or script'; macro = 'an Office file with macros'; legacy = 'an older Office format that can carry macros'; html = 'a web page or SVG file (often a fake sign-in page)'; disk = 'a disk image'; archive = 'a compressed archive'; onenote = 'a OneNote file' }
         $list = New-Object System.Collections.ArrayList
         foreach ($at in $atts) {
-            $name = [string](Get-Prop $at 'name')
-            $type = [string](Get-Prop $at '@odata.type')
+            $name = [string](Get-GraphProp $at 'name')
+            $type = [string](Get-GraphProp $at '@odata.type')
             $extn = if ($name -match '\.([A-Za-z0-9]{1,6})$') { $Matches[1].ToLowerInvariant() } else { '' }
             $kind = ''
             foreach ($k in @('executable', 'disk', 'macro', 'html', 'onenote', 'archive', 'legacy')) { if ($risk[$k] -contains $extn) { $kind = $k; break } }
             $double = ($name -match '\.(pdf|docx?|xlsx?|jpe?g|png|txt)\.[A-Za-z0-9]{2,5}$' -and $kind)
             $isItem = $type -match 'itemAttachment'
-            $inline = (Get-Prop $at 'isInline') -eq $true
-            $null = $list.Add([ordered]@{ name = $name; content_type = [string](Get-Prop $at 'contentType'); size = (Get-Prop $at 'size'); inline = $inline; risk = $(if ($kind) { $kind } elseif ($isItem) { 'attached-email' } else { '' }) })
+            $inline = (Get-GraphProp $at 'isInline') -eq $true
+            $null = $list.Add([ordered]@{ name = $name; content_type = [string](Get-GraphProp $at 'contentType'); size = (Get-GraphProp $at 'size'); inline = $inline; risk = $(if ($kind) { $kind } elseif ($isItem) { 'attached-email' } else { '' }) })
             if ($kind) { $null = $flags.Add("Attachment $name is $($labels[$kind])."); $score += $weights[$kind] }
             if ($double) { $null = $flags.Add("Attachment $name hides its real type behind a double extension."); $score += 2 }
             if ($isItem) { $null = $flags.Add("Attachment $name is another email attached inside this one; check it too.") }

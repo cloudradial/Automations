@@ -35,6 +35,8 @@ Four steps. Only step 3 uses AI, and it can't call any tools.
    - otherwise, it opens a ticket titled `Phishing report (<verdict>): <subject>` for the company, with **high** priority for malicious, **medium** for suspicious or not found, and **low** for likely safe, and adds the findings as an internal note. The ticket description itself holds no findings.
    - **Malicious:** the internal note also carries a **draft** Security & Compliance search-and-purge (`New-ComplianceSearch` for the sender, subject and arrival dates, then `New-ComplianceSearchAction -Purge -PurgeType SoftDelete`) for a technician to review and run. **This workflow never purges, deletes or moves any email.**
 
+**Retry-safe.** The findings note ends with a marker made from the reported email (a short code from its Internet Message-ID, never a name or address), so a ServiceAI Action Runs **Retry** adds nothing twice. Without a `ticket_id`, a confirm run first looks for an open ticket for the company from the last 3 days, titled `Phishing report`, that already holds this report's marker, and reuses it instead of opening a second ticket. If that lookup fails, the run says so in `warnings` and opens the ticket anyway, because a missing phishing ticket is worse than a duplicate.
+
 `confirm` defaults to `false`: the run returns the verdict, the full note and what it would do (`status: pending_confirmation`) and writes nothing to the PSA. Send `confirm: true` to write. Portal forms and ServiceAI Triage Actions send `"confirm": "true"` in their body, because nobody is there to rerun them.
 
 ### This workflow or the certified Phishing Alert Triage agent?

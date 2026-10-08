@@ -14,8 +14,10 @@ foreach ($p in $todo) {
     }
     if ($p.notice) {
         try {
-            $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeClosingText $p) -Title 'Closing this ticket' -Public -Marker (Get-NudgeMarker 'closing notice' $p.since)
+            $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeClosingText $p) -Title 'Closing this ticket' -Public -Marker (Get-NudgePublicMarker 'closing notice' $p.since)
             $p.noticeResult = $(if ($r -eq 'already-present') { 'sent earlier' } else { 'sent' })
+            # The readable "closing notice" marker goes on an internal note, so the next run retries only the close.
+            $null = Add-NudgeCompanionNote $p 'closing notice' (Get-NudgeNoticeNote $p) $state
         }
         catch {
             $p.noticeResult = 'failed'; $p.closeResult = 'not closed'; $p.error = [string]$_.Exception.Message

@@ -89,6 +89,8 @@ foreach ($t in $found) {
 
     $ours = @(); $others = @()
     foreach ($n in $notes) {
+        # Our own public reminder or notice shows only an opaque Ref line; its companion internal note holds the marker.
+        if (Test-NudgeOwnPublic $n) { continue }
         $m = [regex]::Match($n.text, $NudgeMarkerPattern)
         if ($m.Success) { $ours += , @{ created = $n.created; tag = $m.Groups['tag'].Value.Trim().ToLowerInvariant(); since = (ConvertTo-PsaDate $m.Groups['since'].Value.Trim()) } }
         else { $others += , $n }

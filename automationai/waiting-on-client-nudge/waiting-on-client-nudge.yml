@@ -345,20 +345,27 @@ definition:
           # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
           # Throws when the PSA rejects it.
           # -Marker makes the write safe to repeat (a ServiceAI Action Runs "Retry" replays the whole request):
-          # "[marker]" is added as the note's last line, and when a note on the ticket already holds that marker
-          # nothing is written. With -Marker it returns 'written' or 'already-present'; without it, nothing
-          # (so existing callers that don't discard the result are unchanged). If the notes can't be read, it
-          # throws rather than risk a second copy.
+          # when a note on the ticket already holds the marker nothing is written. An internal note gets "[marker]"
+          # as its last line. A public (client-visible) note never shows the marker: its last line is only the
+          # opaque "Ref: xxxxxxxx" (Get-PsaMarkerRef), and a "[marker]" the caller put in -Text is taken out.
+          # With -Marker it returns 'written' or 'already-present'; without it, nothing (so existing callers that
+          # don't discard the result are unchanged). If the notes can't be read, it throws rather than risk a
+          # second copy. Never put personal data (names, UPNs, email addresses) or internal tags in a marker.
           function Add-PsaNote {
               param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal, [string]$Marker = '')
               $c = Get-PsaConn
               $tag = ''
+              $pub = [bool]$Public
               if ($Marker) {
                   $tag = Get-PsaMarkerTag $Marker
                   if (Test-PsaNoteMarker -Id $Id -Marker $tag) { return 'already-present' }
-                  if ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
+                  if ($pub) {
+                      $ref = Get-PsaMarkerRef $tag
+                      $Text = ([string]$Text) -replace [regex]::Escape($tag), ''
+                      if (-not (Test-PsaMarkerRefIn $Text $ref)) { $Text = "$($Text.TrimEnd())`n$ref" }
+                  }
+                  elseif ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
               }
-              $pub = [bool]$Public
               switch ($c.Psa) {
                   'connectwise' {
                       # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
@@ -856,11 +863,30 @@ definition:
               if ($m -match '[\[\]\r\n]') { throw "A note marker can't contain brackets or line breaks ('$Marker')." }
               return "[$m]"
           }
-          # $true when a note on the ticket already holds "[marker]" (case-insensitive). Pass -Notes to reuse notes
-          # already read with Get-PsaTicketNotes. Throws when the notes can't be read.
+          # The opaque line a public note shows instead of its marker: "Ref: " and the first 8 hex characters
+          # (lowercase) of the SHA-256 of "[marker]" lowercased, as UTF-8. It reveals nothing of the marker text.
+          function Get-PsaMarkerRef {
+              param([string]$Marker)
+              $tag = (Get-PsaMarkerTag $Marker).ToLowerInvariant()
+              $sha = [System.Security.Cryptography.SHA256]::Create()
+              try { $h = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($tag)) } finally { $sha.Dispose() }
+              return 'Ref: ' + ((@($h[0..3] | ForEach-Object { $_.ToString('x2') })) -join '')
+          }
+          # $true when $Text holds the "Ref: xxxxxxxx" line $Ref (case-insensitive, not part of a longer hex run).
+          function Test-PsaMarkerRefIn {
+              param([string]$Text, [string]$Ref)
+              if (-not $Text) { return $false }
+              $hex = ([string]$Ref -replace '^(?i)Ref:\s*', '')
+              return ($Text -match "(?i)(?<![0-9a-z])Ref:\s*$([regex]::Escape($hex))(?![0-9a-f])")
+          }
+          # $true when a note on the ticket already holds the marker (case-insensitive): either the full "[marker]"
+          # (internal notes, and public notes written before public notes switched to the opaque ref) or the
+          # "Ref: xxxxxxxx" line a public note carries. Pass -Notes to reuse notes already read with
+          # Get-PsaTicketNotes. Throws when the notes can't be read.
           function Test-PsaNoteMarker {
               param([string]$Id, [string]$Marker, $Notes = $null)
               $tag = Get-PsaMarkerTag $Marker
+              $ref = Get-PsaMarkerRef $tag
               if ($null -eq $Notes) {
                   try { $Notes = @(Get-PsaTicketNotes -Id $Id -TextOnly) }
                   catch { throw "Couldn't check ticket $Id for an earlier note marked $tag, so nothing was written: $($_.Exception.Message)" }
@@ -869,6 +895,7 @@ definition:
                   if ($null -eq $n) { continue }
                   $t = if ($n -is [string]) { $n } else { [string](Get-PsaProp $n 'text') }
                   if ($t.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+                  if (Test-PsaMarkerRefIn $t $ref) { return $true }
               }
               return $false
           }
@@ -1071,15 +1098,18 @@ definition:
               $created = ConvertTo-PsaDate (& $v 'created')
               $updated = ConvertTo-PsaDate (& $v 'updated'); if ($null -eq $updated) { $updated = $created }
               $cfg = @(& $v 'configIds' | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+              $closedAt = ConvertTo-PsaDate (& $v 'closed')
+              $isClosed = [bool](& $v 'isClosed')
+              $byStatus = if ($F.ContainsKey('closedByStatus')) { [bool]$F['closedByStatus'] } else { $isClosed }
               return @{
                   id = $id; number = $(if (Test-PsaBlank (& $v 'number')) { $id } else { [string](& $v 'number') }); summary = (& $t 'summary'); description = (& $t 'description')
-                  status = (& $t 'status'); isClosed = [bool](& $v 'isClosed')
+                  status = (& $t 'status'); isClosed = $isClosed; closedByStatus = $byStatus; closedDateSet = ($null -ne $closedAt)
                   companyId = (& $s 'companyId'); companyName = (& $t 'companyName')
                   contactId = (& $s 'contactId'); contactName = (& $t 'contactName'); contactEmail = (& $t 'contactEmail')
                   assigneeId = (& $s 'assigneeId'); assigneeName = (& $t 'assigneeName')
                   queue = $(if ($qname) { $qname } else { $qid }); queueId = $qid; queueName = $qname
                   priority = $prio; priorityLevel = (Get-PsaPriorityLevel $prio)
-                  created = $created; updated = $updated; closed = (ConvertTo-PsaDate (& $v 'closed')); statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
+                  created = $created; updated = $updated; closed = $closedAt; statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
                   ticketType = (& $t 'ticketType'); configIds = $cfg
                   url = $(if ($id) { Get-PsaTicketUrl $id } else { '' }); raw = (& $v 'raw')
               }
@@ -1118,6 +1148,8 @@ definition:
                   }
                   'halopsa' {
                       # Unverified: the list row field names (HaloAPI module). A status id is named from the cached status list.
+                      # isClosed counts a datecleared as closed; closedByStatus (for -OpenByStatus) uses hasbeenclosed and the
+                      # status name only. Unverified: whether hasbeenclosed stays set after a ticket is reopened.
                       $sname = [string](Get-PsaProp $t 'status_name'); $sid = [string](Get-PsaProp $t 'status_id')
                       if (-not $sname -and $sid) {
                           $list = @(); try { $list = @(Get-PsaStatusList) } catch { $PsaState.Statuses = @() }
@@ -1132,6 +1164,7 @@ definition:
                       $upd = Get-PsaProp $t 'lastactiondate'; if (-not (ConvertTo-PsaDate $upd)) { $upd = Get-PsaProp $t 'last_update' }
                       $F += @{ id = (Get-PsaProp $t 'id'); summary = (Get-PsaProp $t 'summary'); description = (Get-PsaProp $t 'details'); status = $sname
                           isClosed = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or ($null -ne (ConvertTo-PsaDate $cl)) -or [bool]$AssumeClosed)
+                          closedByStatus = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or $sname -match '(?i)\b(closed|resolved|completed?|cancell?ed)\b' -or [bool]$AssumeClosed)
                           companyId = (Get-PsaProp $t 'client_id'); companyName = (Get-PsaProp $t 'client_name')
                           contactId = (Get-PsaProp $t 'user_id'); contactName = (Get-PsaProp $t 'user_name'); contactEmail = (Get-PsaFirst $t @('user_email', 'emailaddress'))
                           assigneeId = (Get-PsaProp $t 'agent_id'); assigneeName = (Get-PsaProp $t 'agent_name'); queueId = (Get-PsaProp $t 'team_id'); queueName = (Get-PsaProp $t 'team'); priority = $plabel
@@ -1139,10 +1172,12 @@ definition:
                           configIds = @(Get-PsaProp $t 'assets' | Where-Object { $null -ne $_ } | ForEach-Object { Get-PsaProp $_ 'id' }) }
                   }
                   'kaseyabms' {
-                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name.
+                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name;
+                      # closedByStatus (for -OpenByStatus) from the status name only.
                       $sname = [string](Get-PsaProp $t 'StatusName'); $cd = Get-PsaProp $t 'CompletedDate'
                       $F += @{ id = (Get-PsaProp $t 'Id'); number = (Get-PsaProp $t 'TicketNumber'); summary = (Get-PsaProp $t 'Title'); description = (Get-PsaProp $t 'Details')
                           status = $sname; isClosed = (($null -ne (ConvertTo-PsaDate $cd)) -or $sname -match '(?i)complete|closed|resolved|cancel')
+                          closedByStatus = ($sname -match '(?i)complete|closed|resolved|cancel')
                           companyId = (Get-PsaProp $t 'AccountId'); companyName = (Get-PsaProp $t 'AccountName')
                           contactId = (Get-PsaProp $t 'ContactId'); contactName = (Get-PsaProp $t 'ContactName'); contactEmail = (Get-PsaProp $t 'ContactEmail')
                           assigneeId = (Get-PsaProp $t 'AssigneeId'); assigneeName = (Get-PsaProp $t 'AssigneeName'); queueId = (Get-PsaProp $t 'QueueId'); queueName = (Get-PsaProp $t 'QueueName'); priority = (Get-PsaProp $t 'PriorityName')
@@ -1173,7 +1208,12 @@ definition:
           # Lists tickets. Every filter is sent to the PSA where it can take it, and every row is checked again here,
           # so a filter the PSA ignores (or that isn't verified yet) never lets the wrong ticket through.
           #   -Status <names>      exact status names, case-insensitive (alias -StatusName). Several are allowed.
-          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both.
+          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both. A closed date counts
+          #                        as closed on HaloPSA and Kaseya BMS even when the status is open.
+          #   -OpenByStatus        like -Open, but "open" is decided by the PSA's status or closed flag only, never by a
+          #                        closed date, so an open ticket that wrongly carries a closed date is kept (the
+          #                        psa-hygiene check). Only differs from -Open on HaloPSA and Kaseya BMS; on Kaseya BMS
+          #                        Filter.ExcludeCompleted isn't sent, so completed rows are read and dropped here.
           #   -CompanyId <id>      only this PSA company id (numeric). Rows for any other company, or with no company,
           #                        are always dropped here, so one client's run never sees another client's ticket.
           #   -CreatedAfter/-CreatedBefore, -UpdatedAfter/-UpdatedBefore, -ClosedAfter/-ClosedBefore
@@ -1184,18 +1224,21 @@ definition:
           #   -IncludeSla          Zendesk only: sideload SLA policy metrics so Get-PsaTicketSla needs no extra call.
           # Returns @(@{ id; number; summary; description; status; isClosed; companyId; companyName; contactId; contactName;
           #   contactEmail; assigneeId; assigneeName; queue; queueId; queueName; priority; priorityLevel; created; updated;
-          #   closed; statusChanged; ticketType; configIds; url; raw }). priority is the PSA's own label; priorityLevel is
+          #   closed; statusChanged; ticketType; configIds; url; raw; closedByStatus; closedDateSet }). closedByStatus is the
+          #   status or closed flag alone; closedDateSet is $true when the row carries a closed date. priority is the PSA's own label; priorityLevel is
           #   critical, high, medium, low or ''. created, updated (falls back to created), closed and statusChanged are UTC
           #   [datetime] or $null. Names a PSA leaves out of list rows are '' (Resolve-PsaTicketNames fills them).
           function Find-PsaTickets {
               param(
-                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$Closed, [string]$CompanyId = '',
+                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$OpenByStatus, [switch]$Closed, [string]$CompanyId = '',
                   $CreatedAfter = $null, $CreatedBefore = $null, $UpdatedAfter = $null, $UpdatedBefore = $null, $ClosedAfter = $null, $ClosedBefore = $null,
                   [string]$Text = '', [int]$Max = 500, [ValidateSet('oldest', 'newest')][string]$Order = 'oldest', [switch]$IncludeSla
               )
               $c = Get-PsaConn
               $PsaState.FindTruncated = $false
-              if ($Open -and $Closed) { throw 'Find-PsaTickets takes -Open or -Closed, not both.' }
+              if (($Open -or $OpenByStatus) -and $Closed) { throw 'Find-PsaTickets takes -Open (or -OpenByStatus) or -Closed, not both.' }
+              $byStatus = [bool]$OpenByStatus
+              $wantOpen = [bool]($Open -or $OpenByStatus)
               if ($Max -lt 1) { $Max = 1 }
               $co = ([string]$CompanyId).Trim(); if ($co.StartsWith('@')) { $co = '' }
               if ($co -and $co -notmatch '^\d+$') { throw "Find-PsaTickets needs a numeric PSA company id, not '$co'. Use Resolve-PsaCompanyId or Find-PsaCompany to look a name up." }
@@ -1214,7 +1257,8 @@ definition:
                   param($r)
                   if ($co -and $r.companyId -ne $co) { return $false }
                   if ($want.Count -and $want -notcontains $r.status.Trim().ToLowerInvariant()) { return $false }
-                  if ($Open -and $r.isClosed) { return $false }
+                  if ($byStatus) { if ($r.closedByStatus) { return $false } }
+                  elseif ($Open -and $r.isClosed) { return $false }
                   if ($Closed -and -not $r.isClosed) { return $false }
                   foreach ($k in @(@('created', 'ca', 'cb'), @('updated', 'ua', 'ub'), @('closed', 'xa', 'xb'))) {
                       $lo = $bd[$k[1]]; $hi = $bd[$k[2]]
@@ -1237,7 +1281,7 @@ definition:
                       # "summary contains". closedFlag, company/id and status/name follow the CW conditions syntax.
                       $esc = { param($x) ([string]$x).Replace('\', '\\').Replace('"', '\"') }
                       $conds = @()
-                      if ($Open) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
+                      if ($wantOpen) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
                       if ($co) { $conds += "company/id=$co" }
                       if ($names.Count -eq 1) { $conds += ('status/name="' + (& $esc $names[0]) + '"') }
                       elseif ($names.Count -gt 1) { $conds += ('(' + (@($names | ForEach-Object { 'status/name="' + (& $esc $_) + '"' }) -join ' or ') + ')') }
@@ -1260,7 +1304,7 @@ definition:
                       # as "updated", completedDate as "closed", the "in" operator, and "contains" on title.
                       $complete = @(Get-PsaAtCompleteStatuses)
                       $f = @()
-                      if ($Open) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
+                      if ($wantOpen) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
                       elseif ($Closed -and -not $hasClosedRange -and -not $names.Count) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($complete) } }
                       if ($names.Count -eq 1) { $f += [ordered]@{ op = 'eq'; field = 'status'; value = [int](Get-PsaStatusId $names[0]) } }
                       elseif ($names.Count -gt 1) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($names | ForEach-Object { [int](Get-PsaStatusId $_) }) } }
@@ -1283,7 +1327,7 @@ definition:
                       # Unverified: open_only, closed_only, status_id, client_id, search, the datesearch/startdate/enddate filters
                       # (one date field per request), order/orderdesc, and the list row field names (HaloAPI module).
                       $q = @()
-                      if ($Open) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
+                      if ($wantOpen) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
                       if ($names.Count -eq 1) { $q += "status_id=$(Get-PsaStatusId $names[0])" }
                       if ($co) { $q += "client_id=$co" }
                       if ($hasClosedRange) { $q += 'datesearch=datecleared'; if ($iso.xa) { $q += "startdate=$(ConvertTo-PsaQuery $iso.xa)" }; if ($iso.xb) { $q += "enddate=$(ConvertTo-PsaQuery $iso.xb)" }; $server.closed = $true }
@@ -1306,7 +1350,7 @@ definition:
                       # Unverified live: the date format, whether the To dates are inclusive, whether StatusNames is exact,
                       # and the list field names. There is no text filter, so text is matched here.
                       $q = @()
-                      if ($Open) { $q += 'Filter.ExcludeCompleted=1' }
+                      if ($Open -and -not $byStatus) { $q += 'Filter.ExcludeCompleted=1' }
                       foreach ($n in $names) { $q += "Filter.StatusNames=$(ConvertTo-PsaQuery $n)" }
                       if ($co) { $q += "Filter.AccountIds=$co" }
                       foreach ($pair in @(@('ca', 'Filter.OpenDateFrom', 'created'), @('cb', 'Filter.OpenDateTo', 'created'), @('ua', 'Filter.LastActivityUpdateFrom', 'updated'), @('ub', 'Filter.LastActivityUpdateTo', 'updated'), @('xa', 'Filter.CompletedDateFrom', 'closed'), @('xb', 'Filter.CompletedDateTo', 'closed'))) {
@@ -1329,7 +1373,7 @@ definition:
                       # Resolved is the only closed status. Before-dates are checked here.
                       $q = @()
                       if ($names.Count -eq 1) { $q += "status=$(ConvertTo-PsaQuery $names[0])" }
-                      elseif ($Open) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
+                      elseif ($wantOpen) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
                       elseif ($Closed -and -not $bd.xa) { $q += 'status=Resolved' }
                       if ($co) { $q += "customer_id=$co" }
                       if ($iso.ca) { $q += "created_after=$(ConvertTo-PsaQuery $iso.ca)" }
@@ -1351,7 +1395,7 @@ definition:
                       # with ISO times. Unverified: organization:<id>, solved>= / solved< and the tickets(slas) sideload on search.
                       # Search returns at most 1,000 results (10 pages). A ticket has no solved date of its own, so closed is $null.
                       $sq = 'type:ticket'
-                      if ($Open) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
+                      if ($wantOpen) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
                       if ($names.Count -eq 1) { $sq += " status:$($names[0].ToLowerInvariant())" }
                       if ($co) { $sq += " organization:$co" }
                       foreach ($pair in @(@('ca', 'created>=', 'created'), @('cb', 'created<', 'created'), @('ua', 'updated>=', 'updated'), @('ub', 'updated<', 'updated'), @('xa', 'solved>=', 'closed'), @('xb', 'solved<', 'closed'))) {
@@ -1968,19 +2012,27 @@ definition:
           # <<< _shared/psa-tickets.ps1
           # >>> src/common.ps1 (generated by src/build.js; edit the source, not this block)
           # ---------- src/common.ps1: helpers shared by the Waiting-on-Client Nudge steps ----------
-          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every note this workflow writes ends with a marker:
+          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every internal note this workflow writes ends with a marker:
           #   [waiting-nudge: <tag>, waiting since <yyyy-MM-ddTHH:mmZ>]
           # Tags: "day N" (reminder sent), "closing notice", "closed", "close held" (P1/P2), "failed".
           # The markers are how a later run knows what was already sent and when the wait started, so a
-          # reminder is never sent twice for the same day. The public reminder and closing notice also pass their
-          # marker to Add-PsaNote -Marker, which checks the ticket again just before writing, so two runs that
-          # overlap (a Routine and a manual run, or an Action Runs Retry) still send the client one copy.
+          # reminder is never sent twice for the same day. The client never sees them: the public reminder and closing
+          # notice pass their own marker (Get-NudgePublicMarker) to Add-PsaNote -Marker, which shows the client only an
+          # opaque "Ref: xxxxxxxx" line and checks the ticket again just before writing, so two runs that overlap (a
+          # Routine and a manual run, or an Action Runs Retry) still send the client one copy. Right after each public
+          # note, the step writes the companion internal note carrying the readable tag that later runs read.
+          # Public notes written before this change ended with the bracketed marker; those are still read.
 
           $NudgeMarkerPattern = '\[waiting-nudge: (?<tag>[^,\]]+), waiting since (?<since>[^\]]+)\]'
 
           function Format-NudgeStamp { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('yyyy-MM-ddTHH:mmZ', [Globalization.CultureInfo]::InvariantCulture) }
           function Format-NudgeDay { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('dddd, MMMM d, yyyy', [Globalization.CultureInfo]::GetCultureInfo('en-US')) }
           function Get-NudgeMarker { param([string]$Tag, $Since) return "[waiting-nudge: $Tag, waiting since $(Format-NudgeStamp $Since)]" }
+          # The marker for a public note. Distinct from the internal one, so the companion internal note isn't mistaken for it.
+          function Get-NudgePublicMarker { param([string]$Tag, $Since) return "waiting-nudge public: $Tag, waiting since $(Format-NudgeStamp $Since)" }
+          # $true for this workflow's own public reminder or closing notice (our wording plus the opaque Ref line), so
+          # step 1 doesn't count it as a person's note that starts a new wait.
+          function Test-NudgeOwnPublic { param($n) $t = [string]$n.text; return ((-not $n.internal) -and (-not $n.fromClient) -and $t -match '(?i)(?<![0-9a-z])Ref:\s*[0-9a-f]{8}(?![0-9a-f])' -and $t -match "(?s)^\s*Hello,\s+We('re following up on| haven't heard back about) ticket #") }
           function Get-NudgePlural { param([int]$n, [string]$One, [string]$Many) if ($n -eq 1) { return "1 $One" }; return "$n $Many" }
 
           # A PSCustomObject (from the previous step's JSON) as a hashtable, one level deep.
@@ -2028,8 +2080,6 @@ definition:
                   "When you have a moment, please reply to this message with the details we asked for, or let us know if you no longer need help."
                   ''
                   "If we don't hear back, we'll close this ticket on $(Format-NudgeDay $p.closeBy). If you need help after that, just reply or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker "day $($p.day)" $p.since)
               ) -join "`n"
           }
 
@@ -2042,10 +2092,18 @@ definition:
                   "We haven't heard back about ticket #$($p.number)$subject for $($p.daysWaiting) days, so we're closing it for now."
                   ''
                   "If you still need help, just reply to this message or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker 'closing notice' $p.since)
               ) -join "`n"
           }
+
+          # The internal note written right after a public one, carrying the readable marker later runs read. Retry-safe.
+          # Returns 'written', 'already written' or 'failed' (with a warning added to the state).
+          function Add-NudgeCompanionNote {
+              param($p, [string]$Tag, [string]$Text, $State)
+              try { $r = Add-PsaNote -Id $p.ticketId -Text $Text -Title 'Waiting-on-Client Nudge' -Marker (Get-NudgeMarker $Tag $p.since); return $(if ($r -eq 'already-present') { 'already written' } else { 'written' }) }
+              catch { $State.warnings += "Couldn't write the internal note on ticket $(Get-NudgeTicketLabel $p): $($_.Exception.Message)"; return 'failed' }
+          }
+          function Get-NudgeReminderNote { param($p) return "Waiting-on-Client Nudge sent reminder $($p.reminderNo) of $($p.reminderTotal) (day $($p.day)) to the client as a public note. The ticket has waited $($p.daysWaiting) days, since $(Format-NudgeDay $p.since). It will be closed on $(Format-NudgeDay $p.closeBy) if the client doesn't reply." }
+          function Get-NudgeNoticeNote { param($p) return "Waiting-on-Client Nudge sent the closing notice to the client as a public note after $($p.daysWaiting) days waiting, since $(Format-NudgeDay $p.since). The ticket is closed next." }
           # ---------- end src/common.ps1 ----------
           # <<< src/common.ps1
           # === Step 1: Find tickets in Waiting ===
@@ -2139,6 +2197,8 @@ definition:
 
               $ours = @(); $others = @()
               foreach ($n in $notes) {
+                  # Our own public reminder or notice shows only an opaque Ref line; its companion internal note holds the marker.
+                  if (Test-NudgeOwnPublic $n) { continue }
                   $m = [regex]::Match($n.text, $NudgeMarkerPattern)
                   if ($m.Success) { $ours += , @{ created = $n.created; tag = $m.Groups['tag'].Value.Trim().ToLowerInvariant(); since = (ConvertTo-PsaDate $m.Groups['since'].Value.Trim()) } }
                   else { $others += , $n }
@@ -2539,20 +2599,27 @@ definition:
           # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
           # Throws when the PSA rejects it.
           # -Marker makes the write safe to repeat (a ServiceAI Action Runs "Retry" replays the whole request):
-          # "[marker]" is added as the note's last line, and when a note on the ticket already holds that marker
-          # nothing is written. With -Marker it returns 'written' or 'already-present'; without it, nothing
-          # (so existing callers that don't discard the result are unchanged). If the notes can't be read, it
-          # throws rather than risk a second copy.
+          # when a note on the ticket already holds the marker nothing is written. An internal note gets "[marker]"
+          # as its last line. A public (client-visible) note never shows the marker: its last line is only the
+          # opaque "Ref: xxxxxxxx" (Get-PsaMarkerRef), and a "[marker]" the caller put in -Text is taken out.
+          # With -Marker it returns 'written' or 'already-present'; without it, nothing (so existing callers that
+          # don't discard the result are unchanged). If the notes can't be read, it throws rather than risk a
+          # second copy. Never put personal data (names, UPNs, email addresses) or internal tags in a marker.
           function Add-PsaNote {
               param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal, [string]$Marker = '')
               $c = Get-PsaConn
               $tag = ''
+              $pub = [bool]$Public
               if ($Marker) {
                   $tag = Get-PsaMarkerTag $Marker
                   if (Test-PsaNoteMarker -Id $Id -Marker $tag) { return 'already-present' }
-                  if ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
+                  if ($pub) {
+                      $ref = Get-PsaMarkerRef $tag
+                      $Text = ([string]$Text) -replace [regex]::Escape($tag), ''
+                      if (-not (Test-PsaMarkerRefIn $Text $ref)) { $Text = "$($Text.TrimEnd())`n$ref" }
+                  }
+                  elseif ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
               }
-              $pub = [bool]$Public
               switch ($c.Psa) {
                   'connectwise' {
                       # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
@@ -3050,11 +3117,30 @@ definition:
               if ($m -match '[\[\]\r\n]') { throw "A note marker can't contain brackets or line breaks ('$Marker')." }
               return "[$m]"
           }
-          # $true when a note on the ticket already holds "[marker]" (case-insensitive). Pass -Notes to reuse notes
-          # already read with Get-PsaTicketNotes. Throws when the notes can't be read.
+          # The opaque line a public note shows instead of its marker: "Ref: " and the first 8 hex characters
+          # (lowercase) of the SHA-256 of "[marker]" lowercased, as UTF-8. It reveals nothing of the marker text.
+          function Get-PsaMarkerRef {
+              param([string]$Marker)
+              $tag = (Get-PsaMarkerTag $Marker).ToLowerInvariant()
+              $sha = [System.Security.Cryptography.SHA256]::Create()
+              try { $h = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($tag)) } finally { $sha.Dispose() }
+              return 'Ref: ' + ((@($h[0..3] | ForEach-Object { $_.ToString('x2') })) -join '')
+          }
+          # $true when $Text holds the "Ref: xxxxxxxx" line $Ref (case-insensitive, not part of a longer hex run).
+          function Test-PsaMarkerRefIn {
+              param([string]$Text, [string]$Ref)
+              if (-not $Text) { return $false }
+              $hex = ([string]$Ref -replace '^(?i)Ref:\s*', '')
+              return ($Text -match "(?i)(?<![0-9a-z])Ref:\s*$([regex]::Escape($hex))(?![0-9a-f])")
+          }
+          # $true when a note on the ticket already holds the marker (case-insensitive): either the full "[marker]"
+          # (internal notes, and public notes written before public notes switched to the opaque ref) or the
+          # "Ref: xxxxxxxx" line a public note carries. Pass -Notes to reuse notes already read with
+          # Get-PsaTicketNotes. Throws when the notes can't be read.
           function Test-PsaNoteMarker {
               param([string]$Id, [string]$Marker, $Notes = $null)
               $tag = Get-PsaMarkerTag $Marker
+              $ref = Get-PsaMarkerRef $tag
               if ($null -eq $Notes) {
                   try { $Notes = @(Get-PsaTicketNotes -Id $Id -TextOnly) }
                   catch { throw "Couldn't check ticket $Id for an earlier note marked $tag, so nothing was written: $($_.Exception.Message)" }
@@ -3063,6 +3149,7 @@ definition:
                   if ($null -eq $n) { continue }
                   $t = if ($n -is [string]) { $n } else { [string](Get-PsaProp $n 'text') }
                   if ($t.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+                  if (Test-PsaMarkerRefIn $t $ref) { return $true }
               }
               return $false
           }
@@ -3265,15 +3352,18 @@ definition:
               $created = ConvertTo-PsaDate (& $v 'created')
               $updated = ConvertTo-PsaDate (& $v 'updated'); if ($null -eq $updated) { $updated = $created }
               $cfg = @(& $v 'configIds' | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+              $closedAt = ConvertTo-PsaDate (& $v 'closed')
+              $isClosed = [bool](& $v 'isClosed')
+              $byStatus = if ($F.ContainsKey('closedByStatus')) { [bool]$F['closedByStatus'] } else { $isClosed }
               return @{
                   id = $id; number = $(if (Test-PsaBlank (& $v 'number')) { $id } else { [string](& $v 'number') }); summary = (& $t 'summary'); description = (& $t 'description')
-                  status = (& $t 'status'); isClosed = [bool](& $v 'isClosed')
+                  status = (& $t 'status'); isClosed = $isClosed; closedByStatus = $byStatus; closedDateSet = ($null -ne $closedAt)
                   companyId = (& $s 'companyId'); companyName = (& $t 'companyName')
                   contactId = (& $s 'contactId'); contactName = (& $t 'contactName'); contactEmail = (& $t 'contactEmail')
                   assigneeId = (& $s 'assigneeId'); assigneeName = (& $t 'assigneeName')
                   queue = $(if ($qname) { $qname } else { $qid }); queueId = $qid; queueName = $qname
                   priority = $prio; priorityLevel = (Get-PsaPriorityLevel $prio)
-                  created = $created; updated = $updated; closed = (ConvertTo-PsaDate (& $v 'closed')); statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
+                  created = $created; updated = $updated; closed = $closedAt; statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
                   ticketType = (& $t 'ticketType'); configIds = $cfg
                   url = $(if ($id) { Get-PsaTicketUrl $id } else { '' }); raw = (& $v 'raw')
               }
@@ -3312,6 +3402,8 @@ definition:
                   }
                   'halopsa' {
                       # Unverified: the list row field names (HaloAPI module). A status id is named from the cached status list.
+                      # isClosed counts a datecleared as closed; closedByStatus (for -OpenByStatus) uses hasbeenclosed and the
+                      # status name only. Unverified: whether hasbeenclosed stays set after a ticket is reopened.
                       $sname = [string](Get-PsaProp $t 'status_name'); $sid = [string](Get-PsaProp $t 'status_id')
                       if (-not $sname -and $sid) {
                           $list = @(); try { $list = @(Get-PsaStatusList) } catch { $PsaState.Statuses = @() }
@@ -3326,6 +3418,7 @@ definition:
                       $upd = Get-PsaProp $t 'lastactiondate'; if (-not (ConvertTo-PsaDate $upd)) { $upd = Get-PsaProp $t 'last_update' }
                       $F += @{ id = (Get-PsaProp $t 'id'); summary = (Get-PsaProp $t 'summary'); description = (Get-PsaProp $t 'details'); status = $sname
                           isClosed = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or ($null -ne (ConvertTo-PsaDate $cl)) -or [bool]$AssumeClosed)
+                          closedByStatus = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or $sname -match '(?i)\b(closed|resolved|completed?|cancell?ed)\b' -or [bool]$AssumeClosed)
                           companyId = (Get-PsaProp $t 'client_id'); companyName = (Get-PsaProp $t 'client_name')
                           contactId = (Get-PsaProp $t 'user_id'); contactName = (Get-PsaProp $t 'user_name'); contactEmail = (Get-PsaFirst $t @('user_email', 'emailaddress'))
                           assigneeId = (Get-PsaProp $t 'agent_id'); assigneeName = (Get-PsaProp $t 'agent_name'); queueId = (Get-PsaProp $t 'team_id'); queueName = (Get-PsaProp $t 'team'); priority = $plabel
@@ -3333,10 +3426,12 @@ definition:
                           configIds = @(Get-PsaProp $t 'assets' | Where-Object { $null -ne $_ } | ForEach-Object { Get-PsaProp $_ 'id' }) }
                   }
                   'kaseyabms' {
-                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name.
+                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name;
+                      # closedByStatus (for -OpenByStatus) from the status name only.
                       $sname = [string](Get-PsaProp $t 'StatusName'); $cd = Get-PsaProp $t 'CompletedDate'
                       $F += @{ id = (Get-PsaProp $t 'Id'); number = (Get-PsaProp $t 'TicketNumber'); summary = (Get-PsaProp $t 'Title'); description = (Get-PsaProp $t 'Details')
                           status = $sname; isClosed = (($null -ne (ConvertTo-PsaDate $cd)) -or $sname -match '(?i)complete|closed|resolved|cancel')
+                          closedByStatus = ($sname -match '(?i)complete|closed|resolved|cancel')
                           companyId = (Get-PsaProp $t 'AccountId'); companyName = (Get-PsaProp $t 'AccountName')
                           contactId = (Get-PsaProp $t 'ContactId'); contactName = (Get-PsaProp $t 'ContactName'); contactEmail = (Get-PsaProp $t 'ContactEmail')
                           assigneeId = (Get-PsaProp $t 'AssigneeId'); assigneeName = (Get-PsaProp $t 'AssigneeName'); queueId = (Get-PsaProp $t 'QueueId'); queueName = (Get-PsaProp $t 'QueueName'); priority = (Get-PsaProp $t 'PriorityName')
@@ -3367,7 +3462,12 @@ definition:
           # Lists tickets. Every filter is sent to the PSA where it can take it, and every row is checked again here,
           # so a filter the PSA ignores (or that isn't verified yet) never lets the wrong ticket through.
           #   -Status <names>      exact status names, case-insensitive (alias -StatusName). Several are allowed.
-          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both.
+          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both. A closed date counts
+          #                        as closed on HaloPSA and Kaseya BMS even when the status is open.
+          #   -OpenByStatus        like -Open, but "open" is decided by the PSA's status or closed flag only, never by a
+          #                        closed date, so an open ticket that wrongly carries a closed date is kept (the
+          #                        psa-hygiene check). Only differs from -Open on HaloPSA and Kaseya BMS; on Kaseya BMS
+          #                        Filter.ExcludeCompleted isn't sent, so completed rows are read and dropped here.
           #   -CompanyId <id>      only this PSA company id (numeric). Rows for any other company, or with no company,
           #                        are always dropped here, so one client's run never sees another client's ticket.
           #   -CreatedAfter/-CreatedBefore, -UpdatedAfter/-UpdatedBefore, -ClosedAfter/-ClosedBefore
@@ -3378,18 +3478,21 @@ definition:
           #   -IncludeSla          Zendesk only: sideload SLA policy metrics so Get-PsaTicketSla needs no extra call.
           # Returns @(@{ id; number; summary; description; status; isClosed; companyId; companyName; contactId; contactName;
           #   contactEmail; assigneeId; assigneeName; queue; queueId; queueName; priority; priorityLevel; created; updated;
-          #   closed; statusChanged; ticketType; configIds; url; raw }). priority is the PSA's own label; priorityLevel is
+          #   closed; statusChanged; ticketType; configIds; url; raw; closedByStatus; closedDateSet }). closedByStatus is the
+          #   status or closed flag alone; closedDateSet is $true when the row carries a closed date. priority is the PSA's own label; priorityLevel is
           #   critical, high, medium, low or ''. created, updated (falls back to created), closed and statusChanged are UTC
           #   [datetime] or $null. Names a PSA leaves out of list rows are '' (Resolve-PsaTicketNames fills them).
           function Find-PsaTickets {
               param(
-                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$Closed, [string]$CompanyId = '',
+                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$OpenByStatus, [switch]$Closed, [string]$CompanyId = '',
                   $CreatedAfter = $null, $CreatedBefore = $null, $UpdatedAfter = $null, $UpdatedBefore = $null, $ClosedAfter = $null, $ClosedBefore = $null,
                   [string]$Text = '', [int]$Max = 500, [ValidateSet('oldest', 'newest')][string]$Order = 'oldest', [switch]$IncludeSla
               )
               $c = Get-PsaConn
               $PsaState.FindTruncated = $false
-              if ($Open -and $Closed) { throw 'Find-PsaTickets takes -Open or -Closed, not both.' }
+              if (($Open -or $OpenByStatus) -and $Closed) { throw 'Find-PsaTickets takes -Open (or -OpenByStatus) or -Closed, not both.' }
+              $byStatus = [bool]$OpenByStatus
+              $wantOpen = [bool]($Open -or $OpenByStatus)
               if ($Max -lt 1) { $Max = 1 }
               $co = ([string]$CompanyId).Trim(); if ($co.StartsWith('@')) { $co = '' }
               if ($co -and $co -notmatch '^\d+$') { throw "Find-PsaTickets needs a numeric PSA company id, not '$co'. Use Resolve-PsaCompanyId or Find-PsaCompany to look a name up." }
@@ -3408,7 +3511,8 @@ definition:
                   param($r)
                   if ($co -and $r.companyId -ne $co) { return $false }
                   if ($want.Count -and $want -notcontains $r.status.Trim().ToLowerInvariant()) { return $false }
-                  if ($Open -and $r.isClosed) { return $false }
+                  if ($byStatus) { if ($r.closedByStatus) { return $false } }
+                  elseif ($Open -and $r.isClosed) { return $false }
                   if ($Closed -and -not $r.isClosed) { return $false }
                   foreach ($k in @(@('created', 'ca', 'cb'), @('updated', 'ua', 'ub'), @('closed', 'xa', 'xb'))) {
                       $lo = $bd[$k[1]]; $hi = $bd[$k[2]]
@@ -3431,7 +3535,7 @@ definition:
                       # "summary contains". closedFlag, company/id and status/name follow the CW conditions syntax.
                       $esc = { param($x) ([string]$x).Replace('\', '\\').Replace('"', '\"') }
                       $conds = @()
-                      if ($Open) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
+                      if ($wantOpen) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
                       if ($co) { $conds += "company/id=$co" }
                       if ($names.Count -eq 1) { $conds += ('status/name="' + (& $esc $names[0]) + '"') }
                       elseif ($names.Count -gt 1) { $conds += ('(' + (@($names | ForEach-Object { 'status/name="' + (& $esc $_) + '"' }) -join ' or ') + ')') }
@@ -3454,7 +3558,7 @@ definition:
                       # as "updated", completedDate as "closed", the "in" operator, and "contains" on title.
                       $complete = @(Get-PsaAtCompleteStatuses)
                       $f = @()
-                      if ($Open) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
+                      if ($wantOpen) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
                       elseif ($Closed -and -not $hasClosedRange -and -not $names.Count) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($complete) } }
                       if ($names.Count -eq 1) { $f += [ordered]@{ op = 'eq'; field = 'status'; value = [int](Get-PsaStatusId $names[0]) } }
                       elseif ($names.Count -gt 1) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($names | ForEach-Object { [int](Get-PsaStatusId $_) }) } }
@@ -3477,7 +3581,7 @@ definition:
                       # Unverified: open_only, closed_only, status_id, client_id, search, the datesearch/startdate/enddate filters
                       # (one date field per request), order/orderdesc, and the list row field names (HaloAPI module).
                       $q = @()
-                      if ($Open) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
+                      if ($wantOpen) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
                       if ($names.Count -eq 1) { $q += "status_id=$(Get-PsaStatusId $names[0])" }
                       if ($co) { $q += "client_id=$co" }
                       if ($hasClosedRange) { $q += 'datesearch=datecleared'; if ($iso.xa) { $q += "startdate=$(ConvertTo-PsaQuery $iso.xa)" }; if ($iso.xb) { $q += "enddate=$(ConvertTo-PsaQuery $iso.xb)" }; $server.closed = $true }
@@ -3500,7 +3604,7 @@ definition:
                       # Unverified live: the date format, whether the To dates are inclusive, whether StatusNames is exact,
                       # and the list field names. There is no text filter, so text is matched here.
                       $q = @()
-                      if ($Open) { $q += 'Filter.ExcludeCompleted=1' }
+                      if ($Open -and -not $byStatus) { $q += 'Filter.ExcludeCompleted=1' }
                       foreach ($n in $names) { $q += "Filter.StatusNames=$(ConvertTo-PsaQuery $n)" }
                       if ($co) { $q += "Filter.AccountIds=$co" }
                       foreach ($pair in @(@('ca', 'Filter.OpenDateFrom', 'created'), @('cb', 'Filter.OpenDateTo', 'created'), @('ua', 'Filter.LastActivityUpdateFrom', 'updated'), @('ub', 'Filter.LastActivityUpdateTo', 'updated'), @('xa', 'Filter.CompletedDateFrom', 'closed'), @('xb', 'Filter.CompletedDateTo', 'closed'))) {
@@ -3523,7 +3627,7 @@ definition:
                       # Resolved is the only closed status. Before-dates are checked here.
                       $q = @()
                       if ($names.Count -eq 1) { $q += "status=$(ConvertTo-PsaQuery $names[0])" }
-                      elseif ($Open) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
+                      elseif ($wantOpen) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
                       elseif ($Closed -and -not $bd.xa) { $q += 'status=Resolved' }
                       if ($co) { $q += "customer_id=$co" }
                       if ($iso.ca) { $q += "created_after=$(ConvertTo-PsaQuery $iso.ca)" }
@@ -3545,7 +3649,7 @@ definition:
                       # with ISO times. Unverified: organization:<id>, solved>= / solved< and the tickets(slas) sideload on search.
                       # Search returns at most 1,000 results (10 pages). A ticket has no solved date of its own, so closed is $null.
                       $sq = 'type:ticket'
-                      if ($Open) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
+                      if ($wantOpen) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
                       if ($names.Count -eq 1) { $sq += " status:$($names[0].ToLowerInvariant())" }
                       if ($co) { $sq += " organization:$co" }
                       foreach ($pair in @(@('ca', 'created>=', 'created'), @('cb', 'created<', 'created'), @('ua', 'updated>=', 'updated'), @('ub', 'updated<', 'updated'), @('xa', 'solved>=', 'closed'), @('xb', 'solved<', 'closed'))) {
@@ -4162,19 +4266,27 @@ definition:
           # <<< _shared/psa-tickets.ps1
           # >>> src/common.ps1 (generated by src/build.js; edit the source, not this block)
           # ---------- src/common.ps1: helpers shared by the Waiting-on-Client Nudge steps ----------
-          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every note this workflow writes ends with a marker:
+          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every internal note this workflow writes ends with a marker:
           #   [waiting-nudge: <tag>, waiting since <yyyy-MM-ddTHH:mmZ>]
           # Tags: "day N" (reminder sent), "closing notice", "closed", "close held" (P1/P2), "failed".
           # The markers are how a later run knows what was already sent and when the wait started, so a
-          # reminder is never sent twice for the same day. The public reminder and closing notice also pass their
-          # marker to Add-PsaNote -Marker, which checks the ticket again just before writing, so two runs that
-          # overlap (a Routine and a manual run, or an Action Runs Retry) still send the client one copy.
+          # reminder is never sent twice for the same day. The client never sees them: the public reminder and closing
+          # notice pass their own marker (Get-NudgePublicMarker) to Add-PsaNote -Marker, which shows the client only an
+          # opaque "Ref: xxxxxxxx" line and checks the ticket again just before writing, so two runs that overlap (a
+          # Routine and a manual run, or an Action Runs Retry) still send the client one copy. Right after each public
+          # note, the step writes the companion internal note carrying the readable tag that later runs read.
+          # Public notes written before this change ended with the bracketed marker; those are still read.
 
           $NudgeMarkerPattern = '\[waiting-nudge: (?<tag>[^,\]]+), waiting since (?<since>[^\]]+)\]'
 
           function Format-NudgeStamp { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('yyyy-MM-ddTHH:mmZ', [Globalization.CultureInfo]::InvariantCulture) }
           function Format-NudgeDay { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('dddd, MMMM d, yyyy', [Globalization.CultureInfo]::GetCultureInfo('en-US')) }
           function Get-NudgeMarker { param([string]$Tag, $Since) return "[waiting-nudge: $Tag, waiting since $(Format-NudgeStamp $Since)]" }
+          # The marker for a public note. Distinct from the internal one, so the companion internal note isn't mistaken for it.
+          function Get-NudgePublicMarker { param([string]$Tag, $Since) return "waiting-nudge public: $Tag, waiting since $(Format-NudgeStamp $Since)" }
+          # $true for this workflow's own public reminder or closing notice (our wording plus the opaque Ref line), so
+          # step 1 doesn't count it as a person's note that starts a new wait.
+          function Test-NudgeOwnPublic { param($n) $t = [string]$n.text; return ((-not $n.internal) -and (-not $n.fromClient) -and $t -match '(?i)(?<![0-9a-z])Ref:\s*[0-9a-f]{8}(?![0-9a-f])' -and $t -match "(?s)^\s*Hello,\s+We('re following up on| haven't heard back about) ticket #") }
           function Get-NudgePlural { param([int]$n, [string]$One, [string]$Many) if ($n -eq 1) { return "1 $One" }; return "$n $Many" }
 
           # A PSCustomObject (from the previous step's JSON) as a hashtable, one level deep.
@@ -4222,8 +4334,6 @@ definition:
                   "When you have a moment, please reply to this message with the details we asked for, or let us know if you no longer need help."
                   ''
                   "If we don't hear back, we'll close this ticket on $(Format-NudgeDay $p.closeBy). If you need help after that, just reply or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker "day $($p.day)" $p.since)
               ) -join "`n"
           }
 
@@ -4236,15 +4346,24 @@ definition:
                   "We haven't heard back about ticket #$($p.number)$subject for $($p.daysWaiting) days, so we're closing it for now."
                   ''
                   "If you still need help, just reply to this message or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker 'closing notice' $p.since)
               ) -join "`n"
           }
+
+          # The internal note written right after a public one, carrying the readable marker later runs read. Retry-safe.
+          # Returns 'written', 'already written' or 'failed' (with a warning added to the state).
+          function Add-NudgeCompanionNote {
+              param($p, [string]$Tag, [string]$Text, $State)
+              try { $r = Add-PsaNote -Id $p.ticketId -Text $Text -Title 'Waiting-on-Client Nudge' -Marker (Get-NudgeMarker $Tag $p.since); return $(if ($r -eq 'already-present') { 'already written' } else { 'written' }) }
+              catch { $State.warnings += "Couldn't write the internal note on ticket $(Get-NudgeTicketLabel $p): $($_.Exception.Message)"; return 'failed' }
+          }
+          function Get-NudgeReminderNote { param($p) return "Waiting-on-Client Nudge sent reminder $($p.reminderNo) of $($p.reminderTotal) (day $($p.day)) to the client as a public note. The ticket has waited $($p.daysWaiting) days, since $(Format-NudgeDay $p.since). It will be closed on $(Format-NudgeDay $p.closeBy) if the client doesn't reply." }
+          function Get-NudgeNoticeNote { param($p) return "Waiting-on-Client Nudge sent the closing notice to the client as a public note after $($p.daysWaiting) days waiting, since $(Format-NudgeDay $p.since). The ticket is closed next." }
           # ---------- end src/common.ps1 ----------
           # <<< src/common.ps1
           # === Step 2: Send reminders ===
           # Posts the polite reminder as a public note, so the PSA emails the client. With preview: true it only
-          # records what it would send.
+          # records what it would send. Right after the public note it writes the companion internal note with the
+          # readable "day N" marker that later runs read (the client sees only an opaque Ref line).
 
           $state = Read-NudgeState
           $todo = @($state.plan | Where-Object { $_.action -eq 'remind' })
@@ -4252,8 +4371,9 @@ definition:
           foreach ($p in $todo) {
               if ($state.settings.preview) { $p.remindResult = 'would send'; continue }
               try {
-                  $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeReminderText $p) -Title 'Reminder: we are waiting on your reply' -Public -Marker (Get-NudgeMarker "day $($p.day)" $p.since)
+                  $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeReminderText $p) -Title 'Reminder: we are waiting on your reply' -Public -Marker (Get-NudgePublicMarker "day $($p.day)" $p.since)
                   $p.remindResult = $(if ($r -eq 'already-present') { 'already sent' } else { 'sent' })
+                  $p.noteResult = Add-NudgeCompanionNote $p "day $($p.day)" (Get-NudgeReminderNote $p) $state
               }
               catch {
                   $p.remindResult = 'failed'; $p.error = [string]$_.Exception.Message
@@ -4599,20 +4719,27 @@ definition:
           # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
           # Throws when the PSA rejects it.
           # -Marker makes the write safe to repeat (a ServiceAI Action Runs "Retry" replays the whole request):
-          # "[marker]" is added as the note's last line, and when a note on the ticket already holds that marker
-          # nothing is written. With -Marker it returns 'written' or 'already-present'; without it, nothing
-          # (so existing callers that don't discard the result are unchanged). If the notes can't be read, it
-          # throws rather than risk a second copy.
+          # when a note on the ticket already holds the marker nothing is written. An internal note gets "[marker]"
+          # as its last line. A public (client-visible) note never shows the marker: its last line is only the
+          # opaque "Ref: xxxxxxxx" (Get-PsaMarkerRef), and a "[marker]" the caller put in -Text is taken out.
+          # With -Marker it returns 'written' or 'already-present'; without it, nothing (so existing callers that
+          # don't discard the result are unchanged). If the notes can't be read, it throws rather than risk a
+          # second copy. Never put personal data (names, UPNs, email addresses) or internal tags in a marker.
           function Add-PsaNote {
               param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal, [string]$Marker = '')
               $c = Get-PsaConn
               $tag = ''
+              $pub = [bool]$Public
               if ($Marker) {
                   $tag = Get-PsaMarkerTag $Marker
                   if (Test-PsaNoteMarker -Id $Id -Marker $tag) { return 'already-present' }
-                  if ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
+                  if ($pub) {
+                      $ref = Get-PsaMarkerRef $tag
+                      $Text = ([string]$Text) -replace [regex]::Escape($tag), ''
+                      if (-not (Test-PsaMarkerRefIn $Text $ref)) { $Text = "$($Text.TrimEnd())`n$ref" }
+                  }
+                  elseif ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
               }
-              $pub = [bool]$Public
               switch ($c.Psa) {
                   'connectwise' {
                       # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
@@ -5110,11 +5237,30 @@ definition:
               if ($m -match '[\[\]\r\n]') { throw "A note marker can't contain brackets or line breaks ('$Marker')." }
               return "[$m]"
           }
-          # $true when a note on the ticket already holds "[marker]" (case-insensitive). Pass -Notes to reuse notes
-          # already read with Get-PsaTicketNotes. Throws when the notes can't be read.
+          # The opaque line a public note shows instead of its marker: "Ref: " and the first 8 hex characters
+          # (lowercase) of the SHA-256 of "[marker]" lowercased, as UTF-8. It reveals nothing of the marker text.
+          function Get-PsaMarkerRef {
+              param([string]$Marker)
+              $tag = (Get-PsaMarkerTag $Marker).ToLowerInvariant()
+              $sha = [System.Security.Cryptography.SHA256]::Create()
+              try { $h = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($tag)) } finally { $sha.Dispose() }
+              return 'Ref: ' + ((@($h[0..3] | ForEach-Object { $_.ToString('x2') })) -join '')
+          }
+          # $true when $Text holds the "Ref: xxxxxxxx" line $Ref (case-insensitive, not part of a longer hex run).
+          function Test-PsaMarkerRefIn {
+              param([string]$Text, [string]$Ref)
+              if (-not $Text) { return $false }
+              $hex = ([string]$Ref -replace '^(?i)Ref:\s*', '')
+              return ($Text -match "(?i)(?<![0-9a-z])Ref:\s*$([regex]::Escape($hex))(?![0-9a-f])")
+          }
+          # $true when a note on the ticket already holds the marker (case-insensitive): either the full "[marker]"
+          # (internal notes, and public notes written before public notes switched to the opaque ref) or the
+          # "Ref: xxxxxxxx" line a public note carries. Pass -Notes to reuse notes already read with
+          # Get-PsaTicketNotes. Throws when the notes can't be read.
           function Test-PsaNoteMarker {
               param([string]$Id, [string]$Marker, $Notes = $null)
               $tag = Get-PsaMarkerTag $Marker
+              $ref = Get-PsaMarkerRef $tag
               if ($null -eq $Notes) {
                   try { $Notes = @(Get-PsaTicketNotes -Id $Id -TextOnly) }
                   catch { throw "Couldn't check ticket $Id for an earlier note marked $tag, so nothing was written: $($_.Exception.Message)" }
@@ -5123,6 +5269,7 @@ definition:
                   if ($null -eq $n) { continue }
                   $t = if ($n -is [string]) { $n } else { [string](Get-PsaProp $n 'text') }
                   if ($t.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+                  if (Test-PsaMarkerRefIn $t $ref) { return $true }
               }
               return $false
           }
@@ -5325,15 +5472,18 @@ definition:
               $created = ConvertTo-PsaDate (& $v 'created')
               $updated = ConvertTo-PsaDate (& $v 'updated'); if ($null -eq $updated) { $updated = $created }
               $cfg = @(& $v 'configIds' | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+              $closedAt = ConvertTo-PsaDate (& $v 'closed')
+              $isClosed = [bool](& $v 'isClosed')
+              $byStatus = if ($F.ContainsKey('closedByStatus')) { [bool]$F['closedByStatus'] } else { $isClosed }
               return @{
                   id = $id; number = $(if (Test-PsaBlank (& $v 'number')) { $id } else { [string](& $v 'number') }); summary = (& $t 'summary'); description = (& $t 'description')
-                  status = (& $t 'status'); isClosed = [bool](& $v 'isClosed')
+                  status = (& $t 'status'); isClosed = $isClosed; closedByStatus = $byStatus; closedDateSet = ($null -ne $closedAt)
                   companyId = (& $s 'companyId'); companyName = (& $t 'companyName')
                   contactId = (& $s 'contactId'); contactName = (& $t 'contactName'); contactEmail = (& $t 'contactEmail')
                   assigneeId = (& $s 'assigneeId'); assigneeName = (& $t 'assigneeName')
                   queue = $(if ($qname) { $qname } else { $qid }); queueId = $qid; queueName = $qname
                   priority = $prio; priorityLevel = (Get-PsaPriorityLevel $prio)
-                  created = $created; updated = $updated; closed = (ConvertTo-PsaDate (& $v 'closed')); statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
+                  created = $created; updated = $updated; closed = $closedAt; statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
                   ticketType = (& $t 'ticketType'); configIds = $cfg
                   url = $(if ($id) { Get-PsaTicketUrl $id } else { '' }); raw = (& $v 'raw')
               }
@@ -5372,6 +5522,8 @@ definition:
                   }
                   'halopsa' {
                       # Unverified: the list row field names (HaloAPI module). A status id is named from the cached status list.
+                      # isClosed counts a datecleared as closed; closedByStatus (for -OpenByStatus) uses hasbeenclosed and the
+                      # status name only. Unverified: whether hasbeenclosed stays set after a ticket is reopened.
                       $sname = [string](Get-PsaProp $t 'status_name'); $sid = [string](Get-PsaProp $t 'status_id')
                       if (-not $sname -and $sid) {
                           $list = @(); try { $list = @(Get-PsaStatusList) } catch { $PsaState.Statuses = @() }
@@ -5386,6 +5538,7 @@ definition:
                       $upd = Get-PsaProp $t 'lastactiondate'; if (-not (ConvertTo-PsaDate $upd)) { $upd = Get-PsaProp $t 'last_update' }
                       $F += @{ id = (Get-PsaProp $t 'id'); summary = (Get-PsaProp $t 'summary'); description = (Get-PsaProp $t 'details'); status = $sname
                           isClosed = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or ($null -ne (ConvertTo-PsaDate $cl)) -or [bool]$AssumeClosed)
+                          closedByStatus = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or $sname -match '(?i)\b(closed|resolved|completed?|cancell?ed)\b' -or [bool]$AssumeClosed)
                           companyId = (Get-PsaProp $t 'client_id'); companyName = (Get-PsaProp $t 'client_name')
                           contactId = (Get-PsaProp $t 'user_id'); contactName = (Get-PsaProp $t 'user_name'); contactEmail = (Get-PsaFirst $t @('user_email', 'emailaddress'))
                           assigneeId = (Get-PsaProp $t 'agent_id'); assigneeName = (Get-PsaProp $t 'agent_name'); queueId = (Get-PsaProp $t 'team_id'); queueName = (Get-PsaProp $t 'team'); priority = $plabel
@@ -5393,10 +5546,12 @@ definition:
                           configIds = @(Get-PsaProp $t 'assets' | Where-Object { $null -ne $_ } | ForEach-Object { Get-PsaProp $_ 'id' }) }
                   }
                   'kaseyabms' {
-                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name.
+                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name;
+                      # closedByStatus (for -OpenByStatus) from the status name only.
                       $sname = [string](Get-PsaProp $t 'StatusName'); $cd = Get-PsaProp $t 'CompletedDate'
                       $F += @{ id = (Get-PsaProp $t 'Id'); number = (Get-PsaProp $t 'TicketNumber'); summary = (Get-PsaProp $t 'Title'); description = (Get-PsaProp $t 'Details')
                           status = $sname; isClosed = (($null -ne (ConvertTo-PsaDate $cd)) -or $sname -match '(?i)complete|closed|resolved|cancel')
+                          closedByStatus = ($sname -match '(?i)complete|closed|resolved|cancel')
                           companyId = (Get-PsaProp $t 'AccountId'); companyName = (Get-PsaProp $t 'AccountName')
                           contactId = (Get-PsaProp $t 'ContactId'); contactName = (Get-PsaProp $t 'ContactName'); contactEmail = (Get-PsaProp $t 'ContactEmail')
                           assigneeId = (Get-PsaProp $t 'AssigneeId'); assigneeName = (Get-PsaProp $t 'AssigneeName'); queueId = (Get-PsaProp $t 'QueueId'); queueName = (Get-PsaProp $t 'QueueName'); priority = (Get-PsaProp $t 'PriorityName')
@@ -5427,7 +5582,12 @@ definition:
           # Lists tickets. Every filter is sent to the PSA where it can take it, and every row is checked again here,
           # so a filter the PSA ignores (or that isn't verified yet) never lets the wrong ticket through.
           #   -Status <names>      exact status names, case-insensitive (alias -StatusName). Several are allowed.
-          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both.
+          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both. A closed date counts
+          #                        as closed on HaloPSA and Kaseya BMS even when the status is open.
+          #   -OpenByStatus        like -Open, but "open" is decided by the PSA's status or closed flag only, never by a
+          #                        closed date, so an open ticket that wrongly carries a closed date is kept (the
+          #                        psa-hygiene check). Only differs from -Open on HaloPSA and Kaseya BMS; on Kaseya BMS
+          #                        Filter.ExcludeCompleted isn't sent, so completed rows are read and dropped here.
           #   -CompanyId <id>      only this PSA company id (numeric). Rows for any other company, or with no company,
           #                        are always dropped here, so one client's run never sees another client's ticket.
           #   -CreatedAfter/-CreatedBefore, -UpdatedAfter/-UpdatedBefore, -ClosedAfter/-ClosedBefore
@@ -5438,18 +5598,21 @@ definition:
           #   -IncludeSla          Zendesk only: sideload SLA policy metrics so Get-PsaTicketSla needs no extra call.
           # Returns @(@{ id; number; summary; description; status; isClosed; companyId; companyName; contactId; contactName;
           #   contactEmail; assigneeId; assigneeName; queue; queueId; queueName; priority; priorityLevel; created; updated;
-          #   closed; statusChanged; ticketType; configIds; url; raw }). priority is the PSA's own label; priorityLevel is
+          #   closed; statusChanged; ticketType; configIds; url; raw; closedByStatus; closedDateSet }). closedByStatus is the
+          #   status or closed flag alone; closedDateSet is $true when the row carries a closed date. priority is the PSA's own label; priorityLevel is
           #   critical, high, medium, low or ''. created, updated (falls back to created), closed and statusChanged are UTC
           #   [datetime] or $null. Names a PSA leaves out of list rows are '' (Resolve-PsaTicketNames fills them).
           function Find-PsaTickets {
               param(
-                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$Closed, [string]$CompanyId = '',
+                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$OpenByStatus, [switch]$Closed, [string]$CompanyId = '',
                   $CreatedAfter = $null, $CreatedBefore = $null, $UpdatedAfter = $null, $UpdatedBefore = $null, $ClosedAfter = $null, $ClosedBefore = $null,
                   [string]$Text = '', [int]$Max = 500, [ValidateSet('oldest', 'newest')][string]$Order = 'oldest', [switch]$IncludeSla
               )
               $c = Get-PsaConn
               $PsaState.FindTruncated = $false
-              if ($Open -and $Closed) { throw 'Find-PsaTickets takes -Open or -Closed, not both.' }
+              if (($Open -or $OpenByStatus) -and $Closed) { throw 'Find-PsaTickets takes -Open (or -OpenByStatus) or -Closed, not both.' }
+              $byStatus = [bool]$OpenByStatus
+              $wantOpen = [bool]($Open -or $OpenByStatus)
               if ($Max -lt 1) { $Max = 1 }
               $co = ([string]$CompanyId).Trim(); if ($co.StartsWith('@')) { $co = '' }
               if ($co -and $co -notmatch '^\d+$') { throw "Find-PsaTickets needs a numeric PSA company id, not '$co'. Use Resolve-PsaCompanyId or Find-PsaCompany to look a name up." }
@@ -5468,7 +5631,8 @@ definition:
                   param($r)
                   if ($co -and $r.companyId -ne $co) { return $false }
                   if ($want.Count -and $want -notcontains $r.status.Trim().ToLowerInvariant()) { return $false }
-                  if ($Open -and $r.isClosed) { return $false }
+                  if ($byStatus) { if ($r.closedByStatus) { return $false } }
+                  elseif ($Open -and $r.isClosed) { return $false }
                   if ($Closed -and -not $r.isClosed) { return $false }
                   foreach ($k in @(@('created', 'ca', 'cb'), @('updated', 'ua', 'ub'), @('closed', 'xa', 'xb'))) {
                       $lo = $bd[$k[1]]; $hi = $bd[$k[2]]
@@ -5491,7 +5655,7 @@ definition:
                       # "summary contains". closedFlag, company/id and status/name follow the CW conditions syntax.
                       $esc = { param($x) ([string]$x).Replace('\', '\\').Replace('"', '\"') }
                       $conds = @()
-                      if ($Open) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
+                      if ($wantOpen) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
                       if ($co) { $conds += "company/id=$co" }
                       if ($names.Count -eq 1) { $conds += ('status/name="' + (& $esc $names[0]) + '"') }
                       elseif ($names.Count -gt 1) { $conds += ('(' + (@($names | ForEach-Object { 'status/name="' + (& $esc $_) + '"' }) -join ' or ') + ')') }
@@ -5514,7 +5678,7 @@ definition:
                       # as "updated", completedDate as "closed", the "in" operator, and "contains" on title.
                       $complete = @(Get-PsaAtCompleteStatuses)
                       $f = @()
-                      if ($Open) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
+                      if ($wantOpen) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
                       elseif ($Closed -and -not $hasClosedRange -and -not $names.Count) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($complete) } }
                       if ($names.Count -eq 1) { $f += [ordered]@{ op = 'eq'; field = 'status'; value = [int](Get-PsaStatusId $names[0]) } }
                       elseif ($names.Count -gt 1) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($names | ForEach-Object { [int](Get-PsaStatusId $_) }) } }
@@ -5537,7 +5701,7 @@ definition:
                       # Unverified: open_only, closed_only, status_id, client_id, search, the datesearch/startdate/enddate filters
                       # (one date field per request), order/orderdesc, and the list row field names (HaloAPI module).
                       $q = @()
-                      if ($Open) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
+                      if ($wantOpen) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
                       if ($names.Count -eq 1) { $q += "status_id=$(Get-PsaStatusId $names[0])" }
                       if ($co) { $q += "client_id=$co" }
                       if ($hasClosedRange) { $q += 'datesearch=datecleared'; if ($iso.xa) { $q += "startdate=$(ConvertTo-PsaQuery $iso.xa)" }; if ($iso.xb) { $q += "enddate=$(ConvertTo-PsaQuery $iso.xb)" }; $server.closed = $true }
@@ -5560,7 +5724,7 @@ definition:
                       # Unverified live: the date format, whether the To dates are inclusive, whether StatusNames is exact,
                       # and the list field names. There is no text filter, so text is matched here.
                       $q = @()
-                      if ($Open) { $q += 'Filter.ExcludeCompleted=1' }
+                      if ($Open -and -not $byStatus) { $q += 'Filter.ExcludeCompleted=1' }
                       foreach ($n in $names) { $q += "Filter.StatusNames=$(ConvertTo-PsaQuery $n)" }
                       if ($co) { $q += "Filter.AccountIds=$co" }
                       foreach ($pair in @(@('ca', 'Filter.OpenDateFrom', 'created'), @('cb', 'Filter.OpenDateTo', 'created'), @('ua', 'Filter.LastActivityUpdateFrom', 'updated'), @('ub', 'Filter.LastActivityUpdateTo', 'updated'), @('xa', 'Filter.CompletedDateFrom', 'closed'), @('xb', 'Filter.CompletedDateTo', 'closed'))) {
@@ -5583,7 +5747,7 @@ definition:
                       # Resolved is the only closed status. Before-dates are checked here.
                       $q = @()
                       if ($names.Count -eq 1) { $q += "status=$(ConvertTo-PsaQuery $names[0])" }
-                      elseif ($Open) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
+                      elseif ($wantOpen) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
                       elseif ($Closed -and -not $bd.xa) { $q += 'status=Resolved' }
                       if ($co) { $q += "customer_id=$co" }
                       if ($iso.ca) { $q += "created_after=$(ConvertTo-PsaQuery $iso.ca)" }
@@ -5605,7 +5769,7 @@ definition:
                       # with ISO times. Unverified: organization:<id>, solved>= / solved< and the tickets(slas) sideload on search.
                       # Search returns at most 1,000 results (10 pages). A ticket has no solved date of its own, so closed is $null.
                       $sq = 'type:ticket'
-                      if ($Open) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
+                      if ($wantOpen) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
                       if ($names.Count -eq 1) { $sq += " status:$($names[0].ToLowerInvariant())" }
                       if ($co) { $sq += " organization:$co" }
                       foreach ($pair in @(@('ca', 'created>=', 'created'), @('cb', 'created<', 'created'), @('ua', 'updated>=', 'updated'), @('ub', 'updated<', 'updated'), @('xa', 'solved>=', 'closed'), @('xb', 'solved<', 'closed'))) {
@@ -6222,19 +6386,27 @@ definition:
           # <<< _shared/psa-tickets.ps1
           # >>> src/common.ps1 (generated by src/build.js; edit the source, not this block)
           # ---------- src/common.ps1: helpers shared by the Waiting-on-Client Nudge steps ----------
-          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every note this workflow writes ends with a marker:
+          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every internal note this workflow writes ends with a marker:
           #   [waiting-nudge: <tag>, waiting since <yyyy-MM-ddTHH:mmZ>]
           # Tags: "day N" (reminder sent), "closing notice", "closed", "close held" (P1/P2), "failed".
           # The markers are how a later run knows what was already sent and when the wait started, so a
-          # reminder is never sent twice for the same day. The public reminder and closing notice also pass their
-          # marker to Add-PsaNote -Marker, which checks the ticket again just before writing, so two runs that
-          # overlap (a Routine and a manual run, or an Action Runs Retry) still send the client one copy.
+          # reminder is never sent twice for the same day. The client never sees them: the public reminder and closing
+          # notice pass their own marker (Get-NudgePublicMarker) to Add-PsaNote -Marker, which shows the client only an
+          # opaque "Ref: xxxxxxxx" line and checks the ticket again just before writing, so two runs that overlap (a
+          # Routine and a manual run, or an Action Runs Retry) still send the client one copy. Right after each public
+          # note, the step writes the companion internal note carrying the readable tag that later runs read.
+          # Public notes written before this change ended with the bracketed marker; those are still read.
 
           $NudgeMarkerPattern = '\[waiting-nudge: (?<tag>[^,\]]+), waiting since (?<since>[^\]]+)\]'
 
           function Format-NudgeStamp { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('yyyy-MM-ddTHH:mmZ', [Globalization.CultureInfo]::InvariantCulture) }
           function Format-NudgeDay { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('dddd, MMMM d, yyyy', [Globalization.CultureInfo]::GetCultureInfo('en-US')) }
           function Get-NudgeMarker { param([string]$Tag, $Since) return "[waiting-nudge: $Tag, waiting since $(Format-NudgeStamp $Since)]" }
+          # The marker for a public note. Distinct from the internal one, so the companion internal note isn't mistaken for it.
+          function Get-NudgePublicMarker { param([string]$Tag, $Since) return "waiting-nudge public: $Tag, waiting since $(Format-NudgeStamp $Since)" }
+          # $true for this workflow's own public reminder or closing notice (our wording plus the opaque Ref line), so
+          # step 1 doesn't count it as a person's note that starts a new wait.
+          function Test-NudgeOwnPublic { param($n) $t = [string]$n.text; return ((-not $n.internal) -and (-not $n.fromClient) -and $t -match '(?i)(?<![0-9a-z])Ref:\s*[0-9a-f]{8}(?![0-9a-f])' -and $t -match "(?s)^\s*Hello,\s+We('re following up on| haven't heard back about) ticket #") }
           function Get-NudgePlural { param([int]$n, [string]$One, [string]$Many) if ($n -eq 1) { return "1 $One" }; return "$n $Many" }
 
           # A PSCustomObject (from the previous step's JSON) as a hashtable, one level deep.
@@ -6282,8 +6454,6 @@ definition:
                   "When you have a moment, please reply to this message with the details we asked for, or let us know if you no longer need help."
                   ''
                   "If we don't hear back, we'll close this ticket on $(Format-NudgeDay $p.closeBy). If you need help after that, just reply or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker "day $($p.day)" $p.since)
               ) -join "`n"
           }
 
@@ -6296,10 +6466,18 @@ definition:
                   "We haven't heard back about ticket #$($p.number)$subject for $($p.daysWaiting) days, so we're closing it for now."
                   ''
                   "If you still need help, just reply to this message or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker 'closing notice' $p.since)
               ) -join "`n"
           }
+
+          # The internal note written right after a public one, carrying the readable marker later runs read. Retry-safe.
+          # Returns 'written', 'already written' or 'failed' (with a warning added to the state).
+          function Add-NudgeCompanionNote {
+              param($p, [string]$Tag, [string]$Text, $State)
+              try { $r = Add-PsaNote -Id $p.ticketId -Text $Text -Title 'Waiting-on-Client Nudge' -Marker (Get-NudgeMarker $Tag $p.since); return $(if ($r -eq 'already-present') { 'already written' } else { 'written' }) }
+              catch { $State.warnings += "Couldn't write the internal note on ticket $(Get-NudgeTicketLabel $p): $($_.Exception.Message)"; return 'failed' }
+          }
+          function Get-NudgeReminderNote { param($p) return "Waiting-on-Client Nudge sent reminder $($p.reminderNo) of $($p.reminderTotal) (day $($p.day)) to the client as a public note. The ticket has waited $($p.daysWaiting) days, since $(Format-NudgeDay $p.since). It will be closed on $(Format-NudgeDay $p.closeBy) if the client doesn't reply." }
+          function Get-NudgeNoticeNote { param($p) return "Waiting-on-Client Nudge sent the closing notice to the client as a public note after $($p.daysWaiting) days waiting, since $(Format-NudgeDay $p.since). The ticket is closed next." }
           # ---------- end src/common.ps1 ----------
           # <<< src/common.ps1
           # === Step 3: Close with notice ===
@@ -6318,8 +6496,10 @@ definition:
               }
               if ($p.notice) {
                   try {
-                      $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeClosingText $p) -Title 'Closing this ticket' -Public -Marker (Get-NudgeMarker 'closing notice' $p.since)
+                      $r = Add-PsaNote -Id $p.ticketId -Text (Get-NudgeClosingText $p) -Title 'Closing this ticket' -Public -Marker (Get-NudgePublicMarker 'closing notice' $p.since)
                       $p.noticeResult = $(if ($r -eq 'already-present') { 'sent earlier' } else { 'sent' })
+                      # The readable "closing notice" marker goes on an internal note, so the next run retries only the close.
+                      $null = Add-NudgeCompanionNote $p 'closing notice' (Get-NudgeNoticeNote $p) $state
                   }
                   catch {
                       $p.noticeResult = 'failed'; $p.closeResult = 'not closed'; $p.error = [string]$_.Exception.Message
@@ -6676,20 +6856,27 @@ definition:
           # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
           # Throws when the PSA rejects it.
           # -Marker makes the write safe to repeat (a ServiceAI Action Runs "Retry" replays the whole request):
-          # "[marker]" is added as the note's last line, and when a note on the ticket already holds that marker
-          # nothing is written. With -Marker it returns 'written' or 'already-present'; without it, nothing
-          # (so existing callers that don't discard the result are unchanged). If the notes can't be read, it
-          # throws rather than risk a second copy.
+          # when a note on the ticket already holds the marker nothing is written. An internal note gets "[marker]"
+          # as its last line. A public (client-visible) note never shows the marker: its last line is only the
+          # opaque "Ref: xxxxxxxx" (Get-PsaMarkerRef), and a "[marker]" the caller put in -Text is taken out.
+          # With -Marker it returns 'written' or 'already-present'; without it, nothing (so existing callers that
+          # don't discard the result are unchanged). If the notes can't be read, it throws rather than risk a
+          # second copy. Never put personal data (names, UPNs, email addresses) or internal tags in a marker.
           function Add-PsaNote {
               param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal, [string]$Marker = '')
               $c = Get-PsaConn
               $tag = ''
+              $pub = [bool]$Public
               if ($Marker) {
                   $tag = Get-PsaMarkerTag $Marker
                   if (Test-PsaNoteMarker -Id $Id -Marker $tag) { return 'already-present' }
-                  if ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
+                  if ($pub) {
+                      $ref = Get-PsaMarkerRef $tag
+                      $Text = ([string]$Text) -replace [regex]::Escape($tag), ''
+                      if (-not (Test-PsaMarkerRefIn $Text $ref)) { $Text = "$($Text.TrimEnd())`n$ref" }
+                  }
+                  elseif ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
               }
-              $pub = [bool]$Public
               switch ($c.Psa) {
                   'connectwise' {
                       # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
@@ -7187,11 +7374,30 @@ definition:
               if ($m -match '[\[\]\r\n]') { throw "A note marker can't contain brackets or line breaks ('$Marker')." }
               return "[$m]"
           }
-          # $true when a note on the ticket already holds "[marker]" (case-insensitive). Pass -Notes to reuse notes
-          # already read with Get-PsaTicketNotes. Throws when the notes can't be read.
+          # The opaque line a public note shows instead of its marker: "Ref: " and the first 8 hex characters
+          # (lowercase) of the SHA-256 of "[marker]" lowercased, as UTF-8. It reveals nothing of the marker text.
+          function Get-PsaMarkerRef {
+              param([string]$Marker)
+              $tag = (Get-PsaMarkerTag $Marker).ToLowerInvariant()
+              $sha = [System.Security.Cryptography.SHA256]::Create()
+              try { $h = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($tag)) } finally { $sha.Dispose() }
+              return 'Ref: ' + ((@($h[0..3] | ForEach-Object { $_.ToString('x2') })) -join '')
+          }
+          # $true when $Text holds the "Ref: xxxxxxxx" line $Ref (case-insensitive, not part of a longer hex run).
+          function Test-PsaMarkerRefIn {
+              param([string]$Text, [string]$Ref)
+              if (-not $Text) { return $false }
+              $hex = ([string]$Ref -replace '^(?i)Ref:\s*', '')
+              return ($Text -match "(?i)(?<![0-9a-z])Ref:\s*$([regex]::Escape($hex))(?![0-9a-f])")
+          }
+          # $true when a note on the ticket already holds the marker (case-insensitive): either the full "[marker]"
+          # (internal notes, and public notes written before public notes switched to the opaque ref) or the
+          # "Ref: xxxxxxxx" line a public note carries. Pass -Notes to reuse notes already read with
+          # Get-PsaTicketNotes. Throws when the notes can't be read.
           function Test-PsaNoteMarker {
               param([string]$Id, [string]$Marker, $Notes = $null)
               $tag = Get-PsaMarkerTag $Marker
+              $ref = Get-PsaMarkerRef $tag
               if ($null -eq $Notes) {
                   try { $Notes = @(Get-PsaTicketNotes -Id $Id -TextOnly) }
                   catch { throw "Couldn't check ticket $Id for an earlier note marked $tag, so nothing was written: $($_.Exception.Message)" }
@@ -7200,6 +7406,7 @@ definition:
                   if ($null -eq $n) { continue }
                   $t = if ($n -is [string]) { $n } else { [string](Get-PsaProp $n 'text') }
                   if ($t.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+                  if (Test-PsaMarkerRefIn $t $ref) { return $true }
               }
               return $false
           }
@@ -7402,15 +7609,18 @@ definition:
               $created = ConvertTo-PsaDate (& $v 'created')
               $updated = ConvertTo-PsaDate (& $v 'updated'); if ($null -eq $updated) { $updated = $created }
               $cfg = @(& $v 'configIds' | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+              $closedAt = ConvertTo-PsaDate (& $v 'closed')
+              $isClosed = [bool](& $v 'isClosed')
+              $byStatus = if ($F.ContainsKey('closedByStatus')) { [bool]$F['closedByStatus'] } else { $isClosed }
               return @{
                   id = $id; number = $(if (Test-PsaBlank (& $v 'number')) { $id } else { [string](& $v 'number') }); summary = (& $t 'summary'); description = (& $t 'description')
-                  status = (& $t 'status'); isClosed = [bool](& $v 'isClosed')
+                  status = (& $t 'status'); isClosed = $isClosed; closedByStatus = $byStatus; closedDateSet = ($null -ne $closedAt)
                   companyId = (& $s 'companyId'); companyName = (& $t 'companyName')
                   contactId = (& $s 'contactId'); contactName = (& $t 'contactName'); contactEmail = (& $t 'contactEmail')
                   assigneeId = (& $s 'assigneeId'); assigneeName = (& $t 'assigneeName')
                   queue = $(if ($qname) { $qname } else { $qid }); queueId = $qid; queueName = $qname
                   priority = $prio; priorityLevel = (Get-PsaPriorityLevel $prio)
-                  created = $created; updated = $updated; closed = (ConvertTo-PsaDate (& $v 'closed')); statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
+                  created = $created; updated = $updated; closed = $closedAt; statusChanged = (ConvertTo-PsaDate (& $v 'statusChanged'))
                   ticketType = (& $t 'ticketType'); configIds = $cfg
                   url = $(if ($id) { Get-PsaTicketUrl $id } else { '' }); raw = (& $v 'raw')
               }
@@ -7449,6 +7659,8 @@ definition:
                   }
                   'halopsa' {
                       # Unverified: the list row field names (HaloAPI module). A status id is named from the cached status list.
+                      # isClosed counts a datecleared as closed; closedByStatus (for -OpenByStatus) uses hasbeenclosed and the
+                      # status name only. Unverified: whether hasbeenclosed stays set after a ticket is reopened.
                       $sname = [string](Get-PsaProp $t 'status_name'); $sid = [string](Get-PsaProp $t 'status_id')
                       if (-not $sname -and $sid) {
                           $list = @(); try { $list = @(Get-PsaStatusList) } catch { $PsaState.Statuses = @() }
@@ -7463,6 +7675,7 @@ definition:
                       $upd = Get-PsaProp $t 'lastactiondate'; if (-not (ConvertTo-PsaDate $upd)) { $upd = Get-PsaProp $t 'last_update' }
                       $F += @{ id = (Get-PsaProp $t 'id'); summary = (Get-PsaProp $t 'summary'); description = (Get-PsaProp $t 'details'); status = $sname
                           isClosed = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or ($null -ne (ConvertTo-PsaDate $cl)) -or [bool]$AssumeClosed)
+                          closedByStatus = (((Get-PsaProp $t 'hasbeenclosed') -eq $true) -or $sname -match '(?i)\b(closed|resolved|completed?|cancell?ed)\b' -or [bool]$AssumeClosed)
                           companyId = (Get-PsaProp $t 'client_id'); companyName = (Get-PsaProp $t 'client_name')
                           contactId = (Get-PsaProp $t 'user_id'); contactName = (Get-PsaProp $t 'user_name'); contactEmail = (Get-PsaFirst $t @('user_email', 'emailaddress'))
                           assigneeId = (Get-PsaProp $t 'agent_id'); assigneeName = (Get-PsaProp $t 'agent_name'); queueId = (Get-PsaProp $t 'team_id'); queueName = (Get-PsaProp $t 'team'); priority = $plabel
@@ -7470,10 +7683,12 @@ definition:
                           configIds = @(Get-PsaProp $t 'assets' | Where-Object { $null -ne $_ } | ForEach-Object { Get-PsaProp $_ 'id' }) }
                   }
                   'kaseyabms' {
-                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name.
+                      # Unverified: the list row field names. Closed is read from CompletedDate or the status name;
+                      # closedByStatus (for -OpenByStatus) from the status name only.
                       $sname = [string](Get-PsaProp $t 'StatusName'); $cd = Get-PsaProp $t 'CompletedDate'
                       $F += @{ id = (Get-PsaProp $t 'Id'); number = (Get-PsaProp $t 'TicketNumber'); summary = (Get-PsaProp $t 'Title'); description = (Get-PsaProp $t 'Details')
                           status = $sname; isClosed = (($null -ne (ConvertTo-PsaDate $cd)) -or $sname -match '(?i)complete|closed|resolved|cancel')
+                          closedByStatus = ($sname -match '(?i)complete|closed|resolved|cancel')
                           companyId = (Get-PsaProp $t 'AccountId'); companyName = (Get-PsaProp $t 'AccountName')
                           contactId = (Get-PsaProp $t 'ContactId'); contactName = (Get-PsaProp $t 'ContactName'); contactEmail = (Get-PsaProp $t 'ContactEmail')
                           assigneeId = (Get-PsaProp $t 'AssigneeId'); assigneeName = (Get-PsaProp $t 'AssigneeName'); queueId = (Get-PsaProp $t 'QueueId'); queueName = (Get-PsaProp $t 'QueueName'); priority = (Get-PsaProp $t 'PriorityName')
@@ -7504,7 +7719,12 @@ definition:
           # Lists tickets. Every filter is sent to the PSA where it can take it, and every row is checked again here,
           # so a filter the PSA ignores (or that isn't verified yet) never lets the wrong ticket through.
           #   -Status <names>      exact status names, case-insensitive (alias -StatusName). Several are allowed.
-          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both.
+          #   -Open / -Closed      only tickets that aren't closed / are closed. Neither means both. A closed date counts
+          #                        as closed on HaloPSA and Kaseya BMS even when the status is open.
+          #   -OpenByStatus        like -Open, but "open" is decided by the PSA's status or closed flag only, never by a
+          #                        closed date, so an open ticket that wrongly carries a closed date is kept (the
+          #                        psa-hygiene check). Only differs from -Open on HaloPSA and Kaseya BMS; on Kaseya BMS
+          #                        Filter.ExcludeCompleted isn't sent, so completed rows are read and dropped here.
           #   -CompanyId <id>      only this PSA company id (numeric). Rows for any other company, or with no company,
           #                        are always dropped here, so one client's run never sees another client's ticket.
           #   -CreatedAfter/-CreatedBefore, -UpdatedAfter/-UpdatedBefore, -ClosedAfter/-ClosedBefore
@@ -7515,18 +7735,21 @@ definition:
           #   -IncludeSla          Zendesk only: sideload SLA policy metrics so Get-PsaTicketSla needs no extra call.
           # Returns @(@{ id; number; summary; description; status; isClosed; companyId; companyName; contactId; contactName;
           #   contactEmail; assigneeId; assigneeName; queue; queueId; queueName; priority; priorityLevel; created; updated;
-          #   closed; statusChanged; ticketType; configIds; url; raw }). priority is the PSA's own label; priorityLevel is
+          #   closed; statusChanged; ticketType; configIds; url; raw; closedByStatus; closedDateSet }). closedByStatus is the
+          #   status or closed flag alone; closedDateSet is $true when the row carries a closed date. priority is the PSA's own label; priorityLevel is
           #   critical, high, medium, low or ''. created, updated (falls back to created), closed and statusChanged are UTC
           #   [datetime] or $null. Names a PSA leaves out of list rows are '' (Resolve-PsaTicketNames fills them).
           function Find-PsaTickets {
               param(
-                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$Closed, [string]$CompanyId = '',
+                  [Alias('StatusName')][string[]]$Status = @(), [switch]$Open, [switch]$OpenByStatus, [switch]$Closed, [string]$CompanyId = '',
                   $CreatedAfter = $null, $CreatedBefore = $null, $UpdatedAfter = $null, $UpdatedBefore = $null, $ClosedAfter = $null, $ClosedBefore = $null,
                   [string]$Text = '', [int]$Max = 500, [ValidateSet('oldest', 'newest')][string]$Order = 'oldest', [switch]$IncludeSla
               )
               $c = Get-PsaConn
               $PsaState.FindTruncated = $false
-              if ($Open -and $Closed) { throw 'Find-PsaTickets takes -Open or -Closed, not both.' }
+              if (($Open -or $OpenByStatus) -and $Closed) { throw 'Find-PsaTickets takes -Open (or -OpenByStatus) or -Closed, not both.' }
+              $byStatus = [bool]$OpenByStatus
+              $wantOpen = [bool]($Open -or $OpenByStatus)
               if ($Max -lt 1) { $Max = 1 }
               $co = ([string]$CompanyId).Trim(); if ($co.StartsWith('@')) { $co = '' }
               if ($co -and $co -notmatch '^\d+$') { throw "Find-PsaTickets needs a numeric PSA company id, not '$co'. Use Resolve-PsaCompanyId or Find-PsaCompany to look a name up." }
@@ -7545,7 +7768,8 @@ definition:
                   param($r)
                   if ($co -and $r.companyId -ne $co) { return $false }
                   if ($want.Count -and $want -notcontains $r.status.Trim().ToLowerInvariant()) { return $false }
-                  if ($Open -and $r.isClosed) { return $false }
+                  if ($byStatus) { if ($r.closedByStatus) { return $false } }
+                  elseif ($Open -and $r.isClosed) { return $false }
                   if ($Closed -and -not $r.isClosed) { return $false }
                   foreach ($k in @(@('created', 'ca', 'cb'), @('updated', 'ua', 'ub'), @('closed', 'xa', 'xb'))) {
                       $lo = $bd[$k[1]]; $hi = $bd[$k[2]]
@@ -7568,7 +7792,7 @@ definition:
                       # "summary contains". closedFlag, company/id and status/name follow the CW conditions syntax.
                       $esc = { param($x) ([string]$x).Replace('\', '\\').Replace('"', '\"') }
                       $conds = @()
-                      if ($Open) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
+                      if ($wantOpen) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
                       if ($co) { $conds += "company/id=$co" }
                       if ($names.Count -eq 1) { $conds += ('status/name="' + (& $esc $names[0]) + '"') }
                       elseif ($names.Count -gt 1) { $conds += ('(' + (@($names | ForEach-Object { 'status/name="' + (& $esc $_) + '"' }) -join ' or ') + ')') }
@@ -7591,7 +7815,7 @@ definition:
                       # as "updated", completedDate as "closed", the "in" operator, and "contains" on title.
                       $complete = @(Get-PsaAtCompleteStatuses)
                       $f = @()
-                      if ($Open) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
+                      if ($wantOpen) { foreach ($v in $complete) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
                       elseif ($Closed -and -not $hasClosedRange -and -not $names.Count) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($complete) } }
                       if ($names.Count -eq 1) { $f += [ordered]@{ op = 'eq'; field = 'status'; value = [int](Get-PsaStatusId $names[0]) } }
                       elseif ($names.Count -gt 1) { $f += [ordered]@{ op = 'in'; field = 'status'; value = @($names | ForEach-Object { [int](Get-PsaStatusId $_) }) } }
@@ -7614,7 +7838,7 @@ definition:
                       # Unverified: open_only, closed_only, status_id, client_id, search, the datesearch/startdate/enddate filters
                       # (one date field per request), order/orderdesc, and the list row field names (HaloAPI module).
                       $q = @()
-                      if ($Open) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
+                      if ($wantOpen) { $q += 'open_only=true' } elseif ($Closed) { $q += 'closed_only=true' }
                       if ($names.Count -eq 1) { $q += "status_id=$(Get-PsaStatusId $names[0])" }
                       if ($co) { $q += "client_id=$co" }
                       if ($hasClosedRange) { $q += 'datesearch=datecleared'; if ($iso.xa) { $q += "startdate=$(ConvertTo-PsaQuery $iso.xa)" }; if ($iso.xb) { $q += "enddate=$(ConvertTo-PsaQuery $iso.xb)" }; $server.closed = $true }
@@ -7637,7 +7861,7 @@ definition:
                       # Unverified live: the date format, whether the To dates are inclusive, whether StatusNames is exact,
                       # and the list field names. There is no text filter, so text is matched here.
                       $q = @()
-                      if ($Open) { $q += 'Filter.ExcludeCompleted=1' }
+                      if ($Open -and -not $byStatus) { $q += 'Filter.ExcludeCompleted=1' }
                       foreach ($n in $names) { $q += "Filter.StatusNames=$(ConvertTo-PsaQuery $n)" }
                       if ($co) { $q += "Filter.AccountIds=$co" }
                       foreach ($pair in @(@('ca', 'Filter.OpenDateFrom', 'created'), @('cb', 'Filter.OpenDateTo', 'created'), @('ua', 'Filter.LastActivityUpdateFrom', 'updated'), @('ub', 'Filter.LastActivityUpdateTo', 'updated'), @('xa', 'Filter.CompletedDateFrom', 'closed'), @('xb', 'Filter.CompletedDateTo', 'closed'))) {
@@ -7660,7 +7884,7 @@ definition:
                       # Resolved is the only closed status. Before-dates are checked here.
                       $q = @()
                       if ($names.Count -eq 1) { $q += "status=$(ConvertTo-PsaQuery $names[0])" }
-                      elseif ($Open) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
+                      elseif ($wantOpen) { $q += "status=$(ConvertTo-PsaQuery 'Not Closed')" }
                       elseif ($Closed -and -not $bd.xa) { $q += 'status=Resolved' }
                       if ($co) { $q += "customer_id=$co" }
                       if ($iso.ca) { $q += "created_after=$(ConvertTo-PsaQuery $iso.ca)" }
@@ -7682,7 +7906,7 @@ definition:
                       # with ISO times. Unverified: organization:<id>, solved>= / solved< and the tickets(slas) sideload on search.
                       # Search returns at most 1,000 results (10 pages). A ticket has no solved date of its own, so closed is $null.
                       $sq = 'type:ticket'
-                      if ($Open) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
+                      if ($wantOpen) { $sq += ' status<solved' } elseif ($Closed) { $sq += ' status>=solved' }
                       if ($names.Count -eq 1) { $sq += " status:$($names[0].ToLowerInvariant())" }
                       if ($co) { $sq += " organization:$co" }
                       foreach ($pair in @(@('ca', 'created>=', 'created'), @('cb', 'created<', 'created'), @('ua', 'updated>=', 'updated'), @('ub', 'updated<', 'updated'), @('xa', 'solved>=', 'closed'), @('xb', 'solved<', 'closed'))) {
@@ -8299,19 +8523,27 @@ definition:
           # <<< _shared/psa-tickets.ps1
           # >>> src/common.ps1 (generated by src/build.js; edit the source, not this block)
           # ---------- src/common.ps1: helpers shared by the Waiting-on-Client Nudge steps ----------
-          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every note this workflow writes ends with a marker:
+          # Paste after _shared/psa.ps1 and _shared/psa-tickets.ps1. Every internal note this workflow writes ends with a marker:
           #   [waiting-nudge: <tag>, waiting since <yyyy-MM-ddTHH:mmZ>]
           # Tags: "day N" (reminder sent), "closing notice", "closed", "close held" (P1/P2), "failed".
           # The markers are how a later run knows what was already sent and when the wait started, so a
-          # reminder is never sent twice for the same day. The public reminder and closing notice also pass their
-          # marker to Add-PsaNote -Marker, which checks the ticket again just before writing, so two runs that
-          # overlap (a Routine and a manual run, or an Action Runs Retry) still send the client one copy.
+          # reminder is never sent twice for the same day. The client never sees them: the public reminder and closing
+          # notice pass their own marker (Get-NudgePublicMarker) to Add-PsaNote -Marker, which shows the client only an
+          # opaque "Ref: xxxxxxxx" line and checks the ticket again just before writing, so two runs that overlap (a
+          # Routine and a manual run, or an Action Runs Retry) still send the client one copy. Right after each public
+          # note, the step writes the companion internal note carrying the readable tag that later runs read.
+          # Public notes written before this change ended with the bracketed marker; those are still read.
 
           $NudgeMarkerPattern = '\[waiting-nudge: (?<tag>[^,\]]+), waiting since (?<since>[^\]]+)\]'
 
           function Format-NudgeStamp { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('yyyy-MM-ddTHH:mmZ', [Globalization.CultureInfo]::InvariantCulture) }
           function Format-NudgeDay { param($Value) $d = ConvertTo-PsaDate $Value; if ($null -eq $d) { return '' }; return $d.ToString('dddd, MMMM d, yyyy', [Globalization.CultureInfo]::GetCultureInfo('en-US')) }
           function Get-NudgeMarker { param([string]$Tag, $Since) return "[waiting-nudge: $Tag, waiting since $(Format-NudgeStamp $Since)]" }
+          # The marker for a public note. Distinct from the internal one, so the companion internal note isn't mistaken for it.
+          function Get-NudgePublicMarker { param([string]$Tag, $Since) return "waiting-nudge public: $Tag, waiting since $(Format-NudgeStamp $Since)" }
+          # $true for this workflow's own public reminder or closing notice (our wording plus the opaque Ref line), so
+          # step 1 doesn't count it as a person's note that starts a new wait.
+          function Test-NudgeOwnPublic { param($n) $t = [string]$n.text; return ((-not $n.internal) -and (-not $n.fromClient) -and $t -match '(?i)(?<![0-9a-z])Ref:\s*[0-9a-f]{8}(?![0-9a-f])' -and $t -match "(?s)^\s*Hello,\s+We('re following up on| haven't heard back about) ticket #") }
           function Get-NudgePlural { param([int]$n, [string]$One, [string]$Many) if ($n -eq 1) { return "1 $One" }; return "$n $Many" }
 
           # A PSCustomObject (from the previous step's JSON) as a hashtable, one level deep.
@@ -8359,8 +8591,6 @@ definition:
                   "When you have a moment, please reply to this message with the details we asked for, or let us know if you no longer need help."
                   ''
                   "If we don't hear back, we'll close this ticket on $(Format-NudgeDay $p.closeBy). If you need help after that, just reply or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker "day $($p.day)" $p.since)
               ) -join "`n"
           }
 
@@ -8373,10 +8603,18 @@ definition:
                   "We haven't heard back about ticket #$($p.number)$subject for $($p.daysWaiting) days, so we're closing it for now."
                   ''
                   "If you still need help, just reply to this message or contact us and we'll pick it up again."
-                  ''
-                  (Get-NudgeMarker 'closing notice' $p.since)
               ) -join "`n"
           }
+
+          # The internal note written right after a public one, carrying the readable marker later runs read. Retry-safe.
+          # Returns 'written', 'already written' or 'failed' (with a warning added to the state).
+          function Add-NudgeCompanionNote {
+              param($p, [string]$Tag, [string]$Text, $State)
+              try { $r = Add-PsaNote -Id $p.ticketId -Text $Text -Title 'Waiting-on-Client Nudge' -Marker (Get-NudgeMarker $Tag $p.since); return $(if ($r -eq 'already-present') { 'already written' } else { 'written' }) }
+              catch { $State.warnings += "Couldn't write the internal note on ticket $(Get-NudgeTicketLabel $p): $($_.Exception.Message)"; return 'failed' }
+          }
+          function Get-NudgeReminderNote { param($p) return "Waiting-on-Client Nudge sent reminder $($p.reminderNo) of $($p.reminderTotal) (day $($p.day)) to the client as a public note. The ticket has waited $($p.daysWaiting) days, since $(Format-NudgeDay $p.since). It will be closed on $(Format-NudgeDay $p.closeBy) if the client doesn't reply." }
+          function Get-NudgeNoticeNote { param($p) return "Waiting-on-Client Nudge sent the closing notice to the client as a public note after $($p.daysWaiting) days waiting, since $(Format-NudgeDay $p.since). The ticket is closed next." }
           # ---------- end src/common.ps1 ----------
           # <<< src/common.ps1
           # === Step 4: Internal note per action, and the run summary ===
@@ -8392,11 +8630,9 @@ definition:
               $since = Format-NudgeDay $p.since
               switch ($p.action) {
                   'remind' {
-                      # Another run already sent this reminder (and writes its own internal note).
-                      if ($p.remindResult -eq 'already sent') { return $null }
-                      if ($p.remindResult -eq 'sent') {
-                          return @{ tag = "day $($p.day)"; text = "$wf sent reminder $($p.reminderNo) of $($p.reminderTotal) (day $($p.day)) to the client as a public note. The ticket has waited $($p.daysWaiting) days, since $since. It will be closed on $(Format-NudgeDay $p.closeBy) if the client doesn't reply." }
-                      }
+                      # Step 2 wrote the companion internal note right after the public reminder.
+                      if ($p.remindResult -in @('sent', 'already sent')) { return $null }
+                      if ($p.remindResult -eq 'would send') { return @{ tag = "day $($p.day)"; text = (Get-NudgeReminderNote $p) } }
                       return @{ tag = 'failed'; text = "$wf tried to send the day $($p.day) reminder, but $($s.psaName) refused it: $($p.error). The next run will try again." }
                   }
                   'close' {

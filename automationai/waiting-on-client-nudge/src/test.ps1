@@ -10,7 +10,13 @@ Import-Steps (Join-Path $PSScriptRoot 'build.js')
 Check 'four PowerShell steps' ($MockSteps.Count -eq 4) ($MockSteps.Keys -join ', ')
 
 $Waiting = @{ connectwise = 'Waiting Customer'; autotask = 'Waiting Customer'; halopsa = 'Waiting on User'; kaseyabms = 'Waiting on Customer'; syncro = 'Waiting on Customer'; zendesk = 'pending' }
+# Old style (before public notes switched to the opaque ref): the marker on the public note itself. Still read.
 function Get-Marker { param([string]$Tag, [double]$SinceDays) return "Reminder text.`n[waiting-nudge: $Tag, waiting since $(Get-Stamp (Get-Ago $SinceDays))]" }
+# New style: the public reminder shows only an opaque Ref line; the companion internal note holds the marker.
+function Get-PubReminder { param($Id) return "Hello,`n`nWe're following up on ticket #$Id. We're waiting on a reply from you before we can go any further.`nRef: 0a1b2c3d" }
+function Get-IntMarker { param([string]$Tag, [double]$SinceDays) return "Waiting-on-Client Nudge sent a reminder.`n[waiting-nudge: $Tag, waiting since $(Get-Stamp (Get-Ago $SinceDays))]" }
+# A client-visible note: our wording, then only the opaque ref; no marker, tag, address or internal status word.
+function Test-CleanPublic { param([string]$Text) return ($Text -notmatch '\[|waiting-nudge|@|closing notice|close held|failed' -and $Text -cmatch "`nRef: [0-9a-f]{8}$") }
 
 # The standard world. Expected on a first run with the defaults (reminders 2,4; close 7):
 #   101 remind day 2   102 remind day 4   103 close with notice   104 client replied: skip
@@ -21,10 +27,10 @@ function New-StandardWorld {
     Reset-World $Psa
     $w = $Waiting[$Psa]
     $null = Add-WorldTicket 101 $w -Created 10 -Notes @(@{ d = 3; who = 'tech'; text = 'Could you send a screenshot of the error?' })
-    $null = Add-WorldTicket 102 $w -Created 12 -Notes @(@{ d = 5; who = 'tech'; text = 'Which printer is it?' }, @{ d = 3; who = 'marker'; text = (Get-Marker 'day 2' 5) }, @{ d = 3; who = 'marker'; internal = $true; text = (Get-Marker 'day 2' 5) })
-    $null = Add-WorldTicket 103 $w -Created 20 -Notes @(@{ d = 8; who = 'tech'; text = 'Please restart and tell us if it helps.' }, @{ d = 6; who = 'marker'; text = (Get-Marker 'day 2' 8) }, @{ d = 4; who = 'marker'; text = (Get-Marker 'day 4' 8) })
+    $null = Add-WorldTicket 102 $w -Created 12 -Notes @(@{ d = 5; who = 'tech'; text = 'Which printer is it?' }, @{ d = 3; who = 'marker'; text = (Get-PubReminder 102) }, @{ d = 3; who = 'marker'; internal = $true; text = (Get-IntMarker 'day 2' 5) })
+    $null = Add-WorldTicket 103 $w -Created 20 -Notes @(@{ d = 8; who = 'tech'; text = 'Please restart and tell us if it helps.' }, @{ d = 6; who = 'marker'; text = (Get-PubReminder 103) }, @{ d = 6; who = 'marker'; internal = $true; text = (Get-IntMarker 'day 2' 8) }, @{ d = 4; who = 'marker'; text = (Get-PubReminder 103) }, @{ d = 4; who = 'marker'; internal = $true; text = (Get-IntMarker 'day 4' 8) })
     $null = Add-WorldTicket 104 $w -Created 10 -Notes @(@{ d = 6; who = 'tech'; text = 'Can you confirm the user name?' }, @{ d = 4; who = 'marker'; text = (Get-Marker 'day 2' 6) }, @{ d = 1; who = 'client'; text = 'It is pat@contoso.example.' })
-    $null = Add-WorldTicket 105 $w -Prio critical -Created 20 -Notes @(@{ d = 9; who = 'tech'; text = 'Is the server back up?' }, @{ d = 7; who = 'marker'; text = (Get-Marker 'day 2' 9) }, @{ d = 5; who = 'marker'; text = (Get-Marker 'day 4' 9) })
+    $null = Add-WorldTicket 105 $w -Prio critical -Created 20 -Notes @(@{ d = 9; who = 'tech'; text = 'Is the server back up?' }, @{ d = 7; who = 'marker'; text = (Get-PubReminder 105) }, @{ d = 7; who = 'marker'; internal = $true; text = (Get-IntMarker 'day 2' 9) }, @{ d = 5; who = 'marker'; text = (Get-PubReminder 105) }, @{ d = 5; who = 'marker'; internal = $true; text = (Get-IntMarker 'day 4' 9) })
     $null = Add-WorldTicket 106 $w -Created 10 -Notes @(@{ d = 3; who = 'tech'; text = 'Any update?' }, @{ d = 1; who = 'marker'; text = (Get-Marker 'day 2' 3) })
     $null = Add-WorldTicket 107 'In Progress' -Created 20 -Notes @(@{ d = 10; who = 'tech'; text = 'Working on it.' })
     $null = Add-WorldTicket 108 $w -Created 0.5 -Notes @()
@@ -54,13 +60,15 @@ Check 'cw live: status success' ($out.status -eq 'success') "$($out.status): $($
 $pub = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.detailDescriptionFlag -eq $true })
 $pub = @($pub | Sort-Object { ($_.Uri -split '/')[-2] })   # tickets are listed oldest first, so sort by id
 Check 'cw live: three public notes (101, 102, 103)' ((@($pub | ForEach-Object { ($_.Uri -split '/')[-2] } | Sort-Object) -join ',') -eq '101,102,103') (@($pub | ForEach-Object { $_.Uri }) -join '; ')
-Check 'cw live: 101 reminder carries the day 2 marker' ($pub[0].Body.text -match '\[waiting-nudge: day 2, waiting since ' -and $pub[0].Body.text -like '*close this ticket on*') $pub[0].Body.text
-Check 'cw live: 102 reminder carries the day 4 marker' ($pub[1].Body.text -match '\[waiting-nudge: day 4, waiting since ')
-Check 'cw live: 103 gets the closing notice' ($pub[2].Body.text -match '\[waiting-nudge: closing notice, ' -and $pub[2].Body.text -like "*so we're closing it*")
+Check 'cw live: 101 reminder says when it closes and ends with only the opaque ref' ((Test-CleanPublic $pub[0].Body.text) -and $pub[0].Body.text -like '*close this ticket on*') $pub[0].Body.text
+Check 'cw live: 102 and 103 public notes carry no marker, tag or address' ((Test-CleanPublic $pub[1].Body.text) -and (Test-CleanPublic $pub[2].Body.text)) "$($pub[1].Body.text) || $($pub[2].Body.text)"
+Check 'cw live: 103 gets the closing notice' ($pub[2].Body.text -like "*so we're closing it*")
 $patch = @(Get-Writes "PATCH $cw/service/tickets/*")
 Check 'cw live: only 103 is closed, to Closed (not Resolved)' ($patch.Count -eq 1 -and $patch[0].Uri -like '*/103' -and $patch[0].Body[0].value.id -eq 13 -and (Get-WorldTicket 103).status -eq 'Closed') ($patch | ConvertTo-Json -Depth 5 -Compress)
 $int = @(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Body.internalAnalysisFlag -eq $true })
-Check 'cw live: internal notes on 101, 102, 103 and 105' ((@($int | ForEach-Object { ($_.Uri -split '/')[-2] } | Sort-Object) -join ',') -eq '101,102,103,105') (@($int | ForEach-Object { $_.Uri }) -join '; ')
+Check 'cw live: internal notes on 101, 102, 103 (notice and closed) and 105' ((@($int | ForEach-Object { ($_.Uri -split '/')[-2] } | Sort-Object) -join ',') -eq '101,102,103,103,105') (@($int | ForEach-Object { $_.Uri }) -join '; ')
+$intText = { param($Id) @($int | Where-Object { $_.Uri -like "*/$Id/notes" } | ForEach-Object { [string]$_.Body.text }) -join ' || ' }
+Check 'cw live: the readable markers are on the companion internal notes' ((& $intText 101) -match '\[waiting-nudge: day 2, waiting since ' -and (& $intText 102) -match '\[waiting-nudge: day 4, waiting since ' -and (& $intText 103) -match '\[waiting-nudge: closing notice, ' -and (& $intText 103) -match '\[waiting-nudge: closed, ') "$(& $intText 101) ## $(& $intText 103)"
 Check 'cw live: 105 internal note asks a technician to follow up' (@($int | Where-Object { $_.Uri -like '*/105/notes' })[0].Body.text -like "*priority is 'Priority 1 - Emergency Response', so*didn't close it*" -and (@($int | Where-Object { $_.Uri -like '*/105/notes' })[0].Body.text -match '\[waiting-nudge: close held, ')) (@($int | Where-Object { $_.Uri -like '*/105/notes' })[0].Body.text)
 Check 'cw live: nothing written on 104, 106, 107, 108' (@(Get-Writes | Where-Object { $_.Uri -match '/(104|106|107|108)(/|$)' }).Count -eq 0)
 Check 'cw live: message' ($out.message -like "Checked 6 tickets in 'Waiting Customer' in ConnectWise: sent 2 reminders, closed 1 ticket and flagged 1 high-priority ticket for a technician instead of closing them. 1 ticket was skipped because the client had replied.") $out.message
@@ -80,7 +88,8 @@ Check 'zendesk live: public comments on 101, 102, 103' ((@($pubz | ForEach-Objec
 $st = @(Get-Writes "PUT $zd/tickets/*" | Where-Object { $_.Body.ticket.PSObject.Properties['status'] })
 Check 'zendesk live: 103 set to solved' ($st.Count -eq 1 -and $st[0].Uri -like '*/103' -and $st[0].Body.ticket.status -eq 'solved')
 $intz = @(Get-Writes "PUT $zd/tickets/*" | Where-Object { $_.Body.ticket.PSObject.Properties['comment'] -and $_.Body.ticket.comment.public -eq $false })
-Check 'zendesk live: private notes on 101, 102, 103, 105' ((@($intz | ForEach-Object { ($_.Uri -split '/')[-1] } | Sort-Object) -join ',') -eq '101,102,103,105')
+Check 'zendesk live: private notes on 101, 102, 103 (notice and closed), 105' ((@($intz | ForEach-Object { ($_.Uri -split '/')[-1] } | Sort-Object) -join ',') -eq '101,102,103,103,105')
+Check 'zendesk live: public comments carry no marker, tag or address' (@($pubz | Where-Object { -not (Test-CleanPublic ([string]$_.Body.ticket.comment.body)) }).Count -eq 0) (@($pubz | ForEach-Object { $_.Body.ticket.comment.body }) -join ' || ')
 $MockWorld.writes.Clear(); $out2 = Invoke-Workflow $null
 Check 'zendesk second run: nothing written' (@(Get-Writes).Count -eq 0) (@(Get-Writes | ForEach-Object { "$($_.Method) $($_.Uri)" }) -join '; ')
 
@@ -108,7 +117,14 @@ Check 'overlap: the second run posts no public note' (@(Get-Writes "POST $cw/ser
 Check 'overlap: the second run reports the reminders as already sent' (@($b2.plan | Where-Object { $_.remindResult -eq 'already sent' }).Count -eq 2) ($b2.plan | ConvertTo-Json -Depth 5 -Compress)
 Check 'overlap: the second run reports the closing notice as sent earlier' (@($b3.plan | Where-Object { $_.action -eq 'close' -and $_.noticeResult -eq 'sent earlier' }).Count -eq 1)
 Check 'overlap: no second internal reminder note' (@(Get-Writes "POST $cw/service/tickets/*/notes" | Where-Object { $_.Uri -match '/(101|102)/notes$' }).Count -eq 0)
-Check 'overlap: each ticket holds one copy of each reminder' (@((Get-WorldTicket 101).notes | Where-Object { -not $_.internal -and $_.text -match '\[waiting-nudge: day 2, ' }).Count -eq 1 -and @((Get-WorldTicket 103).notes | Where-Object { -not $_.internal -and $_.text -match '\[waiting-nudge: closing notice, ' }).Count -eq 1)
+Check 'overlap: each ticket holds one copy of each reminder and one companion note' (@((Get-WorldTicket 101).notes | Where-Object { -not $_.internal -and $_.text -like "*We're following up on*" }).Count -eq 1 -and @((Get-WorldTicket 101).notes | Where-Object { $_.internal -and $_.text -match '\[waiting-nudge: day 2, ' }).Count -eq 1 -and @((Get-WorldTicket 103).notes | Where-Object { -not $_.internal -and $_.text -like "*so we're closing it*" }).Count -eq 1 -and @((Get-WorldTicket 103).notes | Where-Object { $_.internal -and $_.text -match '\[waiting-nudge: closing notice, ' }).Count -eq 1)
+Check 'overlap: no public note on any ticket shows a marker' (@($MockWorld.tickets | ForEach-Object { $_.notes } | Where-Object { -not $_.internal -and $_.text -like '*Ref: *' -and -not (Test-CleanPublic $_.text) }).Count -eq 0)
+
+# ---- 4c. The public reminder went out but its internal note was lost: no second reminder straight away ----
+New-StandardWorld 'connectwise'
+$null = Add-WorldTicket 109 $Waiting.connectwise -Created 10 -Notes @(@{ d = 6; who = 'tech'; text = 'Could you check the cable?' }, @{ d = 0.01; who = 'marker'; text = (Get-PubReminder 109) })
+$out = Invoke-Workflow ([pscustomobject]@{ preview = $true })
+Check 'lost internal note: no second reminder straight away' ($null -eq (Get-Action $out 109) -and @($out.skipped | Where-Object { [string]$_.ticketId -eq '109' -and $_.reason -like 'nothing due*' }).Count -eq 1) ($out.skipped | ConvertTo-Json -Compress)
 
 # ---- 5. Missing permission (403) fails with a plain message ----
 New-StandardWorld 'connectwise'

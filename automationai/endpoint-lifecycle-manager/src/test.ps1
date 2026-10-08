@@ -16,6 +16,8 @@ $eps = @(
     @{ companyId = 1; name = 'OK-LAPTOP'; os = 'Windows 11 Pro'; manufacturedDate = '2025-01-10T00:00:00Z'; expirationDate = '2028-01-10T00:00:00Z'; memory = 17179869184 },
     @{ companyId = 1; name = 'Draytek'; os = '' },
     @{ companyId = 2; name = 'OLD-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2017-01-01T00:00:00Z' },
+    @{ companyId = 2; name = 'W11-READY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },      # expect Upgrade in place
+    @{ companyId = 2; name = 'W11-NOTREADY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'NotReady'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },   # expect Replace
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(

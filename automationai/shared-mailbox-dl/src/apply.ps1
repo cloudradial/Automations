@@ -59,15 +59,30 @@ function Connect-SmPsa {
     return $psaReady.ok
 }
 # Notes never fail the run; a failure becomes a warning.
+# Every note carries a stable marker, so a ServiceAI Action Runs "Retry" (or a rerun) writes nothing twice.
 function Write-SmNote {
-    param([string]$Text, [string]$Title, [switch]$Public)
+    param([string]$Text, [string]$Title, [string]$Marker, [switch]$Public)
     if (-not $ticketId) { return }
     if (-not (Connect-SmPsa)) { return }
+    $which = $(if ($Public) { 'public' } else { 'internal' })
     try {
-        if ($Public) { Add-PsaNote -Id $ticketId -Text $Text -Title $Title -Public; $null = $actions.Add("Added a public note to ticket $ticketId") }
-        else { Add-PsaNote -Id $ticketId -Text $Text -Title $Title; $out.note_written = $true; $null = $actions.Add("Added an internal note to ticket $ticketId") }
+        $res = $(if ($Public) { Add-PsaNote -Id $ticketId -Text $Text -Title $Title -Public -Marker $Marker } else { Add-PsaNote -Id $ticketId -Text $Text -Title $Title -Marker $Marker })
+        if ($res -eq 'already-present') { $null = $actions.Add("The $which note was already on ticket $ticketId, so it wasn't added again"); return }
+        if (-not $Public) { $out.note_written = $true }
+        $null = $actions.Add("Added a$(if ($Public) { '' } else { 'n' }) $which note to ticket $ticketId")
     }
-    catch { $null = $warnings.Add("Couldn't add the $(if ($Public) { 'public' } else { 'internal' }) note to ticket $($ticketId): $($_.Exception.Message)") }
+    catch { $null = $warnings.Add("Couldn't add the $which note to ticket $($ticketId): $($_.Exception.Message)") }
+}
+# A short fingerprint of a note, so a different preview or a different failure gets its own note.
+function Get-SmFingerprint { param([string]$s) $h = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($s)); return ([System.BitConverter]::ToString($h) -replace '-', '').Substring(0, 8).ToLowerInvariant() }
+$markerKind = $(if ($out.kind) { $out.kind } else { 'mailbox-or-list' })
+$markerAddr = $(if ($address) { $address } else { 'no-address' })
+$doneMarker = "$markerKind created $markerAddr"
+# $true when an earlier run already created this address and noted it on the ticket (a Retry after success).
+function Test-SmAlreadyDone {
+    if (-not $ticketId -or -not $address) { return $false }
+    if (-not (Connect-SmPsa)) { return $false }
+    try { return (Test-PsaNoteMarker -Id $ticketId -Marker $doneMarker) } catch { return $false }
 }
 function Complete-Sm {
     param([string]$Status, [string]$Msg, [string]$Note, [string]$Public = '')
@@ -76,8 +91,9 @@ function Complete-Sm {
     if ($warnings.Count) { $text += "`n`nWarnings:`n" + (@($warnings | ForEach-Object { "- $_" }) -join "`n") }
     $out.internal_note = $text
     $out.public_note = $Public
-    Write-SmNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { "New $kindLabel request (not created yet)" } else { "New $kindLabel" })
-    if ($Public) { Write-SmNote $Public "New $kindLabel" -Public }
+    $mk = $(if ($Status -eq 'success') { $doneMarker } else { "$markerKind $Status $markerAddr $(Get-SmFingerprint $text)" })
+    Write-SmNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { "New $kindLabel request (not created yet)" } else { "New $kindLabel" }) $mk
+    if ($Public) { Write-SmNote $Public "New $kindLabel" "$markerKind ready $markerAddr" -Public }
     $out.actions = @($actions); $out.warnings = @($warnings)
     Set-NodeOutput $out
     # The output is kept; the throw marks the run as failed in the run history.
@@ -89,6 +105,15 @@ if ($null -eq $prep) { Complete-Sm 'error' 'The Apply step got no output from th
 $prepStatus = [string](Get-OfProp $prep 'status')
 if ($prepStatus -ne 'ok') {
     $m = [string](Get-OfProp $prep 'message')
+    # A Retry after a successful run finds the address taken by the mailbox or list that run created. Say so and write nothing.
+    if ($prepStatus -eq 'rejected' -and $m -match 'already used' -and (Test-SmAlreadyDone)) {
+        $msg = "The $kindLabel $address was already created by an earlier run for ticket $ticketId. Nothing was changed."
+        $out.status = 'success'; $out.message = $msg; $out.chatReply = $msg; $out.internal_note = ''; $out.public_note = ''
+        $null = $actions.Add("Ticket $ticketId already notes that $address was created, so no note was added")
+        $out.actions = @($actions); $out.warnings = @($warnings)
+        Set-NodeOutput $out
+        return
+    }
     $note = "The $kindLabel request$(if ($address) { " for $address" }) was not carried out.`n$m"
     if ($commands.Count -and (Test-SmYes (Get-OfProp $prep 'exchange_unreachable'))) { $out.manual_commands = @($commands); $note += Format-SmSection 'To create it by hand in Exchange Online PowerShell, run:' $commands }
     Complete-Sm $(if ($prepStatus) { $prepStatus } else { 'error' }) $m $note

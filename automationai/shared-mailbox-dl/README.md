@@ -79,6 +79,8 @@ If a change fails after the mailbox or list was created (for example one send-as
 - **Internal note** on `ticket_id`, every run: the plan or the result, the reasons a technician must confirm, the Exchange commands, and any warnings.
 - **Public note**, only when everything was created: "The new shared mailbox Contoso Sales Team is ready at contoso-sales-team@contoso.com." It holds the new address only, never the members.
 
+**A retry writes nothing twice.** Each note ends with a short marker line, such as `[shared_mailbox created contoso-sales-team@contoso.com]`. Before writing, the workflow reads the ticket's notes and skips a note whose marker is already there, so a ServiceAI Action Runs **Retry** or a rerun adds no duplicate. A rerun after a successful run finds the address taken by the mailbox or list it created; when the ticket already holds that run's note, it returns `success` saying the address was already created, and changes and writes nothing. A preview or failure with different content still gets its own note. If the notes can't be read, the note is skipped with a warning rather than risk a second copy.
+
 All six PSAs are supported for the notes: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
 
 ## Download & import
@@ -172,4 +174,4 @@ node automationai/shared-mailbox-dl/src/build.js            # rebuild the .yml
 pwsh -NoProfile -File automationai/shared-mailbox-dl/src/test.ps1
 ```
 
-`src/exchange.ps1` holds the Exchange Online sign-in and cmdlet calls used by both steps. It is a copy of the one in `user-offboarding/src` and should move to `_shared` later. The harness runs both steps from the built `.yml` under strict mode with a mocked Key Vault, Graph, Exchange Online (REST and the PowerShell module) and PSAs (ConnectWise, Autotask and HaloPSA notes). js-yaml comes from `automationai/_shared/node_modules` (`npm install` there) or `JS_YAML_PATH`.
+The Exchange Online sign-in and cmdlet calls come from `automationai/_shared/exchange.ps1`, which the build pastes into both steps; the Graph, plan and PSA note calls come from the other `_shared` libraries. The harness runs both steps from the built `.yml` under strict mode with a mocked Key Vault, Graph, Exchange Online (REST and the PowerShell module) and PSAs (ConnectWise, Autotask and HaloPSA notes, including reruns that must write nothing twice). js-yaml comes from `automationai/_shared/node_modules` (`npm install` there) or `JS_YAML_PATH`.

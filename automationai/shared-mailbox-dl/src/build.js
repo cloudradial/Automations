@@ -24,13 +24,13 @@ const readScript = preamble('Check the request and plan it', [
   'Writes nothing. Checks the address is free and every member exists (Microsoft Graph and Exchange Online),',
   "and whether a technician must confirm (someone outside the requester's department, or more than 25 members).",
   'Secrets: M365-TenantId, M365-ClientId, M365-ClientSecret; MicrosoftExchange-* (see README).',
-]) + lib('graph.ps1') + read('exchange.ps1') + '\n# ---------- this step ----------\n' + read('read.ps1');
+]) + lib('graph.ps1') + lib('exchange.ps1') + '\n# ---------- this step ----------\n' + read('read.ps1');
 
 const applyScript = preamble('Create it, or hold it for confirmation, then reply on the ticket', [
   'Creates the shared mailbox or distribution list in Exchange Online unless preview is true, or the request',
   'needs confirmation and confirm is false. Adds an internal note with the plan or result to ticket_id, and a',
   "public note with the new address when it was created. Secrets: MicrosoftExchange-*, PSA-Type and the PSA's own secrets.",
-]) + lib('plan.ps1') + lib('psa.ps1') + read('exchange.ps1') + '\n# ---------- this step ----------\n' + read('apply.ps1');
+]) + lib('plan.ps1') + lib('psa.ps1') + lib('exchange.ps1') + '\n# ---------- this step ----------\n' + read('apply.ps1');
 
 const testInput = {
   kind: 'shared_mailbox',
@@ -92,7 +92,7 @@ const header = [
 ].join('\n');
 const dumped = header + '\n' + y.dump(wf, { lineWidth: -1, noRefs: true });
 const { text, blocks } = injectText(dumped, 'shared-mailbox-dl.yml', new Map());
-if (blocks.length !== 3) throw new Error(`expected 3 _shared blocks, got ${blocks.length}`);
+if (blocks.length !== 5) throw new Error(`expected 5 _shared blocks, got ${blocks.length}`);
 const back = y.load(text);
 JSON.parse(back.definition.activities.find((a) => a.id === 'node-read').properties.testInput);
 if (back.definition.activities[0].properties.webhookEnabled !== false) throw new Error('webhook must ship off');

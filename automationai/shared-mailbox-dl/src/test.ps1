@@ -51,6 +51,7 @@ function New-Scenario {
     $Sc.exoTokenFail = $false
     $Sc.exoLog = New-Object System.Collections.ArrayList
     $Sc.exoParams = New-Object System.Collections.ArrayList
+    $Sc.notes = New-Object System.Collections.ArrayList   # @{ text; internal } for every note written, read back by the marker check
     foreach ($k in $Over.Keys) { $Sc[$k] = $Over[$k] }
     $sec = $BaseSecrets.Clone()
     if ($Psa) { foreach ($k in $PsaSecrets[$Psa].Keys) { $sec[$k] = $PsaSecrets[$Psa][$k] }; $sec['PSA-Type'] = $Psa }
@@ -74,6 +75,11 @@ function Invoke-FakeExo {
     }
     if ($Sc.failOn -eq $Name) { throw "$Name couldn't be completed (simulated)." }
     if ($Sc.notFoundOnce -eq $Name) { $Sc.notFoundOnce = ''; throw "The operation couldn't be performed because object 'new' couldn't be found on 'EXAMPLE.PROD.OUTLOOK.COM'." }
+    if (@('New-Mailbox', 'New-DistributionGroup') -contains $Name) {
+        # What it creates now exists, so a rerun finds the address taken.
+        $rec = @{ DisplayName = [string](Get-PVal $P 'DisplayName'); RecipientTypeDetails = $(if ($Name -eq 'New-Mailbox') { 'SharedMailbox' } else { 'MailUniversalDistributionGroup' }) }
+        foreach ($k in @('PrimarySmtpAddress', 'Alias')) { $v = [string](Get-PVal $P $k); if ($v) { $Sc.recipients[$v.ToLowerInvariant()] = $rec } }
+    }
     if (@('New-Mailbox', 'New-DistributionGroup', 'Add-MailboxPermission', 'Add-RecipientPermission', 'Add-DistributionGroupMember') -contains $Name) { return @(J @{ Identity = (Get-PVal $P 'Identity') }) }
     throw "unmocked Exchange cmdlet $Name"
 }
@@ -123,14 +129,20 @@ $Handler = {
         }
         throw "unmocked Graph $m $p"
     }
-    if ($u -like 'https://cw.example/*' -and $m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { return J @{ id = 1 } }
+    # Notes are kept in $Sc.notes and read back, so Add-PsaNote -Marker can find an earlier copy.
+    if ($u -like 'https://cw.example/*') {
+        if ($m -eq 'GET' -and $u -like '*/service/tickets/12345/notes*') { $i = 0; return , @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; text = $_.text; internalAnalysisFlag = $_.internal; detailDescriptionFlag = (-not $_.internal); member = (J @{ identifier = 'api' }) } }) }
+        if ($m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.text; internal = [bool]$b.internalAnalysisFlag }); return J @{ id = $Sc.notes.Count } }
+    }
     if ($u -like 'https://at.example/*') {
+        if ($m -eq 'GET' -and $u -like '*/TicketNotes/query?*') { $i = 0; return J @{ items = @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; description = $_.text; publish = $(if ($_.internal) { 2 } else { 1 }); creatorResourceID = 1 } }); pageDetails = (J @{ nextPageUrl = $null }) } }
         if ($m -eq 'GET' -and $u -like '*/TicketNotes/entityInformation/fields') { return J @{ fields = @((J @{ name = 'publish'; picklistValues = @((J @{ value = '1'; label = 'All Autotask Users'; isActive = $true }), (J @{ value = '2'; label = 'Internal Only'; isActive = $true })) }), (J @{ name = 'noteType'; picklistValues = @((J @{ value = '13'; label = 'System Workflow Note'; isActive = $true }), (J @{ value = '1'; label = 'Task Detail'; isActive = $true })) })) } }
-        if ($m -eq 'POST' -and $u -like '*/Tickets/12345/Notes') { return J @{ itemId = 1 } }
+        if ($m -eq 'POST' -and $u -like '*/Tickets/12345/Notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.description; internal = ([string]$b.publish -eq '2') }); return J @{ itemId = $Sc.notes.Count } }
     }
     if ($u -like 'https://halo.example/*') {
         if ($u -like '*/auth/token') { return J @{ access_token = 'halo-tok' } }
-        if ($m -eq 'POST' -and $u -like '*/api/Actions') { return @(J @{ id = 1 }) }
+        if ($m -eq 'GET' -and $u -like '*/api/Actions?ticket_id=12345*') { $i = 0; return J @{ actions = @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; note = $_.text; hiddenfromuser = $_.internal; who_type = 1 } }) } }
+        if ($m -eq 'POST' -and $u -like '*/api/Actions') { $b = @($c.Body | ConvertFrom-Json)[0]; $null = $Sc.notes.Add(@{ text = [string]$b.note; internal = [bool]$b.hiddenfromuser }); return @(J @{ id = $Sc.notes.Count }) }
     }
     throw "unmocked $m $u"
 }
@@ -192,7 +204,7 @@ $sa = Get-ExoCall 'Add-RecipientPermission'
 Check 'shared: send-as for sam' ((Get-PVal $sa 'Trustee') -eq 'sam.doe@contoso.com' -and @(Get-PVal $sa 'AccessRights') -contains 'SendAs') ($sa | ConvertTo-Json -Compress)
 $notes = @(Get-PsaNotes)
 Check 'shared: ConnectWise internal then public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).internalAnalysisFlag -eq $false -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true) (Show-Calls)
-Check 'shared: public note is the new address only' ($o.public_note -eq "The new shared mailbox Contoso Sales Team is ready at $Addr." -and (Read-Body $notes[1]).text -eq $o.public_note) $o.public_note
+Check 'shared: public note is the new address only' ($o.public_note -eq "The new shared mailbox Contoso Sales Team is ready at $Addr." -and (Read-Body $notes[1]).text -eq "$($o.public_note)`n[shared_mailbox ready $Addr]") $o.public_note
 Check 'shared: internal note names the owner and what ran' ($o.internal_note -match 'Owner: Alex Kim' -and $o.internal_note -match 'send as' -and $o.internal_note -notmatch 'Warnings') $o.internal_note
 Check 'shared: Exchange used REST with the extension secrets' ($r.read.exchange_mode -eq 'rest' -and @(Get-Calls 'POST' "$ExoBase/$TenantGuid/InvokeCommand").Count -ge 6) ''
 
@@ -342,5 +354,23 @@ Check 'CloudRadial form shape: parsed, literal token ignored, created' ($r.out.s
 New-Scenario '' 'rest'
 $r = Invoke-Request (New-Body)
 Check 'no PSA set up: still created, warning' ($r.out.status -eq 'success' -and (@($r.out.warnings) -match 'No PSA is set up').Count -eq 1) "$($r.out.status) $(@($r.out.warnings) -join ' | ')"
+
+# =================== rerun writes nothing twice (ServiceAI Action Runs Retry) ===================
+New-Scenario 'connectwise' 'rest'
+$null = Invoke-Request (New-Body @{ preview = 'true' })
+$r = Invoke-Request (New-Body @{ preview = 'true' })
+Check 'rerun preview: no second internal note' (@(Get-PsaNotes).Count -eq 1 -and $Sc.notes[0].text -match '\[shared_mailbox pending_confirmation contoso-sales-team@contoso\.com [0-9a-f]{8}\]' -and (@($r.out.actions) -match 'already on ticket 12345').Count -eq 1) "$(@(Get-PsaNotes).Count) / $(@($r.out.actions) -join ' | ')"
+$null = Invoke-Request (New-Body)
+$created = @(Get-ExoWrites).Count
+$r = Invoke-Request (New-Body)
+Check 'rerun after success: success, nothing created or noted again' ($r.out.status -eq 'success' -and -not $r.err -and @(Get-PsaNotes).Count -eq 3 -and @(Get-ExoWrites).Count -eq $created -and $r.out.message -match 'already created by an earlier run') "$($r.out.status) $($r.out.message) $($r.err) / $(@(Get-PsaNotes).Count)"
+New-Scenario 'connectwise' 'rest' @{ recipients = @{ $Addr = @{ DisplayName = 'Someone Else'; RecipientTypeDetails = 'UserMailbox' } } }
+$r = Invoke-Request (New-Body)
+Check 'address taken with no earlier success note: still rejected' ($r.out.status -eq 'rejected' -and $r.err -match 'already used') "$($r.out.status) $($r.err)"
+New-Scenario 'autotask' 'rest'
+$null = Invoke-Request (New-Body @{ kind = 'distribution_list'; send_as = ''; confirm = 'true' })
+$n1 = @(Get-PsaNotes).Count
+$r = Invoke-Request (New-Body @{ kind = 'distribution_list'; send_as = ''; confirm = 'true' })
+Check 'rerun on Autotask: nothing written twice' ($n1 -ge 1 -and @(Get-PsaNotes).Count -eq $n1 -and $r.out.status -eq 'success') "$n1 / $(@(Get-PsaNotes).Count) $($r.out.status) $($r.out.message)"
 
 Complete-Test

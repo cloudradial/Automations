@@ -179,4 +179,51 @@ foreach ($TCase in $TNoteCases) {
     Check "$($TCase.psa) notes: text, internal flag and date" ($TR.notes.Count -eq 2 -and $TR.notes[0].text -eq '[Auto-Escalation] moved' -and $TR.notes[0].internal -eq $true -and $TR.notes[1].internal -eq $false -and $TR.notes[0].created -is [datetime]) (Show-Calls)
 }
 
+# ---- Find-PsaTickets -CompanyId: server-side filter on every PSA, and a client-side guard ----
+# Each mock returns two tickets, one for company 42 and one for company 43, as if the PSA ignored the filter.
+$TCoCases = @(
+    @{ psa = 'connectwise'; like = '*/service/tickets[?]*'; check = { param($u) $u -match 'closedFlag=false and company/id=42' }
+        reply = @([pscustomobject]@{ id = 1; summary = 'A'; company = [pscustomobject]@{ id = 42; name = 'Contoso Ltd' }; _info = [pscustomobject]@{ dateEntered = (& $TNowIso -2) } }, [pscustomobject]@{ id = 2; summary = 'B'; company = [pscustomobject]@{ id = 43; name = 'Example MSP' }; _info = [pscustomobject]@{ dateEntered = (& $TNowIso -2) } }) }
+    @{ psa = 'autotask'; like = '*/Tickets/query[?]*'; check = { param($u) $u -match '"field":"companyID","value":42' }
+        reply = [pscustomobject]@{ items = @([pscustomobject]@{ id = 1; title = 'A'; companyID = 42; status = 1; createDate = (& $TNowIso -2) }, [pscustomobject]@{ id = 2; title = 'B'; companyID = 43; status = 1; createDate = (& $TNowIso -2) }); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
+    @{ psa = 'halopsa'; like = '*/api/Tickets[?]*'; check = { param($u) $u -match 'open_only=true&client_id=42&' }
+        reply = [pscustomobject]@{ record_count = 2; tickets = @([pscustomobject]@{ id = 1; summary = 'A'; client_id = 42; dateoccurred = (& $TNowIso -2) }, [pscustomobject]@{ id = 2; summary = 'B'; client_id = 43; dateoccurred = (& $TNowIso -2) }) } }
+    @{ psa = 'kaseyabms'; like = '*/v2/servicedesk/tickets[?]*'; check = { param($u) $u -match 'Filter\.AccountIds=42' }
+        reply = [pscustomobject]@{ Result = @([pscustomobject]@{ Id = 1; Title = 'A'; AccountId = 42; StatusName = 'New'; OpenDate = (& $TNowIso -2) }, [pscustomobject]@{ Id = 2; Title = 'B'; AccountId = 43; StatusName = 'New'; OpenDate = (& $TNowIso -2) }) } }
+    @{ psa = 'syncro'; like = '*/tickets[?]*'; check = { param($u) $u -match 'status=Not Closed&customer_id=42&page=1' }
+        reply = [pscustomobject]@{ tickets = @([pscustomobject]@{ id = 1; subject = 'A'; customer_id = 42; status = 'New'; created_at = (& $TNowIso -2) }, [pscustomobject]@{ id = 2; subject = 'B'; customer_id = 43; status = 'New'; created_at = (& $TNowIso -2) }); meta = [pscustomobject]@{ total_pages = 1 } } }
+    @{ psa = 'zendesk'; like = '*/search[?]*'; check = { param($u) $u -match 'type:ticket status<solved organization:42&' }
+        reply = [pscustomobject]@{ results = @([pscustomobject]@{ id = 1; subject = 'A'; organization_id = 42; status = 'open'; created_at = (& $TNowIso -2) }, [pscustomobject]@{ id = 2; subject = 'B'; organization_id = 43; status = 'open'; created_at = (& $TNowIso -2) }); next_page = $null } }
+)
+foreach ($TCase in $TCoCases) {
+    $global:TCaseNow = $TCase
+    Reset-Mock -Secrets $TSecrets[$TCase.psa] -Handler { param($c, $n)
+        if ($c.Uri -like '*/auth/token') { return [pscustomobject]@{ access_token = 'tok' } }
+        if ($c.Uri -like '*/v2/security/authenticate') { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'tok' } } }
+        if ($c.Uri -like '*/Tickets/entityInformation/fields') { return $TAtFields }
+        if ($c.Uri -like $global:TCaseNow.like) { return $global:TCaseNow.reply }
+        return $null
+    }
+    $TR = Invoke-Extra { $null = Connect-Psa; @{ rows = @(Find-PsaTickets -CompanyId '42') } }
+    $TU = [uri]::UnescapeDataString(@($Mock.Calls | Where-Object { $_.Uri -like $TCase.like })[0].Uri)
+    Check "$($TCase.psa) company filter: sent to the PSA, and other companies dropped even if returned" ((& $TCase.check $TU) -and $TR.rows.Count -eq 1 -and $TR.rows[0].companyId -eq '42') "$TU | rows=$(@($TR.rows | ForEach-Object { $_.companyId }) -join ',')"
+}
+Reset-Mock -Secrets $TSecrets.connectwise
+$TMsg = Get-ThrowMessage { Invoke-Extra { $null = Connect-Psa; Find-PsaTickets -CompanyId 'Contoso' } }
+Check 'Find-PsaTickets refuses a non-numeric company id before calling the PSA' ($TMsg -match 'needs a numeric PSA company id' -and $Mock.Calls.Count -eq 0) $TMsg
+
+# ---- Resolve-PsaCompanyId ----
+Reset-Mock -Secrets $TSecrets.connectwise -Handler { param($c, $n)
+    $u = [uri]::UnescapeDataString($c.Uri)
+    if ($u -match 'name="Contoso Ltd"') { return @([pscustomobject]@{ id = 42; name = 'Contoso Ltd' }) }
+    if ($u -match 'name="Twins"') { return @([pscustomobject]@{ id = 50; name = 'Twins' }, [pscustomobject]@{ id = 51; name = 'twins' }) }
+    return @()
+}
+$TR = Invoke-Extra { $null = Connect-Psa; @{ a = (Resolve-PsaCompanyId '42'); b = (Resolve-PsaCompanyId 'Contoso Ltd'); c = (Resolve-PsaCompanyId ''); d = (Resolve-PsaCompanyId '@CompanyPsaId') } }
+Check 'Resolve company: an id is used as given (no lookup), an exact name resolves, blank and @token mean all' ($TR.a.id -eq '42' -and $TR.b.id -eq '42' -and $TR.b.name -eq 'Contoso Ltd' -and $TR.c.id -eq '' -and $TR.d.id -eq '' -and @(Get-Calls GET '*/company/companies*').Count -eq 1) (Show-Calls)
+$TMsg = Get-ThrowMessage { Invoke-Extra { $null = Connect-Psa; Resolve-PsaCompanyId 'Nobody Inc' } }
+Check 'Resolve company: an unknown name is refused plainly' ($TMsg -eq "ConnectWise has no company named 'Nobody Inc'. Use the exact company name or the PSA company id.") $TMsg
+$TMsg = Get-ThrowMessage { Invoke-Extra { $null = Connect-Psa; Resolve-PsaCompanyId 'Twins' } }
+Check 'Resolve company: an ambiguous name is refused plainly' ($TMsg -eq "ConnectWise has 2 companies named 'Twins'. Use the PSA company id instead.") $TMsg
+
 Complete-Test

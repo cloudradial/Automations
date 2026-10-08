@@ -46,6 +46,7 @@ const testInput = JSON.stringify({
   escalation_map: { 'Service Desk': { queue: 'Tier 2' }, 'Tier 2': { queue: 'Tier 3' } },
   dispatcher_email: 'dispatch@example.com',
   skip_statuses: 'waiting,pending,on hold,scheduled',
+  company: '',
   psa: '',
 }, null, 2);
 

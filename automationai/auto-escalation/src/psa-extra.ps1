@@ -6,8 +6,10 @@
 # Every call marked "Unverified" is not in reference/build-kit/PSA.md yet. Check it against a real tenant
 # before relying on it, then record it in PSA.md.
 #
-#   Find-PsaTickets [-UpdatedBefore <datetime>] [-Status <string[]>] [-Max <int>] [-IncludeClosed]
-#       Open tickets (by default), optionally only those last updated before a time or in named statuses.
+#   Find-PsaTickets [-UpdatedBefore <datetime>] [-Status <string[]>] [-CompanyId <id>] [-Max <int>] [-IncludeClosed]
+#       Open tickets (by default), optionally only those last updated before a time, in named statuses, or for
+#       one PSA company id. With -CompanyId, a row whose company isn't exactly that id is always dropped here,
+#       even when the PSA ignored the server-side filter, so one client's run never sees another client's tickets.
 #       Returns @(@{ id; number; summary; companyId; companyName; status; priority; priorityLabel; queueId;
 #       queueName; assigneeId; assigneeName; created; updated; raw }). priority is critical, high, medium,
 #       low or ''. created and updated are UTC [datetime] values (updated falls back to created).
@@ -20,6 +22,7 @@
 #   Get-PsaTicketNotes -Id <string>   @(@{ text; internal; created }), newest first where the PSA sorts.
 #   Get-PsaDefaultRole -UserId <string>   Autotask: the resource's default Service Desk role id, for Set-PsaAssignee.
 #       Other PSAs don't need a role and get ''.
+#   Resolve-PsaCompanyId -Company <id or exact name>   @{ id; name } for a run's "company" input.
 
 $PsaExtraState = @{ Names = @{}; Sla = @{}; MaxPages = 50 }
 
@@ -88,12 +91,14 @@ function Get-PsaBmsList {
 }
 
 function Find-PsaTickets {
-    param($UpdatedBefore = $null, [string[]]$Status = @(), [int]$Max = 500, [switch]$IncludeClosed)
+    param($UpdatedBefore = $null, [string[]]$Status = @(), [string]$CompanyId = '', [int]$Max = 500, [switch]$IncludeClosed)
     $c = Get-PsaConn
     $cut = ConvertTo-PsaDate $UpdatedBefore
     $iso = if ($cut) { $cut.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' }
     $want = @($Status | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
     if ($Max -lt 1) { $Max = 1 }
+    $co = ([string]$CompanyId).Trim()
+    if ($co -and $co -notmatch '^\d+$') { throw "Find-PsaTickets needs a numeric PSA company id, not '$co'. Use Find-PsaCompany to look a name up." }
     $found = New-Object System.Collections.ArrayList
     $what = 'list tickets'
     switch ($c.Psa) {
@@ -101,6 +106,7 @@ function Find-PsaTickets {
             # Unverified: the lastUpdated condition with a [date] literal (CW conditions syntax) and the list fields used.
             $conds = @(); if (-not $IncludeClosed) { $conds += 'closedFlag=false' }
             if ($iso) { $conds += "lastUpdated < [$iso]" }
+            if ($co) { $conds += "company/id=$co" }
             if ($want.Count -eq 1) { $conds += ('status/name="' + $Status[0].Trim().Replace('"', '\"') + '"') }
             $cq = if ($conds.Count) { "conditions=$(ConvertTo-PsaQuery ($conds -join ' and '))&" } else { '' }
             for ($p = 1; $p -le $PsaExtraState.MaxPages; $p++) {
@@ -116,6 +122,7 @@ function Find-PsaTickets {
             $f = @()
             if (-not $IncludeClosed) { foreach ($v in @(Get-PsaAtCompleteStatuses)) { $f += [ordered]@{ op = 'noteq'; field = 'status'; value = $v } } }
             if ($iso) { $f += [ordered]@{ op = 'lt'; field = 'lastActivityDate'; value = $iso } }
+            if ($co) { $f += [ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$co } }
             if (-not $f.Count) { $f += [ordered]@{ op = 'gt'; field = 'id'; value = 0 } }
             $path = "/Tickets/query?search=$(ConvertTo-PsaQuery (@{ filter = $f; MaxRecords = 500 } | ConvertTo-Json -Depth 6 -Compress))"
             $statusVals = @(Get-PsaAtPicklist 'Tickets' 'status'); $prioVals = @(Get-PsaAtPicklist 'Tickets' 'priority'); $queueVals = @(Get-PsaAtPicklist 'Tickets' 'queueID')
@@ -133,6 +140,7 @@ function Find-PsaTickets {
         'halopsa' {
             # Unverified: list paging (pageinate, page_size, page_no), lastactiondate, and status_name/team/agent_name on list rows.
             $open = if ($IncludeClosed) { '' } else { 'open_only=true&' }
+            if ($co) { $open += "client_id=$co&" }
             for ($p = 1; $p -le $PsaExtraState.MaxPages; $p++) {
                 $r = Invoke-PsaRead "/Tickets?$($open)pageinate=true&page_size=100&page_no=$p&order=id" $what
                 $page = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })
@@ -148,9 +156,9 @@ function Find-PsaTickets {
             }
         }
         'kaseyabms' {
-            # Unverified: list paging (PageNumber, PageSize), the reply shape and every field name below. Open/closed is read from the status name.
+            # Unverified: list paging (PageNumber, PageSize), Filter.AccountIds, the reply shape and every field name below. Open/closed is read from the status name.
             for ($p = 1; $p -le $PsaExtraState.MaxPages; $p++) {
-                $page = @(Get-PsaBmsList (Invoke-PsaRead "/servicedesk/tickets?PageNumber=$p&PageSize=100" $what))
+                $page = @(Get-PsaBmsList (Invoke-PsaRead "/servicedesk/tickets?PageNumber=$p&PageSize=100$(if ($co) { "&Filter.AccountIds=$co" })" $what))
                 foreach ($t in $page) {
                     $sname = [string](Get-PsaProp $t 'StatusName')
                     if (-not $IncludeClosed -and $sname -match '(?i)complete|closed|resolved|cancel') { continue }
@@ -163,6 +171,7 @@ function Find-PsaTickets {
         'syncro' {
             # Unverified: customer_business_then_name, priority, updated_at and due_date on list rows (status "Not Closed" is in PSA.md).
             $st = if ($IncludeClosed) { '' } else { "status=$(ConvertTo-PsaQuery 'Not Closed')&" }
+            if ($co) { $st += "customer_id=$co&" }   # Unverified: the customer_id filter
             for ($p = 1; $p -le $PsaExtraState.MaxPages; $p++) {
                 $r = Invoke-PsaRead "/tickets?$($st)page=$p" $what
                 foreach ($t in @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })) {
@@ -174,7 +183,7 @@ function Find-PsaTickets {
         }
         'zendesk' {
             # Unverified: the updated< search with a time, and sideloading SLAs with include=tickets(slas) on search.
-            $q = 'type:ticket'; if (-not $IncludeClosed) { $q += ' status<solved' }; if ($iso) { $q += " updated<$iso" }
+            $q = 'type:ticket'; if (-not $IncludeClosed) { $q += ' status<solved' }; if ($iso) { $q += " updated<$iso" }; if ($co) { $q += " organization:$co" }
             $path = "/search?query=$(ConvertTo-PsaQuery $q)&sort_by=updated_at&sort_order=asc&per_page=100&include=$(ConvertTo-PsaQuery 'tickets(slas)')"
             for ($p = 1; $p -le 10 -and $path; $p++) {
                 $r = Invoke-PsaRead $path $what
@@ -189,6 +198,7 @@ function Find-PsaTickets {
     # The same filters again here, for the PSAs that can't filter on the server.
     $out = @($found | Where-Object {
             (-not $cut -or ($null -ne $_.updated -and $_.updated -lt $cut)) -and
+            (-not $co -or $_.companyId -eq $co) -and
             (-not $want.Count -or $want -contains $_.status.Trim().ToLowerInvariant())
         })
     return @($out | Select-Object -First $Max)
@@ -389,5 +399,18 @@ function Get-PsaDefaultRole {
     $v = Get-PsaPath (Invoke-Psa GET "/Resources/$UserId") 'item.defaultServiceDeskRoleID'
     if (Test-PsaBlank $v) { return '' }
     return [string]$v
+}
+# A run's "company" input as a PSA company: a numeric id is used as given; a name must match exactly one
+# company (Find-PsaCompany, case-insensitive). Returns @{ id; name }, or @{ id = ''; name = '' } for blank.
+# Throws a plain sentence when the name matches none or several.
+function Resolve-PsaCompanyId {
+    param([string]$Company)
+    $v = ([string]$Company).Trim()
+    if (-not $v -or $v.StartsWith('@')) { return @{ id = ''; name = '' } }
+    if ($v -match '^\d+$') { return @{ id = $v; name = '' } }
+    $hits = @(Find-PsaCompany -Name $v | Where-Object { $_.exact })
+    if (-not $hits.Count) { throw "$(Get-PsaName) has no company named '$v'. Use the exact company name or the PSA company id." }
+    if ($hits.Count -gt 1) { throw "$(Get-PsaName) has $($hits.Count) companies named '$v'. Use the PSA company id instead." }
+    return @{ id = [string]$hits[0].id; name = [string]$hits[0].name }
 }
 # ---------- end psa-extra.ps1 ----------

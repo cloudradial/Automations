@@ -78,6 +78,7 @@ A Routine sends no input, so every field has a default.
 | `minutes_untouched_by_priority` | `{"critical":15,"high":60,"medium":240,"low":480}` | Minutes without an update before a ticket is escalated. Give any subset. |
 | `sla_risk_percent` | `80` | Escalate once this much of the PSA's SLA time is used (1 to 100). |
 | `check_sla` | `true` | `false` ignores SLA targets and uses the untouched time only. |
+| `company` | (all companies) | Only this client: a PSA company id, or the exact company name (it must match one company). No other client's ticket is read, moved or noted, even if the PSA ignores the filter. Also accepted as `company_id` or `companyId`. |
 | `max_tickets` | `10` | The most tickets escalated in one run (1 to 100). |
 | `max_scan` | `500` | The most open tickets read in one run. |
 | `skip_statuses` | `waiting,pending,on hold,scheduled` | Leave out tickets whose status contains any of these words. |
@@ -103,8 +104,8 @@ A list works too: `[{"from": "Service Desk", "queue": "Tier 2"}]`. The target ca
 ## Import & test
 
 1. Import `auto-escalation.yml`, add the secrets above to the runner, then **Publish** and **Deploy** to that runner.
-2. **Preview first.** In **Run**, use the first step's Test Input (it has `preview: true`) with your own queue names in `escalation_map`. Expect `status: pending_confirmation` (or `success` with "No open tickets need escalating") and a list of what would happen. Nothing changes.
-3. **One live ticket.** Make a test ticket in a mapped queue, wait past its untouched limit (or set `minutes_untouched_by_priority` to `{"low":1,"medium":1}`), then run with `preview: false` and `max_tickets: 1`. Expect the ticket moved one tier, one dispatcher email and one internal `[Auto-Escalation]` note.
+2. **Preview first.** In **Run**, use the first step's Test Input (it has `preview: true`) with your own queue names in `escalation_map` and `company` set to one test client. Expect `status: pending_confirmation` (or `success` with "No open tickets need escalating") and a list of what would happen. Nothing changes.
+3. **One live ticket.** Make a test ticket for the test client in a mapped queue, wait past its untouched limit (or set `minutes_untouched_by_priority` to `{"low":1,"medium":1}`), then run with `preview: false` and `company` set to that client, so no other client's ticket can be touched. Expect the ticket moved one tier, one dispatcher email and one internal `[Auto-Escalation]` note.
 4. **Run it again.** The same ticket must not move again: expect `alreadyEscalated: 1`.
 5. **Schedule it.** Add the `AutoEscalation-Map` and `Dispatcher-Email` secrets, then a **Routine** that runs the deployed version every 15 minutes.
 

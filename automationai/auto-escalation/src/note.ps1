@@ -26,6 +26,8 @@ $emailed = (Get-PsaProp $prev 'dispatcher_emailed') -eq $true
 $delivery = [string](Get-PsaProp $prev 'delivery')
 $counts = ConvertTo-EscHash (Get-PsaProp $prev 'counts')
 $noteFails = 0
+$coName = [string](Get-PsaProp $prev 'companyName'); $coId = [string](Get-PsaProp $prev 'companyId')
+$scope = if ($coName) { " for $coName" } elseif ($coId) { " for company $coId" } else { '' }
 
 if (-not $preview -and $escalations.Count) {
     $connected = $false
@@ -59,7 +61,7 @@ if ($preview -or -not $n) {
 }
 else {
     $status = if ($moveFails -or $noteFails) { 'incomplete' } else { 'success' }
-    $message = "Escalated $n ticket$(if ($n -ne 1) { 's' }): $moved moved up a tier and $($n - $moved) flagged without moving. $delivery"
+    $message = "Escalated $n ticket$(if ($n -ne 1) { 's' })$($scope): $moved moved up a tier and $($n - $moved) flagged without moving. $delivery"
     if ($moveFails) { $message += " $moveFails could not be moved; see warnings." }
     if ($noteFails) { $message += " $noteFails escalation note$(if ($noteFails -ne 1) { 's' }) could not be added; see warnings." }
 }

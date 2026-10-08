@@ -110,6 +110,8 @@ try {
         psa = [string](Get-EscInput 'psa' ''); preview = $preview; max_tickets = $maxT; minutes_untouched_by_priority = $limits; sla_risk_percent = $riskPct
         check_sla = $checkSla; dispatcher_email = @($dispatch); skip_statuses = $skip; marker = $escMarker
         from = [string](Get-EscInput 'from' ''); message_stream = [string](Get-EscInput 'message_stream' 'outbound')
+        company = [string](@(@('company', 'company_id', 'companyId') | ForEach-Object { Get-EscInput $_ '' } | Where-Object { ([string]$_).Trim() }) | Select-Object -First 1)
+        companyId = ''; companyName = ''
     }
 }
 catch { Stop-EscRun 'rejected' "Auto-Escalation didn't run because an input is invalid: $($_.Exception.Message)" }
@@ -118,10 +120,14 @@ catch { Stop-EscRun 'rejected' "Auto-Escalation didn't run because an input is i
 try { $conn = Connect-Psa (Get-PsaType $settings.psa) }
 catch { Stop-EscRun 'error' "Auto-Escalation couldn't connect to the PSA. $($_.Exception.Message)" }
 $psaName = Get-PsaName
+# Optional company input: a PSA company id or exact name. Only that company's tickets are read, moved or noted.
+try { $co = Resolve-PsaCompanyId $settings.company; $settings.companyId = $co.id; $settings.companyName = $co.name }
+catch { Stop-EscRun 'rejected' "Auto-Escalation didn't run because the company input couldn't be matched: $($_.Exception.Message)" }
+$scope = if ($settings.companyName) { " for $($settings.companyName)" } elseif ($settings.companyId) { " for company $($settings.companyId)" } else { '' }
 $now = [datetime]::UtcNow
-try { $open = @(Find-PsaTickets -Max $maxScan) }
+try { $open = @(Find-PsaTickets -CompanyId $settings.companyId -Max $maxScan) }
 catch { Stop-EscRun 'error' "Auto-Escalation couldn't read open tickets from $psaName. $($_.Exception.Message)" }
-$null = $run.actions.Add("Read $($open.Count) open tickets from $psaName.")
+$null = $run.actions.Add("Read $($open.Count) open tickets$scope from $psaName.")
 if ($open.Count -ge $maxScan) { $null = $run.warnings.Add("Stopped reading at max_scan ($maxScan) open tickets, so some weren't checked.") }
 
 $counts = [ordered]@{ open = $open.Count; skipped = 0; atRisk = 0; alreadyEscalated = 0; notesUnreadable = 0; selected = 0; toReassign = 0; noteOnly = 0; overLimit = 0 }
@@ -215,15 +221,15 @@ $counts.selected = $escalations.Count
 
 $checked = $open.Count - $counts.skipped
 if (-not $escalations.Count) {
-    $msg = "No open tickets need escalating. $checked open tickets were checked."
+    $msg = "No open tickets$scope need escalating. $checked open tickets were checked."
     if ($counts.alreadyEscalated) { $msg += " $($counts.alreadyEscalated) at-risk tickets were already escalated earlier." }
 }
-elseif ($preview) { $msg = "Preview: $($escalations.Count) ticket$(if ($escalations.Count -ne 1) { 's' }) would be escalated ($($counts.toReassign) moved up a tier, $($counts.noteOnly) noted and flagged only). Nothing was changed. Run again with preview set to false to make the changes." }
+elseif ($preview) { $msg = "Preview: $($escalations.Count) ticket$(if ($escalations.Count -ne 1) { 's' }) would be escalated$scope ($($counts.toReassign) moved up a tier, $($counts.noteOnly) noted and flagged only). Nothing was changed. Run again with preview set to false to make the changes." }
 else { $msg = "$($escalations.Count) ticket$(if ($escalations.Count -ne 1) { 's' }) to escalate: $($counts.toReassign) to move up a tier and $($counts.noteOnly) to note and flag only." }
 
 Set-NodeOutput ([ordered]@{
         status = $(if ($preview -and $escalations.Count) { 'pending_confirmation' } else { 'success' }); message = $msg; public_note = ''; internal_note = $msg; ticket_id = ''
-        preview = $preview; psa = $conn.Psa; psaName = $psaName; generatedAt = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        preview = $preview; psa = $conn.Psa; psaName = $psaName; companyId = $settings.companyId; companyName = $settings.companyName; generatedAt = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
         escalations = @($escalations); counts = $counts; settings = $settings
         actions = @($run.actions); warnings = @($run.warnings)
     })

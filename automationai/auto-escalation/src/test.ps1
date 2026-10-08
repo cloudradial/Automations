@@ -73,7 +73,7 @@ $TBody = @{ escalation_map = ($TMap | ConvertTo-Json -Compress); dispatcher_emai
 #   2006 waiting on client                                 -> skipped
 #   2007 medium, Tier 2, idle 300 (limit 240)              -> move to Tier 3 and assign "escalations"
 function New-TCw { param($Id, $Summary, $Co, $Board, $Prio, $PrioId, $Owner, $Idle, $Created, $Status = 'In Progress', $Sla = $null)
-    $t = [ordered]@{ id = $Id; summary = $Summary; company = [pscustomobject]@{ id = 5; name = $Co }; status = [pscustomobject]@{ name = $Status }; priority = [pscustomobject]@{ id = $PrioId; name = $Prio }; board = [pscustomobject]@{ id = 1; name = $Board }; _info = [pscustomobject]@{ dateEntered = (Get-TAgo $Created); lastUpdated = (Get-TAgo $Idle) } }
+    $t = [ordered]@{ id = $Id; summary = $Summary; company = [pscustomobject]@{ id = $(if ($Co -eq 'Contoso Ltd') { 5 } else { 6 }); name = $Co }; status = [pscustomobject]@{ name = $Status }; priority = [pscustomobject]@{ id = $PrioId; name = $Prio }; board = [pscustomobject]@{ id = 1; name = $Board }; _info = [pscustomobject]@{ dateEntered = (Get-TAgo $Created); lastUpdated = (Get-TAgo $Idle) } }
     if ($Owner) { $t.owner = [pscustomobject]@{ id = 7; identifier = $Owner; name = "$Owner (name)" } }
     if ($Sla) { $t.sla = [pscustomobject]@{ id = $Sla }; $t.dateResponded = $null }
     return [pscustomobject]$t
@@ -97,6 +97,7 @@ $TCwHandler = { param($c, $n)
         if ($Matches[1] -eq '2004') { return @([pscustomobject]@{ id = 1; text = '[Auto-Escalation] This ticket was escalated automatically.'; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 200) }) }
         return @([pscustomobject]@{ id = 1; text = 'Customer called'; internalAnalysisFlag = $false; dateCreated = (Get-TAgo 500) })
     }
+    if ($u -like '*/company/companies*') { if ($u -match 'name="Contoso Ltd"') { return @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return @() }
     if ($u -like '*/service/SLAs/5/priorities*') { return @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
     if ($u -like '*/service/SLAs/5') { return [pscustomobject]@{ id = 5; respondHours = 4; resolutionHours = 24 } }
     if ($c.Method -eq 'PATCH' -and $u -match '/service/tickets/(\d+)$') { if ($global:TCw.failPatch -eq $Matches[1]) { New-HttpError 403 '{"message":"denied"}' }; return [pscustomobject]@{ id = [int]$Matches[1] } }
@@ -133,6 +134,21 @@ Check 'Live: 2003 note keeps it with the working tech and names the SLA' ($TN3.t
 Check 'Live: already-escalated 2004 gets nothing' ($null -eq (Get-TCwNote 2004)) ''
 Check 'Live: message and contract' ($TR.out.message -match '^Escalated 4 tickets: 2 moved up a tier and 2 flagged without moving\. The dispatcher was emailed' -and $TR.out.public_note -eq '' -and $TR.out.internal_note -match 'Ticket 2001 \(Contoso Ltd\)' -and @($TR.out.actions).Count -ge 7) $TR.out.message
 Check 'Live: no em dashes in notes or email' (-not (@(Get-TCwNotes | Where-Object { $_.Body -match [char]0x2014 }).Count) -and $TPmBody.HtmlBody -notmatch [char]0x2014) ''
+
+# ---- 2b. company input: only that client's tickets are read, moved or noted ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ company = '5' })
+$TU = [uri]::UnescapeDataString((Get-Calls GET '*/service/tickets[?]*')[0].Uri)
+$TOther = @($Mock.Calls | Where-Object { $_.Uri -match '/service/tickets/(2003|2004|2005|2006)(/|$|\?)' })
+Check 'company=5 (id): filter sent to the PSA; only Contoso tickets escalated (2001, 2002, 2007)' ($TR.out.status -eq 'success' -and $TU -match 'company/id=5' -and (@($TR.out.escalations | ForEach-Object { $_.id } | Sort-Object) -join ',') -eq '2001,2002,2007') "$TU | $(($TR.out.escalations | ForEach-Object { $_.id }) -join ',')"
+Check 'company=5: no read, move or note on any other company''s ticket, even though the mock returned them' ($TOther.Count -eq 0 -and @(Get-TCwNotes).Count -eq 3) (($TOther | ForEach-Object { "$($_.Method) $($_.Uri)" }) -join ' ; ')
+Check 'company=5: the message names the scope' ($TR.out.message -match '^Escalated 3 tickets for company 5: ') $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ company = 'Contoso Ltd'; preview = $true })
+Check 'company by exact name (preview): looked up, only that company, nothing written' ($TR.out.status -eq 'pending_confirmation' -and @($TR.out.escalations).Count -eq 3 -and $TR.out.message -match 'would be escalated for Contoso Ltd' -and @(Get-TWrites).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ company = 'Nobody Inc' })
+Check 'unknown company name: rejected before any ticket is read; nothing written' ($TR.stage -eq 'find' -and $TR.out.status -eq 'rejected' -and $TR.out.message -match "has no company named 'Nobody Inc'" -and @(Get-Calls GET '*/service/tickets*').Count -eq 0 -and @(Get-TWrites).Count -eq 0) $TR.out.message
 
 # ---- 3. max_tickets ----
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler

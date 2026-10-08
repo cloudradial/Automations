@@ -154,7 +154,8 @@ definition:
               if ($type -eq 'other') { return @{ excluded = $true } }
               $ageO = Get-Age $ep; $age = if ($ageO) { $ageO.years } else { $null }
               $war = Get-Warranty $ep; $sup = Get-OsSupport $os $type; $mac = if ($type -eq 'macos') { Get-MacMajor $os } else { $null }
-              $ram = Get-RamGb $ep; $w11 = ([string](Get-Prop $ep 'windows11Readiness')) -match '(?i)installed|capable'
+              # Positive-only Win11 signal. The API reports 'Ready' (and 'NotReady'), so match whole words and reject any 'not'.
+              $ram = Get-RamGb $ep; $w11r = [string](Get-Prop $ep 'windows11Readiness'); $w11 = ($w11r -match '(?i)\b(installed|capable|ready)\b') -and ($w11r -notmatch '(?i)not')
               $mk = ([string](Get-Prop $ep 'manufacturer')).Trim(); $md = ([string](Get-Prop $ep 'model')).Trim(); $sn = ([string](Get-Prop $ep 'serialNumber')).Trim()
               $ident = (@($mk, $md) | Where-Object { $_ }) -join ' '; if ($sn) { $ident = $(if ($ident) { "$ident, serial $sn" } else { "serial $sn" }) }
               $lead = "<strong>$(Enc $name)</strong>$(if ($ident) { " ($(Enc $ident))" })"

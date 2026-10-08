@@ -3,7 +3,7 @@ agent:
   slug: endpoint-warranty-refresh-advisor-planner-cards
   name: Endpoint LifeCycle Manager
   vendor: CloudRadial
-  version: 0.4.2
+  version: 0.4.3
   description: Reviews managed endpoints per company and maintains one Planner card per
     refresh category (each carrying a triage priority) for out-of-spec computers. All
     decision logic is inline in the prompt; it does NOT depend on knowledge grounding.
@@ -72,7 +72,7 @@ agent:
     - manufacturedDate = age basis (fallback biosDate, then cpuDate, mark estimated)
     - expirationDate = warranty end
     - os, osVersion = operating system
-    - windows11Readiness = positive-only Windows 11 signal ("Installed"/"Capable")
+    - windows11Readiness = positive-only Windows 11 signal ("Installed"/"Capable"/"Ready"; "NotReady" or any "not" value is not ready)
     - isssd = SSD (true) vs HDD (false); the field name is lowercase isssd
     - memory = RAM in bytes (divide by 1073741824 for GB). A value of 0 means UNKNOWN, not low: never treat unknown memory as below standard, and never flag or card a device because of unknown memory. Score RAM only when a real positive value is present.
     - isServer, isVirtual = routing flags

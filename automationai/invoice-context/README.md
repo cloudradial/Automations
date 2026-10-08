@@ -34,8 +34,8 @@ Three steps. Only step 2 uses AI, and it can't call any tools. The workflow only
 | ConnectWise PSA | Yes | Yes, by company (`/time/entries`) | Yes (`/finance/agreements`) | Yes (`/finance/invoices`); period derived from the invoice date |
 | Autotask | Yes | Yes, by ticket (`TimeEntries`) | Yes (`Contracts`) | Yes (`Invoices`), with the invoice's own from and to dates |
 | HaloPSA | Yes | Yes, by ticket (actions with time) | Yes (`ClientContract`) | Yes (`Invoice`); period derived from the invoice date |
-| Kaseya BMS | Yes | Yes, by ticket (time logs) | Yes (contracts) | Not supported: send `period` |
-| Syncro | Yes | Yes, by ticket (ticket timers) | Yes (contracts) | Not supported: send `period` |
+| Kaseya BMS | Yes | Yes, by ticket (`/timelogs`) | Yes (contracts) | Not supported: send `period` |
+| Syncro | Yes | Yes, by ticket (`/ticket_timers`, or labour line items on the ticket) | Yes (contracts) | Not supported: send `period` |
 | Zendesk | Yes | Not available (no time-entry API) | Not available | Not supported: send `period` |
 
 Where time is kept per ticket, it is read for the company's tickets opened in the period or in the `lookbackDays` (default 60) before it, up to 50 tickets, with a warning when there are more.
@@ -76,7 +76,7 @@ By name only. Use the same names as the catalog extensions, so one set serves bo
 
 **ServiceAI Secrets manager:** `aai_invoice_dispute_context`, the workflow's webhook secret, sent as `X-Crauto-Webhook-Secret`.
 
-**PSA permissions:** the API member or key needs to read tickets, companies, time entries, agreements (contracts) and invoices, and add notes. In ConnectWise that means the Finance (agreements, invoices) and Time (time entries) inquire rights as well as Service Desk. A missing permission stops the run with the PSA's own message, for example `ConnectWise GET /time/entries failed (HTTP 403): ...`.
+**PSA permissions:** the API member or key needs to read tickets, companies, time entries, agreements (contracts) and invoices, and add notes. In ConnectWise that means the Finance (agreements, invoices) and Time (time entries) inquire rights as well as Service Desk. A missing permission stops the run with a plain message naming the PSA and what to grant, for example `ConnectWise refused to read time entries (HTTP 403). Give the API user permission to read time entries, then run this again.`.
 
 ## Required Graph permissions
 
@@ -118,7 +118,7 @@ Parameters: `ticketId` and `companyName` (required strings), `invoiceNumber` and
 
 `status` (`success`, `pending_confirmation`, `incomplete`, `rejected` or `error`), `message`, `public_note` (always empty: nothing is posted to the client), `internal_note` (the note text), `ticket_id`, `psa`, `period`, `summary`, `summarized_by` (`ai` or `figures`), `note_written`, `counts`, `actions`, `warnings` and `chatReply`. The first step's output also holds `figures_json`, the exact figures.
 
-ServiceAI's Action Runs **Retry** replays the request, which adds the note again.
+ServiceAI's Action Runs **Retry** (or a Routine running again) replays the request and writes nothing twice. The note ends with a marker such as `[invoice context 1001 2026-09-01T00:00:00Z to 2026-10-01T00:00:00Z]` (the ticket, the period and any invoice number). When a note with that marker is already on the ticket, nothing is added, `status` is `success` and `note_written` is `false`. A different period or invoice gets its own note.
 
 ## Import & test
 
@@ -128,8 +128,8 @@ ServiceAI's Action Runs **Retry** replays the request, which adds the note again
 4. **Note.** Run again with `addNote` left out (true). Expect one internal note on the ticket and nothing else changed.
 5. **Wire the trigger.** Enable the webhook in **Properties** (AutomationAI issues the URL and secret), redeploy, store the secret as `aai_invoice_dispute_context` in the ServiceAI Secrets manager, and create the two Actions, the triage rule and the Quick Action above.
 
-> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `gather.ps1`, `note.ps1`, `psa-extra.ps1` or the `summarize.*.txt` prompts, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `gather.ps1`, `note.ps1` or the `summarize.*.txt` prompts, run `node src/build.js` (it pastes `_shared/psa.ps1` and `_shared/psa-tickets.ps1` into the steps), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
 
 ### Not yet proven live
 
-`src/psa-extra.ps1` adds PSA calls that `_shared/psa.ps1` doesn't have yet (ticket lists, time entries, agreements, invoices). None is in `reference/build-kit/PSA.md` yet, and each carries an `Unverified` comment saying what to check, notably the ConnectWise `billableOption` values, Autotask `TimeEntries` with the `in` operator, the HaloPSA action time fields and invoice search, and every Kaseya BMS and Syncro time and contract call. The AI Prompt step's property names (`promptTemplate`, `systemMessage`, `maxTokens`, `outputKey`) follow the Phishing Report Triage workflow and are also unverified.
+The ticket lists, time entries, agreements and invoices come from the shared `_shared/psa-tickets.ps1`. Calls not yet in `reference/build-kit/PSA.md` carry an `Unverified` or `Vendor docs` comment there saying what to check, notably the ConnectWise `billableOption` values, Autotask `TimeEntries` by ticket, the HaloPSA action time fields and invoice search, and every Kaseya BMS and Syncro time and contract call. The AI Prompt step's property names (`promptTemplate`, `systemMessage`, `maxTokens`, `outputKey`) follow the Phishing Report Triage workflow and are also unverified.

@@ -23,20 +23,22 @@ The workflow runs against one company: the Microsoft 365 tenant whose app secret
 Steps: **Read inputs > Find risky users > Respond to new risky users > Block confirmed accounts > Summarize.** No AI step is used; the rules are fixed.
 
 1. **Find risky users** (read-only) reads the users Microsoft Entra ID Protection has **at risk now** (risk state "at risk") at high risk, or at medium and high with `min_risk` set to medium. Users whose risk was remediated or dismissed are left out. For each one it reads the account, its manager, whether it holds a directory admin role, and its risk detections from the last `lookback_days` days (IP address, location, detection type and times).
-2. **Respond to new risky users.** A user is new when the PSA has no open ticket whose summary contains `[Risky sign-in] <sign-in name>`. For each new user, without asking (this is what the automation is for), it:
+2. **Respond to new risky users.** A user is new when the PSA has no open ticket for the company whose summary contains `[Risky sign-in] <sign-in name>` (found with the shared `Find-PsaTickets`, on all six PSAs). For each new user, without asking (this is what the automation is for), it:
    - opens a **high-priority** ticket for the company, or **critical** when the user holds an admin role. The ticket description is generic: it never holds the IP, location or detection types;
    - **signs the user out of every session**;
    - **requires a password change at next sign-in**. This is skipped for accounts synced from on-premises Active Directory (reset those there), and it has no effect when the user's domain is federated to another identity provider (reset it there). Microsoft 365 doesn't let an app change an admin's password settings, so for admins the note says to reset it by hand;
-   - adds an **internal note** with the risk detail and what was done. This is the only place the risk detail is written;
+   - adds an **internal note** with the risk detail and what was done. This is the only place the risk detail is written. The note ends with `[risky-signin: <ticket id>]` (the shared `Add-PsaNote -Marker`), so a retried run never adds it twice; the marker holds no name or address;
    - emails the user's **manager** a short notice from the `Notify-FromMailbox` mailbox. It says only that Microsoft flagged unusual sign-in activity and what was done. No manager, or no mailbox secret, means no email and a warning.
 
    A user who already has an open ticket is left alone, so an hourly Routine never opens a second ticket or signs the user out again while the first ticket is open. When the account is safe, dismiss or remediate the risk in Entra ID Protection **before** closing the ticket: a user who is still at risk when their ticket is closed gets a new ticket on the next run.
-3. **Block confirmed accounts.** Nothing is blocked automatically. With `confirm` false (the default) and `block_upns` set, the run previews the block. With `confirm` true, it blocks only the accounts in `block_upns` that Microsoft **still has at risk at that moment**, that are still turned on, and that aren't synced from on-premises. For each it turns off sign-in, signs the account out again, and adds an internal note to its open ticket. The risk is **never dismissed** automatically; dismiss it in Entra ID Protection once the account is safe.
+3. **Block confirmed accounts.** Nothing is blocked automatically. With `confirm` false (the default) and `block_upns` set, the run previews the block. With `confirm` true, it blocks only the accounts in `block_upns` that Microsoft **still has at risk at that moment**, that are still turned on, and that aren't synced from on-premises. For each it turns off sign-in, signs the account out again, and adds an internal note to its open ticket, marked `[risky-signin-block: <ticket id> <date>]` so a retried confirm run notes the block only once that day. The risk is **never dismissed** automatically; dismiss it in Entra ID Protection once the account is safe.
 4. **Summarize** returns the result in plain sentences.
 
 With `preview` true the run reads everything, including the PSA, and says what it would do, but changes nothing.
 
-**Kaseya BMS** can't search tickets by text, so for it (and whenever a PSA search fails) the workflow keeps a log instead: one item per handled user in the company's **Risky Sign-ins** report archive (Compliance > Reports, admins only). The log item holds the sign-in name, ticket number, time and detection ids, never the IP or location. A user is handled again only when Microsoft updates their risk.
+**Safe to retry.** A rerun (ServiceAI **Retry** in Action Runs, or the next hourly Routine) finds the open ticket and leaves that user alone, and every ticket note is marker-guarded, so nothing is written twice. Every note is internal: the workflow writes no client-visible note.
+
+**When the PSA can't be searched.** Kaseya BMS has no text search, so its open tickets for the company are listed and matched by the workflow. When a PSA search fails, or stops at its limit without a match, the workflow keeps a log instead: one item per handled user in the company's **Risky Sign-ins** report archive (Compliance > Reports, admins only). The log item holds the sign-in name, ticket number, time and detection ids, never the IP or location. A user logged there is handled again only when Microsoft updates their risk.
 
 ## Download & import
 
@@ -51,8 +53,8 @@ Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [requir
 | `M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` (the `Entra-*` and `Graph-*` names work too) | Reading risky users and responding in the client's Microsoft 365 tenant |
 | `PSA-Type` plus that PSA's secrets (`CW-*`, `Autotask-*`, `Halo-*`, `KaseyaBMS-*`, `Syncro-*` or `Zendesk-*`) | Opening and searching tickets. Same names as the PSA's catalog extension. Kaseya BMS also needs `KaseyaBMS-NoteTypeId` and its ticket id secrets. |
 | `PSA-CompanyId` | The client's company id in the PSA. Recommended. Without it the workflow looks the company up by its CloudRadial name and needs exactly one exact match. |
-| `CloudRadial-CompanyId` | The CloudRadial company number. Needed for the name lookup and the Kaseya BMS log. A run's `company_id` input overrides it. |
-| `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey` | The name lookup and the Kaseya BMS log |
+| `CloudRadial-CompanyId` | The CloudRadial company number. Needed for the name lookup and the fallback log. A run's `company_id` input overrides it. |
+| `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey` | The name lookup and the fallback log |
 | `Notify-FromMailbox` | The mailbox the manager email is sent from, for example `alerts@yourmsp.com` in the client tenant. Leave it out to send no manager email. |
 
 ## Required Graph permissions

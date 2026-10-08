@@ -5,7 +5,8 @@
 # never trusted on their own.
 # confirm false: nothing changes, the plan is only previewed. confirm true: for each account, turn off
 # sign-in, then sign it out of every session. The plan stops at the first failure and says what didn't run.
-# A blocked account's open "[Risky sign-in]" ticket gets an internal note. The risk is never dismissed here.
+# A blocked account's open "[Risky sign-in]" ticket gets an internal note, marked "risky-signin-block:
+# <ticket id> <date>" so a retried run never adds it twice. The risk is never dismissed here.
 $ErrorActionPreference = 'Stop'
 function Get-RsProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-RsState {
@@ -79,7 +80,11 @@ if ($blocked.Count) {
         if ($null -eq $resp) { $rs['warnings'] = @(@($rs['warnings']) + "No open risky sign-in ticket was found for $b on this run, so the block wasn't noted on a ticket."); continue }
         if (-not $psaOk) { continue }
         $tid = [string](Get-RsProp $resp 'ticket_id')
-        try { Add-PsaNote -Id $tid -Text "A technician confirmed blocking $b. The automation turned off sign-in and signed the account out of every session at $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC. Turn sign-in back on in Microsoft 365 once the account is safe, and dismiss the risk in Entra ID Protection." -Title 'Account blocked'; $rs['actions'] = @(@($rs['actions']) + "Noted the block of $b on ticket $tid.") }
+        $now = (Get-Date).ToUniversalTime()
+        try {
+            $w = Add-PsaNote -Id $tid -Text "A technician confirmed blocking $b. The automation turned off sign-in and signed the account out of every session at $($now.ToString('yyyy-MM-dd HH:mm')) UTC. Turn sign-in back on in Microsoft 365 once the account is safe, and dismiss the risk in Entra ID Protection." -Title 'Account blocked' -Marker "risky-signin-block: $tid $($now.ToString('yyyy-MM-dd'))"
+            $rs['actions'] = @(@($rs['actions']) + $(if ($w -eq 'already-present') { "The block of $b was already noted on ticket $tid today, so it was not noted again." } else { "Noted the block of $b on ticket $tid." }))
+        }
         catch { $rs['warnings'] = @(@($rs['warnings']) + "Couldn't note the block on ticket $($tid): $($_.Exception.Message)") }
     }
 }

@@ -7,12 +7,14 @@
 #   2. signs the user out of every session (User.RevokeSessions.All)
 #   3. requires a password change at next sign-in (User.ReadWrite.All). Skipped for accounts synced from
 #      on-premises, and has no effect for federated domains; the note says so
-#   4. adds the internal note with the risk detail and what was done
+#   4. adds the internal note with the risk detail and what was done (Add-PsaNote -Marker, so a retried run
+#      never adds it twice; the marker is "risky-signin: <ticket id>", with no name or address in it)
 #   5. emails the user's manager a short notice with no risk detail (Mail.Send, from Notify-FromMailbox)
 # The account is never blocked here; that needs a confirm run (next step).
 # With preview true, it reads the PSA to show what it would do and changes nothing.
-# Kaseya BMS can't search tickets by text, so for it (or when a PSA search fails) the step keeps a log of
-# handled users in the company's "Risky Sign-ins" report archive instead (no risk detail in it).
+# The open-ticket search is the shared Find-PsaTickets (all six PSAs). When the search fails, or stops at its
+# limit without a match, the step keeps a log of handled users in the company's "Risky Sign-ins" report
+# archive instead (no risk detail in it).
 $ErrorActionPreference = 'Stop'
 function Get-RsProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-RsState {
@@ -37,33 +39,20 @@ function Add-RsWarning { param([string]$Text) $rs['warnings'] = @(@($rs['warning
 function Get-RsMarker { param([string]$Upn) return "[Risky sign-in] $Upn" }
 
 # The open ticket whose summary holds the user's marker. Returns @{ supported; id; summary }.
-# supported is $false when this PSA can't search ticket text (Kaseya BMS). Searches on the sign-in name
-# and checks the marker here, because the PSAs treat brackets differently in their search syntax.
-# Unverified: each PSA's search call below has not been proven by a live run yet.
+# Uses the shared Find-PsaTickets (open tickets, only the company's when its PSA id is known), searching on
+# the sign-in name and checking the marker here, because the PSAs treat brackets differently in their
+# search syntax. Kaseya BMS has no text search, so its open tickets are read and matched here.
+# supported is $false when the search stopped at its limit (FindTruncated) with no match, so the caller
+# falls back to the report archive log rather than risk a second ticket.
 function Find-RsOpenTicket {
-    param([string]$Upn)
+    param([string]$Upn, [string]$CompanyId = '')
     $marker = Get-RsMarker $Upn
-    $rows = @(); $field = 'summary'
-    switch ($PsaState.Conn.Psa) {
-        'connectwise' {
-            $q = $Upn.Replace('\', '\\').Replace('"', '\"')
-            # Build the text first: an escaped quote in a string nested inside $(...) ends the outer string.
-            $cond = "summary contains `"$q`" and closedFlag=false"
-            $rows = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery $cond)&fields=id,summary&pageSize=50")
-        }
-        'autotask' {
-            $f = @([ordered]@{ op = 'contains'; field = 'title'; value = $Upn }) + @(Get-PsaAtCompleteStatuses | ForEach-Object { [ordered]@{ op = 'noteq'; field = 'status'; value = $_ } })
-            $s = @{ filter = $f; IncludeFields = @('id', 'title', 'status'); MaxRecords = 50 }
-            $rows = @(Get-PsaProp (Invoke-Psa GET "/Tickets/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))") 'items'); $field = 'title'
-        }
-        'halopsa' { $rows = @(Get-PsaProp (Invoke-Psa GET "/Tickets?search=$(ConvertTo-PsaQuery $Upn)&open_only=true&pageinate=true&page_size=50&page_no=1") 'tickets') }
-        'kaseyabms' { return @{ supported = $false; id = ''; summary = '' } }
-        'syncro' { $rows = @(Get-PsaProp (Invoke-Psa GET "/tickets?query=$(ConvertTo-PsaQuery $Upn)&status=$(ConvertTo-PsaQuery 'Not Closed')") 'tickets'); $field = 'subject' }
-        'zendesk' { $zq = "type:ticket status<solved `"$Upn`""; $rows = @(Get-PsaProp (Invoke-Psa GET "/search?query=$(ConvertTo-PsaQuery $zq)") 'results'); $field = 'subject' }
-    }
-    $hit = @($rows | Where-Object { $null -ne $_ -and ([string](Get-PsaProp $_ $field)).IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) | Select-Object -First 1
-    if ($null -eq $hit) { return @{ supported = $true; id = ''; summary = '' } }
-    return @{ supported = $true; id = [string](Get-PsaProp $hit 'id'); summary = [string](Get-PsaProp $hit $field) }
+    $co = $(if ($CompanyId -match '^\d+$') { $CompanyId } else { '' })
+    $rows = @(Find-PsaTickets -Open -Text $Upn -CompanyId $co -Max 200 -Order newest)
+    $hit = @($rows | Where-Object { $null -ne $_ -and ([string]$_.summary).IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) | Select-Object -First 1
+    if ($null -ne $hit) { return @{ supported = $true; id = [string]$hit.id; summary = [string]$hit.summary } }
+    if ($PsaState.FindTruncated) { return @{ supported = $false; id = ''; summary = '' } }
+    return @{ supported = $true; id = ''; summary = '' }
 }
 
 # Fallback de-duplication: one item per handled risk in the company's "Risky Sign-ins" report archive.
@@ -115,7 +104,7 @@ function Get-RsNote {
     else { $null = $L.Add('If the user''s domain is federated to another identity provider, the password change set in Microsoft 365 has no effect. Reset the password at that provider.') }
     $null = $L.Add("To block the account, run the Risky sign-in response workflow with confirm set to true and block_upns set to $(Get-RsProp $U 'upn'). It only blocks the account if it is still at risk at that time.")
     $null = $L.Add('The risk is not dismissed automatically. Once the account is safe, dismiss it in Entra ID Protection > Risky users.')
-    if ($Mode -eq 'archive') { $null = $L.Add('This PSA can''t be searched for open tickets, so this user is logged as handled in the company''s Risky Sign-ins report archive to stop a second ticket.') }
+    if ($Mode -eq 'archive') { $null = $L.Add('The PSA couldn''t be searched for open tickets on this run, so this user is logged as handled in the company''s Risky Sign-ins report archive to stop a second ticket.') }
     return ($L -join "`n")
 }
 
@@ -178,14 +167,14 @@ if ($risky.Count) {
         # ---- 1. Already handled? ----
         $existing = ''; $known = $false; $mode = 'psa'
         if ($psaOk) {
-            try { $f = Find-RsOpenTicket $upn; if ($f.supported) { $known = $true; $existing = $f.id } else { $mode = 'archive' } }
+            try { $f = Find-RsOpenTicket $upn $psaCompany; if ($f.supported) { $known = $true; $existing = $f.id } else { $mode = 'archive'; Add-RsWarning "$(Get-PsaName) has too many open tickets to be sure $upn has none, so the report archive log was used instead." } }
             catch { $mode = 'archive'; Add-RsWarning "Couldn't search $(Get-PsaName) for an open ticket for $($upn), so the report archive log was used instead: $($_.Exception.Message)" }
             if ($mode -eq 'archive') {
                 if ($crOk) {
                     try { if (Test-RsLogged ([int]$cid) (Get-RsLogKey $u)) { $existing = 'logged' }; $known = $true }
                     catch { Add-RsWarning "Couldn't read the Risky Sign-ins report archive: $($_.Exception.Message)" }
                 }
-                else { Add-RsWarning "$(Get-PsaName) can't be searched for open tickets and there's no CloudRadial company to keep a log in, so $upn couldn't be checked. Set the CloudRadial-CompanyId and CloudRadial-* secrets." }
+                else { Add-RsWarning "$(Get-PsaName) couldn't be searched for open tickets and there's no CloudRadial company to keep a log in, so $upn couldn't be checked. Set the CloudRadial-CompanyId and CloudRadial-* secrets." }
             }
         }
         $r.dedupe = $mode
@@ -245,7 +234,7 @@ if ($risky.Count) {
         $note = Get-RsNote $u $done $mode
         $r.note = $note
         if ($r.ticket_id) {
-            try { Add-PsaNote -Id $r.ticket_id -Text $note -Title 'Risky sign-in detail' }
+            try { $null = Add-PsaNote -Id $r.ticket_id -Text $note -Title 'Risky sign-in detail' -Marker "risky-signin: $($r.ticket_id)" }
             catch { Add-RsWarning "Couldn't add the internal note to ticket $($r.ticket_id): $($_.Exception.Message) The detail is in this run's internal_note." }
         }
 

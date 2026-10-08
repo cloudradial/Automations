@@ -19,7 +19,11 @@ $Steps = @{}; foreach ($s in $StepIds) { $Steps[$s] = Get-Content -Raw (Join-Pat
 Remove-Item -Recurse -Force $tmp
 
 $Tally = @{ pass = 0; fail = 0 }
-$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{}; NextId = 5000 }
+$Mock = @{ Secrets = @{}; Calls = (New-Object System.Collections.ArrayList); Opt = @{}; NextId = 5000; Notes = @{} }
+# Notes written to each ticket (kept across runs until Clear-Notes), read back by the shared retry guard.
+function Add-MockNote { param([string]$T, [string]$Text, [bool]$Public) if (-not $Mock.Notes.Contains($T)) { $Mock.Notes[$T] = @() }; $Mock.Notes[$T] += [pscustomobject]@{ text = $Text; public = $Public } }
+function Get-MockNotes { param([string]$T) if ($Mock.Notes.Contains($T)) { return @($Mock.Notes[$T]) }; return @() }
+function Clear-Notes { $Mock.Notes = @{} }
 function Get-AzKeyVaultSecret { [CmdletBinding()] param($VaultName, $Name, [switch]$AsPlainText) if ($Mock.Secrets.Contains($Name)) { return $Mock.Secrets[$Name] }; return $null }
 function Start-Sleep { [CmdletBinding()] param([double]$Seconds = 0, [int]$Milliseconds = 0) }
 function Get-NodeInput { return $global:NodeIn }
@@ -114,8 +118,10 @@ function Invoke-RestMethod {
     $cw = 'https://cw.example-msp.test/v4_6_release/apis/3.0'
     if ($m -eq 'GET' -and $u -like "$cw/service/tickets[?]conditions=*") {
         if ($Mock.Opt.Contains('SearchFail')) { New-HttpError 500 '{"message":"Mock search error"}' }
-        if ($u -match 'existing@contoso\.com') { return @([pscustomobject]@{ id = 4242; summary = '[Risky sign-in] existing@contoso.com: Microsoft flagged high risk' }) }
-        if ($u -match 'alice@contoso\.com') { return @([pscustomobject]@{ id = 4100; summary = 'Printer for alice@contoso.com' }) }
+        $co = [pscustomobject]@{ id = 250; name = 'Contoso' }
+        if ($Mock.Opt.Contains('OpenRisky') -and $u -match [regex]::Escape($Mock.Opt['OpenRisky'].upn)) { return @([pscustomobject]@{ id = $Mock.Opt['OpenRisky'].id; summary = "[Risky sign-in] $($Mock.Opt['OpenRisky'].upn): Microsoft flagged high risk"; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
+        if ($u -match 'existing@contoso\.com') { return @([pscustomobject]@{ id = 4242; summary = '[Risky sign-in] existing@contoso.com: Microsoft flagged high risk'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
+        if ($u -match 'alice@contoso\.com') { return @([pscustomobject]@{ id = 4100; summary = 'Printer for alice@contoso.com'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
         return @()
     }
     if ($m -eq 'GET' -and $u -like "$cw/service/priorities*") { return @([pscustomobject]@{ id = 1; name = 'Priority 1 - Critical' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - High' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal' }) }
@@ -126,23 +132,33 @@ function Invoke-RestMethod {
         return @()
     }
     if ($m -eq 'POST' -and $u -eq "$cw/service/tickets") { $Mock.NextId++; return [pscustomobject]@{ id = $Mock.NextId } }
-    if ($m -eq 'POST' -and $u -like "$cw/service/tickets/*/notes") { return [pscustomobject]@{ id = 1 } }
+    if ($m -eq 'POST' -and $u -like "$cw/service/tickets/*/notes") { $bo = $b | ConvertFrom-Json; Add-MockNote ($u -split '/')[-2] $bo.text ([bool]$bo.detailDescriptionFlag); return [pscustomobject]@{ id = 1 } }
+    if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
 
     # Zendesk
     $zd = 'https://examplemsp.zendesk.test/api/v2'
     if ($m -eq 'GET' -and $u -like "$zd/search*") {
-        if ($u -match 'existing@contoso\.com') { return [pscustomobject]@{ results = @([pscustomobject]@{ id = 777; subject = '[Risky sign-in] existing@contoso.com: Microsoft flagged high risk' }) } }
+        if ($u -match 'existing@contoso\.com') { return [pscustomobject]@{ results = @([pscustomobject]@{ id = 777; subject = '[Risky sign-in] existing@contoso.com: Microsoft flagged high risk'; organization_id = 360001; status = 'open' }) } }
         return [pscustomobject]@{ results = @() }
     }
     if ($m -eq 'GET' -and $u -like "$zd/organizations/autocomplete*") { return [pscustomobject]@{ organizations = @([pscustomobject]@{ id = 360001; name = 'Contoso' }, [pscustomobject]@{ id = 360002; name = 'Contoso Labs' }) } }
     if ($m -eq 'POST' -and $u -eq "$zd/tickets") { $Mock.NextId++; return [pscustomobject]@{ ticket = [pscustomobject]@{ id = $Mock.NextId } } }
-    if ($m -eq 'PUT' -and $u -like "$zd/tickets/*") { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 1 } } }
+    if ($m -eq 'PUT' -and $u -like "$zd/tickets/*") { $bo = $b | ConvertFrom-Json; Add-MockNote ($u -split '/')[-1] $bo.ticket.comment.body ([bool]$bo.ticket.comment.public); return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 1 } } }
+    if ($m -eq 'GET' -and $u -match '/tickets/(\d+)/comments') { $i = 0; return [pscustomobject]@{ comments = @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; body = $_.text; public = $_.public; author_id = 1 } }); next_page = $null } }
 
     # Kaseya BMS
     $bms = 'https://bms.example-msp.test'
     if ($m -eq 'POST' -and $u -eq "$bms/v2/security/authenticate") { return [pscustomobject]@{ Success = $true; Result = [pscustomobject]@{ AccessToken = 'tok' } } }
     if ($m -eq 'POST' -and $u -eq "$bms/v2/servicedesk/tickets") { $Mock.NextId++; return [pscustomobject]@{ Success = $true; Result = [pscustomobject]@{ Id = $Mock.NextId } } }
-    if ($m -eq 'POST' -and $u -like "$bms/v2/servicedesk/tickets/*/notes") { return [pscustomobject]@{ Success = $true } }
+    if ($m -eq 'POST' -and $u -like "$bms/v2/servicedesk/tickets/*/notes") { $bo = $b | ConvertFrom-Json; Add-MockNote ($u -split '/')[-2] $bo.Details (-not $bo.IsInternal); return [pscustomobject]@{ Success = $true } }
+    if ($m -eq 'GET' -and $u -match '/v2/servicedesk/tickets/(\d+)/notes') { $i = 0; return [pscustomobject]@{ Success = $true; Result = @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ Id = $i; Details = $_.text; IsInternal = (-not $_.public) } }) } }
+    if ($m -eq 'GET' -and $u -like "$bms/v2/servicedesk/tickets[?]*") {
+        if ($Mock.Opt.Contains('SearchFail')) { New-HttpError 500 '{"message":"Mock list error"}' }
+        $rows = @([pscustomobject]@{ Id = 9100; Title = 'Printer for alice@contoso.com'; StatusName = 'New'; AccountId = 88 })
+        if ($Mock.Opt.Contains('BmsExisting')) { $rows += [pscustomobject]@{ Id = 9200; Title = '[Risky sign-in] alice@contoso.com: Microsoft flagged high risk'; StatusName = 'In Progress'; AccountId = 88 } }
+        $rows += [pscustomobject]@{ Id = 9300; Title = '[Risky sign-in] synced.user@contoso.com: Microsoft flagged high risk'; StatusName = 'New'; AccountId = 99 }
+        return [pscustomobject]@{ Success = $true; Result = @($rows); TotalRecords = @($rows).Count }
+    }
 
     # CloudRadial
     $cr = 'https://portal.example-msp.test'
@@ -265,19 +281,26 @@ Check 'zendesk: opening comment has no risk detail' (-not @($zp | Where-Object {
 $zn = @(Get-Calls PUT 'https://examplemsp.zendesk.test/api/v2/tickets/*' | ForEach-Object { ($_.Body | ConvertFrom-Json).ticket.comment })
 Check 'zendesk: detail goes in private comments' ($zn.Count -eq 3 -and @($zn | Where-Object { $_.public -eq $false }).Count -eq 3 -and @($zn | Where-Object { $_.body -match '198\.51\.100\.7' }).Count -eq 1) ''
 
-# 5. Kaseya BMS can't search: archive log fallback, then a rerun finds the log.
+# 5. Kaseya BMS: its open tickets are listed (no text search) and matched here, scoped to the company.
 $Mock.NextId = 7000
 $r = Invoke-Workflow @{ psa = 'kaseyabms'; psa_company_id = '88' }
 $o = $r.out
 Check 'kaseya: no error' ($r.error -eq '' -and $o.status -eq 'success') "$($r.error) $($o.status) $($o.message)"
-Check 'kaseya: four tickets (no search, nothing logged yet)' (@(Get-Calls POST 'https://bms.example-msp.test/v2/servicedesk/tickets').Count -eq 4 -and (Get-Resp $o 'alice@contoso.com').dedupe -eq 'archive') ''
-$logs = @(Get-Calls POST 'https://portal.example-msp.test/v2/archiveitem' | ForEach-Object { $_.Body | ConvertFrom-Json })
-Check 'kaseya: each handled user logged in the Risky Sign-ins archive' ($logs.Count -eq 4 -and @($logs | Where-Object { $_.subject -like 'Risky sign-in handled: *' -and $_.archiveId -eq 66 }).Count -eq 4) (@($logs | ForEach-Object { $_.subject }) -join ' | ')
-Check 'kaseya: log holds no IP or location' (-not @($logs | Where-Object { $_.text -match '203\.0\.113|Lagos|198\.51' }).Count -and @($logs | Where-Object { $_.text -match 'det-a1' }).Count -eq 1) ''
+$kl = @(Get-Calls GET 'https://bms.example-msp.test/v2/servicedesk/tickets[?]*')
+Check 'kaseya: open tickets listed for company 88 only' ($kl.Count -ge 1 -and @($kl | Where-Object { $_.Uri -match 'Filter\.AccountIds=88' -and $_.Uri -match 'Filter\.ExcludeCompleted=1' }).Count -eq $kl.Count) (@($kl | ForEach-Object { $_.Uri }) -join ' | ')
+Check 'kaseya: four tickets; another company''s matching ticket is ignored' (@(Get-Calls POST 'https://bms.example-msp.test/v2/servicedesk/tickets').Count -eq 4 -and (Get-Resp $o 'alice@contoso.com').dedupe -eq 'psa' -and (Get-Resp $o 'synced.user@contoso.com').outcome -eq 'handled') ''
+Check 'kaseya: no archive log needed' (@(Get-Calls POST 'https://portal.example-msp.test/v2/archiveitem').Count -eq 0) ''
 $kn = @(Get-Calls POST 'https://bms.example-msp.test/v2/servicedesk/tickets/*/notes' | ForEach-Object { $_.Body | ConvertFrom-Json })
 Check 'kaseya: internal notes' ($kn.Count -eq 4 -and @($kn | Where-Object { $_.IsInternal -eq $true }).Count -eq 4) ''
-$r = Invoke-Workflow @{ psa = 'kaseyabms'; psa_company_id = '88' } @{} @{ HasArchive = $true; Logged = 'alice@contoso.com' }
-Check 'kaseya rerun: logged user not handled again' ((Get-Resp $r.out 'alice@contoso.com').outcome -eq 'already-open' -and @(Get-Calls POST '*/users/u1/revokeSignInSessions').Count -eq 0 -and @(Get-Calls POST 'https://bms.example-msp.test/v2/servicedesk/tickets').Count -eq 3) "$((Get-Resp $r.out 'alice@contoso.com').outcome)"
+$r = Invoke-Workflow @{ psa = 'kaseyabms'; psa_company_id = '88' } @{} @{ BmsExisting = $true }
+Check 'kaseya: open risky ticket found, user not handled again' ((Get-Resp $r.out 'alice@contoso.com').outcome -eq 'already-open' -and (Get-Resp $r.out 'alice@contoso.com').ticket_id -eq '9200' -and @(Get-Calls POST '*/users/u1/revokeSignInSessions').Count -eq 0 -and @(Get-Calls POST 'https://bms.example-msp.test/v2/servicedesk/tickets').Count -eq 3) "$((Get-Resp $r.out 'alice@contoso.com').outcome)"
+# Kaseya BMS list failure: archive log fallback, then a rerun finds the log.
+$r = Invoke-Workflow @{ psa = 'kaseyabms'; psa_company_id = '88' } @{} @{ SearchFail = $true }
+$logs = @(Get-Calls POST 'https://portal.example-msp.test/v2/archiveitem' | ForEach-Object { $_.Body | ConvertFrom-Json })
+Check 'kaseya list failure: each handled user logged in the Risky Sign-ins archive' ((Get-Resp $r.out 'alice@contoso.com').dedupe -eq 'archive' -and $logs.Count -eq 4 -and @($logs | Where-Object { $_.subject -like 'Risky sign-in handled: *' -and $_.archiveId -eq 66 }).Count -eq 4) (@($logs | ForEach-Object { $_.subject }) -join ' | ')
+Check 'kaseya list failure: log holds no IP or location' (-not @($logs | Where-Object { $_.text -match '203\.0\.113|Lagos|198\.51' }).Count -and @($logs | Where-Object { $_.text -match 'det-a1' }).Count -eq 1) ''
+$r = Invoke-Workflow @{ psa = 'kaseyabms'; psa_company_id = '88' } @{} @{ SearchFail = $true; HasArchive = $true; Logged = 'alice@contoso.com' }
+Check 'kaseya list failure rerun: logged user not handled again' ((Get-Resp $r.out 'alice@contoso.com').outcome -eq 'already-open' -and @(Get-Calls POST '*/users/u1/revokeSignInSessions').Count -eq 0 -and @(Get-Calls POST 'https://bms.example-msp.test/v2/servicedesk/tickets').Count -eq 3) "$((Get-Resp $r.out 'alice@contoso.com').outcome)"
 
 # 6. A PSA search failure falls back to the archive log instead of opening a duplicate blindly.
 $r = Invoke-Workflow @{} @{ 'PSA-CompanyId' = '250' } @{ SearchFail = $true; HasArchive = $true; Logged = 'existing@contoso.com' }
@@ -342,6 +365,25 @@ Check 'block confirm: message and public note' ($o.message -match 'Blocked sign-
 # 17. Block confirm on a user that is no longer at risk: rejected, nothing changed.
 $r = Invoke-Workflow @{ confirm = $true; block_upns = 'remediated@contoso.com' } @{ 'PSA-CompanyId' = '250' } @{ Empty = $true }
 Check 'block not at risk: rejected, nothing disabled' ($r.out.status -eq 'rejected' -and @(Get-Calls PATCH '*/users/*').Count -eq 0) "$($r.out.status) $($r.out.message)"
+
+# 17b. Rerun writes nothing twice.
+# The response note is marker-guarded: a second write of the same ticket's note is skipped.
+Clear-Notes; $Mock.NextId = 8500
+$r = Invoke-Workflow @{} @{ 'PSA-CompanyId' = '250' }
+$TAliceT = [string](Get-Resp $r.out 'alice@contoso.com').ticket_id
+Check 'rerun: first run notes carry the marker with the ticket id only' ((Get-MockNotes $TAliceT).Count -eq 1 -and ((Get-MockNotes $TAliceT)[0].text).Contains("[risky-signin: $TAliceT]") -and (Get-MockNotes $TAliceT)[0].public -eq $false) "$TAliceT"
+Check 'rerun: no marker holds a name or address' (-not @($Mock.Notes.Values | ForEach-Object { $_ } | Where-Object { $_.text -match '\[risky-signin[^\]]*@' }).Count) ''
+# The same run retried: the open ticket is found by its summary, so no second ticket, sign-out or note.
+$r = Invoke-Workflow @{} @{ 'PSA-CompanyId' = '250' } @{ OpenRisky = @{ upn = 'alice@contoso.com'; id = [int]$TAliceT } }
+Check 'rerun: alice already open, nothing written for her' ((Get-Resp $r.out 'alice@contoso.com').outcome -eq 'already-open' -and @(Get-Calls POST '*/users/u1/revokeSignInSessions').Count -eq 0 -and @(Get-Calls POST "https://cw.example-msp.test/*/service/tickets/$TAliceT/notes").Count -eq 0 -and (Get-MockNotes $TAliceT).Count -eq 1) "$((Get-Resp $r.out 'alice@contoso.com').outcome)"
+# Block confirm retried the same day: the block note is written once.
+Clear-Notes; $Mock.NextId = 8600
+$r = Invoke-Workflow @{ confirm = 'true'; block_upns = 'alice@contoso.com' } @{ 'PSA-CompanyId' = '250' }
+$TBlockT = [string](Get-Resp $r.out 'alice@contoso.com').ticket_id
+$TBefore = @(Get-MockNotes $TBlockT | Where-Object { $_.text -match 'confirmed blocking' }).Count
+$r = Invoke-Workflow @{ confirm = 'true'; block_upns = 'alice@contoso.com' } @{ 'PSA-CompanyId' = '250' } @{ OpenRisky = @{ upn = 'alice@contoso.com'; id = [int]$TBlockT } }
+Check 'rerun block: block note written once, marked with ticket id and date' ($TBefore -eq 1 -and @(Get-MockNotes $TBlockT | Where-Object { $_.text -match 'confirmed blocking' }).Count -eq 1 -and @(Get-MockNotes $TBlockT | Where-Object { $_.text.Contains("[risky-signin-block: $TBlockT $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd'))]") }).Count -eq 1 -and (@($r.out.actions) -join ' ') -match 'already noted') (@($r.out.actions) -join ' | ')
+Check 'every ticket note this workflow writes is internal' (-not @($Mock.Notes.Values | ForEach-Object { $_ } | Where-Object { $_.public }).Count) ''
 
 # 18. Bad input fails closed before any call.
 $r = Invoke-Workflow @{ min_risk = 'low' }

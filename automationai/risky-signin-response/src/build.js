@@ -27,7 +27,7 @@ const steps = [
   { id: 'node-inputs', name: 'Read inputs', file: 'read-inputs.ps1', libs: [], timeout: 120,
     testInput: { min_risk: 'high', preview: true, notify_manager: true, confirm: false, block_upns: '', company_id: '', psa: '', psa_company_id: '' } },
   { id: 'node-find', name: 'Find risky users', file: 'find-risky.ps1', libs: ['graph.ps1'], timeout: 600 },
-  { id: 'node-respond', name: 'Respond to new risky users', file: 'respond.ps1', libs: ['graph.ps1', 'psa.ps1', 'cloudradial.ps1'], timeout: 900 },
+  { id: 'node-respond', name: 'Respond to new risky users', file: 'respond.ps1', libs: ['graph.ps1', 'psa.ps1', 'psa-tickets.ps1', 'cloudradial.ps1'], timeout: 900 },
   { id: 'node-block', name: 'Block confirmed accounts', file: 'block.ps1', libs: ['graph.ps1', 'plan.ps1', 'psa.ps1'], timeout: 600 },
   { id: 'node-summary', name: 'Summarize', file: 'summarize.ps1', libs: [], timeout: 120 },
 ];

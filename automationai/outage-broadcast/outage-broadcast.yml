@@ -1,0 +1,1664 @@
+automationsWorkflow: 1
+name: Outage / Incident Broadcast
+description: Tells every affected client about an outage in one go. Finds the companies (a list, a company
+  group, or every company with the service installed), previews the change, and on confirm sets each
+  portal's service status banner token, pins a Service Status article, optionally emails each primary
+  contact, and notes the problem ticket. A resolved run clears the banner and posts the resolution.
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      # Enable the webhook in Properties after import; AutomationAI issues the URL and secret.
+      webhookEnabled: false
+  - id: parse
+    name: Read the request
+    type: powershell-script
+    position:
+      x: 280
+      y: 80
+    properties:
+      script: |-
+        # === NODE: Read the request ===
+        # Outage / Incident Broadcast. Called by the ServiceAI Action "Outage Broadcast" (Use in AI), the
+        # ChatAI /broadcast command, or a manual run. Reads what is down, what to tell clients, which
+        # companies to target, and whether this run may change anything (confirm, default false).
+        # Accepts a flat {key:value} body, the CloudRadial {Ticket:{Questions:[...]},Company:{...}} shape,
+        # or either one wrapped in {trigger:...} (the step's "trigger" parameter is bound to
+        # {{ nodes.trigger.output }}, as in Password Reset). A value left as a literal @token or {{placeholder}}
+        # counts as not given. This step makes no calls.
+        $ErrorActionPreference = 'Stop'
+
+        function Get-ObProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+
+        $out = [ordered]@{
+            status = 'ok'; message = ''; public_note = ''; internal_note = ''; chatReply = ''; ticket_id = ''
+            mode = 'broadcast'; affectedService = ''; notice = ''; confirm = $false
+            companies = @(); companyGroup = ''; emailContacts = $false; postBanner = $true; postArticle = $true
+            bannerToken = 'ServiceStatus'; articleCategory = 'Service Status'; maxCompanies = 50
+            psa = ''; requestedBy = ''; triggerSource = ''; received_keys = @(); received_body = $null
+            actions = @(); warnings = @()
+        }
+        function Stop-Request {
+            param([string]$Why)
+            $out.status = 'incomplete'; $out.message = $Why
+            $out.chatReply = "I couldn't run the outage broadcast: $Why"
+            $out.internal_note = "Outage broadcast stopped before anything was read or changed: $Why"
+            Set-NodeOutput $out
+        }
+
+        $raw = Get-NodeInput
+        if ($raw -is [string]) { try { $raw = $raw | ConvertFrom-Json } catch { Stop-Request 'The input was text that is not valid JSON.'; return } }
+        $wrap = Get-ObProp $raw 'trigger'
+        if ($null -ne $wrap) { $raw = $wrap; if ($raw -is [string]) { try { $raw = $raw | ConvertFrom-Json } catch { Stop-Request 'The trigger body was text that is not valid JSON.'; return } } }
+        if ($null -eq $raw) { Stop-Request 'No input was received. Send affectedService and message.'; return }
+
+        $answers = @{}
+        if ($raw -is [System.Collections.IDictionary]) { foreach ($k in @($raw.Keys)) { $answers[[string]$k] = $raw[$k] } }
+        else { foreach ($p in $raw.PSObject.Properties) { $answers[$p.Name] = $p.Value } }
+        $crTicket = Get-ObProp $raw 'Ticket'
+        if ($null -ne $crTicket) {
+            foreach ($q in @(Get-ObProp $crTicket 'Questions')) { $qid = [string](Get-ObProp $q 'Id'); if ($qid) { $answers[$qid] = Get-ObProp $q 'Value' } }
+            $tid = Get-ObProp $crTicket 'TicketId'; if ($null -ne $tid -and -not $answers.ContainsKey('ticketId')) { $answers['ticketId'] = $tid }
+        }
+        # Keep the body for the first test run, so the "performed for a person" field can be mapped (TRIGGERS.md).
+        $out.received_keys = @($answers.Keys | Sort-Object)
+        $out.received_body = $raw
+
+        function Test-ObBlank { param($v) if ($null -eq $v) { return $true }; $s = ([string]$v).Trim(); return (-not $s -or $s.StartsWith('@') -or $s -match '^\{\{.*\}\}$' -or $s -match '^<.*>$') }
+        function Get-Field {
+            param([string[]]$Names)
+            foreach ($n in $Names) {
+                if (-not $answers.ContainsKey($n)) { continue }
+                $v = $answers[$n]
+                if ($v -is [System.Management.Automation.PSCustomObject] -or $v -is [System.Collections.IDictionary] -or $v -is [array]) { continue }
+                if (Test-ObBlank $v) { continue }
+                return ([string]$v).Trim()
+            }
+            return ''
+        }
+        function Get-Flag {
+            param([string[]]$Names, [bool]$Default)
+            foreach ($n in $Names) {
+                if (-not $answers.ContainsKey($n)) { continue }
+                $v = $answers[$n]
+                if ($v -is [bool]) { return $v }
+                if (Test-ObBlank $v) { continue }
+                switch -Regex (([string]$v).Trim().ToLowerInvariant()) { '^(true|yes|y|1|on)$' { return $true } '^(false|no|n|0|off)$' { return $false } }
+            }
+            return $Default
+        }
+        function Get-ListField {
+            param([string[]]$Names)
+            foreach ($n in $Names) {
+                if (-not $answers.ContainsKey($n)) { continue }
+                $v = $answers[$n]
+                $items = @()
+                if ($v -is [array]) { $items = @($v) } elseif ($v -is [string]) { $items = @($v -split '[,;\r\n]+') } elseif ($null -ne $v -and $v -isnot [System.Management.Automation.PSCustomObject]) { $items = @([string]$v) }
+                $items = @($items | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -and -not (Test-ObBlank $_) })
+                if ($items.Count) { return $items }
+            }
+            return @()
+        }
+
+        $mode = (Get-Field @('mode', 'action', 'phase')).ToLowerInvariant()
+        if (-not $mode) { $mode = 'broadcast' }
+        if ($mode -match '^(resolve|resolved|resolution|clear|all-?clear|restored)$') { $mode = 'resolved' }
+        elseif ($mode -match '^(broadcast|outage|incident|update|post)$') { $mode = 'broadcast' }
+        else { Stop-Request "mode '$mode' isn't one of: broadcast, resolved."; return }
+        $out.mode = $mode
+
+        $out.affectedService = Get-Field @('affectedService', 'affected_service', 'service', 'serviceName')
+        $out.notice = Get-Field @('message', 'notice', 'clientMessage', 'update')
+        $out.ticket_id = Get-Field @('problemTicketId', 'problem_ticket_id', 'ticketId', 'ticket_id', 'TicketId')
+        # confirm, or its aliases from the tracker's safety line. Only an explicit true allows changes.
+        $out.confirm = Get-Flag @('confirm', 'approvedToBroadcast', 'approvedToWrite') $false
+        $out.companies = @(Get-ListField @('companies', 'companyIds', 'companyNames', 'company'))
+        $out.companyGroup = Get-Field @('companyGroup', 'company_group', 'group')
+        $out.emailContacts = Get-Flag @('emailContacts', 'email_contacts', 'notifyContacts') $false
+        $out.postBanner = Get-Flag @('postBanner', 'post_banner', 'banner') $true
+        $out.postArticle = Get-Flag @('postArticle', 'post_article', 'article') $true
+        $bt = Get-Field @('bannerToken', 'banner_token'); if ($bt) { $out.bannerToken = $bt.TrimStart('@') }
+        $ac = Get-Field @('articleCategory', 'article_category'); if ($ac) { $out.articleCategory = $ac }
+        $mc = Get-Field @('maxCompanies', 'max_companies'); if ($mc) { if ($mc -notmatch '^\d+$' -or [int]$mc -lt 1) { Stop-Request "maxCompanies must be a whole number of 1 or more, not '$mc'."; return }; $out.maxCompanies = [int]$mc }
+        $out.psa = Get-Field @('psa')
+        $out.triggerSource = Get-Field @('triggerSource', 'trigger_source')
+        # Who ran it. ServiceAI fills this from the signed-in technician; the field name is unverified, so try the likely ones.
+        $out.requestedBy = Get-Field @('requestedBy', 'requested_by', 'requester', 'requesterEmail', 'performedBy', 'performedFor', 'onBehalfOf', 'technician', 'technicianEmail', 'userEmail', 'UserEmail', 'user', 'actor', 'initiatedBy', 'submittedBy')
+
+        if (-not $out.affectedService) { Stop-Request 'affectedService is missing. Say which service or system is down.'; return }
+        if ($out.affectedService.Length -gt 120) { Stop-Request 'affectedService is longer than 120 characters. Use the short name of the service.'; return }
+        if ($mode -eq 'broadcast' -and -not $out.notice) { Stop-Request 'message is missing. Write the plain-language update for clients.'; return }
+        if ($out.notice.Length -gt 2000) { Stop-Request 'message is longer than 2000 characters. Keep the client update short.'; return }
+        if ($out.notice -match '<\s*(script|iframe|object|embed|style)\b' -or $out.notice -match '(?i)javascript:') { Stop-Request 'message contains script or embedded content. Send plain text only.'; return }
+        if ($out.bannerToken -notmatch '^[A-Za-z][A-Za-z0-9_]{1,49}$') { Stop-Request "bannerToken '$($out.bannerToken)' isn't a valid token name (letters, digits and underscores)."; return }
+        if (-not $out.postBanner -and -not $out.postArticle -and -not $out.emailContacts) { Stop-Request 'postBanner, postArticle and emailContacts are all off, so there is nothing to post.'; return }
+        if ($mode -eq 'resolved' -and -not $out.notice) { $out.notice = "The issue affecting $($out.affectedService) has been resolved. Thank you for your patience." }
+
+        Set-NodeOutput $out
+      timeoutSeconds: 600
+      retryCount: 0
+      parameters:
+      - name: trigger
+        expression: '{{ nodes.trigger.output }}'
+      aiExtensions: []
+      testInput: |-
+        {
+          "affectedService": "Contoso Hosted PBX",
+          "message": "Phones are not ringing for incoming calls. We are working with the provider and will update you within the hour.",
+          "confirm": false,
+          "problemTicketId": "",
+          "companies": "",
+          "companyGroup": "",
+          "emailContacts": false,
+          "mode": "broadcast",
+          "triggerSource": "manual"
+        }
+  - id: identify
+    name: Find the affected companies
+    type: powershell-script
+    position:
+      x: 460
+      y: 80
+    properties:
+      script: |-
+        # === NODE: Find the affected companies ===
+        # Reads CloudRadial only; changes nothing. Picks the affected companies from, in this order:
+        #   1. companies: names or CloudRadial company ids sent in the request
+        #   2. companyGroup: a CloudRadial company group name
+        #   3. broadcast mode: every company with an endpoint that has a service matching affectedService
+        #      installed (CloudRadial service and serviceinstall). Resolved mode: every company whose banner
+        #      token or Service Status article still shows this service.
+        # Then reads each company's current banner token and Service Status article, so the next step can
+        # say exactly what it would create, update or clear. Stops (incomplete) when more companies match
+        # than maxCompanies allows.
+        # >>> _shared/cloudradial.ps1 (generated by _shared/inject.js; edit the source, not this block)
+        # ---------- _shared/cloudradial.ps1: CloudRadial API for AutomationAI steps ----------
+        # Edit this file, then run: node automationai/_shared/inject.js <automation-folder>
+        # Lifted from endpoint-lifecycle-manager/src/elm.ps1 and the ScalePad sync's archive helpers.
+        # Secrets (runner Key Vault): CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+        # Reports for a client go to Report Archives (Compliance > Reports, admins only), never to the
+        # knowledge base, and never carry another client's data.
+        # All state lives in the $CrState hashtable and is changed in place, because the runner
+        # runs a step in a child scope where $script: variables don't behave.
+
+        $CrState = @{
+            Base        = $null
+            Headers     = $null
+            MaxAttempts = 6
+        }
+
+        # ---- small helpers (all Cr-prefixed so they don't clash with other shared files) ----
+        function Get-CrSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Get-CrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-CrHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
+        function Get-CrRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+        function Get-CrId { param($o, [string[]]$Names) foreach ($n in $Names) { $v = $o; foreach ($part in $n -split '\.') { $v = Get-CrProp $v $part }; if ($null -ne $v -and [string]$v -match '^\d+$' -and [long]$v -gt 0) { return [int]$v } }; return 0 }
+
+        # Reads the API keys from the runner Key Vault (or takes them as parameters). Returns @{ Base }.
+        function Connect-Cr {
+            param([string]$BaseUrl, [string]$PublicKey, [string]$PrivateKey)
+            if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-CrSecret 'CloudRadial-BaseUrl' }
+            if ([string]::IsNullOrWhiteSpace($PublicKey)) { $PublicKey = Get-CrSecret 'CloudRadial-PublicKey' }
+            if ([string]::IsNullOrWhiteSpace($PrivateKey)) { $PrivateKey = Get-CrSecret 'CloudRadial-PrivateKey' }
+            $missing = @()
+            if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $missing += 'CloudRadial-BaseUrl' }
+            if ([string]::IsNullOrWhiteSpace($PublicKey)) { $missing += 'CloudRadial-PublicKey' }
+            if ([string]::IsNullOrWhiteSpace($PrivateKey)) { $missing += 'CloudRadial-PrivateKey' }
+            if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+            $CrState.Base = $BaseUrl.Trim().TrimEnd('/')
+            $CrState.Headers = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($PublicKey.Trim()):$($PrivateKey.Trim())")); Accept = 'application/json' }
+            return @{ Base = $CrState.Base }
+        }
+
+        # One CloudRadial call. Path is relative to the base URL (or a full URL).
+        # Retries 429, GET 5xx and dropped connections, honoring Retry-After; other errors throw a plain message.
+        function Invoke-CrApi {
+            param([string]$Path, [string]$Method = 'GET', $Body = $null, [string]$ContentType = 'application/json')
+            if ($null -eq $CrState.Headers) { throw 'Call Connect-Cr before any other CloudRadial function.' }
+            $url = if ($Path -match '^https?://') { $Path } else { "$($CrState.Base)$Path" }
+            for ($i = 1; $i -le $CrState.MaxAttempts; $i++) {
+                try {
+                    $a = @{ Uri = $url; Method = $Method; Headers = $CrState.Headers; ContentType = $ContentType; ErrorAction = 'Stop' }
+                    if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 }) }
+                    return Invoke-RestMethod @a
+                }
+                catch {
+                    $code = Get-CrHttpStatus $_
+                    $msg = [string]$_.Exception.Message
+                    $transient = (-not $code -and $msg -match 'SSL connection|could not be established|No such host|actively refused|forcibly closed|error occurred while sending|timed out|TaskCanceled')
+                    if (($code -eq 429 -or ($Method -eq 'GET' -and $code -ge 500) -or $transient) -and $i -lt $CrState.MaxAttempts) { Start-Sleep -Seconds (Get-CrRetryAfter $_ $i); continue }
+                    $detail = $msg; try { if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message } } catch { }
+                    throw "CloudRadial $Method $Path failed$(if ($code) { " (HTTP $code)" }): $detail"
+                }
+            }
+        }
+
+        # Every row of a /v2/odata list. Those lists stop at 200 rows with no nextLink, so this pages with $top/$skip.
+        # Wrap the result in @(...).
+        function Get-CrAll {
+            param([string]$Path, [int]$PageSize = 200, [int]$MaxPages = 500)
+            $rows = New-Object System.Collections.ArrayList; $skip = 0
+            for ($n = 0; $n -lt $MaxPages; $n++) {
+                $sep = if ($Path -match '\?') { '&' } else { '?' }
+                $resp = Invoke-CrApi -Path "$Path$sep`$top=$PageSize&`$skip=$skip"
+                $batch = @(); $v = Get-CrProp $resp 'value'
+                if ($null -ne $v) { $batch = @($v) } elseif ($resp -is [array]) { $batch = @($resp) }
+                $batch = @($batch | Where-Object { $null -ne $_ })
+                foreach ($r in $batch) { $null = $rows.Add($r) }
+                if ($batch.Count -lt $PageSize) { break }
+                $skip += $PageSize
+            }
+            return @($rows)
+        }
+
+        # Every row of a legacy /api/beta list. Those page with Skip/Take and return 10 rows by default.
+        function Get-CrBetaAll {
+            param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+            $all = New-Object System.Collections.ArrayList
+            $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+            for ($p = 0; $p -lt $MaxPages; $p++) {
+                $raw = Invoke-CrApi -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                $rows = @($raw)
+                foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-CrProp $rows[0] $k)) { $rows = @(Get-CrProp $rows[0] $k) } }
+                $rows = @($rows | Where-Object { $null -ne $_ })
+                foreach ($r in $rows) { $null = $all.Add($r) }
+                if ($rows.Count -lt $Take) { break }
+            }
+            return @($all)
+        }
+
+        # Creates or updates one Planner card (a CloudRadial "product") for a company, so a run never duplicates a card.
+        # It finds the company's card whose subject matches -Subject, or whose body holds -Key, and updates it; otherwise it creates one.
+        #   -Fields    the card's other fields: body, summary, notes, category, productCategoryId, priority (1 high, 0 medium, -1 low),
+        #              status (0 open, 20 scheduled, 40 completed), productType, scheduledQuarter, quarterOffset, and so on
+        #   -Key       a stable marker. It is added to the end of the body when missing, so the card is found again after its subject changes
+        #   -Existing  the company's cards when already read (saves a call per card); otherwise they are read here
+        #   -Preview   work out what would happen without writing
+        # Returns @{ action = created | updated | would-create | would-update; productId; optionalFieldsDropped }.
+        function Set-CrPlannerCard {
+            param([int]$CompanyId, [string]$Subject, [hashtable]$Fields = @{}, [string]$Key = '', $Existing = $null, [switch]$Preview)
+            if ([string]::IsNullOrWhiteSpace($Subject)) { throw 'Set-CrPlannerCard needs a subject.' }
+            $cards = if ($null -ne $Existing) { @($Existing) } else { @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId") }
+            $want = $Subject.Trim()
+            $card = @($cards | Where-Object {
+                    $null -ne $_ -and ($null -eq (Get-CrProp $_ 'companyId') -or [int](Get-CrProp $_ 'companyId') -eq $CompanyId) -and (
+                        ([string](Get-CrProp $_ 'subject')).Trim() -ieq $want -or ($Key -and ([string](Get-CrProp $_ 'body')).Contains($Key)))
+                }) | Select-Object -First 1
+            $f = [ordered]@{ subject = $want }
+            foreach ($k in $Fields.Keys) { if ($k -ne 'subject') { $f[$k] = $Fields[$k] } }
+            if ($Key -and $f.Contains('body') -and -not ([string]$f['body']).Contains($Key)) { $f['body'] = "$($f['body'])<p><em>$Key</em></p>" }
+            $optional = @('notes', 'productType', 'scheduledQuarter', 'quarterOffset')
+            $dropped = $false
+
+            if ($null -ne $card) {
+                $id = [string](Get-CrProp $card 'productId')
+                if ($Preview) { return @{ action = 'would-update'; productId = $id; optionalFieldsDropped = $false } }
+                $ops = @($f.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = "/$($_.Key)"; value = $_.Value } })
+                try { $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $ops -ContentType 'application/json-patch+json' }
+                catch {
+                    # Older portals may not take notes or the roadmap fields: write the card without them.
+                    $core = @($ops | Where-Object { $_.path.TrimStart('/') -notin $optional })
+                    if ($core.Count -eq $ops.Count) { throw }
+                    $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $core -ContentType 'application/json-patch+json'
+                    $dropped = $true
+                }
+                return @{ action = 'updated'; productId = $id; optionalFieldsDropped = $dropped }
+            }
+
+            if ($Preview) { return @{ action = 'would-create'; productId = ''; optionalFieldsDropped = $false } }
+            $body = [ordered]@{ companyId = $CompanyId; datePublished = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); isRequired = $false; isShowPrice = $false; isClientVisible = $false; status = 0 }
+            foreach ($k in $f.Keys) { $body[$k] = $f[$k] }
+            $new = $null
+            try { $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body }
+            catch {
+                $had = @($optional | Where-Object { $body.Contains($_) })
+                if (-not $had.Count) { throw }
+                foreach ($k in $had) { $body.Remove($k) }
+                $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body
+                $dropped = $true
+            }
+            # POST replies { success, message, data = { productId, ... } }.
+            $newId = Get-CrId $new @('productId', 'data.productId')
+            return @{ action = 'created'; productId = $(if ($newId) { [string]$newId } else { '' }); optionalFieldsDropped = $dropped }
+        }
+
+        # Finds a company's report archive by name through the legacy /api/beta/archive list (which ignores
+        # companyId, so it is filtered here), and creates it with -Create. Returns @{ id; companyId; name; inboundAddress } or $null.
+        # The create reply doesn't always carry the new id, so the archive is looked up again by name.
+        function Get-CrArchive {
+            param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'AutomationAI')
+            $find = {
+                $list = @(Get-CrBetaAll '/api/beta/archive')
+                @($list | Where-Object {
+                        $n = [string](Get-CrProp $_ 'name'); if (-not $n) { $n = [string](Get-CrProp $_ 'archiveName') }
+                        $c = Get-CrProp $_ 'companyId'
+                        $n.Trim() -ieq $Name.Trim() -and ($null -eq $c -or [int]$c -eq $CompanyId)
+                    }) | Select-Object -First 1
+            }
+            $hit = & $find
+            if ($null -eq $hit -and $Create) {
+                $resp = $null
+                # A 400 here has meant "already exists" when the list missed it, so look again before giving up.
+                try { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                catch { $again = & $find; if ($null -eq $again) { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" }; $resp = $again }
+                $id = Get-CrId $resp @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')
+                if (-not $id -and ([string]$resp -match '^\d+$')) { $id = [int][string]$resp }
+                $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { & $find }
+            }
+            if ($null -eq $hit) { return $null }
+            $aid = Get-CrId $hit @('id', 'archiveId', 'companyReportFolderId')
+            if (-not $aid) { throw "Found the '$Name' archive but couldn't read its id." }
+            return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = [string](Get-CrProp $hit 'inboundAddress') }
+        }
+
+        # Writes an HTML report into a company's Report Archive (Compliance > Reports, admins only), creating the archive
+        # when needed. An item with the same subject is replaced, so a re-run updates the report instead of piling up.
+        # Never falls back to a knowledge base article: if this throws, keep the report in the run output.
+        # Returns @{ action = created | updated | would-write; archiveId; itemId; location }.
+        function Add-CrArchiveReport {
+            param([int]$CompanyId, [string]$ArchiveName, [string]$Subject, [string]$Html, [string]$Category = 'AutomationAI', [switch]$IsError, [switch]$Preview)
+            if ([string]::IsNullOrWhiteSpace($ArchiveName) -or [string]::IsNullOrWhiteSpace($Subject)) { throw 'Add-CrArchiveReport needs an archive name and a subject.' }
+            $where = "Report archive '$ArchiveName' (Compliance > Reports, admins only), item '$Subject'"
+            $arch = Get-CrArchive -CompanyId $CompanyId -Name $ArchiveName -Create:(-not $Preview) -Category $Category
+            if ($Preview) { return @{ action = 'would-write'; archiveId = $(if ($arch) { $arch.id } else { 0 }); itemId = 0; location = $where } }
+            $aid = [int]$arch.id
+            $esc = $Subject.Replace("'", "''")
+            $prev = $null
+            try { $prev = @(Get-CrAll "/v2/odata/archiveitem?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId and companyReportFolderId eq $aid and subject eq '$esc'"))&`$select=companyReportItemId,subject") | Where-Object { ([string](Get-CrProp $_ 'subject')) -eq $Subject } | Select-Object -First 1 } catch { $prev = $null }
+            $item = [ordered]@{ companyId = $CompanyId; archiveId = $aid; subject = $Subject; text = $Html; isHtml = $true; isError = [bool]$IsError }
+            $iid = Get-CrId $prev @('companyReportItemId')
+            if ($iid) {
+                $null = Invoke-CrApi -Path "/v2/archiveitem/$aid/$iid" -Method PUT -Body $item
+                return @{ action = 'updated'; archiveId = $aid; itemId = $iid; location = $where }
+            }
+            $r = Invoke-CrApi -Path '/v2/archiveitem' -Method POST -Body $item
+            return @{ action = 'created'; archiveId = $aid; itemId = (Get-CrId $r @('companyReportItemId', 'id', 'data.companyReportItemId', 'data.id')); location = $where }
+        }
+        # ---------- end _shared/cloudradial.ps1 ----------
+        # <<< _shared/cloudradial.ps1
+        $ErrorActionPreference = 'Stop'
+
+        function Get-ObState { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in @($in.Keys)) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Get-ObList { param($S, [string]$Key) if (-not $S.Contains($Key)) { return @() }; return @(@($S[$Key]) | Where-Object { $null -ne $_ -and [string]$_ -ne '' }) }
+        function ConvertTo-ObOData { param([string]$s) return $s.Replace("'", "''") }
+        function ConvertTo-ObFilter { param([string]$f) return [uri]::EscapeDataString($f) }
+
+        $st = Get-ObState
+        if ([string]$st['status'] -ne 'ok') { Set-NodeOutput $st; return }
+        $warnings = New-Object System.Collections.ArrayList; foreach ($w in @(Get-ObList $st 'warnings')) { $null = $warnings.Add([string]$w) }
+        $mode = [string]$st['mode']
+        $service = [string]$st['affectedService']
+        $tokenName = [string]$st['bannerToken']
+        $category = [string]$st['articleCategory']
+        $subjectBase = "Service status: $service"
+
+        function Stop-Ob {
+            param([string]$Status, [string]$Why, [string]$Chat = '')
+            $st['status'] = $Status; $st['message'] = $Why
+            $st['chatReply'] = $(if ($Chat) { $Chat } else { $Why })
+            $st['internal_note'] = "Outage broadcast for $service ($mode) stopped before any change: $Why"
+            $st['warnings'] = @($warnings)
+            $st['targets'] = @(); $st['counts'] = @{ companies = 0 }
+            Set-NodeOutput $st
+        }
+
+        $null = Connect-Cr
+        $all = @(Get-CrAll "/v2/odata/company?`$select=companyId,name,psaKey")
+        $byId = @{}; foreach ($c in $all) { $cid = [int](Get-CrProp $c 'companyId'); if ($cid -gt 0) { $byId[$cid] = $c } }
+
+        $picked = [ordered]@{}   # "companyId" -> reason (string keys: an int would index an ordered dictionary by position)
+        $source = ''
+        $wanted = @(Get-ObList $st 'companies')
+        $group = [string]$st['companyGroup']
+        if ($wanted.Count) {
+            $source = 'the company list in the request'
+            foreach ($w in $wanted) {
+                $hit = $null
+                if ($w -match '^\d+$') { if ($byId.ContainsKey([int]$w)) { $hit = $byId[[int]$w] } }
+                else { $hit = @($all | Where-Object { ([string](Get-CrProp $_ 'name')).Trim() -ieq $w.Trim() }) | Select-Object -First 1 }
+                if ($null -eq $hit) { $null = $warnings.Add("No CloudRadial company matches '$w', so it was skipped."); continue }
+                $picked[[string][int](Get-CrProp $hit 'companyId')] = 'named in the request'
+            }
+            if (-not $picked.Count) { Stop-Ob 'incomplete' "None of the companies named in the request ($($wanted -join ', ')) exist in CloudRadial."; return }
+        }
+        elseif ($group) {
+            $source = "the company group '$group'"
+            $g = @(Get-CrAll "/v2/odata/companygroup?`$filter=$(ConvertTo-ObFilter "group eq '$(ConvertTo-ObOData $group)'")" | Where-Object { (Get-CrProp $_ 'isDeleted') -ne $true }) | Select-Object -First 1
+            if ($null -eq $g) { Stop-Ob 'incomplete' "There is no CloudRadial company group named '$group'."; return }
+            $gid = [int](Get-CrProp $g 'companyGroupId')
+            foreach ($m in @(Get-CrAll "/v2/odata/companygroupcompany?`$filter=$(ConvertTo-ObFilter "companyGroupId eq $gid")")) {
+                if ((Get-CrProp $m 'isDeleted') -eq $true) { continue }
+                $cid = [int](Get-CrProp $m 'companyId'); if ($byId.ContainsKey($cid)) { $picked["$cid"] = "member of the '$group' group" }
+            }
+        }
+
+        # Current banner tokens and Service Status articles (read for every mode, for the preview and for resolved-mode targeting).
+        $tokens = @{}; $partnerToken = $false
+        foreach ($t in @(Get-CrAll "/v2/odata/token?`$filter=$(ConvertTo-ObFilter "name eq '$(ConvertTo-ObOData $tokenName)'")")) {
+            if ([string](Get-CrProp $t 'name') -ne $tokenName) { continue }
+            $cid = [int](Get-CrProp $t 'companyId')
+            if ($cid -eq 0) { $partnerToken = $true; continue }
+            $tokens[$cid] = [string](Get-CrProp $t 'value')
+        }
+        $articles = @{}
+        foreach ($a in @(Get-CrAll "/v2/odata/article?`$filter=$(ConvertTo-ObFilter "category eq '$(ConvertTo-ObOData $category)'")&`$select=articleId,companyId,subject,isFrontPage,datePublished")) {
+            $subj = ([string](Get-CrProp $a 'subject')).Trim()
+            if ($subj -ine $subjectBase -and $subj -ine "$subjectBase (resolved)") { continue }
+            $cid = [int](Get-CrProp $a 'companyId')
+            if (-not $articles.ContainsKey($cid)) { $articles[$cid] = $a }
+        }
+        function Test-ObMentions { param([string]$v) return ($v -and $v.IndexOf($service, [StringComparison]::OrdinalIgnoreCase) -ge 0) }
+
+        if (-not $source) {
+            if ($mode -eq 'broadcast') {
+                $source = "endpoints with a service matching '$service' installed"
+                $svcFilter = ConvertTo-ObFilter "contains(tolower(name),'$(ConvertTo-ObOData $service.ToLowerInvariant())')"
+                $services = @(Get-CrAll "/v2/odata/service?`$filter=$svcFilter&`$select=serviceId,companyId,name" | Where-Object { ([string](Get-CrProp $_ 'name')).IndexOf($service, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+                foreach ($s in $services) {
+                    $sid = [int](Get-CrProp $s 'serviceId')
+                    # Unverified: whether a service row's companyId is always set; the installing endpoint's company is the fallback.
+                    $inst = @(Get-CrProp (Invoke-CrApi "/v2/odata/serviceinstall?`$filter=$(ConvertTo-ObFilter "serviceId eq $sid")&`$top=1&`$expand=endpoint(`$select=companyId)") 'value' | Where-Object { $null -ne $_ })
+                    if (-not $inst.Count) { continue }
+                    $cid = [int](Get-CrProp $s 'companyId')
+                    if ($cid -le 0) { $ep = Get-CrProp $inst[0] 'endpoint'; $cid = [int](Get-CrProp $ep 'companyId') }
+                    if ($cid -gt 0 -and $byId.ContainsKey($cid) -and -not $picked.Contains("$cid")) { $picked["$cid"] = "has $([string](Get-CrProp $s 'name')) installed" }
+                }
+            }
+            else {
+                $source = "companies whose banner or Service Status article still shows $service"
+                foreach ($cid in @($tokens.Keys)) { if ((Test-ObMentions $tokens[$cid]) -and $byId.ContainsKey($cid)) { $picked["$cid"] = 'banner shows this outage' } }
+                foreach ($cid in @($articles.Keys)) {
+                    $a = $articles[$cid]
+                    if ((Get-CrProp $a 'isFrontPage') -eq $true -and ([string](Get-CrProp $a 'subject')).Trim() -ieq $subjectBase -and $byId.ContainsKey($cid) -and -not $picked.Contains("$cid")) { $picked["$cid"] = 'Service Status article still open' }
+                }
+            }
+        }
+
+        if (-not $picked.Count) {
+            $why = if ($mode -eq 'broadcast') { "No company matched $source, so there is nothing to post." } else { "No company's banner or Service Status article shows $service, so there is nothing to clear." }
+            $st['status'] = 'success'; $st['message'] = $why; $st['chatReply'] = $why
+            $st['internal_note'] = "Outage broadcast for $service ($mode): $why Nothing was changed."
+            $st['targets'] = @(); $st['counts'] = @{ companies = 0 }; $st['warnings'] = @($warnings)
+            Set-NodeOutput $st; return
+        }
+        $max = [int]$st['maxCompanies']
+        if ($picked.Count -gt $max) {
+            Stop-Ob 'incomplete' "This would reach $($picked.Count) companies, which is over the limit of $max. Check the service name, or rerun with maxCompanies set to $($picked.Count) to go ahead."
+            return
+        }
+
+        $targets = @(foreach ($key in @($picked.Keys)) {
+                $cid = [int]$key
+                $c = $byId[$cid]
+                $a = $(if ($articles.ContainsKey($cid)) { $articles[$cid] } else { $null })
+                [ordered]@{
+                    companyId = $cid; name = [string](Get-CrProp $c 'name'); psaKey = [string](Get-CrProp $c 'psaKey'); reason = $picked[$key]
+                    tokenExists = $tokens.ContainsKey($cid); tokenValue = $(if ($tokens.ContainsKey($cid)) { $tokens[$cid] } else { '' })
+                    articleId = $(if ($a) { [int](Get-CrProp $a 'articleId') } else { 0 })
+                    articleSubject = $(if ($a) { [string](Get-CrProp $a 'subject') } else { '' })
+                    articleDatePublished = $(if ($a) { [string](Get-CrProp $a 'datePublished') } else { '' })
+                }
+            })
+        $st['targets'] = @($targets)
+        $st['targetSource'] = $source
+        $st['partnerTokenExists'] = $partnerToken
+        $st['counts'] = @{ companies = $targets.Count }
+        $st['warnings'] = @($warnings)
+        Set-NodeOutput $st
+      timeoutSeconds: 600
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: broadcast
+    name: Post the notice and record it
+    type: powershell-script
+    position:
+      x: 640
+      y: 80
+    properties:
+      script: |-
+        # === NODE: Post the notice and record it ===
+        # Builds one plan for every affected company, previews it, and only makes the changes when confirm is true.
+        #   Banner token: the CloudRadial API has no news, announcement or banner resource, so the notice goes
+        #     into a company token (default @ServiceStatus) that the portal's home page or banner shows. Broadcast
+        #     sets it; resolved clears it, but only when it still shows this service.
+        #   Service Status article: one knowledge base article per company in the "Service Status" category,
+        #     pinned to the portal front page while the outage is open and unpinned with a resolution when it ends.
+        #   Email (off unless emailContacts is true): the company's primary contact from the PSA, one email per
+        #     company through Postmark. Without the Postmark secrets nothing is emailed and the ticket note says so.
+        #   Problem ticket: an internal note listing what ran, on the ticket in problemTicketId (or ticketId).
+        # A company whose banner and article already show this exact notice is skipped, so a retried run doesn't email twice.
+        # >>> _shared/plan.ps1 (generated by _shared/inject.js; edit the source, not this block)
+        # ---------- _shared/plan.ps1: preview first, change on confirm ----------
+        # Edit this file, then run: node automationai/_shared/inject.js <automation-folder>
+        # AutomationAI has no approval step, so every automation that writes builds a plan:
+        #   $plan = New-ChangePlan 'Offboard sam@contoso.com'
+        #   Add-PlannedChange $plan 'Block sign-in' { param($u) Set-GraphAccountEnabled $u $false } -Arguments @($userId)
+        #   $result = Invoke-ChangePlan $plan -Confirm:$confirm
+        # Without confirm nothing runs and the result is a preview. With confirm the changes run in order
+        # and stop at the first failure, and the result says what ran and what didn't.
+        # Pass loop values through -Arguments: a scriptblock reads variables when it runs, not when it was added.
+        # Don't use .GetNewClosure() either; a closure can't see functions defined in the step.
+
+        function New-ChangePlan {
+            param([string]$Title = '')
+            return @{ title = $Title; changes = (New-Object System.Collections.ArrayList) }
+        }
+
+        function Add-PlannedChange {
+            param($Plan, [string]$Description, [scriptblock]$Action, [object[]]$Arguments = @())
+            if ($null -eq $Plan -or -not ($Plan -is [System.Collections.IDictionary]) -or -not $Plan.Contains('changes')) { throw 'Add-PlannedChange needs a plan from New-ChangePlan.' }
+            if ([string]::IsNullOrWhiteSpace($Description)) { throw 'Each planned change needs a description.' }
+            if ($null -eq $Action) { throw "Planned change '$Description' has no scriptblock." }
+            $null = $Plan.changes.Add(@{ description = $Description; action = $Action; arguments = @($Arguments) })
+        }
+
+        # Returns @{ status; confirmed; message; planned; ran; notRun; failed }:
+        #   status    'preview' (nothing ran), 'done' (everything ran), 'failed' (stopped part way) or 'empty'
+        #   planned   every description, in order
+        #   ran       @(@{ description; output }) for the changes that finished
+        #   notRun    descriptions that didn't run (all of them in a preview)
+        #   failed    $null, or @{ description; error } for the change that stopped the run
+        function Invoke-ChangePlan {
+            param($Plan, $Confirm = $false)
+            if ($null -eq $Plan -or -not ($Plan -is [System.Collections.IDictionary]) -or -not $Plan.Contains('changes')) { throw 'Invoke-ChangePlan needs a plan from New-ChangePlan.' }
+            $ok = $false
+            if ($Confirm -is [bool]) { $ok = $Confirm } elseif ($null -ne $Confirm) { $ok = ([string]$Confirm).Trim() -match '^(?i)(true|yes|y|1)$' }
+            $all = @($Plan.changes)
+            $planned = @($all | ForEach-Object { [string]$_.description })
+            $res = [ordered]@{ status = ''; confirmed = $ok; title = [string]$Plan.title; message = ''; planned = $planned; ran = @(); notRun = @(); failed = $null }
+            $n = $all.Count
+            $things = if ($n -eq 1) { '1 change' } else { "$n changes" }
+            if ($n -eq 0) { $res.status = 'empty'; $res.message = 'There is nothing to change.'; return $res }
+            if (-not $ok) {
+                $res.status = 'preview'; $res.notRun = $planned
+                $res.message = "Nothing was changed. Run again with confirm set to true to make these $($things): $($planned -join '; ')."
+                return $res
+            }
+            $ran = New-Object System.Collections.ArrayList
+            for ($i = 0; $i -lt $n; $i++) {
+                $c = $all[$i]
+                try {
+                    $args2 = @($c.arguments)
+                    $out = & $c.action @args2
+                    $null = $ran.Add(@{ description = [string]$c.description; output = $out })
+                }
+                catch {
+                    $res.failed = @{ description = [string]$c.description; error = [string]$_.Exception.Message }
+                    $res.ran = @($ran)
+                    $res.notRun = @($planned | Select-Object -Skip ($i + 1))
+                    $res.status = 'failed'
+                    $done = if ($ran.Count -eq 0) { 'No changes were made' } else { "Made $($ran.Count) of $n changes ($(@($ran | ForEach-Object { $_.description }) -join '; '))" }
+                    $left = if ($res.notRun.Count) { " Not run: $($res.notRun -join '; ')." } else { '' }
+                    $res.message = "$done, then stopped because '$($c.description)' failed: $($res.failed.error.Trim().TrimEnd('.')).$left"
+                    return $res
+                }
+            }
+            $res.ran = @($ran); $res.status = 'done'
+            $res.message = "Made $(if ($n -eq 1) { 'the change' } else { "all $n changes" }): $($planned -join '; ')."
+            return $res
+        }
+        # ---------- end _shared/plan.ps1 ----------
+        # <<< _shared/plan.ps1
+        # >>> _shared/cloudradial.ps1 (generated by _shared/inject.js; edit the source, not this block)
+        # ---------- _shared/cloudradial.ps1: CloudRadial API for AutomationAI steps ----------
+        # Edit this file, then run: node automationai/_shared/inject.js <automation-folder>
+        # Lifted from endpoint-lifecycle-manager/src/elm.ps1 and the ScalePad sync's archive helpers.
+        # Secrets (runner Key Vault): CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+        # Reports for a client go to Report Archives (Compliance > Reports, admins only), never to the
+        # knowledge base, and never carry another client's data.
+        # All state lives in the $CrState hashtable and is changed in place, because the runner
+        # runs a step in a child scope where $script: variables don't behave.
+
+        $CrState = @{
+            Base        = $null
+            Headers     = $null
+            MaxAttempts = 6
+        }
+
+        # ---- small helpers (all Cr-prefixed so they don't clash with other shared files) ----
+        function Get-CrSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Get-CrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-CrHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
+        function Get-CrRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+        function Get-CrId { param($o, [string[]]$Names) foreach ($n in $Names) { $v = $o; foreach ($part in $n -split '\.') { $v = Get-CrProp $v $part }; if ($null -ne $v -and [string]$v -match '^\d+$' -and [long]$v -gt 0) { return [int]$v } }; return 0 }
+
+        # Reads the API keys from the runner Key Vault (or takes them as parameters). Returns @{ Base }.
+        function Connect-Cr {
+            param([string]$BaseUrl, [string]$PublicKey, [string]$PrivateKey)
+            if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-CrSecret 'CloudRadial-BaseUrl' }
+            if ([string]::IsNullOrWhiteSpace($PublicKey)) { $PublicKey = Get-CrSecret 'CloudRadial-PublicKey' }
+            if ([string]::IsNullOrWhiteSpace($PrivateKey)) { $PrivateKey = Get-CrSecret 'CloudRadial-PrivateKey' }
+            $missing = @()
+            if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $missing += 'CloudRadial-BaseUrl' }
+            if ([string]::IsNullOrWhiteSpace($PublicKey)) { $missing += 'CloudRadial-PublicKey' }
+            if ([string]::IsNullOrWhiteSpace($PrivateKey)) { $missing += 'CloudRadial-PrivateKey' }
+            if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+            $CrState.Base = $BaseUrl.Trim().TrimEnd('/')
+            $CrState.Headers = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($PublicKey.Trim()):$($PrivateKey.Trim())")); Accept = 'application/json' }
+            return @{ Base = $CrState.Base }
+        }
+
+        # One CloudRadial call. Path is relative to the base URL (or a full URL).
+        # Retries 429, GET 5xx and dropped connections, honoring Retry-After; other errors throw a plain message.
+        function Invoke-CrApi {
+            param([string]$Path, [string]$Method = 'GET', $Body = $null, [string]$ContentType = 'application/json')
+            if ($null -eq $CrState.Headers) { throw 'Call Connect-Cr before any other CloudRadial function.' }
+            $url = if ($Path -match '^https?://') { $Path } else { "$($CrState.Base)$Path" }
+            for ($i = 1; $i -le $CrState.MaxAttempts; $i++) {
+                try {
+                    $a = @{ Uri = $url; Method = $Method; Headers = $CrState.Headers; ContentType = $ContentType; ErrorAction = 'Stop' }
+                    if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 }) }
+                    return Invoke-RestMethod @a
+                }
+                catch {
+                    $code = Get-CrHttpStatus $_
+                    $msg = [string]$_.Exception.Message
+                    $transient = (-not $code -and $msg -match 'SSL connection|could not be established|No such host|actively refused|forcibly closed|error occurred while sending|timed out|TaskCanceled')
+                    if (($code -eq 429 -or ($Method -eq 'GET' -and $code -ge 500) -or $transient) -and $i -lt $CrState.MaxAttempts) { Start-Sleep -Seconds (Get-CrRetryAfter $_ $i); continue }
+                    $detail = $msg; try { if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message } } catch { }
+                    throw "CloudRadial $Method $Path failed$(if ($code) { " (HTTP $code)" }): $detail"
+                }
+            }
+        }
+
+        # Every row of a /v2/odata list. Those lists stop at 200 rows with no nextLink, so this pages with $top/$skip.
+        # Wrap the result in @(...).
+        function Get-CrAll {
+            param([string]$Path, [int]$PageSize = 200, [int]$MaxPages = 500)
+            $rows = New-Object System.Collections.ArrayList; $skip = 0
+            for ($n = 0; $n -lt $MaxPages; $n++) {
+                $sep = if ($Path -match '\?') { '&' } else { '?' }
+                $resp = Invoke-CrApi -Path "$Path$sep`$top=$PageSize&`$skip=$skip"
+                $batch = @(); $v = Get-CrProp $resp 'value'
+                if ($null -ne $v) { $batch = @($v) } elseif ($resp -is [array]) { $batch = @($resp) }
+                $batch = @($batch | Where-Object { $null -ne $_ })
+                foreach ($r in $batch) { $null = $rows.Add($r) }
+                if ($batch.Count -lt $PageSize) { break }
+                $skip += $PageSize
+            }
+            return @($rows)
+        }
+
+        # Every row of a legacy /api/beta list. Those page with Skip/Take and return 10 rows by default.
+        function Get-CrBetaAll {
+            param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+            $all = New-Object System.Collections.ArrayList
+            $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+            for ($p = 0; $p -lt $MaxPages; $p++) {
+                $raw = Invoke-CrApi -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                $rows = @($raw)
+                foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-CrProp $rows[0] $k)) { $rows = @(Get-CrProp $rows[0] $k) } }
+                $rows = @($rows | Where-Object { $null -ne $_ })
+                foreach ($r in $rows) { $null = $all.Add($r) }
+                if ($rows.Count -lt $Take) { break }
+            }
+            return @($all)
+        }
+
+        # Creates or updates one Planner card (a CloudRadial "product") for a company, so a run never duplicates a card.
+        # It finds the company's card whose subject matches -Subject, or whose body holds -Key, and updates it; otherwise it creates one.
+        #   -Fields    the card's other fields: body, summary, notes, category, productCategoryId, priority (1 high, 0 medium, -1 low),
+        #              status (0 open, 20 scheduled, 40 completed), productType, scheduledQuarter, quarterOffset, and so on
+        #   -Key       a stable marker. It is added to the end of the body when missing, so the card is found again after its subject changes
+        #   -Existing  the company's cards when already read (saves a call per card); otherwise they are read here
+        #   -Preview   work out what would happen without writing
+        # Returns @{ action = created | updated | would-create | would-update; productId; optionalFieldsDropped }.
+        function Set-CrPlannerCard {
+            param([int]$CompanyId, [string]$Subject, [hashtable]$Fields = @{}, [string]$Key = '', $Existing = $null, [switch]$Preview)
+            if ([string]::IsNullOrWhiteSpace($Subject)) { throw 'Set-CrPlannerCard needs a subject.' }
+            $cards = if ($null -ne $Existing) { @($Existing) } else { @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId") }
+            $want = $Subject.Trim()
+            $card = @($cards | Where-Object {
+                    $null -ne $_ -and ($null -eq (Get-CrProp $_ 'companyId') -or [int](Get-CrProp $_ 'companyId') -eq $CompanyId) -and (
+                        ([string](Get-CrProp $_ 'subject')).Trim() -ieq $want -or ($Key -and ([string](Get-CrProp $_ 'body')).Contains($Key)))
+                }) | Select-Object -First 1
+            $f = [ordered]@{ subject = $want }
+            foreach ($k in $Fields.Keys) { if ($k -ne 'subject') { $f[$k] = $Fields[$k] } }
+            if ($Key -and $f.Contains('body') -and -not ([string]$f['body']).Contains($Key)) { $f['body'] = "$($f['body'])<p><em>$Key</em></p>" }
+            $optional = @('notes', 'productType', 'scheduledQuarter', 'quarterOffset')
+            $dropped = $false
+
+            if ($null -ne $card) {
+                $id = [string](Get-CrProp $card 'productId')
+                if ($Preview) { return @{ action = 'would-update'; productId = $id; optionalFieldsDropped = $false } }
+                $ops = @($f.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = "/$($_.Key)"; value = $_.Value } })
+                try { $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $ops -ContentType 'application/json-patch+json' }
+                catch {
+                    # Older portals may not take notes or the roadmap fields: write the card without them.
+                    $core = @($ops | Where-Object { $_.path.TrimStart('/') -notin $optional })
+                    if ($core.Count -eq $ops.Count) { throw }
+                    $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $core -ContentType 'application/json-patch+json'
+                    $dropped = $true
+                }
+                return @{ action = 'updated'; productId = $id; optionalFieldsDropped = $dropped }
+            }
+
+            if ($Preview) { return @{ action = 'would-create'; productId = ''; optionalFieldsDropped = $false } }
+            $body = [ordered]@{ companyId = $CompanyId; datePublished = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); isRequired = $false; isShowPrice = $false; isClientVisible = $false; status = 0 }
+            foreach ($k in $f.Keys) { $body[$k] = $f[$k] }
+            $new = $null
+            try { $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body }
+            catch {
+                $had = @($optional | Where-Object { $body.Contains($_) })
+                if (-not $had.Count) { throw }
+                foreach ($k in $had) { $body.Remove($k) }
+                $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body
+                $dropped = $true
+            }
+            # POST replies { success, message, data = { productId, ... } }.
+            $newId = Get-CrId $new @('productId', 'data.productId')
+            return @{ action = 'created'; productId = $(if ($newId) { [string]$newId } else { '' }); optionalFieldsDropped = $dropped }
+        }
+
+        # Finds a company's report archive by name through the legacy /api/beta/archive list (which ignores
+        # companyId, so it is filtered here), and creates it with -Create. Returns @{ id; companyId; name; inboundAddress } or $null.
+        # The create reply doesn't always carry the new id, so the archive is looked up again by name.
+        function Get-CrArchive {
+            param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'AutomationAI')
+            $find = {
+                $list = @(Get-CrBetaAll '/api/beta/archive')
+                @($list | Where-Object {
+                        $n = [string](Get-CrProp $_ 'name'); if (-not $n) { $n = [string](Get-CrProp $_ 'archiveName') }
+                        $c = Get-CrProp $_ 'companyId'
+                        $n.Trim() -ieq $Name.Trim() -and ($null -eq $c -or [int]$c -eq $CompanyId)
+                    }) | Select-Object -First 1
+            }
+            $hit = & $find
+            if ($null -eq $hit -and $Create) {
+                $resp = $null
+                # A 400 here has meant "already exists" when the list missed it, so look again before giving up.
+                try { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                catch { $again = & $find; if ($null -eq $again) { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" }; $resp = $again }
+                $id = Get-CrId $resp @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')
+                if (-not $id -and ([string]$resp -match '^\d+$')) { $id = [int][string]$resp }
+                $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { & $find }
+            }
+            if ($null -eq $hit) { return $null }
+            $aid = Get-CrId $hit @('id', 'archiveId', 'companyReportFolderId')
+            if (-not $aid) { throw "Found the '$Name' archive but couldn't read its id." }
+            return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = [string](Get-CrProp $hit 'inboundAddress') }
+        }
+
+        # Writes an HTML report into a company's Report Archive (Compliance > Reports, admins only), creating the archive
+        # when needed. An item with the same subject is replaced, so a re-run updates the report instead of piling up.
+        # Never falls back to a knowledge base article: if this throws, keep the report in the run output.
+        # Returns @{ action = created | updated | would-write; archiveId; itemId; location }.
+        function Add-CrArchiveReport {
+            param([int]$CompanyId, [string]$ArchiveName, [string]$Subject, [string]$Html, [string]$Category = 'AutomationAI', [switch]$IsError, [switch]$Preview)
+            if ([string]::IsNullOrWhiteSpace($ArchiveName) -or [string]::IsNullOrWhiteSpace($Subject)) { throw 'Add-CrArchiveReport needs an archive name and a subject.' }
+            $where = "Report archive '$ArchiveName' (Compliance > Reports, admins only), item '$Subject'"
+            $arch = Get-CrArchive -CompanyId $CompanyId -Name $ArchiveName -Create:(-not $Preview) -Category $Category
+            if ($Preview) { return @{ action = 'would-write'; archiveId = $(if ($arch) { $arch.id } else { 0 }); itemId = 0; location = $where } }
+            $aid = [int]$arch.id
+            $esc = $Subject.Replace("'", "''")
+            $prev = $null
+            try { $prev = @(Get-CrAll "/v2/odata/archiveitem?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId and companyReportFolderId eq $aid and subject eq '$esc'"))&`$select=companyReportItemId,subject") | Where-Object { ([string](Get-CrProp $_ 'subject')) -eq $Subject } | Select-Object -First 1 } catch { $prev = $null }
+            $item = [ordered]@{ companyId = $CompanyId; archiveId = $aid; subject = $Subject; text = $Html; isHtml = $true; isError = [bool]$IsError }
+            $iid = Get-CrId $prev @('companyReportItemId')
+            if ($iid) {
+                $null = Invoke-CrApi -Path "/v2/archiveitem/$aid/$iid" -Method PUT -Body $item
+                return @{ action = 'updated'; archiveId = $aid; itemId = $iid; location = $where }
+            }
+            $r = Invoke-CrApi -Path '/v2/archiveitem' -Method POST -Body $item
+            return @{ action = 'created'; archiveId = $aid; itemId = (Get-CrId $r @('companyReportItemId', 'id', 'data.companyReportItemId', 'data.id')); location = $where }
+        }
+        # ---------- end _shared/cloudradial.ps1 ----------
+        # <<< _shared/cloudradial.ps1
+        # >>> _shared/psa.ps1 (generated by _shared/inject.js; edit the source, not this block)
+        # ---------- _shared/psa.ps1: one adapter for six PSAs ----------
+        # ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+        # Edit this file, then run: node automationai/_shared/inject.js <automation-folder>
+        # The source of each call, and whether it has been checked, is in reference/build-kit/PSA.md.
+        # Calls marked "Unverified" below have not been proven by a live run; check them before the first live write.
+        # Secrets use the same Key Vault names as each PSA's catalog extension.
+        # All state lives in the $PsaState hashtable and is changed in place, because the runner
+        # runs a step in a child scope where $script: variables don't behave.
+
+        $PsaState = @{
+            Conn       = $null
+            Picklists  = @{}
+            MaxRetries = 4
+            Secrets    = @{
+                connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')
+                autotask    = @('Autotask-ApiUrl', 'Autotask-ApiIntegrationCode', 'Autotask-Username', 'Autotask-Secret')
+                halopsa     = @('Halo-ApiUrl', 'Halo-ClientId', 'Halo-ClientSecret')
+                kaseyabms   = @('KaseyaBMS-ApiUrl', 'KaseyaBMS-Username', 'KaseyaBMS-Password', 'KaseyaBMS-CompanyName')
+                syncro      = @('Syncro-ApiUrl', 'Syncro-ApiKey')
+                zendesk     = @('Zendesk-BaseUrl', 'Zendesk-Email', 'Zendesk-ApiToken')
+            }
+            Names      = @{ connectwise = 'ConnectWise'; autotask = 'Autotask'; halopsa = 'HaloPSA'; kaseyabms = 'Kaseya BMS'; syncro = 'Syncro'; zendesk = 'Zendesk' }
+        }
+
+        # ---- small helpers (all Psa-prefixed so they don't clash with other shared files) ----
+        function Get-PsaSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function Get-PsaProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+        function Get-PsaPath { param($o, [string]$Path) foreach ($n in $Path -split '\.') { $o = Get-PsaProp $o $n; if ($null -eq $o) { return $null } }; return $o }
+        function Test-PsaBlank { param($v) return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -eq '0') }
+        function ConvertTo-PsaQuery { param([string]$s) return [uri]::EscapeDataString($s) }
+        function Get-PsaText { param([string]$s, [int]$Max) if ($null -eq $s) { return '' }; if ($s.Length -gt $Max) { return $s.Substring(0, $Max) }; return $s }
+        function Get-PsaName { if ($null -eq $PsaState.Conn) { return 'the PSA' }; return $PsaState.Names[$PsaState.Conn.Psa] }
+        function Get-PsaConn { if ($null -eq $PsaState.Conn) { throw 'Call Connect-Psa before any other PSA function.' }; return $PsaState.Conn }
+        # ConnectWise conditions quote strings and leave numbers bare.
+        function Get-PsaCwOwner { param([string]$u) if ($u -match '^\d+$') { return "owner/id=$u" }; return "owner/identifier=`"$u`"" }
+        function Get-PsaHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
+        function Get-PsaRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+        function Get-PsaErrorText { param($Err) $d = $null; try { if ($Err.ErrorDetails -and $Err.ErrorDetails.Message) { $d = $Err.ErrorDetails.Message } } catch { }; if (-not $d) { $d = [string]$Err.Exception.Message }; return $d }
+
+        # Normalizes a priority hint to critical, high, medium or low ('' when blank).
+        function Get-PsaPriorityHint {
+            param([string]$Hint)
+            $h = ([string]$Hint).Trim().ToLowerInvariant()
+            if (-not $h) { return '' }
+            if ($h -match '^(critical|urgent|emergency|p?1)$') { return 'critical' }
+            if ($h -match '^(high|p?2)$') { return 'high' }
+            if ($h -match '^(medium|normal|moderate|p?3)$') { return 'medium' }
+            if ($h -match '^(low|p?4)$') { return 'low' }
+            throw "Priority '$Hint' isn't one of: critical, high, medium, low."
+        }
+        $PsaState.PriorityPatterns = @{
+            critical = @('(?i)critical', '(?i)urgent', '(?i)emergency', '(?i)\b(p|priority\s*)1\b')
+            high     = @('(?i)high', '(?i)\b(p|priority\s*)2\b')
+            medium   = @('(?i)medium', '(?i)normal', '(?i)moderate', '(?i)\b(p|priority\s*)3\b')
+            low      = @('(?i)low', '(?i)\b(p|priority\s*)4\b')
+        }
+        # The first item whose label property matches one of the patterns, in pattern order.
+        function Select-PsaByLabel {
+            param($Items, [string]$LabelProp, [string[]]$Patterns)
+            foreach ($p in $Patterns) {
+                $hit = @($Items | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ $LabelProp) -match $p }) | Select-Object -First 1
+                if ($hit) { return $hit }
+            }
+            return $null
+        }
+
+        # Which PSA: the run's psa input, then the PSA-Type secret, then ConnectWise when its secrets are
+        # set (so runners set up before PSA-Type existed keep working). '' means none is configured.
+        function Get-PsaType {
+            param([string]$Requested)
+            $v = $Requested; if ([string]::IsNullOrWhiteSpace($v) -or $v.StartsWith('@')) { $v = Get-PsaSecret 'PSA-Type' }
+            if ([string]::IsNullOrWhiteSpace($v)) { if (Get-PsaSecret 'CW-ApiUrl') { return 'connectwise' }; return '' }
+            $v = $v.Trim().ToLowerInvariant()
+            $alias = @{ 'cw' = 'connectwise'; 'connectwise-manage' = 'connectwise'; 'connectwise psa' = 'connectwise'; 'connectwise manage' = 'connectwise'; 'autotask-psa' = 'autotask'; 'datto autotask' = 'autotask'; 'halo' = 'halopsa'; 'halo-psa' = 'halopsa'; 'kaseya' = 'kaseyabms'; 'kaseya-bms' = 'kaseyabms'; 'kaseya bms' = 'kaseyabms'; 'bms' = 'kaseyabms'; 'syncromsp' = 'syncro'; 'zendesk-ticketing' = 'zendesk' }
+            if ($alias.ContainsKey($v)) { $v = $alias[$v] }
+            if (-not $PsaState.Secrets.ContainsKey($v)) { throw "PSA '$v' isn't supported. Use one of: $(($PsaState.Secrets.Keys | Sort-Object) -join ', ')." }
+            return $v
+        }
+
+        # Reads the PSA's secrets, mints a token where the PSA needs one, and keeps the connection in $PsaState.
+        # With no -Psa it uses Get-PsaType. Returns @{ Psa; Base; Headers }.
+        function Connect-Psa {
+            param([string]$Psa)
+            if ([string]::IsNullOrWhiteSpace($Psa)) { $Psa = Get-PsaType ''; if (-not $Psa) { throw 'No PSA is set up. Add the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro or zendesk) to the runner Key Vault.' } }
+            $Psa = $Psa.Trim().ToLowerInvariant()
+            if (-not $PsaState.Secrets.ContainsKey($Psa)) { $Psa = Get-PsaType $Psa }
+            $v = @{}; $missing = @()
+            foreach ($n in $PsaState.Secrets[$Psa]) { $v[$n] = Get-PsaSecret $n; if ([string]::IsNullOrWhiteSpace($v[$n])) { $missing += $n } }
+            if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+            $json = 'application/json'
+            $c = $null
+            switch ($Psa) {
+                'connectwise' {
+                    $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['CW-CompanyID'])+$($v['CW-PublicKey']):$($v['CW-PrivateKey'])"))
+                    $c = @{ Base = $v['CW-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Basic $b"; clientId = $v['CW-ClientId']; Accept = $json } }
+                }
+                'autotask' {
+                    $c = @{ Base = ($v['Autotask-ApiUrl'].TrimEnd('/') -replace '/atservicesrest/v1\.0$', '') + '/atservicesrest/v1.0'
+                        Headers = @{ ApiIntegrationCode = $v['Autotask-ApiIntegrationCode']; UserName = $v['Autotask-Username']; Secret = $v['Autotask-Secret']; Accept = $json } }
+                }
+                'halopsa' {
+                    $base = $v['Halo-ApiUrl'].TrimEnd('/') -replace '/api$', ''
+                    $form = "grant_type=client_credentials&client_id=$([uri]::EscapeDataString($v['Halo-ClientId']))&client_secret=$([uri]::EscapeDataString($v['Halo-ClientSecret']))&scope=all"
+                    $tok = $null
+                    try { $tok = Invoke-RestMethod -Method POST -Uri "$base/auth/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop }
+                    catch {
+                        # Some instances run a separate auth server; /api/authinfo names it.
+                        $info = Invoke-RestMethod -Method GET -Uri "$base/api/authinfo" -ErrorAction Stop
+                        $authUrl = [string](Get-PsaProp $info 'auth_url'); if (-not $authUrl) { throw "HaloPSA sign-in failed and /api/authinfo named no auth server: $(Get-PsaErrorText $_)" }
+                        $tok = Invoke-RestMethod -Method POST -Uri "$($authUrl.TrimEnd('/'))/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
+                    }
+                    $access = Get-PsaProp $tok 'access_token'; if (-not $access) { throw 'HaloPSA sign-in returned no access_token. Check the Halo-* secrets.' }
+                    $c = @{ Base = "$base/api"; Headers = @{ Authorization = "Bearer $access"; Accept = $json } }
+                }
+                'kaseyabms' {
+                    $base = $v['KaseyaBMS-ApiUrl'].TrimEnd('/') -replace '/v2$', ''
+                    # Unverified: the GrantType value 'password' (PSA.md).
+                    $r = Invoke-RestMethod -Method POST -Uri "$base/v2/security/authenticate" -Form @{ UserName = $v['KaseyaBMS-Username']; Password = $v['KaseyaBMS-Password']; Tenant = $v['KaseyaBMS-CompanyName']; GrantType = 'password' } -ErrorAction Stop
+                    $token = Get-PsaPath $r 'Result.AccessToken'; if (-not $token) { $token = Get-PsaPath $r 'result.accessToken' }
+                    if (-not $token) { throw 'Kaseya BMS sign-in returned no Result.AccessToken. Check the KaseyaBMS-* secrets.' }
+                    $c = @{ Base = "$base/v2"; Headers = @{ Authorization = "Bearer $token"; Accept = $json } }
+                }
+                'syncro' { $c = @{ Base = $v['Syncro-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Bearer $($v['Syncro-ApiKey'])"; Accept = $json } } }
+                'zendesk' {
+                    # Unverified: whether the Zendesk-BaseUrl secret already ends in /api/v2, so it is added when missing.
+                    $base = $v['Zendesk-BaseUrl'].TrimEnd('/'); if ($base -notmatch '/api/v2$') { $base += '/api/v2' }
+                    $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['Zendesk-Email'])/token:$($v['Zendesk-ApiToken'])"))
+                    $c = @{ Base = $base; Headers = @{ Authorization = "Basic $b"; Accept = $json } }
+                }
+            }
+            $c.Psa = $Psa
+            $PsaState.Conn = $c
+            $PsaState.Picklists = @{}
+            return $c
+        }
+
+        # One call to the connected PSA. Path is relative to the API base (or a full URL).
+        # Retries 429 (and 502, 503, 504 on GET) honoring Retry-After; other errors throw a plain message.
+        function Invoke-Psa {
+            param([string]$Method, [string]$Path, $Body = $null, [string]$ContentType = 'application/json')
+            $c = Get-PsaConn
+            $uri = if ($Path -match '^https?://') { $Path } else { "$($c.Base)$Path" }
+            for ($i = 1; $i -le $PsaState.MaxRetries; $i++) {
+                $p = @{ Method = $Method; Uri = $uri; Headers = $c.Headers; ErrorAction = 'Stop' }
+                if ($null -ne $Body) { $p.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 10 -Compress }); $p.ContentType = $ContentType }
+                try { return Invoke-RestMethod @p }
+                catch {
+                    $code = Get-PsaHttpStatus $_
+                    if (($code -eq 429 -or ($Method -eq 'GET' -and $code -in @(502, 503, 504))) -and $i -lt $PsaState.MaxRetries) { Start-Sleep -Seconds (Get-PsaRetryAfter $_ $i); continue }
+                    throw "$(Get-PsaName) $Method $Path failed$(if ($code) { " (HTTP $code)" }): $(Get-PsaErrorText $_)"
+                }
+            }
+        }
+
+        # Autotask picklists are per tenant: match on the label, never a hard-coded number.
+        function Get-PsaAtPicklist {
+            param([string]$Entity, [string]$Field)
+            if (-not $PsaState.Picklists.ContainsKey($Entity)) { $PsaState.Picklists[$Entity] = @(Get-PsaProp (Invoke-Psa GET "/$Entity/entityInformation/fields") 'fields') }
+            $f = @($PsaState.Picklists[$Entity] | Where-Object { [string](Get-PsaProp $_ 'name') -eq $Field }) | Select-Object -First 1
+            return @(Get-PsaProp $f 'picklistValues' | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'isActive') -ne $false })
+        }
+        function Select-PsaAtValue {
+            param($Values, [string[]]$Patterns)
+            $hit = Select-PsaByLabel $Values 'label' $Patterns
+            if ($hit) { return (Get-PsaProp $hit 'value') }
+            return $null
+        }
+        function Get-PsaAtCompleteStatuses {
+            $v = @(Get-PsaAtPicklist 'Tickets' 'status' | Where-Object { [string](Get-PsaProp $_ 'label') -match '(?i)complete' } | ForEach-Object { [int](Get-PsaProp $_ 'value') })
+            if (-not $v.Count) { $v = @(5) }
+            return $v
+        }
+
+        # Normalized ticket: @{ id; summary; description; companyId; status; assigneeId; assigneeIds; raw }.
+        function Get-PsaTicket {
+            param([string]$Id)
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' {
+                    $t = Invoke-Psa GET "/service/tickets/$Id"
+                    $desc = ''
+                    try { $n = @(Invoke-Psa GET "/service/tickets/$Id/notes?orderBy=$(ConvertTo-PsaQuery 'id asc')&pageSize=1"); if ($n.Count -and $null -ne $n[0]) { $desc = [string](Get-PsaProp $n[0] 'text') } } catch { }
+                    $owner = Get-PsaProp $t 'owner'
+                    $a = @(@((Get-PsaProp $owner 'identifier'), (Get-PsaProp $owner 'id')) | Where-Object { -not (Test-PsaBlank $_) } | ForEach-Object { [string]$_ })
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'summary'); description = $desc; companyId = [string](Get-PsaPath $t 'company.id'); status = [string](Get-PsaPath $t 'status.name'); assigneeId = $(if ($a.Count) { $a[0] } else { '' }); assigneeIds = $a; raw = $t }
+                }
+                'autotask' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/Tickets/$Id") 'item'
+                    if ($null -eq $t) { throw "Autotask returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'assignedResourceID'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'title'); description = [string](Get-PsaProp $t 'description'); companyId = [string](Get-PsaProp $t 'companyID'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'halopsa' {
+                    $t = Invoke-Psa GET "/Tickets/$($Id)?includedetails=true"
+                    $a = Get-PsaProp $t 'agent_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'summary'); description = [string](Get-PsaProp $t 'details'); companyId = [string](Get-PsaProp $t 'client_id'); status = [string](Get-PsaProp $t 'status_id'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'kaseyabms' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/servicedesk/tickets/$Id") 'Result'
+                    if ($null -eq $t) { throw "Kaseya BMS returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'AssigneeId'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'Title'); description = [string](Get-PsaProp $t 'Details'); companyId = [string](Get-PsaProp $t 'AccountId'); status = [string](Get-PsaProp $t 'StatusName'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'syncro' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$Id") 'ticket'
+                    if ($null -eq $t) { throw "Syncro returned no ticket $Id." }
+                    $cm = @(Get-PsaProp $t 'comments' | Where-Object { $null -ne $_ })
+                    $desc = if ($cm.Count) { [string](Get-PsaProp $cm[0] 'body') } else { '' }
+                    $pt = [string](Get-PsaProp $t 'problem_type'); if ($pt) { $desc = "Issue type: $pt`n$desc" }
+                    $a = Get-PsaProp $t 'user_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'subject'); description = $desc; companyId = [string](Get-PsaProp $t 'customer_id'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+                'zendesk' {
+                    $t = Get-PsaProp (Invoke-Psa GET "/tickets/$Id") 'ticket'
+                    if ($null -eq $t) { throw "Zendesk returned no ticket $Id." }
+                    $a = Get-PsaProp $t 'assignee_id'
+                    return @{ id = $Id; summary = [string](Get-PsaProp $t 'subject'); description = [string](Get-PsaProp $t 'description'); companyId = [string](Get-PsaProp $t 'organization_id'); status = [string](Get-PsaProp $t 'status'); assigneeId = $(if (Test-PsaBlank $a) { '' } else { [string]$a }); assigneeIds = @(); raw = $t }
+                }
+            }
+        }
+
+        # Creates a ticket and returns @{ id; raw }.
+        #   -CompanyId  the PSA's own company id (Find-PsaCompany resolves a name to it)
+        #   -Priority   a hint: critical, high, medium or low. It is matched to the tenant's priority list where the PSA has one.
+        #   -Queue      optional board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro) or group id (Zendesk)
+        #   -Extra      optional hashtable of raw PSA fields merged into the body, for tenant-specific required ids
+        function New-PsaTicket {
+            param([string]$CompanyId, [string]$Summary, [string]$Description = '', [string]$Priority = '', [string]$Queue = '', [hashtable]$Extra = @{})
+            $c = Get-PsaConn
+            if ([string]::IsNullOrWhiteSpace($CompanyId)) { throw 'New-PsaTicket needs a company id. Use Find-PsaCompany to look one up by name.' }
+            if ([string]::IsNullOrWhiteSpace($Summary)) { throw 'New-PsaTicket needs a summary.' }
+            $hint = Get-PsaPriorityHint $Priority
+            $pats = @(); if ($hint) { $pats = $PsaState.PriorityPatterns[$hint] }
+            $isNum = $Queue -match '^\d+$'
+            $id = $null; $raw = $null
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Body and /service/priorities lookup from the CW swagger clients.
+                    $b = [ordered]@{ summary = (Get-PsaText $Summary 100); company = @{ id = [int]$CompanyId }; initialDescription = $Description }
+                    if ($Queue) { $b.board = $(if ($isNum) { @{ id = [int]$Queue } } else { @{ name = $Queue } }) }
+                    if ($hint) { $pr = Select-PsaByLabel @(Invoke-Psa GET '/service/priorities?pageSize=100') 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/service/tickets' $b
+                    $id = Get-PsaProp $raw 'id'
+                }
+                'autotask' {
+                    # From the at_create_ticket extension descriptor: title, companyID, status, priority and dueDateTime are required.
+                    $status = Get-PsaSecret 'Autotask-NewStatusId'
+                    if (-not $status) { $status = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'status') @('^New$', '(?i)^new') }
+                    if (-not $status) { $status = 1 }
+                    $prio = $null
+                    if ($hint) { $prio = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'priority') $pats }
+                    if ($null -eq $prio) { $def = @(Get-PsaAtPicklist 'Tickets' 'priority' | Where-Object { (Get-PsaProp $_ 'isDefaultValue') -eq $true }) | Select-Object -First 1; if ($def) { $prio = Get-PsaProp $def 'value' } }
+                    if ($null -eq $prio) { $prio = Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'priority') $PsaState.PriorityPatterns['medium'] }
+                    if ($null -eq $prio) { throw 'Could not find an Autotask ticket priority. Pass -Priority, or -Extra @{ priority = <id> }.' }
+                    $due = (Get-Date).ToUniversalTime().AddDays($(switch ($hint) { 'critical' { 0.25 } 'high' { 1 } 'low' { 7 } default { 3 } }))
+                    $b = [ordered]@{ companyID = [long]$CompanyId; title = (Get-PsaText $Summary 255); description = (Get-PsaText $Description 8000); status = [int]$status; priority = [int]$prio; dueDateTime = $due.ToString('yyyy-MM-ddTHH:mm:ssZ') }
+                    if ($Queue) {
+                        $qv = if ($isNum) { $Queue } else { Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'queueID') @("^$([regex]::Escape($Queue))$") }
+                        if ($null -eq $qv) { throw "Autotask has no ticket queue named '$Queue'." }
+                        $b.queueID = [int]$qv
+                    }
+                    $bc = Get-PsaSecret 'Autotask-BillingCodeId'; if ($bc) { $b.billingCodeID = [long]$bc }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/Tickets' $b
+                    $id = Get-PsaProp $raw 'itemId'
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. Halo priority ids are per tenant; 1 to 4 are the out-of-box Critical to Low.
+                    $b = [ordered]@{ summary = $Summary; details = $Description; client_id = [long]$CompanyId }
+                    if ($hint) { $b.priority_id = @{ critical = 1; high = 2; medium = 3; low = 4 }[$hint] }
+                    if ($Queue) { if ($isNum) { $b.team_id = [long]$Queue } else { $b.team = $Queue } }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/Tickets' @($b)
+                    $first = @($raw)[0]
+                    $id = Get-PsaProp $first 'id'
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. BMS needs tenant ids for status, type, source and priority; they come from
+                    # the optional KaseyaBMS-NewStatusId, -TicketTypeId, -TicketSourceId, -PriorityId and -QueueId secrets, or -Extra.
+                    $b = [ordered]@{ Title = $Summary; Details = $Description; AccountId = [long]$CompanyId; OpenDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+                    foreach ($pair in @(@('StatusId', 'KaseyaBMS-NewStatusId'), @('TypeId', 'KaseyaBMS-TicketTypeId'), @('SourceId', 'KaseyaBMS-TicketSourceId'), @('PriorityId', 'KaseyaBMS-PriorityId'), @('QueueId', 'KaseyaBMS-QueueId'))) {
+                        $sv = Get-PsaSecret $pair[1]; if ($sv -and $sv -match '^\d+$') { $b[$pair[0]] = [int]$sv }
+                    }
+                    if ($Queue) { if (-not $isNum) { throw 'Kaseya BMS needs a numeric queue id for -Queue.' }; $b.QueueId = [int]$Queue }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/servicedesk/tickets' $b
+                    $id = Get-PsaPath $raw 'Result.Id'; if ($null -eq $id) { $id = Get-PsaProp $raw 'Result' }
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. Syncro takes the description as the first comment, and priority as a label.
+                    $b = [ordered]@{ customer_id = [long]$CompanyId; subject = $Summary; status = 'New'; comments_attributes = @(@{ subject = 'Initial Issue'; body = $(if ($Description) { $Description } else { $Summary }); hidden = $false; do_not_email = $true }) }
+                    if ($hint) { $b.priority = @{ critical = '0 Urgent'; high = '1 High'; medium = '2 Normal'; low = '3 Low' }[$hint] }
+                    if ($Queue) { $b.problem_type = $Queue }
+                    foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/tickets' $b
+                    $id = Get-PsaPath $raw 'ticket.id'
+                }
+                'zendesk' {
+                    # Unverified: not in PSA.md yet. Zendesk priorities are fixed: urgent, high, normal, low.
+                    $t = [ordered]@{ subject = $Summary; comment = @{ body = $(if ($Description) { $Description } else { $Summary }) }; organization_id = [long]$CompanyId }
+                    if ($hint) { $t.priority = @{ critical = 'urgent'; high = 'high'; medium = 'normal'; low = 'low' }[$hint] }
+                    if ($Queue) { if (-not $isNum) { throw 'Zendesk needs a numeric group id for -Queue.' }; $t.group_id = [long]$Queue }
+                    foreach ($k in $Extra.Keys) { $t[$k] = $Extra[$k] }
+                    $raw = Invoke-Psa POST '/tickets' @{ ticket = $t }
+                    $id = Get-PsaPath $raw 'ticket.id'
+                }
+            }
+            if (Test-PsaBlank $id) { throw "$(Get-PsaName) accepted the new ticket but returned no id." }
+            return @{ id = [string]$id; raw = $raw }
+        }
+
+        # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
+        # Throws when the PSA rejects it.
+        function Add-PsaNote {
+            param([string]$Id, [string]$Text, [string]$Title = 'Note', [switch]$Public, [switch]$Internal)
+            $c = Get-PsaConn
+            $pub = [bool]$Public
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
+                    $null = Invoke-Psa POST "/service/tickets/$Id/notes" @{ text = $Text; internalAnalysisFlag = (-not $pub); detailDescriptionFlag = $pub; resolutionFlag = $false }
+                }
+                'autotask' {
+                    $pv = $null
+                    if ($pub) {
+                        # Unverified: which publish label makes a note client-visible. Tries "All Autotask Users" style labels.
+                        $pv = Get-PsaSecret 'Autotask-NotePublicPublishId'
+                        if (-not $pv) { $pv = Select-PsaAtValue (Get-PsaAtPicklist 'TicketNotes' 'publish') @('(?i)^All Autotask Users$', '(?i)^All', '(?i)public') }
+                    }
+                    else {
+                        $pv = Get-PsaSecret 'Autotask-NotePublishId'
+                        if (-not $pv) { $pv = Select-PsaAtValue (Get-PsaAtPicklist 'TicketNotes' 'publish') @('^Internal Only$', 'Internal') }
+                    }
+                    $type = Get-PsaSecret 'Autotask-NoteTypeId'
+                    if (-not $type) { $vals = @(Get-PsaAtPicklist 'TicketNotes' 'noteType' | Where-Object { [string](Get-PsaProp $_ 'value') -ne '13' -and [string](Get-PsaProp $_ 'label') -notmatch 'Workflow' }); $type = Select-PsaAtValue $vals @('Internal', 'Task Detail', 'Detail', '.') }
+                    if ($null -eq $pv -or $null -eq $type) { throw 'Could not find the Autotask note publish and type values. Set the Autotask-NotePublishId and Autotask-NoteTypeId secrets.' }
+                    $null = Invoke-Psa POST "/Tickets/$Id/Notes" @{ ticketID = [long]$Id; title = $Title; description = $Text; noteType = [int]$type; publish = [int]$pv }
+                }
+                'halopsa' {
+                    # Unverified: outcome ids are per tenant; 7 is the built-in Private Note. Halo-NoteOutcomeId overrides it.
+                    $outcome = Get-PsaSecret $(if ($pub) { 'Halo-PublicNoteOutcomeId' } else { 'Halo-NoteOutcomeId' })
+                    if (-not $outcome) { $outcome = Get-PsaSecret 'Halo-NoteOutcomeId' }
+                    if (-not $outcome) { $outcome = 7 }
+                    $null = Invoke-Psa POST '/Actions' @(@{ ticket_id = [long]$Id; note = $Text; hiddenfromuser = (-not $pub); outcome_id = [int]$outcome })
+                }
+                'kaseyabms' {
+                    # Unverified: how to list note types, so the KaseyaBMS-NoteTypeId secret supplies one.
+                    $type = Get-PsaSecret 'KaseyaBMS-NoteTypeId'
+                    if (-not $type) { throw 'Kaseya BMS notes need a note type id. Set the KaseyaBMS-NoteTypeId secret.' }
+                    $null = Invoke-Psa POST "/servicedesk/tickets/$Id/notes" @{ Details = $Text; IsInternal = (-not $pub); NoteDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); TypeId = [int]$type }
+                }
+                'syncro' { $null = Invoke-Psa POST "/tickets/$Id/comment" @{ subject = $Title; body = $Text; hidden = (-not $pub); do_not_email = (-not $pub) } }
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ comment = @{ body = $Text; public = $pub } } } }
+            }
+        }
+
+        # Assigns the ticket. Autotask also needs the resource's role id.
+        function Set-PsaAssignee {
+            param([string]$Id, [string]$UserId, [string]$RoleId = '')
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' {
+                    $val = if ($UserId -match '^\d+$') { @{ id = [int]$UserId } } else { @{ identifier = $UserId } }
+                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'owner'; value = $val })
+                }
+                'autotask' {
+                    if (-not $RoleId) { throw 'Autotask needs the resource role id as well as the resource id.' }
+                    $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; assignedResourceID = [long]$UserId; assignedResourceRoleID = [long]$RoleId })
+                }
+                'halopsa' { $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; agent_id = [long]$UserId }) }
+                'kaseyabms' { $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/AssigneeId'; value = [long]$UserId }) }
+                'syncro' { $null = Invoke-Psa PUT "/tickets/$Id" @{ user_id = [long]$UserId } }
+                'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ assignee_id = [long]$UserId } } }
+            }
+        }
+
+        # Closes or reopens a ticket. -StatusName picks an exact status (a name, or an id for HaloPSA and Kaseya BMS).
+        # Returns the status that was set.
+        function Set-PsaStatus {
+            param([string]$Id, [ValidateSet('closed', 'open')][string]$State = 'closed', [string]$StatusName = '')
+            $c = Get-PsaConn
+            $closed = $State -eq 'closed'
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Statuses belong to the ticket's board; closedStatus and defaultFlag pick one.
+                    $t = Invoke-Psa GET "/service/tickets/$Id"
+                    $boardId = Get-PsaPath $t 'board.id'
+                    if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
+                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })
+                    $st = $null
+                    if ($StatusName) { $st = @($all | Where-Object { [string](Get-PsaProp $_ 'name') -eq $StatusName }) | Select-Object -First 1 }
+                    elseif ($closed) { $cl = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true }); $st = Select-PsaByLabel $cl 'name' @('(?i)resolved', '(?i)closed', '(?i)complete', '.') }
+                    else { $op = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -ne $true }); $st = @($op | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1; if (-not $st) { $st = Select-PsaByLabel $op 'name' @('(?i)^new', '(?i)open', '.') } }
+                    if (-not $st) { throw "No $(if ($StatusName) { "'$StatusName'" } else { $State }) status on ConnectWise board $boardId." }
+                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'status'; value = @{ id = [int](Get-PsaProp $st 'id') } })
+                    return [string](Get-PsaProp $st 'name')
+                }
+                'autotask' {
+                    # Unverified: not in PSA.md yet. Uses the status picklist (Complete = 5 and New = 1 by default) and at_update_ticket's PATCH.
+                    $vals = Get-PsaAtPicklist 'Tickets' 'status'
+                    $pats = if ($StatusName) { @("^$([regex]::Escape($StatusName))$") } elseif ($closed) { @('(?i)^complete$', '(?i)complete') } else { @('(?i)^new$', '(?i)in progress') }
+                    $hit = Select-PsaByLabel $vals 'label' $pats
+                    $sv = if ($hit) { Get-PsaProp $hit 'value' } elseif ($StatusName) { $null } elseif ($closed) { 5 } else { 1 }
+                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'." }
+                    $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$sv })
+                    return $(if ($hit) { [string](Get-PsaProp $hit 'label') } else { [string]$sv })
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. 9 (Closed) and 1 (New) are Halo's out-of-box ids; Halo-ClosedStatusId and Halo-OpenStatusId override them.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
+                    if (-not $sv) { $sv = $(if ($closed) { 9 } else { 1 }) }
+                    if ([string]$sv -notmatch '^\d+$') { throw 'HaloPSA needs a numeric status id.' }
+                    $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; status_id = [int]$sv })
+                    return [string]$sv
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. Status ids are per tenant: KaseyaBMS-ClosedStatusId and KaseyaBMS-OpenStatusId.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
+                    if (-not $sv -or [string]$sv -notmatch '^\d+$') { throw "Kaseya BMS needs a status id. Set the KaseyaBMS-$(if ($closed) { 'Closed' } else { 'Open' })StatusId secret." }
+                    $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/StatusId'; value = [int]$sv })
+                    return [string]$sv
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. Resolved and New are Syncro's default status labels.
+                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { 'Resolved' } else { 'New' }
+                    $null = Invoke-Psa PUT "/tickets/$Id" @{ status = $sv }
+                    return $sv
+                }
+                'zendesk' {
+                    # The API can't set closed directly; solved closes on Zendesk's own schedule.
+                    $sv = if ($StatusName) { $StatusName.ToLowerInvariant() } elseif ($closed) { 'solved' } else { 'open' }
+                    $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ status = $sv } }
+                    return $sv
+                }
+            }
+        }
+
+        # Looks a company up by name. Returns @(@{ id; name; exact; raw }) with exact (case-insensitive) matches first.
+        function Find-PsaCompany {
+            param([string]$Name)
+            $c = Get-PsaConn
+            $n = ([string]$Name).Trim()
+            if (-not $n) { throw 'Find-PsaCompany needs a name.' }
+            $rows = @(); $idProp = 'id'; $nameProp = 'name'
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: not in PSA.md yet. Uses the documented conditions syntax (strings in double quotes).
+                    $q = $n.Replace('\', '\\').Replace('"', '\"')
+                    # Build each condition first: an escaped quote inside a string inside $(...) ends the outer string.
+                    $exactCond = ConvertTo-PsaQuery ('name="' + $q + '" and deletedFlag=false')
+                    $rows = @(Invoke-Psa GET "/company/companies?conditions=$exactCond&pageSize=25")
+                    if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                        $likeCond = ConvertTo-PsaQuery ('name contains "' + $q + '" and deletedFlag=false')
+                        $rows = @(Invoke-Psa GET "/company/companies?conditions=$likeCond&pageSize=25")
+                    }
+                }
+                'autotask' {
+                    # From the at_query_companies extension descriptor.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'companyName'; value = $n }) }
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items')
+                    if (-not @($rows | Where-Object { $null -ne $_ }).Count) {
+                        $s = @{ filter = @([ordered]@{ op = 'contains'; field = 'companyName'; value = $n }) }
+                        $rows = @(Get-PsaProp (Invoke-Psa GET "/Companies/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 5 -Compress))") 'items')
+                    }
+                    $nameProp = 'companyName'
+                }
+                'halopsa' {
+                    # Unverified: not in PSA.md yet. GET /api/Client?search= (halo_query_clients) returns { clients: [...] }.
+                    $r = Invoke-Psa GET "/Client?search=$(ConvertTo-PsaQuery $n)&count=50"
+                    $rows = @(Get-PsaProp $r 'clients'); if (-not @($rows | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $rows = @($r) }
+                }
+                'kaseyabms' {
+                    # Unverified: not in PSA.md yet. The account list filter name is a guess; results are filtered here as well.
+                    $r = Invoke-Psa GET "/crm/accounts?Filter.Name=$(ConvertTo-PsaQuery $n)"
+                    $rows = @(Get-PsaProp $r 'Result'); $idProp = 'Id'; $nameProp = 'Name'
+                    if (@($rows | Where-Object { $null -ne $_ -and $null -eq (Get-PsaProp $_ 'Name') -and $null -ne (Get-PsaProp $_ 'AccountName') }).Count) { $nameProp = 'AccountName' }
+                    $rows = @($rows | Where-Object { $null -ne $_ -and ([string](Get-PsaProp $_ $nameProp)).IndexOf($n, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+                }
+                'syncro' {
+                    # Unverified: not in PSA.md yet. GET /customers?query= returns { customers: [...] } with business_name.
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/customers?query=$(ConvertTo-PsaQuery $n)") 'customers'); $nameProp = 'business_name'
+                }
+                'zendesk' {
+                    # Unverified: not in PSA.md yet. Organization autocomplete matches names that start with the text.
+                    $rows = @(Get-PsaProp (Invoke-Psa GET "/organizations/autocomplete?name=$(ConvertTo-PsaQuery $n)") 'organizations')
+                }
+            }
+            $out = @(foreach ($r in @($rows | Where-Object { $null -ne $_ })) {
+                    $nm = [string](Get-PsaProp $r $nameProp)
+                    if (-not $nm -and $c.Psa -eq 'syncro') { $nm = [string](Get-PsaProp $r 'fullname') }
+                    @{ id = [string](Get-PsaProp $r $idProp); name = $nm; exact = ($nm.Trim() -ieq $n); raw = $r }
+                })
+            return @(@($out | Where-Object { $_.exact }) + @($out | Where-Object { -not $_.exact }))
+        }
+
+        # How many open tickets the technician has: an int, or $null when this PSA can't count.
+        function Get-PsaOpenCount {
+            param([string]$UserId)
+            $c = Get-PsaConn
+            switch ($c.Psa) {
+                'connectwise' { return [int](Get-PsaProp (Invoke-Psa GET "/service/tickets/count?conditions=$(ConvertTo-PsaQuery "$(Get-PsaCwOwner $UserId) and closedFlag=false")") 'count') }
+                'autotask' {
+                    # Unverified: the queryCount field name (PSA.md).
+                    $f = @([ordered]@{ op = 'eq'; field = 'assignedResourceID'; value = [long]$UserId }) + @(Get-PsaAtCompleteStatuses | ForEach-Object { [ordered]@{ op = 'noteq'; field = 'status'; value = $_ } })
+                    $r = Invoke-Psa GET "/Tickets/query/count?search=$(ConvertTo-PsaQuery (@{ filter = $f } | ConvertTo-Json -Depth 6 -Compress))"
+                    $n = Get-PsaProp $r 'queryCount'; if ($null -eq $n) { return $null }; return [int]$n
+                }
+                'halopsa' { $n = Get-PsaProp (Invoke-Psa GET "/Tickets?agent_id=$UserId&open_only=true&pageinate=true&page_size=1&page_no=1") 'record_count'; if ($null -eq $n) { return $null }; return [int]$n }
+                'kaseyabms' { return $null }
+                'syncro' {
+                    $r = Invoke-Psa GET "/tickets?user_id=$UserId&status=$(ConvertTo-PsaQuery 'Not Closed')&page=1"
+                    $te = Get-PsaPath $r 'meta.total_entries'; if ($null -ne $te) { return [int]$te }
+                    $n = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ }).Count; $pages = [int](Get-PsaPath $r 'meta.total_pages')
+                    for ($p = 2; $p -le [Math]::Min($pages, 10); $p++) { $n += @(Get-PsaProp (Invoke-Psa GET "/tickets?user_id=$UserId&status=$(ConvertTo-PsaQuery 'Not Closed')&page=$p") 'tickets' | Where-Object { $null -ne $_ }).Count }
+                    if ($pages -gt 10) { return $null }
+                    return $n
+                }
+                'zendesk' { return [int](Get-PsaProp (Invoke-Psa GET "/search/count?query=$(ConvertTo-PsaQuery "type:ticket assignee:$UserId status<solved")") 'count') }
+            }
+        }
+
+        # The newest ticket currently assigned to the technician: a date, [datetime]::MinValue
+        # when they have none, or $null when this PSA can't tell.
+        function Get-PsaLastAssigned {
+            param([string]$UserId)
+            $c = Get-PsaConn
+            $none = [datetime]::MinValue
+            $date = { param($v) if (Test-PsaBlank $v) { $none } else { [datetime]::Parse([string]$v, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal) } }
+            switch ($c.Psa) {
+                'connectwise' { $r = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery (Get-PsaCwOwner $UserId))&orderBy=$(ConvertTo-PsaQuery 'dateEntered desc')&pageSize=1&fields=id,dateEntered" | Where-Object { $null -ne $_ }); if (-not $r.Count) { return $none }; return (& $date (Get-PsaProp $r[0] 'dateEntered')) }
+                'autotask' {
+                    # The query API can't sort, so take the highest id from the last 90 days.
+                    $since = (Get-Date).ToUniversalTime().AddDays(-90).ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'assignedResourceID'; value = [long]$UserId }, [ordered]@{ op = 'gt'; field = 'createDate'; value = $since }); IncludeFields = @('id', 'createDate'); MaxRecords = 500 }
+                    $r = Invoke-Psa GET "/Tickets/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))"
+                    $top = @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ } | Sort-Object { [long](Get-PsaProp $_ 'id') } -Descending) | Select-Object -First 1
+                    if (-not $top) { return $none }; return (& $date (Get-PsaProp $top 'createDate'))
+                }
+                'halopsa' { $t = @(Get-PsaProp (Invoke-Psa GET "/Tickets?agent_id=$UserId&order=dateoccurred&orderdesc=true&pageinate=true&page_size=1&page_no=1") 'tickets' | Where-Object { $null -ne $_ }); if (-not $t.Count) { return $none }; return (& $date (Get-PsaProp $t[0] 'dateoccurred')) }
+                'kaseyabms' { return $null }
+                'syncro' {
+                    $latest = $none
+                    for ($p = 1; $p -le 10; $p++) {
+                        $r = Invoke-Psa GET "/tickets?user_id=$UserId&page=$p"
+                        foreach ($t in @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })) { $d = & $date (Get-PsaProp $t 'created_at'); if ($d -gt $latest) { $latest = $d } }
+                        if ($p -ge [int](Get-PsaPath $r 'meta.total_pages')) { break }
+                    }
+                    return $latest
+                }
+                'zendesk' { $t = @(Get-PsaProp (Invoke-Psa GET "/search?query=$(ConvertTo-PsaQuery "type:ticket assignee:$UserId")&sort_by=created_at&sort_order=desc&per_page=1") 'results' | Where-Object { $null -ne $_ }); if (-not $t.Count) { return $none }; return (& $date (Get-PsaProp $t[0] 'created_at')) }
+            }
+        }
+        # ---------- end _shared/psa.ps1 ----------
+        # <<< _shared/psa.ps1
+        # >>> src/psa-extra.ps1 (generated by src/build.js; edit the source, not this block)
+        # ---------- outage-broadcast/src/psa-extra.ps1: PSA calls _shared/psa.ps1 doesn't have yet ----------
+        # Candidate to move into automationai/_shared/psa.ps1. Needs _shared/psa.ps1 pasted above it (Connect-Psa, Invoke-Psa).
+        # Edit this file, then run: node src/build.js
+        # None of these calls is in reference/build-kit/PSA.md yet. Each PSA branch says "Unverified" until a live run proves it.
+
+        # The company's primary contact as @{ name; email }, or $null when the PSA has none or can't say.
+        #   -CompanyId  the PSA's own company id (CloudRadial keeps it as the company's psaKey)
+        function Get-PsaPrimaryContact {
+            param([string]$CompanyId)
+            $c = Get-PsaConn
+            if (Test-PsaBlank $CompanyId) { return $null }
+            $name = ''; $email = ''
+            switch ($c.Psa) {
+                'connectwise' {
+                    # Unverified: the company's defaultContact, then the contact's default Email communication item.
+                    $co = Invoke-Psa GET "/company/companies/$CompanyId"
+                    $cid = Get-PsaPath $co 'defaultContact.id'
+                    if (Test-PsaBlank $cid) { return $null }
+                    $ct = Invoke-Psa GET "/company/contacts/$cid"
+                    $name = (@([string](Get-PsaProp $ct 'firstName'), [string](Get-PsaProp $ct 'lastName')) -join ' ').Trim()
+                    $items = @(Get-PsaProp $ct 'communicationItems' | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ 'communicationType') -eq 'Email' })
+                    $pick = @($items | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) + $items | Select-Object -First 1
+                    if ($pick) { $email = [string](Get-PsaProp $pick 'value') }
+                }
+                'autotask' {
+                    # Unverified: Contacts query on companyID with primaryContact = true and isActive = 1.
+                    $s = @{ filter = @([ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$CompanyId }, [ordered]@{ op = 'eq'; field = 'primaryContact'; value = $true }, [ordered]@{ op = 'eq'; field = 'isActive'; value = 1 }); MaxRecords = 5 }
+                    $hit = @(Get-PsaProp (Invoke-Psa GET "/Contacts/query?search=$(ConvertTo-PsaQuery ($s | ConvertTo-Json -Depth 6 -Compress))") 'items' | Where-Object { $null -ne $_ }) | Select-Object -First 1
+                    if (-not $hit) { return $null }
+                    $name = (@([string](Get-PsaProp $hit 'firstName'), [string](Get-PsaProp $hit 'lastName')) -join ' ').Trim()
+                    $email = [string](Get-PsaProp $hit 'emailAddress')
+                }
+                'halopsa' {
+                    # Unverified: GET /api/Users?client_id= and the user flagged as the primary contact.
+                    $r = Invoke-Psa GET "/Users?client_id=$CompanyId&count=100"
+                    $rows = @(Get-PsaProp $r 'users'); if (-not @($rows | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $rows = @($r) }
+                    $hit = @($rows | Where-Object { $null -ne $_ -and ((Get-PsaProp $_ 'isprimarycontact') -eq $true -or (Get-PsaProp $_ 'is_primary_contact') -eq $true) }) | Select-Object -First 1
+                    if (-not $hit) { return $null }
+                    $name = [string](Get-PsaProp $hit 'name')
+                    $email = [string](Get-PsaProp $hit 'emailaddress')
+                }
+                'kaseyabms' {
+                    # Unverified: the contact list filter name and the IsPrimary flag.
+                    $r = Invoke-Psa GET "/crm/contacts?Filter.AccountId=$CompanyId"
+                    $hit = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ -and [string](Get-PsaProp $_ 'AccountId') -eq [string]$CompanyId -and (Get-PsaProp $_ 'IsPrimary') -eq $true }) | Select-Object -First 1
+                    if (-not $hit) { return $null }
+                    $name = (@([string](Get-PsaProp $hit 'FirstName'), [string](Get-PsaProp $hit 'LastName')) -join ' ').Trim()
+                    $email = [string](Get-PsaProp $hit 'EmailAddress')
+                }
+                'syncro' {
+                    # Unverified: a Syncro customer carries its own main email and name.
+                    $cu = Get-PsaProp (Invoke-Psa GET "/customers/$CompanyId") 'customer'
+                    if ($null -eq $cu) { return $null }
+                    $name = (@([string](Get-PsaProp $cu 'firstname'), [string](Get-PsaProp $cu 'lastname')) -join ' ').Trim()
+                    $email = [string](Get-PsaProp $cu 'email')
+                }
+                'zendesk' {
+                    # Zendesk organizations have no primary contact, so there is no one to email.
+                    return $null
+                }
+            }
+            if ($email -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return $null }
+            return @{ name = $name; email = $email.Trim() }
+        }
+        # ---------- end outage-broadcast/src/psa-extra.ps1 ----------
+        # <<< src/psa-extra.ps1
+        $ErrorActionPreference = 'Stop'
+
+        function Get-ObState { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in @($in.Keys)) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
+        function Get-ObList { param($S, [string]$Key) if (-not $S.Contains($Key)) { return @() }; return @(@($S[$Key]) | Where-Object { $null -ne $_ -and [string]$_ -ne '' }) }
+        function Get-ObSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+        function ConvertTo-ObHtml { param([string]$t) return (@(([System.Net.WebUtility]::HtmlEncode($t)) -split "\r?\n\r?\n" | Where-Object { $_.Trim() } | ForEach-Object { '<p>' + ($_.Trim() -replace "\r?\n", '<br>') + '</p>' }) -join '') }
+
+        $st = Get-ObState
+        $status = [string]$st['status']
+        if ($status -ne 'ok') {
+            if (-not [string]$st['chatReply']) { $st['chatReply'] = [string]$st['message'] }
+            Set-NodeOutput $st; return
+        }
+        $warnings = New-Object System.Collections.ArrayList; foreach ($w in @(Get-ObList $st 'warnings')) { $null = $warnings.Add([string]$w) }
+        $actions = New-Object System.Collections.ArrayList
+        $mode = [string]$st['mode']; $resolved = $mode -eq 'resolved'
+        $service = [string]$st['affectedService']; $notice = [string]$st['notice']
+        $tokenName = [string]$st['bannerToken']; $category = [string]$st['articleCategory']
+        $confirm = [bool]$st['confirm']; $ticketId = [string]$st['ticket_id']
+        $postBanner = [bool]$st['postBanner']; $postArticle = [bool]$st['postArticle']; $emailContacts = [bool]$st['emailContacts']
+        $targets = @(Get-ObList $st 'targets')
+        $by = [string]$st['requestedBy']; if (-not $by) { $by = 'not identified (map the ServiceAI requester field from received_keys)' }
+        $now = (Get-Date).ToUniversalTime()
+        $when = $now.ToString('yyyy-MM-dd HH:mm') + ' UTC'
+        $subjectBase = "Service status: $service"
+
+        # The notice the client sees, the same text for every company (it never names another client).
+        $bannerValue = if ($resolved) { '' } else { "$($service): $notice" }
+        if ($bannerValue.Length -gt 1000) { $bannerValue = $bannerValue.Substring(0, 1000) }
+        $articleSubject = if ($resolved) { "$subjectBase (resolved)" } else { $subjectBase }
+        $articleBody = if ($resolved) { "<p><strong>Resolved.</strong></p>$(ConvertTo-ObHtml $notice)<p>Resolved $when.</p>" } else { "$(ConvertTo-ObHtml $notice)<p>Posted $when. We will update this page when the issue is resolved.</p>" }
+        $emailSubject = if ($resolved) { "Resolved: $service" } else { "Service notice: $service" }
+
+        $null = Connect-Cr
+
+        # PSA: needed for the problem ticket note and for the primary contacts. Optional: without it, both are skipped with a warning.
+        $psaReady = $false
+        $psaType = ''
+        try { $psaType = Get-PsaType ([string]$st['psa']) } catch { $null = $warnings.Add($_.Exception.Message) }
+        if ($psaType -and ($ticketId -or $emailContacts)) {
+            try { $null = Connect-Psa $psaType; $psaReady = $true } catch { $null = $warnings.Add("The PSA isn't connected, so no ticket note or contact lookup was done: $($_.Exception.Message)") }
+        }
+        elseif (-not $psaType -and ($ticketId -or $emailContacts)) { $null = $warnings.Add('No PSA is set up (the PSA-Type secret), so no ticket note or contact lookup was done.') }
+
+        # Postmark: only when emailContacts is on.
+        $pm = $null
+        if ($emailContacts) {
+            $tok = Get-ObSecret 'Postmark-ServerToken'; $from = Get-ObSecret 'Postmark-FromEmail'; $api = Get-ObSecret 'Postmark-ApiUrl'
+            if (-not $api) { $api = 'https://api.postmarkapp.com' }
+            if ($tok -and $from) { $pm = @{ Token = $tok; From = $from; Url = $api.TrimEnd('/') + '/email' } }
+            else { $null = $warnings.Add('emailContacts is on, but the Postmark-ServerToken and Postmark-FromEmail secrets are not set, so no email was sent. The problem ticket note lists who would have been emailed.') }
+        }
+        function Send-ObEmail {
+            param([string]$To, [string]$Name, [string]$Subject, [string]$Text)
+            $greet = if ($Name) { "Hello $Name," } else { 'Hello,' }
+            $body = "$greet`n`n$Text`n`nThank you,`nYour IT support team"
+            $req = [ordered]@{ From = $pm.From; To = $To; Subject = $Subject; TextBody = $body; HtmlBody = (ConvertTo-ObHtml $body); MessageStream = 'outbound' }
+            $r = Invoke-RestMethod -Method POST -Uri $pm.Url -Headers @{ 'X-Postmark-Server-Token' = $pm.Token; Accept = 'application/json' } -ContentType 'application/json' -Body (ConvertTo-Json -InputObject $req -Depth 5) -ErrorAction Stop
+            $code = $null; if ($null -ne $r -and $r.PSObject.Properties['ErrorCode']) { $code = $r.ErrorCode }
+            if ($null -ne $code -and [int]$code -ne 0) { throw "Postmark refused the email to $($To): $([string]$r.Message)" }
+            return 'sent'
+        }
+
+        $plan = New-ChangePlan "Outage broadcast: $service ($mode)"
+        $perCompany = New-Object System.Collections.ArrayList
+        $recipients = New-Object System.Collections.ArrayList
+        $unchanged = New-Object System.Collections.ArrayList
+
+        # Partner-level default: an empty token, so a company with no outage shows nothing instead of the literal @ServiceStatus.
+        if (-not $resolved -and $postBanner -and -not [bool]$st['partnerTokenExists']) {
+            Add-PlannedChange $plan "Create the partner-level @$tokenName token with an empty value (so portals without an outage show nothing)" { param($n) $null = Invoke-CrApi -Path '/v2/token' -Method POST -Body ([ordered]@{ companyId = 0; token = $n; value = ''; type = 'String' }); 'created' } -Arguments @($tokenName)
+        }
+
+        foreach ($t in $targets) {
+            $cid = [int]$t.companyId; $cname = [string]$t.name
+            $lines = New-Object System.Collections.ArrayList
+            $current = [string]$t.tokenValue
+            $aid = [int]$t.articleId
+            $already = $true
+
+            if ($postBanner) {
+                if ($resolved) {
+                    if (-not $current) { $null = $lines.Add('banner already clear') }
+                    elseif ($current.IndexOf($service, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $null = $lines.Add('banner shows a different notice, left alone'); $null = $warnings.Add("$cname's @$tokenName banner shows a different notice, so it was left alone.") }
+                    else {
+                        $already = $false
+                        Add-PlannedChange $plan "$($cname): clear the @$tokenName banner" { param($c, $n) $null = Invoke-CrApi -Path '/v2/token' -Method POST -Body ([ordered]@{ companyId = $c; token = $n; value = ''; type = 'String' }); 'cleared' } -Arguments @($cid, $tokenName)
+                        $null = $lines.Add('clear the banner')
+                    }
+                }
+                elseif ($current -ceq $bannerValue) { $null = $lines.Add('banner already shows this notice') }
+                else {
+                    $already = $false
+                    if ($current -and $current.IndexOf($service, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $null = $warnings.Add("$cname's @$tokenName banner showed another notice, which this replaces.") }
+                    Add-PlannedChange $plan "$($cname): set the @$tokenName banner" { param($c, $n, $v) $null = Invoke-CrApi -Path '/v2/token' -Method POST -Body ([ordered]@{ companyId = $c; token = $n; value = $v; type = 'String' }); 'set' } -Arguments @($cid, $tokenName, $bannerValue)
+                    $null = $lines.Add($(if ($t.tokenExists) { 'update the banner' } else { 'set the banner' }))
+                }
+            }
+
+            if ($postArticle) {
+                $art = [ordered]@{ companyId = $cid; subject = $articleSubject; category = $category; body = $articleBody; author = 'Service desk'; datePublished = $now.ToString('yyyy-MM-ddTHH:mm:ssZ'); isFrontPage = (-not $resolved); isFavorite = (-not $resolved) }
+                if ($aid -gt 0) {
+                    if ($resolved -and ([string]$t.articleSubject).Trim() -ieq $articleSubject) { $null = $lines.Add('article already marked resolved') }
+                    else {
+                        $already = $false
+                        Add-PlannedChange $plan "$($cname): $(if ($resolved) { 'mark the Service Status article resolved and unpin it' } else { 'update the pinned Service Status article' })" { param($id, $b) $null = Invoke-CrApi -Path "/v2/article/$id" -Method PUT -Body $b; "article $id updated" } -Arguments @($aid, $art)
+                        $null = $lines.Add($(if ($resolved) { 'mark the article resolved' } else { 'update the article' }))
+                    }
+                }
+                elseif ($resolved) { $null = $lines.Add('no Service Status article to update') }
+                else {
+                    $already = $false
+                    Add-PlannedChange $plan "$($cname): publish a Service Status article pinned to the portal front page" { param($b) $r = Invoke-CrApi -Path '/v2/article' -Method POST -Body $b; "article $(Get-CrId $r @('articleId', 'data.articleId', 'id')) created" } -Arguments @($art)
+                    $null = $lines.Add('publish the article')
+                }
+            }
+
+            if ($emailContacts) {
+                if ($already -and ($postBanner -or $postArticle)) { $null = $lines.Add('no email (this notice was already posted)') }
+                elseif (-not $psaReady) { $null = $lines.Add('no email (PSA not connected)') }
+                elseif (-not $t.psaKey -or [string]$t.psaKey -eq '0') { $null = $lines.Add('no email (company not linked to a PSA company)'); $null = $warnings.Add("$cname isn't linked to a PSA company, so its primary contact couldn't be found.") }
+                else {
+                    $pc = $null
+                    try { $pc = Get-PsaPrimaryContact ([string]$t.psaKey) } catch { $null = $warnings.Add("Couldn't read $cname's primary contact: $($_.Exception.Message)") }
+                    if ($null -eq $pc) { $null = $lines.Add('no email (no primary contact with an email address)') }
+                    else {
+                        $null = $recipients.Add("$cname - $(if ($pc.name) { "$($pc.name) " })<$($pc.email)>")
+                        if ($null -ne $pm) {
+                            $already = $false
+                            Add-PlannedChange $plan "$($cname): email the primary contact $($pc.email)" { param($to, $nm, $sub, $txt) Send-ObEmail $to $nm $sub $txt } -Arguments @($pc.email, $pc.name, $emailSubject, $notice)
+                            $null = $lines.Add("email $($pc.email)")
+                        }
+                        else { $null = $lines.Add("would email $($pc.email), but Postmark isn't set up") }
+                    }
+                }
+            }
+            if ($already) { $null = $unchanged.Add($cname) }
+            $null = $perCompany.Add("$cname ($($t.reason)): $(@($lines) -join ', ')")
+        }
+
+        $result = Invoke-ChangePlan $plan -Confirm:$confirm
+        $n = $targets.Count
+        $names = (@($targets | ForEach-Object { [string]$_.name }) -join ', ')
+        $detail = (@($perCompany) | ForEach-Object { "- $_" }) -join "`n"
+        $verb = if ($resolved) { 'resolution for' } else { 'outage notice for' }
+        $out = [ordered]@{
+            status = ''; message = ''; public_note = ''; internal_note = ''; chatReply = ''; ticket_id = $ticketId
+            mode = $mode; affectedService = $service; confirm = $confirm; requestedBy = [string]$st['requestedBy']; triggerSource = [string]$st['triggerSource']
+            targetSource = [string]$st['targetSource']; companies = @($targets | ForEach-Object { [ordered]@{ companyId = $_.companyId; name = $_.name; reason = $_.reason } })
+            recipients = @($recipients); plan = $result; counts = [ordered]@{ companies = $n; changes = @($result.planned).Count; ran = @($result.ran).Count; unchanged = $unchanged.Count; emails = $recipients.Count }
+            note_written = $false; received_keys = @(Get-ObList $st 'received_keys'); received_body = $st['received_body']
+            actions = @(); warnings = @()
+        }
+        $out.public_note = if ($resolved) { "The issue affecting $service has been resolved. Thank you for your patience." } else { "We are aware of an issue affecting $service and are working on it. $notice" }
+
+        switch ($result.status) {
+            'preview' {
+                $out.status = 'pending_confirmation'
+                $out.message = "Preview only, nothing was changed. This would post the $verb $service to $n compan$(if ($n -eq 1) { 'y' } else { 'ies' }) ($($result.planned.Count) changes). Run again with confirm set to true to go ahead."
+                $out.chatReply = "Here's the preview for $($service): $n compan$(if ($n -eq 1) { 'y' } else { 'ies' }) ($names).$(if ($recipients.Count) { " $($recipients.Count) primary contact(s) would be emailed." }) Nothing has changed yet. Say yes and I'll run it with confirm true."
+            }
+            'empty' {
+                $out.status = 'success'
+                $out.message = "Every affected company already shows this $(if ($resolved) { 'resolution' } else { 'notice' }), so nothing needed to change."
+                $out.chatReply = $out.message
+            }
+            'done' {
+                $out.status = 'success'
+                $out.message = "Posted the $verb $service to $n compan$(if ($n -eq 1) { 'y' } else { 'ies' }): $($result.ran.Count) change$(if ($result.ran.Count -ne 1) { 's' }) made."
+                $out.chatReply = "Done. The $verb $service is posted for $names."
+            }
+            'failed' {
+                $out.status = 'error'
+                $out.message = $result.message
+                $out.chatReply = "The broadcast stopped part way: $($result.failed.description) failed. Check the problem ticket note for what ran."
+            }
+        }
+        foreach ($r in @($result.ran)) { $null = $actions.Add([ordered]@{ action = $r.description; result = [string]$r.output }) }
+        if ($null -ne $result.failed) { $null = $actions.Add([ordered]@{ action = $result.failed.description; result = "failed: $($result.failed.error)" }) }
+
+        $noteText = @(
+            "Outage broadcast ($mode) for $service, $when."
+            "Run by: $by$(if ($st['triggerSource']) { " (via $($st['triggerSource']))" })."
+            "Affected companies ($n), from $($st['targetSource']):"
+            $detail
+            $(if ($recipients.Count) { "Primary contacts$(if ($null -eq $pm) { ' (not emailed, Postmark is not set up)' }): $(@($recipients) -join '; ')" })
+            "Client message: $notice"
+            "Result: $($result.message)"
+            $(if ($warnings.Count) { "Warnings: $(@($warnings) -join ' ')" })
+        ) | Where-Object { $_ }
+        $out.internal_note = ($noteText -join "`n")
+
+        # The problem ticket note is written only when the run was confirmed, so a preview changes nothing anywhere.
+        if ($confirm -and $ticketId) {
+            if ($psaReady) {
+                try { Add-PsaNote -Id $ticketId -Text $out.internal_note -Title "Outage broadcast: $service"; $out.note_written = $true; $null = $actions.Add([ordered]@{ action = "Internal note on problem ticket $ticketId"; result = 'written' }) }
+                catch { $null = $warnings.Add("The internal note on ticket $ticketId failed: $($_.Exception.Message)"); $null = $actions.Add([ordered]@{ action = "Internal note on problem ticket $ticketId"; result = "failed: $($_.Exception.Message)" }) }
+            }
+        }
+        elseif ($confirm -and -not $ticketId) { $null = $warnings.Add('No problemTicketId was sent, so no ticket note was written. The summary is in internal_note.') }
+
+        $out.actions = @($actions)
+        $out.warnings = @($warnings)
+        Set-NodeOutput $out
+      timeoutSeconds: 600
+      retryCount: 0
+      parameters: []
+      aiExtensions: []
+  - id: end
+    name: End
+    type: end
+    position:
+      x: 820
+      y: 80
+  connections:
+  - source: start
+    target: parse
+    sourceHandle: null
+  - source: parse
+    target: identify
+    sourceHandle: null
+  - source: identify
+    target: broadcast
+    sourceHandle: null
+  - source: broadcast
+    target: end
+    sourceHandle: null
+  startActivityId: start

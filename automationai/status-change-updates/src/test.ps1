@@ -66,7 +66,7 @@ $Handler = {
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
         "GET $TAT/Tickets/entityInformation/fields" { return [pscustomobject]@{ fields = @([pscustomobject]@{ name = 'status'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'New'; isActive = $true }, [pscustomobject]@{ value = '5'; label = 'Complete'; isActive = $true }, [pscustomobject]@{ value = '7'; label = 'Waiting Customer'; isActive = $true }) }) } }
-        "GET $TAT/Tickets/1001/Notes" { return [pscustomobject]@{ items = @([pscustomobject]@{ id = 1; description = 'Replaced the toner; test page printed.'; publish = 1; createDateTime = '2026-10-08T11:00:00Z' }, [pscustomobject]@{ id = 2; description = 'Internal: toner billed to stock.'; publish = 2; createDateTime = '2026-10-08T11:05:00Z' }) } }
+        "GET $TAT/TicketNotes/query*" { return [pscustomobject]@{ pageDetails = [pscustomobject]@{ nextPageUrl = $null }; items = @([pscustomobject]@{ id = 1; description = 'Replaced the toner; test page printed.'; publish = 1; createDateTime = '2026-10-08T11:00:00Z' }, [pscustomobject]@{ id = 2; description = 'Internal: toner billed to stock.'; publish = 2; createDateTime = '2026-10-08T11:05:00Z' }) } }
         "GET $TAT/Tickets/1001" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; title = 'Printer out of toner'; description = 'Printer says toner low.'; companyID = 42; status = 5; assignedResourceID = $null } } }
         "POST $TAT/Tickets/1001/Notes" { return [pscustomobject]@{ itemId = 3001 } }
         "GET $TZD/tickets/1001/comments*" { return [pscustomobject]@{ comments = @() } }
@@ -100,6 +100,13 @@ $nt = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
 Check 'cw act: success, posted, AI object answer read' ($o.status -eq 'success' -and $o.posted -eq $true -and $o.written_by -eq 'ai') "$($o.status) $($f.r.error)"
 Check 'cw act: public note (Discussion), not internal' ($nt.Count -eq 1 -and (Read-Body $nt[0]).detailDescriptionFlag -eq $true -and (Read-Body $nt[0]).internalAnalysisFlag -eq $false -and (Read-Body $nt[0]).text -like '*(Status: Waiting on Client)')
 Check 'cw act: no status or other ticket change' (@(Get-WriteCalls).Count -eq 1)
+
+# ---- 2b. Rerun (ServiceAI Retry or a repeated webhook) after a good run: nothing is posted twice ----
+$TWritten = (Read-Body $nt[0]).text
+Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
+$TScenario.cwNotes = @([pscustomobject]@{ id = 9001; text = $TWritten; internalAnalysisFlag = $false; detailDescriptionFlag = $true; resolutionFlag = $false; dateCreated = '2026-10-08T13:00:00Z' }) + $TCwNotesDefault
+$f = Invoke-Flow (New-Body @{ }) $TAiGood
+Check 'rerun: success, nothing posted twice' ($f.r.out.status -eq 'success' -and $f.r.out.posted -eq $false -and $f.r.out.message -like '*already the newest public note*' -and @(Get-WriteCalls).Count -eq 0) "$($f.r.out.message) $(Show-Calls)"
 
 # ---- 3. Autotask, status ids, empty AI answer -> template ----
 Reset-Mock (Get-Secrets 'autotask') $Handler; Reset-Scenario

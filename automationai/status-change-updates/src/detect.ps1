@@ -51,7 +51,7 @@ foreach ($ig in $ignore) {
 }
 
 # ---- client-visible history only ----
-$notes = @(Get-PsaNotes $ticketId)
+$notes = @(Get-PsaTicketNotes -Id $ticketId -Newest -Max 50 -TextOnly)
 $public = @($notes | Where-Object { $_.public -and ([string]$_.text).Trim() })
 $footer = "(Status: $newStatus)"
 if ($public.Count -and ([string]$public[0].text).TrimEnd().EndsWith($footer, [StringComparison]::OrdinalIgnoreCase)) {

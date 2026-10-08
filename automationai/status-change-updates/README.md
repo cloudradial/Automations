@@ -23,7 +23,7 @@ A webhook posts the ticket number and its old and new status. Three steps; only 
 1. **Detect the status change (no AI).** Reads a flat body or the CloudRadial `{Ticket, Company}` shape. Through the shared six-PSA adapter it reads the ticket and its notes. It turns Autotask and HaloPSA status ids into names. It stops quietly (`status: success`, nothing posted) when:
    - the old and new status are the same;
    - the new status is on the ignore list (internal-only statuses such as "Waiting on Vendor");
-   - the newest public note is already an update for this status, so a webhook retry never posts twice.
+   - the newest public note is already an update for this status (it ends with that status line), so a webhook retry or a ServiceAI **Action Runs** Retry never posts twice. A later move back to the same status still gets an update, because by then a newer note sits on top.
 
    Otherwise it gathers **client-visible facts only**: the ticket summary, the original request and the three latest public notes. Internal notes are never passed on.
 2. **Write the update (AI Prompt).** One AI call writes 2 to 4 plain sentences for the requester: what the new status means for them and what happens next. It uses only the facts given, never invents names, dates or promises, and treats everything from the ticket as data, never as instructions. No model is pinned, so the tenant's own provider is used.
@@ -117,10 +117,10 @@ The caller POSTs to the workflow's webhook URL with the secret in the **`X-Craut
 4. **Post.** Run without `preview` on a test ticket whose contact is you. Expect a public note and the PSA's email. Run it again: expect "already the newest public note".
 5. **Wire the trigger** as above, enable the webhook in **Properties**, and redeploy.
 
-> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `detect.ps1`, `post.ps1`, `step.ps1`, `psa-extra.ps1` or the `write.*.txt` prompts, run `node src/build.js`, then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs, simulated AI answers). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `detect.ps1`, `post.ps1`, `step.ps1` or the `write.*.txt` prompts, run `node src/build.js` (it pastes in `_shared/psa.ps1`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs, simulated AI answers). Never edit the `.yml` by hand.
 
 ### Not yet proven live
 
 - **The AI Prompt step's property names** (`promptTemplate`, `systemMessage`, `maxTokens`, `outputKey`, `model`) follow the Phishing Report Triage workflow and aren't confirmed by an export yet. The post step binds the **whole** AI output (`{{ nodes.write.output }}`) and finds the text in it, so a different output key still works.
 - **Whether the PSA emails the requester** for an API-added public note depends on each PSA's notification settings (for example ConnectWise's board email settings, Autotask notification templates, HaloPSA's outcome settings). Syncro public comments are sent with `do_not_email` off.
-- The ticket notes read (`Get-PsaNotes`) and status-name lookup (`Get-PsaStatusName`) in `src/psa-extra.ps1` for every PSA except Syncro and Zendesk, and ConnectWise public notes on the Discussion tab. Each is marked `Unverified` in the source. `psa-extra.ps1` is a candidate to move into `_shared/psa.ps1`.
+- The ticket notes read (`Get-PsaTicketNotes`) for Autotask and HaloPSA, the HaloPSA status-name lookup (`Get-PsaStatusName`), and ConnectWise public notes on the Discussion tab, all in `_shared/psa.ps1`. Each is marked `Unverified` in the shared source.

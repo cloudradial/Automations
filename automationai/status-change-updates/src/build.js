@@ -2,7 +2,7 @@
 // libraries into it (automationai/_shared/inject.js).
 // Usage: node build.js          rewrite the .yml
 //        node build.js --check  exit 1 if the .yml is out of date
-// Edit detect.ps1, post.ps1, step.ps1, psa-extra.ps1 and the write.*.txt prompts, never the .yml.
+// Edit detect.ps1, post.ps1, step.ps1 and the write.*.txt prompts (or the shared files in automationai/_shared), never the .yml.
 // Needs js-yaml: set JS_YAML_PATH (or NODE_PATH) to an existing copy, or npm install in automationai/_shared.
 const fs = require('fs');
 const path = require('path');
@@ -77,9 +77,9 @@ ${block(body, '        ')}
 }
 
 const steps = [
-  { id: 'detect', name: 'Detect the status change', body: script(['psa.ps1'], ['psa-extra.ps1', 'step.ps1'], 'detect.ps1'), params: [['trigger', '{{ nodes.trigger.output }}']], test: testInput },
+  { id: 'detect', name: 'Detect the status change', body: script(['psa.ps1'], ['step.ps1'], 'detect.ps1'), params: [['trigger', '{{ nodes.trigger.output }}']], test: testInput },
   { id: 'write', name: 'Write the update', ai: true, prompt: 'write.prompt.txt', system: 'write.system.txt' },
-  { id: 'post', name: 'Post the update to the requester', body: script(['psa.ps1'], ['psa-extra.ps1', 'step.ps1'], 'post.ps1'),
+  { id: 'post', name: 'Post the update to the requester', body: script(['psa.ps1'], ['step.ps1'], 'post.ps1'),
     params: [['ctx', '{{ nodes.detect.output.ctx_json }}'], ['ai', '{{ nodes.write.output }}']] },
 ];
 

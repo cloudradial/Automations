@@ -8,6 +8,12 @@ foreach ($t in @('test-psa.ps1', 'test-graph.ps1', 'test-plan.ps1', 'test-cloudr
     & pwsh -NoProfile -File (Join-Path $PSScriptRoot $t)
     if ($LASTEXITCODE -ne 0) { $failed += $t }
 }
+# Ticket lists, notes and Postmark (psa-tickets.ps1, the ticket functions in psa.ps1, postmark.ps1).
+foreach ($t in @('test-psa-tickets.ps1', 'test-postmark.ps1')) {
+    Write-Host "--- $t"
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot $t)
+    if ($LASTEXITCODE -ne 0) { $failed += $t }
+}
 Write-Host '--- test-inject.js'
 & node (Join-Path $PSScriptRoot 'test-inject.js')
 if ($LASTEXITCODE -ne 0) { $failed += 'test-inject.js' }

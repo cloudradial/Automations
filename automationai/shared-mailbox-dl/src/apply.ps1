@@ -93,7 +93,8 @@ function Complete-Sm {
     $out.public_note = $Public
     $mk = $(if ($Status -eq 'success') { $doneMarker } else { "$markerKind $Status $markerAddr $(Get-SmFingerprint $text)" })
     Write-SmNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { "New $kindLabel request (not created yet)" } else { "New $kindLabel" }) $mk
-    if ($Public) { Write-SmNote $Public "New $kindLabel" "$markerKind ready $markerAddr" -Public }
+    # The client sees only the opaque "Ref: xxxxxxxx" Add-PsaNote derives from this marker; the address is a fingerprint.
+    if ($Public) { Write-SmNote $Public "New $kindLabel" "smdl ready $(Get-SmFingerprint "$markerKind $($markerAddr.ToLowerInvariant())")" -Public }
     $out.actions = @($actions); $out.warnings = @($warnings)
     Set-NodeOutput $out
     # The output is kept; the throw marks the run as failed in the run history.

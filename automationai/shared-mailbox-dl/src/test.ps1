@@ -204,7 +204,7 @@ $sa = Get-ExoCall 'Add-RecipientPermission'
 Check 'shared: send-as for sam' ((Get-PVal $sa 'Trustee') -eq 'sam.doe@contoso.com' -and @(Get-PVal $sa 'AccessRights') -contains 'SendAs') ($sa | ConvertTo-Json -Compress)
 $notes = @(Get-PsaNotes)
 Check 'shared: ConnectWise internal then public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).internalAnalysisFlag -eq $false -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true) (Show-Calls)
-Check 'shared: public note is the new address only' ($o.public_note -eq "The new shared mailbox Contoso Sales Team is ready at $Addr." -and (Read-Body $notes[1]).text -eq "$($o.public_note)`n[shared_mailbox ready $Addr]") $o.public_note
+Check 'shared: public note is the new address only' ($o.public_note -eq "The new shared mailbox Contoso Sales Team is ready at $Addr." -and (Read-Body $notes[1]).text -cmatch "^$([regex]::Escape($o.public_note))`nRef: [0-9a-f]{8}$") $o.public_note
 Check 'shared: internal note names the owner and what ran' ($o.internal_note -match 'Owner: Alex Kim' -and $o.internal_note -match 'send as' -and $o.internal_note -notmatch 'Warnings') $o.internal_note
 Check 'shared: Exchange used REST with the extension secrets' ($r.read.exchange_mode -eq 'rest' -and @(Get-Calls 'POST' "$ExoBase/$TenantGuid/InvokeCommand").Count -ge 6) ''
 
@@ -372,5 +372,8 @@ $null = Invoke-Request (New-Body @{ kind = 'distribution_list'; send_as = ''; co
 $n1 = @(Get-PsaNotes).Count
 $r = Invoke-Request (New-Body @{ kind = 'distribution_list'; send_as = ''; confirm = 'true' })
 Check 'rerun on Autotask: nothing written twice' ($n1 -ge 1 -and @(Get-PsaNotes).Count -eq $n1 -and $r.out.status -eq 'success') "$n1 / $(@(Get-PsaNotes).Count) $($r.out.status) $($r.out.message)"
+$pub = @($Sc.notes | Where-Object { -not $_.internal })
+Check 'public notes: only the message and an opaque Ref, no marker, tag or internal status word' ($pub.Count -eq 1 -and @($pub | Where-Object { $_.text -match '\[|distribution_list|shared_mailbox|smdl|success|pending|confirmation|error|rejected|sam\.doe' -or $_.text -notmatch '^The new distribution list [^\n]+ is ready at [^\n]+\.\nRef: [0-9a-f]{8}$' }).Count -eq 0) (@($pub | ForEach-Object { $_.text }) -join ' || ')
+Check 'internal notes keep the readable marker' (@($Sc.notes | Where-Object { $_.internal -and $_.text -match '\[distribution_list created contoso-sales-team@contoso\.com\]$' }).Count -eq 1) (@($Sc.notes | ForEach-Object { $_.text }) -join ' || ')
 
 Complete-Test

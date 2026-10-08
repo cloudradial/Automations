@@ -45,6 +45,7 @@ const testInput = JSON.stringify({
   use_psa_sla: true,
   skip_statuses: 'waiting,pending,on hold,scheduled',
   max_tickets: 500,
+  company: '',
   psa: '',
 }, null, 2);
 

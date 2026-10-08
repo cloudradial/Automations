@@ -72,6 +72,7 @@ $global:TCw = @{ tickets = $TCwTickets; fail = 0; pm = 0 }
 $TCwHandler = { param($c, $n)
     if ($c.Uri -like 'https://api.postmarkapp.com/email') { if ($global:TCw.pm) { New-HttpError $global:TCw.pm '{"ErrorCode":10,"Message":"Bad or missing Server API token."}' }; return [pscustomobject]@{ ErrorCode = 0; MessageID = 'm1' } }
     if ($c.Uri -like '*/service/tickets[?]*') { if ($global:TCw.fail) { New-HttpError $global:TCw.fail '{"message":"denied"}' }; return @($global:TCw.tickets) }
+    if ($c.Uri -like '*/company/companies*') { if ([uri]::UnescapeDataString($c.Uri) -match 'name="Contoso Ltd"') { return @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return @() }
     if ($c.Uri -like '*/service/SLAs/5/priorities*') { return @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
     if ($c.Uri -like '*/service/SLAs/5') { return [pscustomobject]@{ id = 5; respondHours = 4; resolutionHours = 24 } }
     throw "unmocked $($c.Method) $($c.Uri)"
@@ -107,6 +108,19 @@ Check 'No input (Routine) with the ServiceManager-Email secret: emailed to it' (
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow @{ to = 'a@example.com; b@example.com'; near_breach_percent = 95; sla_hours_by_priority = '{"medium":12}'; use_psa_sla = 'false' }
 Check 'Custom thresholds: medium 12h breaches B, PSA SLA ignored, two recipients' ($TR.find.counts.breached -ge 1 -and @($TR.out.tickets | Where-Object { $_.id -eq '1002' -and $_.state -eq 'breached' -and $_.slaSource -eq 'Default hours' }).Count -eq 1 -and $TR.find.counts.psaSla -eq 0 -and (@(Get-TPostmark)[0].Body | ConvertFrom-Json).To -eq 'a@example.com,b@example.com') ($TR.find.counts | ConvertTo-Json -Compress)
+
+# ---- 3b. company input: only that client's tickets ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ company = '5' })
+$TU = [uri]::UnescapeDataString((Get-Calls GET '*/service/tickets[?]*')[0].Uri)
+Check 'company=5 (id): filter sent to the PSA; only Contoso rows, even though the mock returned every company' ($TR.out.status -eq 'success' -and $TU -match 'company/id=5' -and @($TR.out.tickets).Count -eq 2 -and -not @($TR.out.tickets | Where-Object { $_.company -ne 'Contoso Ltd' }).Count -and $TR.find.companyId -eq '5') "$TU | $(($TR.out.tickets | ForEach-Object { $_.company }) -join ',')"
+Check 'company=5: the message and subject name the scope' ($TR.find.message -match 'checked for company 5\.' -and ((@(Get-TPostmark))[0].Body | ConvertFrom-Json).Subject -match '^SLA breach report for company 5: ') $TR.find.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ company = 'Contoso Ltd' })
+Check 'company by exact name: looked up, then only that company' ($TR.out.status -eq 'success' -and $TR.find.companyId -eq '5' -and $TR.find.companyName -eq 'Contoso Ltd' -and @($TR.out.tickets).Count -eq 2 -and ((@(Get-TPostmark))[0].Body | ConvertFrom-Json).Subject -match '^SLA breach report for Contoso Ltd: ') "$($TR.error) $($TR.out.message)"
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ company = 'Nobody Inc' })
+Check 'unknown company name: rejected before any ticket is read' ($TR.stage -eq 'find' -and $TR.out.status -eq 'rejected' -and $TR.out.message -match "has no company named 'Nobody Inc'" -and @(Get-Calls GET '*/service/tickets*').Count -eq 0) $TR.out.message
 
 # ---- 4. Empty result ----
 $global:TCw.tickets = @()

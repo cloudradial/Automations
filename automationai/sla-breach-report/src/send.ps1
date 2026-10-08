@@ -39,7 +39,8 @@ if ([string](Get-SlaProp $prev 'status') -ne 'success') {
 
 # ---- build the report ----
 $day = Format-SlaWhen (Get-SlaProp $prev 'generatedAt')
-$subject = "SLA breach report: $(@($rows | Where-Object { (Get-SlaProp $_ 'state') -eq 'breached' }).Count) breached, $(@($rows | Where-Object { (Get-SlaProp $_ 'state') -eq 'near' }).Count) near breach"
+$coLabel = [string](Get-SlaProp $prev 'companyName'); if (-not $coLabel -and (Get-SlaProp $prev 'companyId')) { $coLabel = "company $(Get-SlaProp $prev 'companyId')" }
+$subject = "SLA breach report$(if ($coLabel) { " for $coLabel" }): $(@($rows | Where-Object { (Get-SlaProp $_ 'state') -eq 'breached' }).Count) breached, $(@($rows | Where-Object { (Get-SlaProp $_ 'state') -eq 'near' }).Count) near breach"
 $sb = New-Object System.Text.StringBuilder
 $cell = 'padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;'
 $null = $sb.Append('<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#111827;">')

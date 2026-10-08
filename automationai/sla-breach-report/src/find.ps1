@@ -61,6 +61,8 @@ try {
     $settings = [ordered]@{
         psa = [string](Get-SlaInput 'psa' ''); near_breach_percent = $near; sla_hours_by_priority = $hours; max_tickets = $maxT; use_psa_sla = $usePsaSla
         skip_statuses = $skip; to = @($to); from = [string](Get-SlaInput 'from' ''); message_stream = [string](Get-SlaInput 'message_stream' 'outbound')
+        company = [string](@(@('company', 'company_id', 'companyId') | ForEach-Object { Get-SlaInput $_ '' } | Where-Object { ([string]$_).Trim() }) | Select-Object -First 1)
+        companyId = ''; companyName = ''
     }
 }
 catch { Stop-SlaRun 'rejected' "The SLA report didn't run because an input is invalid: $($_.Exception.Message)" }
@@ -69,10 +71,14 @@ catch { Stop-SlaRun 'rejected' "The SLA report didn't run because an input is in
 try { $conn = Connect-Psa (Get-PsaType $settings.psa) }
 catch { Stop-SlaRun 'error' "The SLA report couldn't connect to the PSA. $($_.Exception.Message)" }
 $psaName = Get-PsaName
+# Optional company input: a PSA company id or exact name. Only that company's tickets are read.
+try { $co = Resolve-PsaCompanyId $settings.company; $settings.companyId = $co.id; $settings.companyName = $co.name }
+catch { Stop-SlaRun 'rejected' "The SLA report didn't run because the company input couldn't be matched: $($_.Exception.Message)" }
+$scope = if ($settings.companyName) { " for $($settings.companyName)" } elseif ($settings.companyId) { " for company $($settings.companyId)" } else { '' }
 $now = [datetime]::UtcNow
-try { $open = @(Find-PsaTickets -Max $maxT) }
+try { $open = @(Find-PsaTickets -CompanyId $settings.companyId -Max $maxT) }
 catch { Stop-SlaRun 'error' "The SLA report couldn't read open tickets from $psaName. $($_.Exception.Message)" }
-$null = $run.actions.Add("Read $($open.Count) open tickets from $psaName.")
+$null = $run.actions.Add("Read $($open.Count) open tickets$scope from $psaName.")
 if ($open.Count -ge $maxT) { $null = $run.warnings.Add("Stopped at max_tickets ($maxT), so some open tickets weren't checked. Raise max_tickets to check them all.") }
 
 $counts = [ordered]@{ open = $open.Count; skipped = 0; breached = 0; nearBreach = 0; psaSla = 0; defaultHours = 0; slaPausedOrMet = 0 }
@@ -123,13 +129,13 @@ $rows = @($flagged | ForEach-Object {
     } | Sort-Object @{ e = { $_.company } }, @{ e = { $_.technician } }, @{ e = { if ($_.state -eq 'breached') { 0 } else { 1 } } }, @{ e = { $_.percentUsed }; Descending = $true })
 
 $checked = $open.Count - $counts.skipped
-$msg = if (-not $rows.Count) { "No open tickets have breached their SLA or are close to it. $checked open tickets were checked." }
-else { "$($counts.breached) open ticket$(if ($counts.breached -ne 1) { 's have' } else { ' has' }) breached SLA and $($counts.nearBreach) $(if ($counts.nearBreach -ne 1) { 'are' } else { 'is' }) close to it ($near% or more of the time used), out of $checked open tickets checked." }
+$msg = if (-not $rows.Count) { "No open tickets$scope have breached their SLA or are close to it. $checked open tickets were checked." }
+else { "$($counts.breached) open ticket$(if ($counts.breached -ne 1) { 's have' } else { ' has' }) breached SLA and $($counts.nearBreach) $(if ($counts.nearBreach -ne 1) { 'are' } else { 'is' }) close to it ($near% or more of the time used), out of $checked open tickets checked$scope." }
 if ($counts.skipped) { $msg += " $($counts.skipped) waiting or scheduled tickets were left out." }
 
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $msg; ticket_id = ''
-        psa = $conn.Psa; psaName = $psaName; generatedAt = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        psa = $conn.Psa; psaName = $psaName; companyId = $settings.companyId; companyName = $settings.companyName; generatedAt = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
         counts = $counts; tickets = @($rows); settings = $settings
         actions = @($run.actions); warnings = @($run.warnings)
     })

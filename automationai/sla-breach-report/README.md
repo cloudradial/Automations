@@ -37,7 +37,7 @@ Two steps, no AI. It works with ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, 
 
 **Report only.** The workflow never writes to a ticket; the test harness checks that it makes no PSA write at all. Without a `to` address or the Postmark secrets, nothing is sent and the full HTML report is in the run output (`html`), with a warning saying why.
 
-**Scope.** The email goes to your own service manager and covers every client in the PSA, the same as the PSA's own SLA reports. Nothing is written into any client's portal or ticket.
+**Scope.** By default the email covers every client in the PSA, the same as the PSA's own SLA reports, and goes only to your own service manager. Set `company` to report on one client only. Nothing is written into any client's portal or ticket.
 
 ## Download & import
 
@@ -79,6 +79,7 @@ A Routine sends no input, so every field has a default.
 | `sla_hours_by_priority` | `{"critical":4,"high":8,"medium":24,"low":72}` | Default hours to resolve, by priority, for tickets the PSA has no SLA dates for. Give any subset; the rest keep their defaults. `urgent`, `normal`, `P1` and similar names are accepted. |
 | `use_psa_sla` | `true` | `false` ignores the PSA's SLA dates and uses the default hours for every ticket. |
 | `skip_statuses` | `waiting,pending,on hold,scheduled` | Leave out tickets whose status contains any of these words. |
+| `company` | (all companies) | Only this client: a PSA company id, or the exact company name (it must match one company). Every other client's tickets are left out, even if the PSA ignores the filter. Also accepted as `company_id` or `companyId`. |
 | `max_tickets` | `500` | The most open tickets to read (1 to 5000). The run warns when it stops at the limit. |
 | `from` | `Postmark-FromEmail` | A different verified sender. |
 | `message_stream` | `outbound` | The Postmark message stream. |
@@ -93,7 +94,7 @@ There's no `confirm` input because the workflow never changes anything.
 ## Import & test
 
 1. Import `sla-breach-report.yml`, add the secrets above to the runner, then **Publish** and **Deploy** to that runner.
-2. **First run.** In **Run**, use the first step's Test Input with `to` set to your own address. Expect `status: success` and one email. Check a few rows against the PSA: the same tickets should show as late in its own SLA view.
+2. **First run.** In **Run**, use the first step's Test Input with `to` set to your own address and `company` set to one test client. Expect `status: success` and one email. Check a few rows against the PSA: the same tickets should show as late in its own SLA view.
 3. **Check the fallback.** Run again with `use_psa_sla: false` and a small `sla_hours_by_priority` such as `{"medium":1}`. More tickets should appear, all measured by "Default hours".
 4. **Schedule it.** Add the `ServiceManager-Email` secret to the runner (a Routine sends no input, so this is where the address comes from), then add a **Routine** that runs the deployed version weekly, for example Monday 07:00. Every other setting uses its default.
 

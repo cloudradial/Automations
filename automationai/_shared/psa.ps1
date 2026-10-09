@@ -28,6 +28,7 @@ $PsaState = @{
     Lookups       = @{}                                       # Resolve-PsaTicketNames cache
     Sla           = @{}                                       # Get-PsaTicketSla cache (ConnectWise SLA definitions)
     MaxPages      = 50
+    ReadBackWaits = @(3, 6)                                   # seconds between read-backs after a redirected note write
     MaxTicketLoop = 50
     # Redirect handling in Invoke-Psa (see "Redirects" in _shared/README.md).
     StopRedirects     = $null                                 # Invoke-RestMethod takes -MaximumRedirection (checked once)
@@ -489,10 +490,19 @@ function Add-PsaNote {
     catch {
         if ($null -eq $PsaState.LastWriteRedirect) { throw }
         $first = [string]$_.Exception.Message
+        # ConnectWise staging saved the note but didn't list it on a read made straight after the redirect,
+        # so the read-back is tried again after short waits before the note is reported as not saved.
         $found = $false
-        try { $found = Test-PsaNoteSaved -Id $Id -Text $Text -Tag $tag }
-        catch { throw "$first Reading ticket $Id back to check also failed: $($_.Exception.Message)" }
-        if (-not $found) { throw "$first Reading ticket $Id back found no such note, so it was not saved." }
+        $waits = @(0) + @($PsaState.ReadBackWaits | Where-Object { $null -ne $_ })
+        $tries = 0
+        foreach ($wait in $waits) {
+            if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+            $tries++
+            try { $found = Test-PsaNoteSaved -Id $Id -Text $Text -Tag $tag }
+            catch { throw "$first Reading ticket $Id back to check also failed: $($_.Exception.Message)" }
+            if ($found) { break }
+        }
+        if (-not $found) { throw "$first Reading ticket $Id back ($tries times over $(($waits | Measure-Object -Sum).Sum) seconds) found no such note, so it was not saved." }
         Add-PsaWarning "$(Get-PsaName) answered the note on ticket $Id with a redirect; reading the ticket back showed the note was saved, so it was not sent again."
     }
     if ($tag) { return 'written' }

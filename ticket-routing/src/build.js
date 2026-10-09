@@ -13,7 +13,7 @@ const agent = y.load(fs.readFileSync(path.join(root, 'ticket-skill-classifier.ag
 
 const preamble = (title, lines) =>
   ['# =====================================================================', `#  Send Every Ticket to the Right Engineer - ${title}`, ...lines.map((l) => `#  ${l}`),
-   '#  Generated from automationai/ticket-routing/src. Edit the source, then run build.js.',
+   '#  Generated from ticket-routing/src. Edit the source, then run build.js.',
    '# =====================================================================', "$ErrorActionPreference = 'Stop'", 'Set-StrictMode -Version Latest', ''].join('\n') + '\n';
 
 const prepareScript = preamble('Read the request, routing table and ticket', [

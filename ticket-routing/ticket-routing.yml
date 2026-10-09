@@ -29,7 +29,7 @@ definition:
           #  Writes nothing. Reads the two routing KB articles from CloudRadial and the ticket from the PSA.
           #  Secrets: CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey, Routing-CompanyId,
           #  PSA-Type, and the PSA's own secrets (the same names as its catalog extension).
-          #  Generated from automationai/ticket-routing/src. Edit the source, then run build.js.
+          #  Generated from ticket-routing/src. Edit the source, then run build.js.
           # =====================================================================
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
@@ -563,7 +563,7 @@ definition:
           # =====================================================================
           #  Send Every Ticket to the Right Engineer - Find, pick, assign and note
           #  Writes to the PSA only when confirm is true: sets the assignee, then adds an internal note.
-          #  Generated from automationai/ticket-routing/src. Edit the source, then run build.js.
+          #  Generated from ticket-routing/src. Edit the source, then run build.js.
           # =====================================================================
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest

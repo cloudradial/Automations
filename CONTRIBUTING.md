@@ -8,7 +8,7 @@ We welcome contributions from MSP Partners. Whether it's a new script that solve
 
 1. **Fork the repository** on GitHub
 2. **Create a feature branch** for your work: `git checkout -b feature/my-script-name`
-3. **Add your script** to the appropriate folder (see folder structure below)
+3. **Add your automation** as a new top-level folder, with a README in the same format as the existing ones (the standalone scripts in `legacy-scripts/` are no longer updated)
 4. **Include documentation** (see Script Standards section)
 5. **Test thoroughly** before submitting—especially with `-WhatIf` for scripts that make changes
 6. **Create a pull request** with a clear description of what the script does and the business problem it solves
@@ -221,7 +221,7 @@ Paste any PowerShell errors or API responses
 ## Questions?
 
 - Check existing scripts and their READMEs for examples
-- Review [getting-started/authentication.md](../getting-started/authentication.md) for API basics
+- Review [legacy-scripts/getting-started/authentication.md](legacy-scripts/getting-started/authentication.md) for API basics
 - Open an issue in this repository—the community is here to help
 
 Thank you for contributing to CloudRadial automation!

@@ -1,9 +1,0 @@
-{
-  "name": "user-offboarding-build",
-  "private": true,
-  "description": "Builds user-offboarding.yml from the scripts in this folder and runs its strict-mode mock harness. Uses js-yaml from automationai/_shared (npm install there) or JS_YAML_PATH.",
-  "scripts": {
-    "build": "node build.js",
-    "test": "node build.js --check && pwsh -NoProfile -File test.ps1"
-  }
-}

@@ -195,7 +195,7 @@ questions", "Turn this spreadsheet into an assessment for company 42", "Copy our
 template into Contoso's new assessment, one set of questions per server".
 
 For Microsoft Secure Score specifically, the AutomationAI workflow
-[Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/automationai/secure-score-assessment)
+[Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment)
 reads Secure Score from Graph and builds the assessment on its own.
 
 ---

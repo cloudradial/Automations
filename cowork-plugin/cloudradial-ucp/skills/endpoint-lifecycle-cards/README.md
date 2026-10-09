@@ -24,7 +24,7 @@ Build hardware refresh cards for Contoso
 - **CloudRadial only.** It reads the endpoints already in the portal and writes Planner cards. It doesn't call your RMM or ScalePad.
 - **Missing data is reported, not guessed.** Computers without warranty or age data go on the Needs data card.
 - **Re-running updates the same cards**, matched by subject, so the client's Planner doesn't fill up with copies.
-- **Needs automation instead?** The AutomationAI version, [Keep Every Client's Hardware Refresh Plan Current](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager), runs the same rules on a schedule.
+- **Needs automation instead?** The AutomationAI version, [Keep Every Client's Hardware Refresh Plan Current](https://github.com/cloudradial/Automations/tree/main/endpoint-lifecycle-manager), runs the same rules on a schedule.
 
 ## Related skills
 

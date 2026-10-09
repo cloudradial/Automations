@@ -23,12 +23,13 @@ $eps = @(
 )
 $cards = @(
     @{ productId = 145; companyId = 1; subject = 'Endpoint Hardware Refresh - Replace'; status = 'Proposed'; body = '' },
-    @{ productId = 146; companyId = 1; subject = 'Endpoint Hardware Refresh - Plan replacement'; status = 'Proposed'; body = '' },
+    @{ productId = 146; companyId = 1; subject = 'Endpoint Hardware Refresh - Plan replacement'; status = 'Proposed'; body = ''; currentlyInstalled = $true },   # marked done in the portal but still has a computer: must reopen
     @{ productId = 147; companyId = 1; subject = 'Endpoint Hardware Refresh - Upgrade in place'; status = 'Proposed'; body = ''; projectUnitPrice = 2900; isShowPrice = $true },   # priced card that empties: completing it must hide the price
     @{ productId = 148; companyId = 1; subject = 'Endpoint Hardware Refresh - Needs data'; status = 'Completed'; body = '' },
     @{ productId = 149; companyId = 1; subject = 'Endpoint Hardware Refresh - Human review'; status = 'Proposed'; body = '' },
     @{ productId = 150; companyId = 1; subject = 'Endpoint Hardware Refresh - Virtual machines'; status = 'Proposed'; body = '' },
-    @{ productId = 151; companyId = 1; subject = 'Laptop Refresh'; status = 'Proposed'; body = '' }
+    @{ productId = 151; companyId = 1; subject = 'Laptop Refresh'; status = 'Proposed'; body = '' },
+    @{ productId = 152; companyId = 1; subject = 'Endpoint Hardware Refresh - Retain'; status = 'Proposed'; body = ''; currentlyInstalled = $true; isShowPrice = $true }   # marked done in the portal, no computers left: leave it alone
 )
 function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
     $u = [uri]::UnescapeDataString($Uri)
@@ -58,5 +59,13 @@ foreach ($r in @($o.results | Where-Object { $_.action -eq 'completed' -and $_.p
     $ok = $w.Count -and @(($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) | Where-Object { $_.path -eq '/isShowPrice' -and $_.value -eq $false }).Count -eq 1
     "completed card $($r.productId) hides its price: $(if ($ok) { 'ok' } elseif ($w.Count) { 'MISSING isShowPrice=false' } else { 'no write (plan mode)' })"
 }
+foreach ($r in @($o.results | Where-Object { $_.action -eq 'reopened' })) {
+    $w = @($global:Writes | Where-Object { $_ -match "^PATCH /v2/product/$($r.productId) " })
+    $ops = if ($w.Count) { @($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) } else { @() }
+    $ok = @($ops | Where-Object { $_.path -eq '/currentlyInstalled' -and $_.value -eq $false }).Count -eq 1 -and @($ops | Where-Object { $_.path -eq '/status' }).Count -eq 1
+    "reopened card $($r.productId) leaves Completed: $(if ($ok) { 'ok' } elseif ($w.Count) { 'MISSING status or currentlyInstalled=false' } else { 'no write (plan mode)' })"
+}
+$touched = @($global:Writes | Where-Object { $_ -match '^PATCH /v2/product/152 ' }).Count
+"card 152 (done in the portal, no computers left) untouched: $(if ($touched) { 'NO - it was written' } else { 'ok' })"
 "--- writes"
 foreach ($w in $global:Writes) { "  " + $w.Substring(0, [Math]::Min(260, $w.Length)) }

@@ -123,7 +123,9 @@ function Get-CrAll {
 function Enc { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
 function Parse-Date { param($v) $d = [datetime]::MinValue; if ($null -ne $v -and [string]$v -and [datetime]::TryParse([string]$v, $ci, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$d)) { if ($d.Year -gt 1900) { return $d } }; return $null }
 function Friendly { param([datetime]$d) $d.ToString('d MMM yyyy', $ci) }
-function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed$') }
+# A card is in Planner's Completed column when its status is Completed, or when someone marked it done in the portal,
+# which sets currentlyInstalled and leaves status alone.
+function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed$' -or [string](Get-Prop $card 'currentlyInstalled') -eq 'True') }
 
 # ---- rules (identical to the agent's decision tracks) ----
 function Get-Age { param($ep)
@@ -370,7 +372,7 @@ foreach ($cid in @($companiesInScope | Sort-Object)) {
             if ($null -ne $card) {
                 $id = Get-Prop $card 'productId'
                 $reopen = Test-Completed $card
-                if ($reopen) { $fields.status = $(if ($OnRoadmap) { 20 } else { 0 }) } elseif ($OnRoadmap) { $fields.status = 20 }
+                if ($reopen) { $fields.status = $(if ($OnRoadmap) { 20 } else { 0 }); $fields.currentlyInstalled = $false } elseif ($OnRoadmap) { $fields.status = 20 }
                 if ($Apply) { Send-Patch $id $fields }
                 $counts.cardsUpdated++
                 Add-Result $cid $cat $top $(if ($reopen) { 'reopened' } else { 'updated' }) $id $n $summary $estimate $breakdown

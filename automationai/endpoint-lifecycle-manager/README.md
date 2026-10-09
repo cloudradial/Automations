@@ -22,6 +22,8 @@ These links point at the `main` branch, so they always open the current version.
 | Download `endpoint-lifecycle-manager-ai.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) |
 | View `knowledge/endpoint-refresh-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
 | Download `knowledge/endpoint-refresh-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
+| View `knowledge/endpoint-refresh-pricing.md` (your pricing, and the Routine input to paste) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) |
+| Download `knowledge/endpoint-refresh-pricing.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) |
 | All files in this automation | [automationai/endpoint-lifecycle-manager](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/endpoint-lifecycle-manager) |
 | Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager/src) |
@@ -47,6 +49,7 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 | [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | Optional. The same rules as an AI agent (slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.3), for asking questions in the AI Playground. |
 | [`endpoint-lifecycle-manager-ai.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) | `automationsWorkflow` | Optional. Runs the agent with a goal. It handles up to 3 companies per run and is subject to the runner's 25-turn limit, so prefer the PowerShell workflow for scheduled runs. |
 | [`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) | Knowledge | The refresh standards in plain language: age, warranty, OS support, RAM, category rules, priority tiers and roadmap quarters, with one table of adjustable values. See [Adjusting the standards](#adjusting-the-standards). |
+| [`knowledge/endpoint-refresh-pricing.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) | Knowledge | Your pricing in plain language: replacement models, upgrade and repair parts, labour hours and rate, with the matching Routine input to paste. See [Pricing the cards](#pricing-the-cards). |
 | [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager/src) | Source | `elm.ps1` (the PowerShell step), a mocked test harness, and the script that embeds it into the `.yml`. See [Changing the workflow](#changing-the-workflow). |
 
 ## Install / run
@@ -142,7 +145,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   - each card's `estimatedPrice` and `priceBreakdown` (which model, parts and labour each card was priced at, and what wasn't priced), so a `plan` run shows the pricing before anything is written
   - any `warnings`, for example a model or part with no valid price, an unrecognised part name, or labour hours with no `hourlyRate`
 
-Reading the pricing from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows can read Knowledge.
+Keep your prices in [`knowledge/endpoint-refresh-pricing.md`](knowledge/endpoint-refresh-pricing.md): edit its tables, then copy its **Run input** block into the Routine input. The workflow reads the Routine input today. Reading the pricing straight from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows and agents can use Knowledge for it.
 
 ## What it does
 

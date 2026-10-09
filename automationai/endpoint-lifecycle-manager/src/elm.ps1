@@ -267,12 +267,13 @@ function Get-ReplacementEstimate { param($devices)
 }
 # Upgrade in place, Retain, Human review: the parts a device's data shows it needs. Virtual machines have no hardware to buy.
 # Live data: isSSD is false on every endpoint of a company that doesn't collect it, so it's trusted only where some endpoint
-# reports true. Nominal 8 GB machines report about 7.8 GB (reserved memory), so the RAM line is below 7.5 GB.
+# reports true. Servers report false even with SSDs (RAID/virtual disks), so they never get an SSD line.
+# Nominal 8 GB machines report about 7.8 GB (reserved memory), so the RAM line is below 7.5 GB.
 function Get-PartNeeds { param($ep, [string]$cat, [bool]$ssdCollected)
     $needs = New-Object System.Collections.ArrayList
     if ($cat -notin @('Upgrade in place', 'Retain', 'Human review')) { return @($needs) }
     $ram = Get-RamGb $ep; if ($null -ne $ram -and $ram -lt 7.5) { $null = $needs.Add('RAM upgrade') }   # unknown memory is not low
-    if ($ssdCollected -and [string](Get-Prop $ep 'isSSD') -eq 'False') { $null = $needs.Add('SSD upgrade') }
+    if ($ssdCollected -and $cat -ne 'Human review' -and [string](Get-Prop $ep 'isSSD') -eq 'False') { $null = $needs.Add('SSD upgrade') }
     if ((Get-Warranty $ep).status -in @('expired', 'expiring')) { $null = $needs.Add('Warranty extension') }
     return @($needs)
 }

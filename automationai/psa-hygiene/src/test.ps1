@@ -67,8 +67,9 @@ function Get-OpenFor {
     return $out
 }
 
+# Like the real cmdlet, a JSON array reply is handed back as ONE object (", @(...)"), not item by item.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
     $m = ([string]$Method).ToUpperInvariant(); $u = [string]$Uri; $d = [uri]::UnescapeDataString($u)
     $null = $Mock.Calls.Add([pscustomobject]@{ Method = $m; Uri = $u; Decoded = $d; Body = $(if ($Body -is [string]) { $Body } else { '' }) })
     $isWrite = $m -in @('PATCH', 'PUT') -or ($m -eq 'POST' -and $u -like '*/api/Tickets')
@@ -76,21 +77,21 @@ function Invoke-RestMethod {
     # Postmark
     if ($u -eq 'https://api.postmark.test/email' -and $m -eq 'POST') { return [pscustomobject]@{ ErrorCode = 0; Message = 'OK'; MessageID = 'msg-1' } }
     # CloudRadial
-    if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return @([pscustomobject]@{ id = 55; companyId = 1; name = 'PSA Hygiene' }) }
+    if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return , @([pscustomobject]@{ id = 55; companyId = 1; name = 'PSA Hygiene' }) }
     if ($u -like 'https://portal.example-msp.test/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @() } }
     if ($u -eq 'https://portal.example-msp.test/v2/archiveitem' -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
     # ConnectWise
     $cw = 'https://cw.example-msp.test/v4_6_release/apis/3.0'
     if ($u -like "$cw/service/tickets[?]*" -and $m -eq 'GET') {
         if ($Mock.Opt.Contains('Tickets403')) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to this resource."}' }
-        if ($d -like '*page=1*') { return @(Get-OpenFor 'cw') }; return @()
+        if ($d -like '*page=1*') { return , @(Get-OpenFor 'cw') }; return , @()
     }
     if ($u -like "$cw/company/companies/*") { $id = ($u -split '/')[-1]; return J @{ id = [int]$id; defaultContact = $(if ($id -eq '5') { @{ id = 9 } } else { $null }) } }
     if ($u -like "$cw/company/contacts[?]*") {
-        if ($d -match 'company/id=5 ') { return @(J @{ id = 9; firstName = 'Pat'; lastName = 'Example' }; J @{ id = 10; firstName = 'Sam'; lastName = 'Example' }) }
-        return @(J @{ id = 11; firstName = 'Alex'; lastName = 'Fabrikam'; defaultFlag = $true }; J @{ id = 12; firstName = 'Jo'; lastName = 'Fabrikam'; defaultFlag = $true })
+        if ($d -match 'company/id=5 ') { return , @(J @{ id = 9; firstName = 'Pat'; lastName = 'Example' }; J @{ id = 10; firstName = 'Sam'; lastName = 'Example' }) }
+        return , @(J @{ id = 11; firstName = 'Alex'; lastName = 'Fabrikam'; defaultFlag = $true }; J @{ id = 12; firstName = 'Jo'; lastName = 'Fabrikam'; defaultFlag = $true })
     }
-    if ($u -like "$cw/service/tickets/*/notes[?]*" -and $m -eq 'GET') { return @($Mock.Notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
+    if ($u -like "$cw/service/tickets/*/notes[?]*" -and $m -eq 'GET') { return , @($Mock.Notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
     if ($u -like "$cw/service/tickets/*/notes" -and $m -eq 'POST') { $null = $Mock.Notes.Add(($Body | ConvertFrom-Json).text); return [pscustomobject]@{ id = 1 } }
     if ($u -like "$cw/service/tickets/*" -and $m -eq 'PATCH') { return [pscustomobject]@{ id = 1 } }
     # Autotask
@@ -110,7 +111,7 @@ function Invoke-RestMethod {
         if ($d -match 'client_id=5&') { return J @{ users = @(@{ id = 9; name = 'Pat Example'; isprimarycontact = $true }, @{ id = 10; name = 'Sam Example'; isprimarycontact = $false }) } }
         return J @{ users = @(@{ id = 11; name = 'Alex Fabrikam'; isprimarycontact = $false }) }
     }
-    if ($u -eq 'https://halo.example-msp.test/api/Tickets' -and $m -eq 'POST') { return @([pscustomobject]@{ id = 202 }) }
+    if ($u -eq 'https://halo.example-msp.test/api/Tickets' -and $m -eq 'POST') { return , @([pscustomobject]@{ id = 202 }) }
     # Kaseya BMS
     if ($u -eq 'https://bms.example-msp.test/v2/security/authenticate') { return J @{ Success = $true; Result = @{ AccessToken = 'bms-token' } } }
     if ($u -like 'https://bms.example-msp.test/v2/servicedesk/tickets[?]*') { $r = @(Get-OpenFor 'bms'); return J @{ Success = $true; Result = $r; TotalRecords = $r.Count } }

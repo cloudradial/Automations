@@ -194,6 +194,21 @@ Invoke-WithLib @('psa.ps1') {
     Check 'priority hint must be known' ($m -match 'critical, high, medium, low') $m
 }
 
+# --- ConnectWise: an API member that can't read priorities still opens the ticket ---
+Reset-Mock $S['connectwise'].Clone() {
+    param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/priorities*') { New-HttpError 403 '{"code":"Security","message":"You do not have security permission to perform this action."}' }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/service/tickets') { return [pscustomobject]@{ id = 601 } }
+    return [pscustomobject]@{ id = 1 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $t = New-PsaTicket -CompanyId 42 -Summary 'Phishing report (suspicious): Invoice overdue' -Priority medium
+    $b = Read-Body (Get-LastCall)
+    Check 'connectwise: priorities 403 -> ticket still opened, no priority sent' ($t.id -eq '601' -and -not $b.PSObject.Properties['priority'] -and (Get-LastCall).Method -eq 'POST') ((Get-LastCall).Body)
+    Check 'connectwise: priorities 403 -> a warning names the default priority and the permission' (@($PsaState.Warnings | Where-Object { $_ -match "board's default priority instead of medium" -and $_ -match 'Service Desk priorities' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
+}
+
 # --- ConnectWise conditions: the exact query strings sent ---
 Reset-Mock $S['connectwise'].Clone() {
     param($c, $n)

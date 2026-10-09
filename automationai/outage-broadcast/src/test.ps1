@@ -93,7 +93,7 @@ $Handler = {
         "POST $TCR/v2/token" { return [pscustomobject]@{ success = $true } }
         "POST $TCR/v2/article" { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ articleId = 777 } } }
         "PUT $TCR/v2/article/*" { return [pscustomobject]@{ success = $true } }
-        "GET $TCW/service/tickets/4242/notes[?]*" { return @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
+        "GET $TCW/service/tickets/4242/notes[?]*" { return , @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
         "POST $TCW/service/tickets/4242/notes" { if ($S.noteForbidden) { New-HttpError 403 '{"message":"Member does not have access to add notes."}' }; $null = $S.notes.Add((Read-Body $c).text); return [pscustomobject]@{ id = 1 } }
         "GET $TCW/company/companies/101" { return [pscustomobject]@{ id = 101; defaultContact = [pscustomobject]@{ id = 55 } } }
         "GET $TCW/company/companies/102" { return [pscustomobject]@{ id = 102; defaultContact = $null } }

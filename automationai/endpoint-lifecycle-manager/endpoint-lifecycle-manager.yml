@@ -289,11 +289,13 @@ definition:
               return @{ total = [math]::Round($total, 2); cost = $(if ($priced -and $costKnown) { [math]::Round($cost, 2) } else { $null }); priced = $priced; unpriced = ($devices.Count - $priced); lines = @($lines) }
           }
           # Upgrade in place, Retain, Human review: the parts a device's data shows it needs. Virtual machines have no hardware to buy.
-          function Get-PartNeeds { param($ep, [string]$cat)
+          # Live data: isSSD is false on every endpoint of a company that doesn't collect it, so it's trusted only where some endpoint
+          # reports true. Nominal 8 GB machines report about 7.8 GB (reserved memory), so the RAM line is below 7.5 GB.
+          function Get-PartNeeds { param($ep, [string]$cat, [bool]$ssdCollected)
               $needs = New-Object System.Collections.ArrayList
               if ($cat -notin @('Upgrade in place', 'Retain', 'Human review')) { return @($needs) }
-              $ram = Get-RamGb $ep; if ($null -ne $ram -and $ram -lt 8) { $null = $needs.Add('RAM upgrade') }   # unknown memory is not low
-              if ([string](Get-Prop $ep 'isSSD') -eq 'False') { $null = $needs.Add('SSD upgrade') }             # only when the endpoint says it has no SSD
+              $ram = Get-RamGb $ep; if ($null -ne $ram -and $ram -lt 7.5) { $null = $needs.Add('RAM upgrade') }   # unknown memory is not low
+              if ($ssdCollected -and [string](Get-Prop $ep 'isSSD') -eq 'False') { $null = $needs.Add('SSD upgrade') }
               if ((Get-Warranty $ep).status -in @('expired', 'expiring')) { $null = $needs.Add('Warranty extension') }
               return @($needs)
           }
@@ -338,6 +340,8 @@ definition:
           if ($null -ne $knownCompanies -and $knownCompanies.Count -eq 0) { $knownCompanies = $null }
           $counts = [ordered]@{ evaluated = 0; flaggedEndpoints = 0; excludedNonComputer = 0; skippedHealthy = 0; orphanedEndpoints = 0; companiesProcessed = 0; cardsCreated = 0; cardsUpdated = 0; cardsCompleted = 0; cardsSkipped = 0; errors = 0 }
           $buckets = @{}; $evaluatedBy = @{}; $companiesInScope = New-Object System.Collections.Generic.HashSet[int]; $orphanedBy = @{}
+          $ssdCompanies = New-Object System.Collections.Generic.HashSet[int]   # companies whose endpoints report isSSD at all
+          foreach ($ep in $endpoints) { if ([string](Get-Prop $ep 'isSSD') -eq 'True') { $null = $ssdCompanies.Add([int](Get-Prop $ep 'companyId')) } }
           foreach ($ep in $endpoints) {
               $cid = [int](Get-Prop $ep 'companyId')
               if ($CompanyIds.Count -and $CompanyIds -notcontains $cid) { continue }
@@ -346,7 +350,7 @@ definition:
               $found = Get-Assessment $ep
               $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null; deviceType = $null; needs = @() }
               foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
-              if ($a.flagged -and $null -ne $Pricing) { $a.deviceType = Get-DeviceType $ep; $a.needs = @(Get-PartNeeds $ep $a.category) }
+              if ($a.flagged -and $null -ne $Pricing) { $a.deviceType = Get-DeviceType $ep; $a.needs = @(Get-PartNeeds $ep $a.category $ssdCompanies.Contains($cid)) }
               if ($a.excluded) { $counts.excludedNonComputer++; continue }
               $null = $companiesInScope.Add($cid)
               $counts.evaluated++; $evaluatedBy[$cid] = 1 + [int]$evaluatedBy[$cid]

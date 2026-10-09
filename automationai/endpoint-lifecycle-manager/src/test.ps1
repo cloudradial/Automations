@@ -21,6 +21,8 @@ $eps = @(
     @{ companyId = 2; name = 'W11-NOTREADY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'NotReady'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },   # expect Replace
     @{ companyId = 2; name = 'W11-READY-HDD'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-05-01T00:00:00Z'; expirationDate = '2027-05-01T00:00:00Z'; memory = 6442450944; isSSD = $false },   # Upgrade in place: needs RAM + SSD
     @{ companyId = 2; name = 'RETAIN-PC'; os = 'Windows 11 Pro'; manufacturedDate = '2024-02-01T00:00:00Z'; expirationDate = '2026-01-15T00:00:00Z'; memory = 17179869184; isSSD = $true },   # Retain: needs a warranty extension
+    @{ companyId = 2; name = 'W11-READY-8GB'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-06-01T00:00:00Z'; expirationDate = '2027-06-01T00:00:00Z'; memory = 8352567296; isSSD = $true },   # 8 GB reports 7.8 GB: no RAM upgrade
+    @{ companyId = 4; name = 'NO-SSD-DATA-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-06-01T00:00:00Z'; expirationDate = '2027-06-01T00:00:00Z'; memory = 17179869184; isSSD = $false },   # company never reports isSSD true: no SSD upgrade
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(
@@ -43,7 +45,7 @@ function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
         return $null
     }
     if ($u -match 'skip=([1-9])') { return [pscustomobject]@{ value = @() } }
-    if ($u -match '/v2/odata/company') { return [pscustomobject]@{ value = @(1, 2 | ForEach-Object { [pscustomobject]@{ companyId = $_ } }) } }
+    if ($u -match '/v2/odata/company') { return [pscustomobject]@{ value = @(1, 2, 4 | ForEach-Object { [pscustomobject]@{ companyId = $_ } }) } }
     if ($u -match '/v2/odata/endpoint') { $f = $eps; if ($u -match 'companyId eq (\d+)' -and $u -notmatch ' or ') { $f = @($eps | Where-Object { $_.companyId -eq [int]$Matches[1] }) }; return [pscustomobject]@{ value = @($f | ForEach-Object { [pscustomobject]$_ }) } }
     if ($u -match '/v2/odata/product.*companyId eq (\d+)') { $c = [int]$Matches[1]; return [pscustomobject]@{ value = @($cards | Where-Object { $_.companyId -eq $c } | ForEach-Object { [pscustomobject]$_ }) } }
     throw "unmocked GET $u"

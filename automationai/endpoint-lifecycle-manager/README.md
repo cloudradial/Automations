@@ -117,8 +117,8 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   
   Add a `"Windows"` or `"Mac"` entry as a fallback for computers whose type isn't recorded. Computers with no matching model are listed as not priced and left out of the total.
 - **Upgrade in place, Retain and Human review cards are priced from `parts` and `labourHours`.** Each computer gets the parts its data shows it needs:
-  - **`RAM upgrade`:** memory is recorded and below 8 GB. Unknown memory doesn't count.
-  - **`SSD upgrade`:** the endpoint says it has no SSD.
+  - **`RAM upgrade`:** memory is recorded and below 7.5 GB. An 8 GB computer reports about 7.8 GB because some memory is reserved, so it doesn't count. Unknown memory doesn't count either.
+  - **`SSD upgrade`:** the endpoint says it has no SSD. Many agents don't collect this and report "no SSD" for everything, so it only counts in a company where at least one endpoint reports an SSD.
   - **`Warranty extension`:** the warranty has expired or ends within 90 days.
   
   These are the only part names the workflow can match. Others are ignored with a warning.

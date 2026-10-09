@@ -7,7 +7,24 @@ $secrets = @{ 'ScalePad-ApiUrl' = 'https://sp.test'; 'ScalePad-ApiKey' = 'k'; 'C
 function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText, $ErrorAction) $secrets[$Name] }
 function Get-NodeInput { Get-Content $InFile -Raw | ConvertFrom-Json }
 function Set-NodeOutput { param($o) $o | ConvertTo-Json -Depth 30 | Set-Content $OutFile }
-function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName) $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes); '{"ok":true}' }
+$global:MockAssessments = New-Object System.Collections.ArrayList
+# ASSESS_EXISTS = title of a type 20 assessment already in CloudRadial; ASSESS_MODIFIED = its dateModified.
+# A type 30 row (a run) and a type 0 row with the same title are always present and must never be matched.
+if ($env:ASSESS_EXISTS) {
+    $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = $env:ASSESS_EXISTS; type = 20; isDeleted = $false; dateModified = $(if ($env:ASSESS_MODIFIED) { $env:ASSESS_MODIFIED } else { '2026-09-01T00:00:00Z' }) })
+    $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 601; companyId = 9; title = $env:ASSESS_EXISTS; type = 30; isDeleted = $false; dateModified = '2026-01-01T00:00:00Z' })
+}
+$null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 602; companyId = 9; title = 'ScalePad - Security Baseline'; type = 0; isDeleted = $false; dateModified = '2026-01-01T00:00:00Z' })
+# Like the live route (204, no body): assessmentId 0 with type 20 creates an assessment titled by "name";
+# an existing assessmentId replaces its answers in place. A non-20 type creates nothing the step can find.
+function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName)
+    $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes)
+    $d = $DataJson | ConvertFrom-Json
+    if ($Path -ne '/v2/assessment/upload' -or $d.type -ne 20) { return '' }
+    if ($d.assessmentId -eq 0) { if (-not $env:ASSESS_LAG) { $null = $global:MockAssessments.Add([pscustomobject]@{ assessmentId = 700 + $global:MockAssessments.Count; companyId = $d.companyId; title = $d.name; type = 20; isDeleted = $false; dateModified = '2026-10-06T00:00:00Z' }) } }
+    else { $row = @($global:MockAssessments | Where-Object { $_.assessmentId -eq $d.assessmentId })[0]; if (-not $row) { throw 'HTTP 400: no such assessment' }; $row.dateModified = '2026-10-06T00:00:00Z' }
+    ''
+}
 function Send-ArchiveUpload { param($ArchiveId, $FilePath, $FileName) if ($ArchiveId -le 0) { throw 'HTTP 400: Sequence contains no elements.' }; $null = $global:MockWrites.Add("UPLOAD archive=$ArchiveId file=$FileName") }
 function Invoke-WebRequest { param($Method, $Uri, $Headers, $OutFile) [IO.File]::WriteAllBytes($OutFile, [byte[]](37, 80, 68, 70)); $null = $global:MockWrites.Add("DOWNLOAD $Uri") }
 
@@ -25,10 +42,10 @@ $sp = @{
             @{ hardware_asset = @{ serial_number = 'SNLT680001'; name = 'Contoso-LT68' }; product = @{ name = 'Google Chrome' }; publisher = @{ name = 'Google' }; version = @{ display = '129.0.6668.90' } },
             @{ hardware_asset = @{ serial_number = 'SNDT010002'; name = 'Contoso-DT01' }; product = @{ name = 'Adobe Acrobat' }; publisher = @{ name = 'Adobe' }; version = @{ display = '24.3' } }); next_cursor = $null }
     '/lifecycle-manager/v1/assessments/criteria/labels'  = @{ data = @(@{ type_key = 'yn'; assessment_criterion_labels = @(@{ label_key = 'yes'; label = 'Yes' }, @{ label_key = 'partial'; label = 'Partially' }, @{ label_key = 'no'; label = 'No' }, @{ label_key = 'na'; label = 'Not Applicable' }) }) }
-    '/lifecycle-manager/v1/assessments'                  = @{ data = @(@{ id = 'as1'; title = 'Security Baseline'; evaluated_at = '2026-08-01T00:00:00Z'; overall_score = 72 }); next_cursor = $null }
+    '/lifecycle-manager/v1/assessments'                  = @{ data = @(@{ id = 'as0'; title = 'Security Baseline'; evaluated_at = '2026-02-01T00:00:00Z'; overall_score = 55 }, @{ id = 'as1'; title = 'Security Baseline'; evaluated_at = '2026-08-01T00:00:00Z'; overall_score = 72 }); next_cursor = $null }
     '/lifecycle-manager/v1/assessments/as1'              = @{ assessment = @{ description = 'Annual baseline'; category_list = @(
                 @{ title = 'Access Control'; question_list = @(
-                        @{ title = 'MFA enforced for all users?'; description = 'Checks MFA.'; remediation_tips = 'Enable conditional access. Then audit.'; scoring_instructions = 'Yes if 100%.'; criteria_list = @(@{ label_key = 'yes'; display_label = 'Yes'; is_selected = $false }, @{ label_key = 'no'; display_label = 'No'; is_selected = $true }); public_comment = @{ text = 'Two admins lack MFA' }; linked_initiatives = @(@{ initiative_name = 'MFA Rollout' }) },
+                        @{ title = 'MFA enforced for all users?'; assessment_template_question_id = 'tq-mfa-001'; description = 'Checks MFA.'; remediation_tips = 'Enable conditional access. Then audit.'; scoring_instructions = 'Yes if 100%.'; criteria_list = @(@{ label_key = 'yes'; display_label = 'Yes'; is_selected = $false }, @{ label_key = 'no'; display_label = 'No'; is_selected = $true }); public_comment = @{ text = 'Two admins lack MFA' }; linked_initiatives = @(@{ initiative_name = 'MFA Rollout' }) },
                         @{ title = 'Password policy set?'; description = 'Checks policy.'; criteria_list = @(@{ label_key = 'yes'; display_label = 'Yes'; is_selected = $true }, @{ label_key = 'partial'; display_label = 'Partially'; is_selected = $false }, @{ label_key = 'na'; display_label = 'Not Applicable'; is_selected = $false }) }) },
                 @{ title = 'Backup'; question_list = @(@{ title = 'Offsite backups tested?'; description = 'Restore test.'; criteria_list = @(@{ label_key = 'yes'; display_label = 'Yes'; is_selected = $false }, @{ label_key = 'no'; display_label = 'No'; is_selected = $false }) }) }) } }
     '/lifecycle-manager/v2/initiatives'                  = @{ data = @(@{ id = 'in1'; name = 'Workstation Replacement Q1'; status = 'Approved'; priority = 'High'; fiscal_quarter = @{ year = 2027; quarter = 1 } }); next_cursor = $null }
@@ -64,6 +81,8 @@ function Invoke-RestMethod {
         if ($env:FAIL_ROADMAP -and $u.AbsolutePath -eq '/lifecycle-manager/v2/initiatives') { throw 'HTTP 500: boom' }
         if ($env:INSIGHT_STRICT -and $u.AbsolutePath -eq '/lifecycle-manager/v1/insights' -and [uri]::UnescapeDataString($u.Query) -match 'eq:|page_size') { throw 'HTTP 422: Unprocessable Entity' }
         $v = $sp[$u.AbsolutePath]; if ($null -eq $v) { throw "unmocked SP $($u.AbsolutePath)" }
+        # SP_REWORD=1: ScalePad rewords two questions of the same template (one has a template question id, one doesn't).
+        if ($env:SP_REWORD -and $u.AbsolutePath -eq '/lifecycle-manager/v1/assessments/as1') { return (($v | ConvertTo-Json -Depth 20) -replace 'MFA enforced for all users\?', 'Is MFA enforced for every user?' -replace 'Password policy set\?', 'Is a password policy set?' | ConvertFrom-Json) }
         if ($env:SP_SSL_ONCE -and $u.AbsolutePath -eq '/core/v1/assets/hardware' -and [int](Get-Variable -Name SslN -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -lt [int]$env:SP_SSL_ONCE) { $global:SslN = 1 + [int](Get-Variable -Name SslN -Scope Global -ValueOnly -ErrorAction SilentlyContinue); $null = $global:MockWrites.Add('SSL fail once'); throw 'The SSL connection could not be established, see inner exception.' }
         if ($u.AbsolutePath -eq '/lifecycle-manager/v1/deliverables' -and $u.Query -match 'sort=') { $null = $global:MockWrites.Add('SP400 deliverables sort'); throw 'HTTP 400: sort field not allowed' }
         if ($u.AbsolutePath -eq '/lifecycle-manager/v1/assets/software' -and $u.Query -match 'page_size=(\d+)' -and [int]$Matches[1] -gt 100) { $null = $global:MockWrites.Add("SP400 software page_size $($Matches[1])"); throw 'HTTP 400: page_size must be <= 100' }
@@ -80,7 +99,7 @@ function Invoke-RestMethod {
         if ($u.AbsolutePath -eq '/v2/endpoint') { return [pscustomobject]@{ companyEndpointId = 9000 + $global:MockWrites.Count } }
         if ($u.AbsolutePath -eq '/v2/flexible-asset-type') { $global:FaTypeN = 1 + [int](Get-Variable -Name FaTypeN -Scope Global -ValueOnly -ErrorAction SilentlyContinue); return [pscustomobject]@{ id = 60 + $global:FaTypeN } }
         if ($env:FAIL_FAPATCH -and $u.AbsolutePath -like '/v2/flexible-asset/*') { throw 'HTTP 400: bad patch' }
-        if ($u.AbsolutePath -eq '/v2/assessment') { return [pscustomobject]@{ assessmentId = 555 } }
+        if ($u.AbsolutePath -eq '/v2/assessment') { throw 'HTTP 404: Not Found' }   # live 2026-10-02: there is no create route
         if ($env:ARCH_EMPTY -and $u.AbsolutePath -eq '/api/beta/archive') { $global:ArchMade = $true; return $null }
         if ($u.AbsolutePath -eq '/api/beta/archive') { return [pscustomobject]@{ id = 77; companyId = 9; name = 'ScalePad QBR History'; inboundAddress = 'contoso-qbr@archive.cloudradial.test' } }
         return [pscustomobject]@{ ok = $true }
@@ -105,7 +124,7 @@ function Invoke-RestMethod {
         '^/v2/odata/flexibleasset\?' { if ($env:FA_EXISTS -and $p -notmatch 'flexibleAssetTypeId eq 41') { return [pscustomobject]@{ value = @() } }; if ($env:FA_EXISTS) { return [pscustomobject]@{ value = @([pscustomobject]@{ id = 501; companyId = 9; flexibleAssetTypeId = 41; traitsJson = '{"name":"Draytek 2865","type":"Router","scalepad-id":"h4","model":"old"}' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/archiveitem' { if ($env:ARCH_HAS) { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportItemId = 1; subject = 'ScalePad - Q2 2026 QBR (2026-06-30).pdf' }, [pscustomobject]@{ companyReportItemId = 3; subject = 'ScalePad sync report'; text = 'old report' }, [pscustomobject]@{ companyReportItemId = 2; subject = 'Meeting - Q2 2026 QBR (2026-06-30)'; text = '<h2>Q2 2026 QBR</h2><p>old notes</p>' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/article' { if ($env:ART_EXISTS) { return [pscustomobject]@{ value = @([pscustomobject]@{ articleId = 555; subject = 'ScalePad sync report' }) } }; return [pscustomobject]@{ value = @() } }
-        '^/v2/odata/assessment' { return [pscustomobject]@{ value = @() } }
+        '^/v2/odata/assessment' { if ($p -match '\$select') { throw 'HTTP 500: Internal Server Error' }; if ($p -match '\$skip=[1-9]') { return [pscustomobject]@{ value = @() } }; return [pscustomobject]@{ value = @($global:MockAssessments) } }
         '^/v2/odata/product' { if ($env:PRODUCT_SELECT_FAIL -and $p -match 'summary') { throw 'HTTP 400: Could not find a property named summary' }; if ($env:PRODUCT_STORE) { return [pscustomobject]@{ value = @(Get-ProductStore) } }; return [pscustomobject]@{ value = @([pscustomobject]@{ productId = 301; subject = 'ScalePad Initiative - Workstation Replacement Q1'; status = 'InProgress' }, [pscustomobject]@{ productId = 302; subject = 'ScalePad Insight - Backups healthy'; status = 'Proposed' }) } }
         '^/api/beta/archive\?' { if ($env:ARCH_EMPTY -and (Get-Variable -Name ArchMade -Scope Global -ErrorAction SilentlyContinue)) { return @([pscustomobject]@{ id = 86; companyId = 9; name = 'ScalePad QBR History' }, [pscustomobject]@{ id = 87; companyId = 9; name = 'ScalePad Migration' }) }; return @() }
         default { throw "unmocked CR GET $p" }

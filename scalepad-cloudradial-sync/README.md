@@ -36,7 +36,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | `assets` | Other hardware: types `NETWORK`, `MOBILE`, `IMAGING`, plus workstations, servers and VMs with no serial number | One flexible asset type per kind of device (Infrastructure): Network Devices, Mobile Devices, Printers & Imaging, Storage Devices, Power Devices, Workstations (No Serial), Servers (No Serial), Virtual Machines (No Serial) or Other Hardware. Each type is created with its fields if missing: name, type, manufacturer, model, serial, warranty and purchase dates, location, assigned user and the ScalePad id. Matched on the ScalePad id, so re-runs update the row. Rows an earlier version wrote to the single **ScalePad Assets** type are moved to their device type; the report says when the old type can be deleted. |
 | `saas` | SaaS subscriptions (Microsoft 365, Google Workspace, ...) | CloudRadial's software records always belong to a device and its API has no SaaS or licence route, so each subscription becomes a row of a flexible asset type named **SaaS**: product, vendor, SKU, category, status, licences and assigned seats, term start, renewal date, auto-renew, billing, provider, tenant domain and the ScalePad id (the match key, so re-runs update). |
 | `software` | Installed software per device | One endpoint application per product per device (name, publisher, version), tagged *Added by ScalePad to CloudRadial Sync* in its comments. Devices that already have software in CloudRadial (usually from the RMM, which keeps its own list current) are left alone; otherwise a product is skipped when the device already has one with the same name, ignoring publisher and version. |
-| `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
+| `assessments` | Completed assessments, full question tree | One CloudRadial assessment per ScalePad assessment title, `ScalePad - <title>`, holding the newest evaluation. It's imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). The first run creates it. Later runs replace its answers in place when ScalePad has a newer evaluation. A person creates dated **runs** from it in the portal (see Notes; the API gap is AAI-125). Answers are scored +2 / +1 / 0 / −1 / −2. |
 | `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>`, updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
 | `insights` | Lifecycle Manager insights (High-risk, Warranty coverage, Hardware and Software modernization, Windows 11, Backup, Security, custom) | Each insight with affected assets becomes a **Proposed** Planner card `ScalePad Insight - <title>`: priority from the risk level, description, affected count, 30-day trend and, for hardware insights, the affected devices (up to 25). Re-runs refresh the text only, keeping any status or priority you set. Every insight, including clear ones, is listed in the report. |
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
@@ -67,7 +67,8 @@ The Sync is built to run again - by hand or as a daily/weekly **Routine** - with
 | Software | Devices that already have software from an RMM are left alone; devices the Sync created get any new ScalePad installs; a device whose software can't be read is skipped |
 | Roadmap cards | Budget, pricing and quarter kept current; **status and priority are set only when a card is created** |
 | Insight cards | Text refreshed; a card is **closed as Completed when its insight clears**, and reopened as Proposed if it comes back |
-| Assessments, PDFs | New ones added; existing ones skipped |
+| Assessments | One per ScalePad title; **answers replaced in place when ScalePad has a newer evaluation**, otherwise skipped |
+| PDFs | New ones added; existing ones skipped |
 | Meeting notes | New meetings added; an archived meeting is **refreshed when its notes, attendees or action items change** |
 | Migration report | **One "ScalePad sync report" item per company in the admin-only ScalePad Migration archive, updated each run** (`reportArticleTitle` renames it) |
 
@@ -128,12 +129,42 @@ All optional. With none, every name-matched company is migrated in apply mode.
 - **ScalePad software paging.** The installed-software list accepts `page_size` 100 at most (the other lists take 200); the step asks for 100. Any list that rejects 200 is retried at 100 automatically.
 
 - **Archive upload route.** `POST /api/beta/archive/{id}/item` takes the PDF as multipart/form-data. The create call doesn't always return the new archive's id, so the step looks the archive up again by name before uploading (a first live run uploaded to archive 0 and failed with "Sequence contains no elements").
-- **Assessment import `type`.** The upload's `data` part sends `type: 0`. If the import lands as a template instead of an assessment, change it in the assessments step.
-- **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
+- **Live test checklist** (before this leaves draft):
+  1. On a test company, run the `assessments` phase twice. The second run should skip the assessment as up to date.
+  2. Click Run in the portal and check that the run copies the answers.
+  3. ~~Compare question ids across two evaluations of the same `assessment_template_id`.~~ Done 2026-10-07: `assessment_template_question_id` is stable, and the Update Keys now use it (see Update Keys below).
+  4. Re-upload a workbook with one question left out, and see whether the old question stays.
+- **Assessment runs are created in the portal (draft, 2026-10-06; filed as AAI-125).** The sync keeps one assessment (type 20) per ScalePad title current. To record a dated run, a person opens it under **Compliance > Assessments** and clicks **Run**, which copies the current answers. The sync report lists this under Needs attention.
+  - The API can't create a run. The portal's Run button uses the portal's own API, which refuses API keys (HTTP 401), and v2 has no run endpoint.
+  - An uploaded run (type 30) gets its own `updateKey`, so it's never linked to its assessment, and the portal never shows it.
+- **How assessments are written.** The v2 API has no create route: `POST /v2/assessment` returns 404 (seen live on 2026-10-02). Like the portal's Import Assessment dialog, `POST /v2/assessment/upload` takes a multipart `data` part `{"name":"<title>","assessmentId":<0 or existing id>,"type":20,"companyId":<id>}` plus the `.xlsx`, and returns 204 with no body.
+  - `assessmentId` 0 creates the assessment. The step then lists `GET /v2/odata/assessment?$filter=companyId eq <id>` (no `$select`, which has returned 500) and matches the title and type 20, retrying after 3 and 10 seconds.
+  - An existing id replaces the answers in place: the same assessment, with no duplicate questions (verified live 2026-10-06).
+  - The upload sets category "Import" and can't set a description.
+- **Assessment type codes** are undocumented. From live data: 10 = template, 20 = assessment, 30 = run. The portal lists only type 20, so the step matches only type 20 rows. A `type: 0` upload is listed by the API but never shown.
+- **When an assessment is refreshed.** Only the newest ScalePad evaluation of each title is used. Older ones are listed in the run output as skipped. The upload happens only when ScalePad's `updated_at` (or `evaluated_at`) is later than the CloudRadial assessment's `dateModified`.
+- **Update Keys.** CloudRadial matches questions on re-upload by the workbook's per-question **Update Key**. The step derives it from the assessment title and ScalePad's `assessment_template_question_id`.
+  - **That id is stable.** A live check on 2026-10-07 compared 3 templates with 2 evaluations each, and every question had the same `assessment_template_question_id` in both. In one template, 2 of 16 question titles differed while the ids still matched. So a question ScalePad rewords keeps its key and its place in the assessment.
+  - **Fallback.** A question with no `assessment_template_question_id` is keyed on its category and text instead, so rewording it makes a new question.
+  - **Untested:** what a re-upload does with a question that is missing from the new workbook. The upload probably adds and updates questions without deleting any. A question removed from the ScalePad template, or a reworded one without an id, would then leave a stale copy with its old answer, which someone can delete in the portal.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).
 - **Devices created from ScalePad** have no RMM agent until one is deployed, they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.
 
-## Tested (mocked ScalePad and CloudRadial APIs, 2026-09-25)
+## Tested (mocked ScalePad and CloudRadial APIs, 2026-09-25 to 2026-10-06)
+
+**Assessments refreshed in place (2026-10-06):** the mocks were:
+- `POST /v2/assessment` returns 404, and `$select` on the assessment list returns 500.
+- ScalePad has two evaluations of one title.
+- CloudRadial has a type 30 run and a hidden type 0 row with that title.
+
+Results:
+- **New:** the step uploaded the newest evaluation once (`assessmentId` 0, `type` 20), found the new id by title, and skipped the older evaluation. It never matched the type 30 or type 0 row.
+- **Existing assessment changed after the evaluation** (different case, trailing space): skipped as up to date, with no upload.
+- **Existing assessment older than the evaluation:** answers re-uploaded into its id.
+- **New assessment not listed yet:** retried twice, counted as imported, warned.
+- **Workbook:** every question carries an Update Key. With ScalePad rewording two questions (harness `SP_REWORD=1`), the one with an `assessment_template_question_id` kept its key, the one without changed, and an unchanged question kept its key (2026-10-07).
+- **Report:** says to create the run in the portal.
+- **Full flow:** ran end to end. The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live (a test assessment imported all its questions and answers); inline strings were never tried against the importer. Read back, the generated workbook had all 51 template columns, with every shared string resolving to its value.
 
 **Flexible assets by device type (third pass):** with a network device already in the old ScalePad Assets type, the `assets` phase created a Network Devices type and a Workstations (No Serial) type, moved the network device (created in the new type, then deleted from the old one), and created the no-serial workstation. With the ScalePad hardware read failing on a TLS error five times in a row, the requests retried and the devices step then ran again for the company and completed.
 

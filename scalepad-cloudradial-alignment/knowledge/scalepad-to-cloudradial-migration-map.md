@@ -60,7 +60,7 @@ Everything below is reachable through the ScalePad API — no exports or files. 
 | Initiatives | Planner items, `productType = 1`, `scheduledQuarter` = Nth upcoming quarter (`-1` = completed) | `POST` / `PATCH /v2/product` | n/a |
 | Initiative budget | Priced Planner items — one-time → `projectUnitPrice`, recurring → `monthlyUnitPrice` | same | n/a |
 | Contracts | Planner items (or `service` + `serviceinstall`) | `/v2/product` | Partial |
-| Assessments | CloudRadial assessment | `POST /v2/assessment` then `POST /v2/assessment/upload` (Excel) | Its own scoring model |
+| Assessments | CloudRadial assessment | `POST /v2/assessment/upload` (Excel, type 20: `assessmentId` 0 creates, an existing id refreshes in place; runs are made in the portal) | Its own scoring model |
 | Other hardware — `NETWORK`, `MOBILE`, `IMAGING`, and devices with no serial | **Flexible asset** — one type per kind of device (*Network Devices*, *Mobile Devices*, *Printers & Imaging*, …) | `POST /v2/flexible-asset-type` (with fields), `POST /v2/flexible-asset`, `PATCH /v2/flexible-asset/{id}` | ❌ Display only |
 | SSL certs / domains | `certificate` / `domain` | `POST /v2/certificate`, `/v2/domain` | ✅ Certificate / Domain Expiration |
 | QBR / deliverable PDFs | **Report Archive** | `POST /api/beta/archive/{archiveId}/item` | n/a |
@@ -114,8 +114,20 @@ Skip a product that's already on that endpoint (same name and publisher). Large 
 
 CloudRadial imports assessments only from Excel (support KB 360052746791, *Importing Assessments*). The file can be built in memory by the workflow — no storage needed.
 
-1. Create the assessment: `POST /v2/assessment` with `companyId`, `title`, `category`, `description` → `assessmentId`. (Not in the published v2 spec, but used by the Microsoft Security Assessment workflow.)
-2. Upload the questions: `POST /v2/assessment/upload`, multipart — part `data` = `{ name, assessmentId, type, companyId }` JSON, part `file` = the `.xlsx` (content type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`). **[verify]** the meaning of `type` (0 is used).
+1. **Find the company's assessment:** list `GET /v2/odata/assessment?$filter=companyId eq <id>` (no `$select`, which has returned 500). Match the title (`ScalePad - <title>`) and **type 20**.
+2. **Upload:** `POST /v2/assessment/upload`, multipart.
+   - Part `data` = `{"name":"<title>","assessmentId":<0 or existing id>,"type":20,"companyId":<id>}` JSON.
+   - Part `file` = the `.xlsx` (content type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`).
+   - `assessmentId` 0 creates the assessment titled by `name`. Find the new id by listing again (step 1), retrying a few times.
+   - An existing id replaces the answers in place: the same row, no duplicate questions (live, 2026-10-06).
+   - It returns 204 with no body.
+   - There is no create route: `POST /v2/assessment` returns 404 (seen live on 2026-10-02). The upload sets `category` to "Import" and can't set a description.
+3. **Update Key:** give every question a stable value in the workbook's **Update Key** column. CloudRadial matches questions by it on re-upload.
+4. **Runs are created in the portal.** The type codes are undocumented. From live data: 10 = template, 20 = assessment, 30 = run.
+   - The portal lists only type 20 assessments.
+   - A run shows only when it shares its assessment's `updateKey`. The upload ignores `updateKey`, so an uploaded type 30 run never shows.
+   - A `type: 0` upload never shows either.
+   - The portal's Run button uses the portal's own API, which refuses API keys (HTTP 401). So a person clicks **Run** on the assessment, which copies its current answers.
 
 | CloudRadial column | From ScalePad |
 |---|---|

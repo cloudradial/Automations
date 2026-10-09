@@ -86,17 +86,17 @@ $global:TCw = @{ tickets = $TCwTickets; failFind = 0; failPatch = ''; failNotes 
 $TCwHandler = { param($c, $n)
     $u = [uri]::UnescapeDataString($c.Uri)
     if ($c.Uri -like 'https://api.postmarkapp.com/email') { if ($global:TCw.pm) { New-HttpError $global:TCw.pm '{"ErrorCode":10,"Message":"Bad token"}' }; return [pscustomobject]@{ ErrorCode = 0; MessageID = 'm1' } }
-    if ($c.Method -eq 'GET' -and $u -like '*/service/tickets[?]*') { if ($global:TCw.failFind) { New-HttpError $global:TCw.failFind '{"message":"denied"}' }; return @($global:TCw.tickets) }
+    if ($c.Method -eq 'GET' -and $u -like '*/service/tickets[?]*') { if ($global:TCw.failFind) { New-HttpError $global:TCw.failFind '{"message":"denied"}' }; return , @($global:TCw.tickets) }
     if ($c.Method -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes\?') {
         $TTid = $Matches[1]
         if ($global:TCw.failNotes -eq $TTid) { New-HttpError 500 'oops' }
         $TBase = if ($TTid -eq '2004') { [pscustomobject]@{ id = 1; text = '[Auto-Escalation] This ticket was escalated automatically.'; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 200) } } else { [pscustomobject]@{ id = 1; text = 'Customer called'; internalAnalysisFlag = $false; dateCreated = (Get-TAgo 500) } }
         # Notes this test has POSTed are on the ticket too, so a rerun sees them (as the PSA would).
         $TPosted = @($Mock.Calls | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like "*/service/tickets/$TTid/notes" } | ForEach-Object { [pscustomobject]@{ id = 50; text = (Read-Body $_).text; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 0) } })
-        return @(@($TBase) + $TPosted)
+        return , @(@($TBase) + $TPosted)
     }
-    if ($u -like '*/company/companies*') { if ($u -match 'name="Contoso Ltd"') { return @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return @() }
-    if ($u -like '*/service/SLAs/5/priorities*') { return @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
+    if ($u -like '*/company/companies*') { if ($u -match 'name="Contoso Ltd"') { return , @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return , @() }
+    if ($u -like '*/service/SLAs/5/priorities*') { return , @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
     if ($u -like '*/service/SLAs/5') { return [pscustomobject]@{ id = 5; respondHours = 4; resolutionHours = 24 } }
     if ($c.Method -eq 'PATCH' -and $u -match '/service/tickets/(\d+)$') { if ($global:TCw.failPatch -eq $Matches[1]) { New-HttpError 403 '{"message":"denied"}' }; return [pscustomobject]@{ id = [int]$Matches[1] } }
     if ($c.Method -eq 'POST' -and $u -match '/service/tickets/(\d+)/notes$') { return [pscustomobject]@{ id = 99 } }
@@ -302,7 +302,7 @@ Check 'Overlapping runs: the second run says so in plain words' ($TB.status -eq 
 # The marker note can't be written: fail closed, the ticket isn't moved.
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler { param($c, $n)
     if ($c.Method -eq 'POST' -and $c.Uri -like '*/service/tickets/2001/notes') { New-HttpError 403 '{"message":"denied"}' }
-    return (& $TCwHandler $c $n)
+    $TRes = & $TCwHandler $c $n; if ($TRes -is [array]) { return , $TRes }; return $TRes
 }
 $TR = Invoke-Flow $TBody
 Check 'Marker note refused (403): 2001 is not moved, the run is incomplete and says why' ($TR.out.status -eq 'incomplete' -and @(Get-Calls PATCH '*/2001').Count -eq 0 -and @(Get-Calls PATCH '*/2007').Count -eq 2 -and (Get-TEsc $TR '2001').error -match 'permission to add ticket notes' -and $TR.out.message -match '1 escalation note could not be added, so that ticket was not moved') "$($TR.out.message) | $((Get-TEsc $TR '2001') | ConvertTo-Json -Compress)"

@@ -51,10 +51,12 @@ function Get-Companies {
     return $rows
 }
 
+# Like the real cmdlet, a JSON array reply is handed back as ONE object (", @(...)"), not item by item, and
+# -MaximumRedirection is accepted (recorded as MaxRedirect, -1 when not sent) so the shared PSA code takes its no-redirect path.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
     $m = ([string]$Method).ToUpperInvariant(); $u = [uri]::UnescapeDataString([string]$Uri)
-    $null = $Mock.Calls.Add([pscustomobject]@{ Method = $m; Uri = $u; Body = $(if ($Body -is [string]) { $Body } else { '' }) })
+    $null = $Mock.Calls.Add([pscustomobject]@{ MaxRedirect = $MaximumRedirection; Method = $m; Uri = $u; Body = $(if ($Body -is [string]) { $Body } else { '' }) })
     $page = { param($rows) if ($u -match 'skip=(\d+)' -and [int]$Matches[1] -gt 0) { return [pscustomobject]@{ value = @() } }; return [pscustomobject]@{ value = @($rows) } }
     # ---- CloudRadial ----
     if ($u -like "$CR/v2/odata/company[?]*" -and $m -eq 'GET') {
@@ -79,33 +81,33 @@ function Invoke-RestMethod {
         return [pscustomobject]@{ data = [pscustomobject]@{ companyDomainId = 44 } }
     }
     if ($u -eq "$CR/v2/companygroupcompany" -and $m -eq 'POST') { return [pscustomobject]@{ companyGroupId = 5; companyId = 9001 } }
-    if ($u -like "$CR/api/beta/archive*" -and $m -eq 'GET') { return @() }
+    if ($u -like "$CR/api/beta/archive*" -and $m -eq 'GET') { return , @() }
     if ($u -eq "$CR/api/beta/archive" -and $m -eq 'POST') { return [pscustomobject]@{ id = 66 } }
     if ($u -like "$CR/v2/odata/archiveitem*") { return [pscustomobject]@{ value = @() } }
     if ($u -eq "$CR/v2/archiveitem" -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
     # ---- ConnectWise ----
     if ($u -like "$CW/company/companies[?]*") {
-        if ($Mock.Opt.Contains('PsaNone')) { return @() }
-        if ($Mock.Opt.Contains('PsaTwo')) { return @([pscustomobject]@{ id = 250; name = 'Contoso Ltd'; identifier = 'ContosoLtd' }, [pscustomobject]@{ id = 251; name = 'Contoso Ltd'; identifier = 'ContosoLtd2' }) }
-        if ($u -like '*name contains*') { return @() }
-        return @([pscustomobject]@{ id = 250; name = 'Contoso Ltd'; identifier = 'ContosoLtd' })
+        if ($Mock.Opt.Contains('PsaNone')) { return , @() }
+        if ($Mock.Opt.Contains('PsaTwo')) { return , @([pscustomobject]@{ id = 250; name = 'Contoso Ltd'; identifier = 'ContosoLtd' }, [pscustomobject]@{ id = 251; name = 'Contoso Ltd'; identifier = 'ContosoLtd2' }) }
+        if ($u -like '*name contains*') { return , @() }
+        return , @([pscustomobject]@{ id = 250; name = 'Contoso Ltd'; identifier = 'ContosoLtd' })
     }
-    if ($u -like "$CW/service/priorities*") { return @([pscustomobject]@{ id = 8; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 6; name = 'Priority 1 - Emergency Response' }) }
+    if ($u -like "$CW/service/priorities*") { return , @([pscustomobject]@{ id = 8; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 6; name = 'Priority 1 - Emergency Response' }) }
     if ($u -eq "$CW/service/tickets" -and $m -eq 'POST') { return [pscustomobject]@{ id = 5150 } }
     if ($u -like "$CW/service/tickets/*/notes" -and $m -eq 'POST') { $bo = $Body | ConvertFrom-Json; Add-MockNote ($u -split '/')[-2] $bo.text ([bool]$bo.detailDescriptionFlag); return [pscustomobject]@{ id = 1 } }
-    if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
+    if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return , @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
     if ($m -eq 'GET' -and $u -like "$CW/service/tickets[?]conditions=*") {
         if ($Mock.Opt.Contains('ListFail')) { New-HttpError 500 '{"message":"Mock list error"}' }
         $rows = @([pscustomobject]@{ id = 3001; summary = 'New client onboarding: Fabrikam Inc'; company = [pscustomobject]@{ id = 250 }; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } })
         if ($Mock.Opt.Contains('OpenTicket')) { $rows += [pscustomobject]@{ id = 5150; summary = 'New client onboarding: Contoso Ltd'; company = [pscustomobject]@{ id = 250 }; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } } }
         $rows += [pscustomobject]@{ id = 3002; summary = 'New client onboarding: Contoso Ltd'; company = [pscustomobject]@{ id = 999 }; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }
-        return $rows
+        return , $rows
     }
     # ---- HaloPSA ----
     if ($u -eq "$HALO/auth/token") { return [pscustomobject]@{ access_token = 'mock' } }
     if ($u -like "$HALO/api/Client[?]*") { return [pscustomobject]@{ clients = @([pscustomobject]@{ id = 31; name = 'Contoso Ltd' }, [pscustomobject]@{ id = 32; name = 'Contoso Ltd Holdings' }) } }
-    if ($u -eq "$HALO/api/Tickets" -and $m -eq 'POST') { return @([pscustomobject]@{ id = 8080 }) }
-    if ($u -eq "$HALO/api/Actions" -and $m -eq 'POST') { $bo = @($Body | ConvertFrom-Json)[0]; Add-MockNote ([string]$bo.ticket_id) $bo.note (-not $bo.hiddenfromuser); return @([pscustomobject]@{ id = 1 }) }
+    if ($u -eq "$HALO/api/Tickets" -and $m -eq 'POST') { return , @([pscustomobject]@{ id = 8080 }) }
+    if ($u -eq "$HALO/api/Actions" -and $m -eq 'POST') { $bo = @($Body | ConvertFrom-Json)[0]; Add-MockNote ([string]$bo.ticket_id) $bo.note (-not $bo.hiddenfromuser); return , @([pscustomobject]@{ id = 1 }) }
     if ($m -eq 'GET' -and $u -match "^$([regex]::Escape($HALO))/api/Actions[?]ticket_id=(\d+)") { $i = 0; return [pscustomobject]@{ actions = @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; note = $_.text; hiddenfromuser = (-not $_.public) } }) } }
     if ($m -eq 'GET' -and $u -like "$HALO/api/Tickets[?]*") { return [pscustomobject]@{ tickets = @(); record_count = 0 } }
     # ---- Microsoft Graph (read only) ----
@@ -206,6 +208,7 @@ Check 'confirm: baseline report in the Onboarding archive' ($ab.Count -eq 1 -and
 Check 'confirm: archive created as Onboarding' (((Get-Calls POST "$CR/api/beta/archive")[0].Body | ConvertFrom-Json).name -eq 'Onboarding') ''
 $nb = (Get-Calls POST "$CW/service/tickets/5150/notes")[0].Body | ConvertFrom-Json
 Check 'confirm: CW internal note with the baseline' ($nb.internalAnalysisFlag -eq $true -and $nb.text -match 'CA001 - Require MFA for admins' -and $nb.text -match 'no sync call') ''
+Check 'ConnectWise calls are sent with -MaximumRedirection 0' ((@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' }).Count -gt 0) -and -not @($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' -and $_.MaxRedirect -ne 0 }).Count) (@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' } | ForEach-Object { "$($_.Method) $($_.MaxRedirect)" }) -join ', ')
 Check 'confirm: message plain' ($o.message -eq 'Created CloudRadial company 9001 for Contoso Ltd, linked to ConnectWise company 250 and opened onboarding ticket 5150 with a 10-item checklist. The Microsoft 365 baseline was prepared but not applied.') $o.message
 Check 'confirm: ticket_id output' ($o.ticket_id -eq '5150' -and $o.company_id -eq 9001) ''
 Check 'confirm: no Graph writes' (@($Mock.Calls | Where-Object { $_.Uri -like 'https://graph.*' -and $_.Method -ne 'GET' }).Count -eq 0) ''

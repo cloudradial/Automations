@@ -58,7 +58,7 @@ $Handler = {
     $k = "$($c.Method) $($c.Uri)"
     switch -Wildcard -CaseSensitive ($k) {
         "POST $TPM" { if ($TScenario.postmarkFail) { New-HttpError $TScenario.postmarkFail '{"ErrorCode":300,"Message":"Invalid email request"}' }; return [pscustomobject]@{ MessageID = 'pm-0001'; ErrorCode = 0 } }
-        "GET $TCW/service/tickets/1001/notes*" { return @($TScenario.cwNotes) }
+        "GET $TCW/service/tickets/1001/notes*" { return , @($TScenario.cwNotes) }
         "GET $TCW/service/tickets/1001" { if ($TScenario.readFail) { New-HttpError $TScenario.readFail '{"message":"You do not have access to this record."}' }; return [pscustomobject]@{ id = 1001; summary = 'Email is down for the whole office'; company = [pscustomobject]@{ id = 42 }; status = [pscustomobject]@{ name = 'New' }; owner = $null } }
         "POST $TCW/service/tickets/1001/notes" { if ($TScenario.noteFail) { New-HttpError $TScenario.noteFail '{"message":"Insufficient security level"}' }; return [pscustomobject]@{ id = 9001 } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(

@@ -99,18 +99,18 @@ $Handler = {
             if ($TScenario.empty) { return [pscustomobject]@{ value = @() } }
             return [pscustomobject]@{ value = @($m) }
         }
-        "GET $TCW/service/priorities*" { return @([pscustomobject]@{ id = 1; name = 'Priority 1 - Emergency Response' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - Quick Response' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 4; name = 'Priority 4 - Schedule Maintenance' }) }
-        "GET $TCW/company/companies*" { return @([pscustomobject]@{ id = 43; name = 'Contoso Ltd' }, [pscustomobject]@{ id = 42; name = 'Contoso' }) }
-        "GET $TCW/service/tickets/777/notes*" { return @([pscustomobject]@{ id = 1; text = "Please check this.`n---------- Forwarded message ----------`nFrom: Microsoft 365 Security <alerts@c0ntoso.com>`nSubject: Your password expires today`nMessage-ID: <phish-0001@c0ntoso.com>" }) }
+        "GET $TCW/service/priorities*" { return , @([pscustomobject]@{ id = 1; name = 'Priority 1 - Emergency Response' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - Quick Response' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 4; name = 'Priority 4 - Schedule Maintenance' }) }
+        "GET $TCW/company/companies*" { return , @([pscustomobject]@{ id = 43; name = 'Contoso Ltd' }, [pscustomobject]@{ id = 42; name = 'Contoso' }) }
+        "GET $TCW/service/tickets/777/notes*" { return , @([pscustomobject]@{ id = 1; text = "Please check this.`n---------- Forwarded message ----------`nFrom: Microsoft 365 Security <alerts@c0ntoso.com>`nSubject: Your password expires today`nMessage-ID: <phish-0001@c0ntoso.com>" }) }
         "GET $TCW/service/tickets/777" { return [pscustomobject]@{ id = 777; summary = 'FW: Your password expires today'; company = [pscustomobject]@{ id = 42 }; owner = $null; status = [pscustomobject]@{ name = 'New' } } }
         # Tickets and notes the workflow writes are kept in $TState, so a rerun sees what the first run wrote.
         "POST $TCW/service/tickets" {
             $null = $TState.tickets.Add([pscustomobject]@{ id = 501; summary = (Read-Body $c).summary; company = [pscustomobject]@{ id = 42 }; closedFlag = $false; dateEntered = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); status = [pscustomobject]@{ name = 'New' } })
             return [pscustomobject]@{ id = 501 }
         }
-        "GET $TCW/service/tickets[?]*" { if ($TScenario.findFail) { New-HttpError 403 '{"message":"Not allowed"}' }; if ($c.Uri -like '*page=1') { return @($TState.tickets) }; return @() }
+        "GET $TCW/service/tickets[?]*" { if ($TScenario.findFail) { New-HttpError 403 '{"message":"Not allowed"}' }; if ($c.Uri -like '*page=1') { return , @($TState.tickets) }; return , @() }
         "POST $TCW/service/tickets/*/notes" { $b = Read-Body $c; Add-TNote ($c.Uri -replace '^.*/tickets/(\d+)/notes$', '$1') ([pscustomobject]@{ id = 9001; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag }); return [pscustomobject]@{ id = 9001 } }
-        "GET $TCW/service/tickets/*/notes*" { if ($c.Uri -like '*page=1') { return @(Get-TNotes ($c.Uri -replace '^.*/tickets/(\d+)/notes.*$', '$1')) }; return @() }
+        "GET $TCW/service/tickets/*/notes*" { if ($c.Uri -like '*page=1') { return , @(Get-TNotes ($c.Uri -replace '^.*/tickets/(\d+)/notes.*$', '$1')) }; return , @() }
         "GET $TAT/TicketNotes/query*" { return [pscustomobject]@{ items = @(Get-TNotes '12345'); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },

@@ -55,22 +55,24 @@ function Get-TicketsFor {
     }
 }
 
+# Like the real cmdlet, a JSON array reply is handed back as ONE object (", @(...)"), not item by item, and
+# -MaximumRedirection is accepted (recorded as MaxRedirect, -1 when not sent) so the shared PSA code takes its no-redirect path.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
     $m = ([string]$Method).ToUpperInvariant(); $u = [string]$Uri; $d = [uri]::UnescapeDataString($u)
-    $null = $Mock.Calls.Add([pscustomobject]@{ Method = $m; Uri = $u; Decoded = $d; Body = $(if ($Body -is [string]) { $Body } else { '' }); Headers = $Headers })
+    $null = $Mock.Calls.Add([pscustomobject]@{ MaxRedirect = $MaximumRedirection; Method = $m; Uri = $u; Decoded = $d; Body = $(if ($Body -is [string]) { $Body } else { '' }); Headers = $Headers })
     # Postmark
     if ($u -eq 'https://api.postmark.test/email' -and $m -eq 'POST') {
         if ($Mock.Opt.Contains('PostmarkRefuse')) { return [pscustomobject]@{ ErrorCode = 300; Message = 'Invalid ''From'' address.' } }
         return [pscustomobject]@{ ErrorCode = 0; Message = 'OK'; MessageID = 'msg-1' }
     }
     # ConnectWise
-    if ($u -like 'https://cw.example-msp.test/v4_6_release/apis/3.0/service/tickets[?]*' -and $m -eq 'GET') { if ($d -like '*page=1*') { return @(Get-TicketsFor 'cw') }; return @() }
+    if ($u -like 'https://cw.example-msp.test/v4_6_release/apis/3.0/service/tickets[?]*' -and $m -eq 'GET') { if ($d -like '*page=1*') { return , @(Get-TicketsFor 'cw') }; return , @() }
     if ($u -like 'https://cw.example-msp.test/v4_6_release/apis/3.0/time/entries[?]*') {
         if ($Mock.Opt.Contains('Time403')) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to this resource."}' }
-        if ($d -match 'chargeToId=101') { return @(J @{ id = 1; actualHours = 1.5; notes = $LongNote; internalNotes = ''; billableOption = 'Billable'; member = @{ identifier = 'jlee'; name = 'Jordan Lee' }; timeStart = (Get-At 9) }) }
-        if ($d -match 'chargeToId=103') { return @(J @{ id = 3; actualHours = 0.5; notes = 'fixed'; internalNotes = 'ok'; billableOption = $null; member = @{ identifier = 'slee'; name = 'Sam Lee' }; timeStart = (Get-At 9) }) }
-        return @()
+        if ($d -match 'chargeToId=101') { return , @(J @{ id = 1; actualHours = 1.5; notes = $LongNote; internalNotes = ''; billableOption = 'Billable'; member = @{ identifier = 'jlee'; name = 'Jordan Lee' }; timeStart = (Get-At 9) }) }
+        if ($d -match 'chargeToId=103') { return , @(J @{ id = 3; actualHours = 0.5; notes = 'fixed'; internalNotes = 'ok'; billableOption = $null; member = @{ identifier = 'slee'; name = 'Sam Lee' }; timeStart = (Get-At 9) }) }
+        return , @()
     }
     # Autotask
     $at = 'https://webservices.example-msp.test/atservicesrest/v1.0'
@@ -158,6 +160,7 @@ Check 'cw: status success' ($o.status -eq 'success') $o.status
 Check 'cw: three tickets reviewed' ($o.counts.tickets_closed -eq 3 -and $o.counts.tickets_checked -eq 3) ($o.counts | ConvertTo-Json -Compress)
 Check 'cw: 102 closed with no time' (((Get-Issues $o 'no_time') -join ',') -eq '102') ((Get-Issues $o 'no_time') -join ',')
 Check 'cw: 103 short note' (((Get-Issues $o 'short_note') -join ',') -eq '103') ((Get-Issues $o 'short_note') -join ',')
+Check 'ConnectWise calls are sent with -MaximumRedirection 0' ((@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' }).Count -gt 0) -and -not @($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' -and $_.MaxRedirect -ne 0 }).Count) (@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' } | ForEach-Object { "$($_.Method) $($_.MaxRedirect)" }) -join ', ')
 Check 'cw: 103 missing billable' (((Get-Issues $o 'missing_billable') -join ',') -eq '103') ''
 Check 'cw: longer of notes and internal notes used' (@($o.findings | Where-Object { $_.issue -eq 'short_note' })[0].detail -match 'only 5 characters') @($o.findings)[1].detail
 $cond = @(Get-Calls GET 'https://cw.example-msp.test/*/service/tickets[?]*')[0].Decoded

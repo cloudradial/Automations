@@ -83,13 +83,13 @@ $Handler = {
     $k = "$($c.Method) $($c.Uri)"
     switch -Wildcard -CaseSensitive ($k) {
         # ---- ConnectWise ----
-        "GET $TCW/company/companies*" { if ([uri]::UnescapeDataString($c.Uri) -like "*Contoso*") { return @([pscustomobject]@{ id = 42; name = 'Contoso' }) }; return @() }
-        "GET $TCW/service/tickets/*/configurations*" { return @() }
-        "GET $TCW/service/tickets/*/notes*" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; if ($c.Uri -notlike '*page=1' -and $c.Uri -like '*page=*') { return @() }; return @(@([pscustomobject]@{ id = 1; text = $TDesc[$id]; internalAnalysisFlag = $false; detailDescriptionFlag = $true }) + @(TNote $id | ForEach-Object { [pscustomobject]@{ id = 2; text = $_; internalAnalysisFlag = $true; detailDescriptionFlag = $false } })) }
+        "GET $TCW/company/companies*" { if ([uri]::UnescapeDataString($c.Uri) -like "*Contoso*") { return , @([pscustomobject]@{ id = 42; name = 'Contoso' }) }; return , @() }
+        "GET $TCW/service/tickets/*/configurations*" { return , @() }
+        "GET $TCW/service/tickets/*/notes*" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; if ($c.Uri -notlike '*page=1' -and $c.Uri -like '*page=*') { return , @() }; return , @(@([pscustomobject]@{ id = 1; text = $TDesc[$id]; internalAnalysisFlag = $false; detailDescriptionFlag = $true }) + @(TNote $id | ForEach-Object { [pscustomobject]@{ id = 2; text = $_; internalAnalysisFlag = $true; detailDescriptionFlag = $false } })) }
         "GET $TCW/service/tickets?conditions=*" {
             if ($TS.list403) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to Service Tickets."}' }
-            if ($TS.empty) { return @() }
-            return @($TCwTickets['1004'], $TCwTickets['1003'], $TCwTickets['1002'], $TCwTickets['1001'])
+            if ($TS.empty) { return , @() }
+            return , @($TCwTickets['1004'], $TCwTickets['1003'], $TCwTickets['1002'], $TCwTickets['1001'])
         }
         "GET $TCW/service/tickets/*" { $id = ($c.Uri -split '/service/tickets/')[1].Split('?')[0]; if ($TCwTickets.Contains($id)) { return $TCwTickets[$id] }; New-HttpError 404 '{"message":"Ticket not found"}' }
         "POST $TCW/service/tickets/*/notes" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; $null = (TNote $id).Add((Read-Body $c).text); return [pscustomobject]@{ id = 9001 } }
@@ -119,8 +119,8 @@ $Handler = {
         "GET $THA/api/Client?search=*" { return [pscustomobject]@{ clients = @([pscustomobject]@{ id = 42; name = 'Contoso' }) } }
         "GET $THA/api/Tickets/4001?includedetails=true" { return [pscustomobject]@{ id = 4001; summary = 'Teams calls dropping'; details = 'Teams calls drop after a minute.'; client_id = 42; status_id = 1; user_id = 5; dateoccurred = (TAgo 0.1); agent_id = $null } }
         "GET $THA/api/Tickets?*client_id=42*" { return [pscustomobject]@{ record_count = 1; tickets = @([pscustomobject]@{ id = 4000; summary = 'Teams calls drop'; details = 'Calls in Teams drop.'; client_id = 42; status_id = 1; user_id = 6; dateoccurred = (TAgo 1); hasbeenclosed = $false }) } }
-        "POST $THA/api/Tickets" { return @([pscustomobject]@{ id = 4001 }) }
-        "POST $THA/api/Actions" { $b = @(Read-Body $c)[0]; $null = (TNote ([string]$b.ticket_id)).Add($b.note); return @([pscustomobject]@{ id = 1 }) }
+        "POST $THA/api/Tickets" { return , @([pscustomobject]@{ id = 4001 }) }
+        "POST $THA/api/Actions" { $b = @(Read-Body $c)[0]; $null = (TNote ([string]$b.ticket_id)).Add($b.note); return , @([pscustomobject]@{ id = 1 }) }
         "GET $THA/api/Actions?ticket_id=*" { $tid = (($c.Uri -split 'ticket_id=')[1] -split '&')[0]; return [pscustomobject]@{ actions = @(TNote $tid | ForEach-Object { [pscustomobject]@{ id = 1; note = $_; hiddenfromuser = $true; datetime = (TAgo 0) } }) } }
         # ---- Zendesk ----
         "GET $TZD/organizations/autocomplete*" { return [pscustomobject]@{ organizations = @([pscustomobject]@{ id = 42; name = 'Contoso' }) } }

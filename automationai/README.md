@@ -42,6 +42,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`scalepad-cloudradial-alignment/`](scalepad-cloudradial-alignment/) | Agent + workflow + Knowledge (optional review before a Sync) |
 | [`scalepad-cloudradial-sync/`](scalepad-cloudradial-sync/) | Workflow |
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Agent + workflows + Knowledge |
+| [`stale-guest-cleanup/`](stale-guest-cleanup/) | Workflow (no AI; monthly Routine, disables only confirmed accounts) |
 | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Workflow (no-AI audit, sent by Deliver Result) |
 
 ## Conventions

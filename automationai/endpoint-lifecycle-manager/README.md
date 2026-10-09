@@ -22,6 +22,8 @@ These links point at the `main` branch, so they always open the current version.
 | Download `endpoint-lifecycle-manager-ai.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) |
 | View `knowledge/endpoint-refresh-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
 | Download `knowledge/endpoint-refresh-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
+| View `knowledge/endpoint-refresh-pricing.md` (your pricing, and the Routine input to paste) | [GitHub](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) |
+| Download `knowledge/endpoint-refresh-pricing.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) |
 | All files in this automation | [automationai/endpoint-lifecycle-manager](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/automationai/endpoint-lifecycle-manager) |
 | Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager/src) |
@@ -47,6 +49,7 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 | [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | Optional. The same rules as an AI agent (slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.3), for asking questions in the AI Playground. |
 | [`endpoint-lifecycle-manager-ai.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) | `automationsWorkflow` | Optional. Runs the agent with a goal. It handles up to 3 companies per run and is subject to the runner's 25-turn limit, so prefer the PowerShell workflow for scheduled runs. |
 | [`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) | Knowledge | The refresh standards in plain language: age, warranty, OS support, RAM, category rules, priority tiers and roadmap quarters, with one table of adjustable values. See [Adjusting the standards](#adjusting-the-standards). |
+| [`knowledge/endpoint-refresh-pricing.md`](https://github.com/cloudradial/Automations/blob/main/automationai/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) | Knowledge | Your pricing in plain language: replacement models, upgrade and repair parts, labour hours and rate, with the matching Routine input to paste. See [Pricing the cards](#pricing-the-cards). |
 | [`src/`](https://github.com/cloudradial/Automations/tree/main/automationai/endpoint-lifecycle-manager/src) | Source | `elm.ps1` (the PowerShell step), a mocked test harness, and the script that embeds it into the `.yml`. See [Changing the workflow](#changing-the-workflow). |
 
 ## Install / run
@@ -68,7 +71,7 @@ All optional. Send them as the run's Trigger input or the Routine input.
 | `closeEmptyCards` | `true` | Close a card when its category has no computers left. |
 | `scheduleOnRoadmap` | `false` | Put cards on the Planner roadmap by urgency (Critical and High, Human review and Needs data in the next quarter; Medium the one after; Low the third). |
 
-| `pricing` | none | Your approved models and labour rate, so replacement cards carry an estimated cost. See [Pricing the cards](#pricing-the-cards). |
+| `pricing` | none | Your approved models, parts, labour hours and rate, so cards carry an estimated cost. See [Pricing the cards](#pricing-the-cards). |
 
 Example: `{"companyIds": "1,4", "mode": "plan"}`
 
@@ -88,6 +91,19 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
       "Windows desktop": { "model": "Dell OptiPlex 7020", "price": 1050, "cost": 850 },
       "Mac laptop":      { "model": "MacBook Air 13 M4", "price": 1299, "cost": 1150 },
       "Mac desktop":     { "model": "Mac mini M4", "price": 799, "cost": 700 }
+    },
+    "parts": {
+      "RAM upgrade":        { "price": 120, "cost": 80 },
+      "SSD upgrade":        { "price": 180, "cost": 110 },
+      "Warranty extension": { "price": 250, "cost": 190 }
+    },
+    "labourHours": {
+      "Upgrade in place": 2,
+      "Retain": 1,
+      "Human review": 2,
+      "Virtual machines": 1,
+      "RAM upgrade": 0.5,
+      "SSD upgrade": 1
     }
   }
 }
@@ -103,11 +119,22 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   - **A battery:** a computer that reports one is a laptop.
   
   Add a `"Windows"` or `"Mac"` entry as a fallback for computers whose type isn't recorded. Computers with no matching model are listed as not priced and left out of the total.
-- **Upgrade in place, Retain, Human review and Virtual machines cards get no flat price.** What they need depends on each machine. Instead, the card says:
-  - labour is billed at your `hourlyRate`
-  - parts, software and licences will be quoted once a technician has checked each device
+- **Upgrade in place, Retain and Human review cards are priced from `parts` and `labourHours`.** Each computer gets the parts its data shows it needs:
+  - **`RAM upgrade`:** memory is recorded and below 7.5 GB. An 8 GB computer reports about 7.8 GB because some memory is reserved, so it doesn't count. Unknown memory doesn't count either.
+  - **`SSD upgrade`:** the endpoint says it has no SSD. Many agents don't collect this and report "no SSD" for everything, so it only counts in a company where at least one endpoint reports an SSD. Servers usually report "no SSD" even when they have one (RAID or virtual disks), so servers never get an SSD line.
+  - **`Warranty extension`:** the warranty has expired or ends within 90 days.
   
-  Needs data cards get no cost line.
+  These are the only part names the workflow can match. Others are ignored with a warning.
+- **Labour hours** are multiplied by `hourlyRate`. You can set two kinds:
+  - **Per card**, for example `"Upgrade in place": 2`, is charged for every computer on that card.
+  - **Per part**, for example `"RAM upgrade": 0.5`, is charged each time that part is fitted.
+- **Virtual machines get labour only,** since there's no hardware to buy.
+- **What the card shows:**
+  - The parts and labour lines and a total go on the card's project price.
+  - The parts `cost` goes in the project cost. Labour cost isn't included.
+  - Software and licences are still quoted after a technician has checked each device.
+  - A part that's needed but has no price is listed as not priced and left out of the total.
+- **If nothing on the card can be priced,** the card says instead that labour is billed at your `hourlyRate` and that parts, software and licences will be quoted. Needs data cards get no cost line.
 - **Clients see the price, never the cost.** By default the card's Show price option is on and the card body gets an Estimated cost section listing the models, prices and total. Set `showPriceToClient` to `false` to hide prices too. The cost only goes into the card's project cost field and the internal note. Either way, the cards stay hidden from clients until you publish them.
 - **CloudRadial shows a card's price to clients only once the card is Completed.** When a category empties and the workflow marks its card Completed, it turns Show price off, so the client never sees a leftover price on a card that says nothing needs doing. The stored price and cost stay on the card for you. If computers come back, the card reopens and the next priced run sets the price and Show price again.
 - **Cards you complete yourself.** Marking a card done in the portal also puts it in Completed. The workflow treats it the same as one it completed. If the category still has computers on the next run, the card is reopened. If the category is empty, the card is left exactly as you closed it, price included.
@@ -115,10 +142,10 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
 - **The run output reports:**
   - `pricingApplied`
   - `estimatedTotal`, across the cards written
-  - each card's `estimatedPrice` and `priceBreakdown` (which model each computer was priced at, and which weren't priced), so a `plan` run shows the pricing before anything is written
-  - any `warnings`, for example a model with no valid price
+  - each card's `estimatedPrice` and `priceBreakdown` (which model, parts and labour each card was priced at, and what wasn't priced), so a `plan` run shows the pricing before anything is written
+  - any `warnings`, for example a model or part with no valid price, an unrecognised part name, or labour hours with no `hourlyRate`
 
-Reading the pricing from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows can read Knowledge.
+Keep your prices in [`knowledge/endpoint-refresh-pricing.md`](knowledge/endpoint-refresh-pricing.md): edit its tables, then copy its **Run input** block into the Routine input. The workflow reads the Routine input today. Reading the pricing straight from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows and agents can use Knowledge for it.
 
 ## What it does
 

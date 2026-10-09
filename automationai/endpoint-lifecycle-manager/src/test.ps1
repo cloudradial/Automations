@@ -11,14 +11,18 @@ $eps = @(
     @{ companyId = 1; name = "Alex's MacBook Air"; os = 'macOS 11.6'; manufacturer = 'Apple'; model = 'MacBook Air'; serialNumber = 'SN0001' },
     @{ companyId = 1; name = 'DESKTOP-0001'; os = 'Windows 11 Pro'; manufacturer = 'Dell'; model = 'Precision 5570'; serialNumber = 'SN0002'; enclosure = 'Desktop'; manufacturedDate = '2022-06-22T00:00:00Z'; expirationDate = '2025-06-24T00:00:00Z'; memory = 34359738368 },
     @{ companyId = 1; name = "Sam's MacBook Pro"; os = 'macOS'; manufacturer = 'Apple' },
-    @{ companyId = 1; name = 'CON-SERVER'; os = 'Windows Server 2016'; isServer = $true; expirationDate = '2020-03-01T00:00:00Z' },
+    @{ companyId = 1; name = 'CON-SERVER'; os = 'Windows Server 2016'; isServer = $true; expirationDate = '2020-03-01T00:00:00Z'; isSSD = $false },   # servers report no SSD even when they have one: no SSD line
     @{ companyId = 1; name = 'win-10-test'; os = 'Windows 10 Pro'; isVirtual = $true; memory = 0 },
-    @{ companyId = 1; name = 'OK-LAPTOP'; os = 'Windows 11 Pro'; manufacturedDate = '2025-01-10T00:00:00Z'; expirationDate = '2028-01-10T00:00:00Z'; memory = 17179869184 },
+    @{ companyId = 1; name = 'OK-LAPTOP'; os = 'Windows 11 Pro'; manufacturedDate = '2025-01-10T00:00:00Z'; expirationDate = '2028-01-10T00:00:00Z'; memory = 17179869184; isSSD = $true },   # company 1 reports SSD data
     @{ companyId = 1; name = 'Draytek'; os = '' },
     @{ companyId = 2; name = 'OLD-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2017-01-01T00:00:00Z' },
     @{ companyId = 2; name = 'OLD-LAPTOP'; os = 'Windows 10 Pro'; manufacturedDate = '2018-03-01T00:00:00Z'; enclosure = '10' },
     @{ companyId = 2; name = 'W11-READY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },      # expect Upgrade in place
     @{ companyId = 2; name = 'W11-NOTREADY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'NotReady'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },   # expect Replace
+    @{ companyId = 2; name = 'W11-READY-HDD'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-05-01T00:00:00Z'; expirationDate = '2027-05-01T00:00:00Z'; memory = 6442450944; isSSD = $false },   # Upgrade in place: needs RAM + SSD
+    @{ companyId = 2; name = 'RETAIN-PC'; os = 'Windows 11 Pro'; manufacturedDate = '2024-02-01T00:00:00Z'; expirationDate = '2026-01-15T00:00:00Z'; memory = 17179869184; isSSD = $true },   # Retain: needs a warranty extension
+    @{ companyId = 2; name = 'W11-READY-8GB'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-06-01T00:00:00Z'; expirationDate = '2027-06-01T00:00:00Z'; memory = 8352567296; isSSD = $true },   # 8 GB reports 7.8 GB: no RAM upgrade
+    @{ companyId = 4; name = 'NO-SSD-DATA-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-06-01T00:00:00Z'; expirationDate = '2027-06-01T00:00:00Z'; memory = 17179869184; isSSD = $false },   # company never reports isSSD true: no SSD upgrade
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(
@@ -41,7 +45,7 @@ function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
         return $null
     }
     if ($u -match 'skip=([1-9])') { return [pscustomobject]@{ value = @() } }
-    if ($u -match '/v2/odata/company') { return [pscustomobject]@{ value = @(1, 2 | ForEach-Object { [pscustomobject]@{ companyId = $_ } }) } }
+    if ($u -match '/v2/odata/company') { return [pscustomobject]@{ value = @(1, 2, 4 | ForEach-Object { [pscustomobject]@{ companyId = $_ } }) } }
     if ($u -match '/v2/odata/endpoint') { $f = $eps; if ($u -match 'companyId eq (\d+)' -and $u -notmatch ' or ') { $f = @($eps | Where-Object { $_.companyId -eq [int]$Matches[1] }) }; return [pscustomobject]@{ value = @($f | ForEach-Object { [pscustomobject]$_ }) } }
     if ($u -match '/v2/odata/product.*companyId eq (\d+)') { $c = [int]$Matches[1]; return [pscustomobject]@{ value = @($cards | Where-Object { $_.companyId -eq $c } | ForEach-Object { [pscustomobject]$_ }) } }
     throw "unmocked GET $u"
@@ -53,7 +57,7 @@ Set-StrictMode -Off
 $o = $global:Out
 $o.message
 "optionalFieldsDropped: $($o.optionalFieldsDropped) | pricingApplied: $($o.pricingApplied) | estimatedTotal: $(if ($o.Contains('estimatedTotal')) { $o.estimatedTotal }) | warnings: $(@($o.warnings) -join ' / ')"
-foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)" }
+foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)"; foreach ($b in @($r.priceBreakdown | Where-Object { $_ })) { "        - $b" } }
 foreach ($r in @($o.results | Where-Object { $_.action -eq 'completed' -and $_.productId })) {
     $w = @($global:Writes | Where-Object { $_ -match "^PATCH /v2/product/$($r.productId) " })
     $ok = $w.Count -and @(($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) | Where-Object { $_.path -eq '/isShowPrice' -and $_.value -eq $false }).Count -eq 1

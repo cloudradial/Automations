@@ -63,27 +63,51 @@ definition:
           # ---- pricing (optional run input; the MSP's own approved models and labour rate) ----
           # "pricing": { "currency": "USD", "hourlyRate": 150, "showPriceToClient": true,
           #   "models": { "Windows laptop": { "model": "Dell Latitude 7450", "price": 1450, "cost": 1180 }, "Windows desktop": {...},
-          #               "Mac laptop": {...}, "Mac desktop": {...}, "Windows": {...}, "Mac": {...} } }
+          #               "Mac laptop": {...}, "Mac desktop": {...}, "Windows": {...}, "Mac": {...} },
+          #   "parts": { "RAM upgrade": { "price": 120, "cost": 80 }, "SSD upgrade": {...}, "Warranty extension": {...} },
+          #   "labourHours": { "Upgrade in place": 2, "Retain": 1, "Human review": 2, "Virtual machines": 1, "RAM upgrade": 0.5 } }
+          # Models price Replace / Plan replacement. Parts and labour hours price Upgrade in place, Retain, Human review and
+          # Virtual machines (labour only): each device gets the parts its data shows it needs, plus the card's hours per device
+          # and each part's fitting hours, at hourlyRate.
           # Without it, cards carry no prices and existing card prices are left alone.
           # Clients see the price unless showPriceToClient is false; the cost (projectUnitCost and the internal note) never shows.
           $warnings = New-Object System.Collections.ArrayList
           function Get-Number { param($v) $d = 0.0; if ($null -ne $v -and [string]$v -ne '' -and [double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float, $ci, [ref]$d) -and $d -ge 0) { return $d }; return $null }
+          $PartNames = @('RAM upgrade', 'SSD upgrade', 'Warranty extension')
+          $ServiceCategories = @('Upgrade in place', 'Retain', 'Human review', 'Virtual machines')   # priced from parts and labour, not models
           $Pricing = $null
           $pin = Get-Prop $in 'pricing'
           if ($pin -is [string]) { if ($pin.Trim()) { try { $pin = $pin | ConvertFrom-Json } catch { $null = $warnings.Add("The pricing input isn't valid JSON, so no prices were added."); $pin = $null } } else { $pin = $null } }
           if ($null -ne $pin) {
               $cur = ([string](Get-Prop $pin 'currency')).Trim().ToUpperInvariant(); if (-not $cur) { $cur = 'USD' }
               $sym = switch ($cur) { { $_ -in @('USD', 'CAD', 'AUD', 'NZD') } { '$' } 'GBP' { [string][char]0x00A3 } 'EUR' { [string][char]0x20AC } default { "$cur " } }
-              $Pricing = @{ symbol = $sym; hourlyRate = (Get-Number (Get-Prop $pin 'hourlyRate')); showToClient = ([string](Get-Prop $pin 'showPriceToClient') -notmatch '^(false|no|0)$'); models = @{} }
-              $m = Get-Prop $pin 'models'
-              $pairs = if ($m -is [System.Collections.IDictionary]) { @($m.GetEnumerator() | ForEach-Object { @{ k = [string]$_.Key; v = $_.Value } }) } elseif ($null -ne $m) { @($m.PSObject.Properties | ForEach-Object { @{ k = $_.Name; v = $_.Value } }) } else { @() }
-              foreach ($p in $pairs) {
+              $Pricing = @{ symbol = $sym; hourlyRate = (Get-Number (Get-Prop $pin 'hourlyRate')); showToClient = ([string](Get-Prop $pin 'showPriceToClient') -notmatch '^(false|no|0)$'); models = @{}; parts = @{}; hours = @{} }
+              function Get-Pairs { param($m) if ($m -is [System.Collections.IDictionary]) { @($m.GetEnumerator() | ForEach-Object { @{ k = ([string]$_.Key).Trim(); v = $_.Value } }) } elseif ($null -ne $m) { @($m.PSObject.Properties | ForEach-Object { @{ k = $_.Name.Trim(); v = $_.Value } }) } else { @() } }
+              foreach ($p in @(Get-Pairs (Get-Prop $pin 'models'))) {
                   $isNum = $null -ne (Get-Number $p.v) -and -not ($p.v -is [System.Collections.IDictionary]) -and -not ($p.v -is [pscustomobject])
                   $price = if ($isNum) { Get-Number $p.v } else { Get-Number (Get-Prop $p.v 'price') }
                   if ($null -eq $price -or $price -le 0) { $null = $warnings.Add("Pricing for '$($p.k)' has no valid price, so it was ignored."); continue }
-                  $Pricing.models[$p.k.Trim()] = @{ model = $(if ($isNum) { '' } else { ([string](Get-Prop $p.v 'model')).Trim() }); price = $price; cost = $(if ($isNum) { $null } else { Get-Number (Get-Prop $p.v 'cost') }) }
+                  $Pricing.models[$p.k] = @{ model = $(if ($isNum) { '' } else { ([string](Get-Prop $p.v 'model')).Trim() }); price = $price; cost = $(if ($isNum) { $null } else { Get-Number (Get-Prop $p.v 'cost') }) }
               }
-              if (-not $Pricing.models.Count -and $null -eq $Pricing.hourlyRate) { $null = $warnings.Add('The pricing input has no models and no hourlyRate, so no prices were added.'); $Pricing = $null }
+              # Parts the workflow can match to a computer from its data (see Get-PartNeeds).
+              foreach ($p in @(Get-Pairs (Get-Prop $pin 'parts'))) {
+                  $known = @($PartNames | Where-Object { $_ -eq $p.k })
+                  if (-not $known.Count) { $null = $warnings.Add("Part '$($p.k)' can't be matched to computers yet (use $($PartNames -join ', ')), so it was ignored."); continue }
+                  $isNum = $null -ne (Get-Number $p.v) -and -not ($p.v -is [System.Collections.IDictionary]) -and -not ($p.v -is [pscustomobject])
+                  $price = if ($isNum) { Get-Number $p.v } else { Get-Number (Get-Prop $p.v 'price') }
+                  if ($null -eq $price -or $price -le 0) { $null = $warnings.Add("Part '$($p.k)' has no valid price, so it was ignored."); continue }
+                  $Pricing.parts[$known[0]] = @{ price = $price; cost = $(if ($isNum) { $null } else { Get-Number (Get-Prop $p.v 'cost') }) }
+              }
+              # Labour hours: per device for a card, or per fitting for a part.
+              foreach ($p in @(Get-Pairs (Get-Prop $pin 'labourHours'))) {
+                  $known = @(@($ServiceCategories) + @($PartNames) | Where-Object { $_ -eq $p.k })
+                  $h = Get-Number $p.v
+                  if (-not $known.Count) { $null = $warnings.Add("Labour hours for '$($p.k)' were ignored (use a card name - $($ServiceCategories -join ', ') - or a part name)."); continue }
+                  if ($null -eq $h -or $h -le 0) { $null = $warnings.Add("Labour hours for '$($p.k)' aren't a positive number, so they were ignored."); continue }
+                  $Pricing.hours[$known[0]] = $h
+              }
+              if ($Pricing.hours.Count -and $null -eq $Pricing.hourlyRate) { $null = $warnings.Add('Labour hours are set but hourlyRate is not, so labour was not priced.') }
+              if (-not $Pricing.models.Count -and -not $Pricing.parts.Count -and $null -eq $Pricing.hourlyRate) { $null = $warnings.Add('The pricing input has no models, parts or hourlyRate, so no prices were added.'); $Pricing = $null }
           }
           function Format-Money { param([double]$v) $Pricing.symbol + $v.ToString($(if ($v -eq [math]::Floor($v)) { 'N0' } else { 'N2' }), $ci) }
           $SubjectPrefix = 'Endpoint Hardware Refresh - '
@@ -264,7 +288,42 @@ definition:
               foreach ($g in $missing.GetEnumerator()) { $null = $lines.Add("$($g.Value) $([char]0x00D7) $(Enc $g.Key): no approved model is set for this type, so it isn't in the estimate") }
               return @{ total = [math]::Round($total, 2); cost = $(if ($priced -and $costKnown) { [math]::Round($cost, 2) } else { $null }); priced = $priced; unpriced = ($devices.Count - $priced); lines = @($lines) }
           }
-          # Upgrade in place, Retain, Human review, Virtual machines: what's needed depends on each device, so no flat price.
+          # Upgrade in place, Retain, Human review: the parts a device's data shows it needs. Virtual machines have no hardware to buy.
+          # Live data: isSSD is false on every endpoint of a company that doesn't collect it, so it's trusted only where some endpoint
+          # reports true. Servers report false even with SSDs (RAID/virtual disks), so they never get an SSD line.
+          # Nominal 8 GB machines report about 7.8 GB (reserved memory), so the RAM line is below 7.5 GB.
+          function Get-PartNeeds { param($ep, [string]$cat, [bool]$ssdCollected)
+              $needs = New-Object System.Collections.ArrayList
+              if ($cat -notin @('Upgrade in place', 'Retain', 'Human review')) { return @($needs) }
+              $ram = Get-RamGb $ep; if ($null -ne $ram -and $ram -lt 7.5) { $null = $needs.Add('RAM upgrade') }   # unknown memory is not low
+              if ($ssdCollected -and $cat -ne 'Human review' -and [string](Get-Prop $ep 'isSSD') -eq 'False') { $null = $needs.Add('SSD upgrade') }
+              if ((Get-Warranty $ep).status -in @('expired', 'expiring')) { $null = $needs.Add('Warranty extension') }
+              return @($needs)
+          }
+          function Format-Hours { param([double]$h) "$($h.ToString('0.##', $ci)) $(if ($h -eq 1) { 'hour' } else { 'hours' })" }
+          # Service cards: each device's needed parts at the catalog price, plus the card's hours per device and each part's fitting hours.
+          function Get-ServiceEstimate { param($devices, [string]$cat)
+              $partCounts = [ordered]@{}; $missing = [ordered]@{}; $hours = 0.0
+              $perDevice = if ($Pricing.hours.ContainsKey($cat)) { $Pricing.hours[$cat] } else { 0.0 }
+              foreach ($d in $devices) {
+                  $hours += $perDevice
+                  foreach ($need in @($d.needs)) {
+                      if ($Pricing.parts.ContainsKey($need)) { $partCounts[$need] = 1 + [int]$partCounts[$need]; if ($Pricing.hours.ContainsKey($need)) { $hours += $Pricing.hours[$need] } }
+                      else { $missing[$need] = 1 + [int]$missing[$need] }
+                  }
+              }
+              $lines = New-Object System.Collections.ArrayList; $total = 0.0; $cost = 0.0; $costKnown = $true; $partsTotal = 0
+              foreach ($g in $partCounts.GetEnumerator()) {
+                  $pt = $Pricing.parts[$g.Key]; $n = [int]$g.Value; $sub = $n * $pt.price; $total += $sub; $partsTotal += $n
+                  if ($null -eq $pt.cost) { $costKnown = $false } else { $cost += $n * $pt.cost }
+                  $null = $lines.Add("$n $([char]0x00D7) $(Enc $g.Key) at $(Format-Money $pt.price) = $(Format-Money $sub)")
+              }
+              foreach ($g in $missing.GetEnumerator()) { $null = $lines.Add("$($g.Value) $([char]0x00D7) $(Enc $g.Key) needed: no price is set for this part, so it isn't in the estimate") }
+              $labour = $null
+              if ($hours -gt 0 -and $null -ne $Pricing.hourlyRate) { $labour = [math]::Round($hours * $Pricing.hourlyRate, 2); $total += $labour; $null = $lines.Add("Labour: $(Format-Hours $hours) at $(Format-Money $Pricing.hourlyRate) an hour = $(Format-Money $labour)") }
+              return @{ total = [math]::Round($total, 2); cost = $(if ($partsTotal -and $costKnown) { [math]::Round($cost, 2) } else { $null }); parts = $partsTotal; labour = $labour; lines = @($lines) }
+          }
+          # Fallback when nothing on a service card can be priced: say how labour, parts and licences will be quoted.
           function Get-LabourNote { param([string]$cat)
               $what = switch ($cat) { 'Human review' { 'server' } 'Virtual machines' { 'virtual machine' } default { 'computer' } }
               if ($null -ne $Pricing.hourlyRate) { return "Labour is billed at $(Format-Money $Pricing.hourlyRate) an hour. Parts, software and licences will be quoted once a technician has checked each $what." }
@@ -282,15 +341,17 @@ definition:
           if ($null -ne $knownCompanies -and $knownCompanies.Count -eq 0) { $knownCompanies = $null }
           $counts = [ordered]@{ evaluated = 0; flaggedEndpoints = 0; excludedNonComputer = 0; skippedHealthy = 0; orphanedEndpoints = 0; companiesProcessed = 0; cardsCreated = 0; cardsUpdated = 0; cardsCompleted = 0; cardsSkipped = 0; errors = 0 }
           $buckets = @{}; $evaluatedBy = @{}; $companiesInScope = New-Object System.Collections.Generic.HashSet[int]; $orphanedBy = @{}
+          $ssdCompanies = New-Object System.Collections.Generic.HashSet[int]   # companies whose endpoints report isSSD at all
+          foreach ($ep in $endpoints) { if ([string](Get-Prop $ep 'isSSD') -eq 'True') { $null = $ssdCompanies.Add([int](Get-Prop $ep 'companyId')) } }
           foreach ($ep in $endpoints) {
               $cid = [int](Get-Prop $ep 'companyId')
               if ($CompanyIds.Count -and $CompanyIds -notcontains $cid) { continue }
               if ($null -ne $knownCompanies -and -not $knownCompanies.Contains($cid)) { $counts.orphanedEndpoints++; $orphanedBy[$cid] = 1 + [int]$orphanedBy[$cid]; continue }
               # Every key present: the runner runs in strict mode, where reading a missing key throws.
               $found = Get-Assessment $ep
-              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null; deviceType = $null }
+              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null; deviceType = $null; needs = @() }
               foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
-              if ($a.flagged -and $null -ne $Pricing) { $a.deviceType = Get-DeviceType $ep }
+              if ($a.flagged -and $null -ne $Pricing) { $a.deviceType = Get-DeviceType $ep; $a.needs = @(Get-PartNeeds $ep $a.category $ssdCompanies.Contains($cid)) }
               if ($a.excluded) { $counts.excludedNonComputer++; continue }
               $null = $companiesInScope.Add($cid)
               $counts.evaluated++; $evaluatedBy[$cid] = 1 + [int]$evaluatedBy[$cid]
@@ -366,7 +427,7 @@ definition:
                           $inTier = @($devices | Where-Object { $_.tier -eq $tr }); if (-not $inTier.Count) { continue }
                           $null = $sb.Append("<h4>$tr</h4><ul>"); foreach ($d in $inTier) { $null = $sb.Append("<li>$($d.line)</li>") }; $null = $sb.Append('</ul>')
                       }
-                      # Pricing: replacement cards are priced from the approved models; the rest get the labour note.
+                      # Pricing: replacement cards from the approved models; service cards from parts and labour hours, else the labour note.
                       $priceFields = $null; $priceHtml = ''; $priceNote = ''; $estimate = $null; $breakdown = $null
                       if ($null -ne $Pricing -and $cat -ne 'Needs data') {
                           if ($cat -in @('Replace', 'Plan replacement')) {
@@ -380,7 +441,21 @@ definition:
                                   $priceNote = " $totalTxt$(if ($null -ne $est.cost) { " Our cost: $(Format-Money $est.cost)." }) Breakdown: $($est.lines -join '; ')."
                               }
                           }
-                          else { $ln = Get-LabourNote $cat; $priceHtml = "<h4>Cost</h4><p>$ln</p>"; $priceNote = " $ln" }
+                          else {
+                              $est = Get-ServiceEstimate $devices $cat
+                              if ($est.total -gt 0) {
+                                  $estimate = $est.total
+                                  $breakdown = @($est.lines | ForEach-Object { [System.Net.WebUtility]::HtmlDecode($_) })
+                                  $priceFields = [ordered]@{ projectUnits = 1; projectUnitPrice = $est.total; isShowPrice = $Pricing.showToClient }
+                                  if ($null -ne $est.cost) { $priceFields.projectUnitCost = $est.cost }
+                                  $what = switch ($cat) { 'Human review' { 'server' } 'Virtual machines' { 'virtual machine' } default { 'computer' } }
+                                  $extra = if ($null -eq $est.labour -and $null -ne $Pricing.hourlyRate) { " Labour is billed at $(Format-Money $Pricing.hourlyRate) an hour on top." } elseif ($null -eq $est.labour) { ' Labour is quoted separately.' } else { '' }
+                                  $totalTxt = "Estimated cost: $(Format-Money $est.total) for $n $(if ($n -eq 1) { $what } else { "$($what)s" }).$extra Software and licences, if needed, are quoted once a technician has checked each $what."
+                                  $priceHtml = '<h4>Estimated cost</h4><ul>' + (($est.lines | ForEach-Object { "<li>$_</li>" }) -join '') + "</ul><p>$totalTxt</p>"
+                                  $priceNote = " $totalTxt$(if ($null -ne $est.cost) { " Our parts cost: $(Format-Money $est.cost)." }) Breakdown: $($est.lines -join '; ')."
+                              }
+                              else { $ln = Get-LabourNote $cat; $priceHtml = "<h4>Cost</h4><p>$ln</p>"; $priceNote = " $ln" }
+                          }
                       }
                       # Prices go in the client-readable body only when the MSP chooses to show them; the internal note always has them.
                       if ($priceHtml -and $Pricing.showToClient) { $null = $sb.Append($priceHtml) }

@@ -84,7 +84,7 @@ $Handler = {
         # ConnectWise ticket 12345
         "GET $TCW/service/tickets/12345" { return [pscustomobject]@{ id = 12345; summary = 'Outlook will not open'; company = [pscustomobject]@{ id = 101 }; status = [pscustomobject]@{ name = $S.ticketStatus }; board = [pscustomobject]@{ id = 1 }; owner = $null } }
         "GET $TCW/service/tickets/404" { New-HttpError 404 '{"message":"Ticket not found"}' }
-        "GET $TCW/service/tickets/12345/notes[?]*" { return @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
+        "GET $TCW/service/tickets/12345/notes[?]*" { return , @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
         "POST $TCW/service/tickets/12345/notes" { if ($S.publicForbidden -and $c.Body -like '*"detailDescriptionFlag":true*') { New-HttpError 403 '{"message":"Member cannot add discussion notes."}' }; $S.notes = @($S.notes) + @((Read-Body $c).text); return [pscustomobject]@{ id = 2 } }
         # Autotask ticket 555
         "GET $TAT/Tickets/555" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 555; title = 'Printer offline'; description = ''; companyID = 101; status = 1; assignedResourceID = $null } } }

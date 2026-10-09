@@ -1,5 +1,5 @@
 # Runs the workflow's PowerShell node against mocked Graph and CloudRadial APIs, in strict mode
-# like the AutomationAI runner. Placeholder data only (Contoso, companyId 9).
+# like the AutomationAI runner. Placeholder data only (Contoso, companyId 123).
 #   pwsh -NoProfile -File test.ps1            # all scenarios
 param([string]$Scenario = '')
 $ErrorActionPreference = 'Stop'
@@ -14,15 +14,15 @@ for ($i = $start + 1; $i -lt $lines.Count; $i++) {
 }
 $script = $body -join "`n"
 
-$in = '{"companyId":9,"tenantId":"00000000-0000-0000-0000-000000000000"}'
+$in = '{"companyId":123,"tenantId":"00000000-0000-0000-0000-000000000000"}'
 # upload: the data JSON the step must send (null = no upload).
 $scenarios = [ordered]@{
-    'plan-new'       = @{ input = '{"companyId":9,"tenantId":"00000000-0000-0000-0000-000000000000","mode":"plan"}'; expect = 'plan'; upload = $null }
-    'plan-existing'  = @{ input = '{"companyId":9,"tenantId":"00000000-0000-0000-0000-000000000000","mode":"plan"}'; expect = 'plan'; existing = $true; upload = $null }
-    'create'         = @{ input = $in; expect = 'created'; expectId = 700; upload = '{"name":"Microsoft Secure Score","assessmentId":0,"type":20,"companyId":9}' }
-    'refresh'        = @{ input = $in; expect = 'refreshed'; existing = $true; expectId = 600; upload = '{"name":"Microsoft Secure Score","assessmentId":600,"type":20,"companyId":9}' }
-    'custom-title'   = @{ input = '{"companyId":9,"tenantId":"00000000-0000-0000-0000-000000000000","assessmentTitle":"Contoso Secure Score"}'; expect = 'created'; expectId = 700; upload = '{"name":"Contoso Secure Score","assessmentId":0,"type":20,"companyId":9}' }
-    'list-lags'      = @{ input = $in; expect = 'created'; lag = $true; expectId = $null; upload = '{"name":"Microsoft Secure Score","assessmentId":0,"type":20,"companyId":9}' }
+    'plan-new'       = @{ input = '{"companyId":123,"tenantId":"00000000-0000-0000-0000-000000000000","mode":"plan"}'; expect = 'plan'; upload = $null }
+    'plan-existing'  = @{ input = '{"companyId":123,"tenantId":"00000000-0000-0000-0000-000000000000","mode":"plan"}'; expect = 'plan'; existing = $true; upload = $null }
+    'create'         = @{ input = $in; expect = 'created'; expectId = 700; upload = '{"name":"Microsoft Secure Score","assessmentId":0,"type":20,"companyId":123}' }
+    'refresh'        = @{ input = $in; expect = 'refreshed'; existing = $true; expectId = 600; upload = '{"name":"Microsoft Secure Score","assessmentId":600,"type":20,"companyId":123}' }
+    'custom-title'   = @{ input = '{"companyId":123,"tenantId":"00000000-0000-0000-0000-000000000000","assessmentTitle":"Contoso Secure Score"}'; expect = 'created'; expectId = 700; upload = '{"name":"Contoso Secure Score","assessmentId":0,"type":20,"companyId":123}' }
+    'list-lags'      = @{ input = $in; expect = 'created'; lag = $true; expectId = $null; upload = '{"name":"Microsoft Secure Score","assessmentId":0,"type":20,"companyId":123}' }
     'list-fails'     = @{ input = $in; expect = 'error'; listFails = $true; upload = $null }
 }
 $failed = 0
@@ -34,11 +34,11 @@ foreach ($name in $scenarios.Keys) {
     $global:Uploads = New-Object System.Collections.ArrayList
     $global:Assess = New-Object System.Collections.ArrayList
     $global:Sc = $sc
-    if ($sc.Contains('existing')) { $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 600; companyId = 9; title = 'microsoft secure score '; type = 20; isDeleted = $false }) }
+    if ($sc.Contains('existing')) { $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 600; companyId = 123; title = 'microsoft secure score '; type = 20; isDeleted = $false }) }
     # Rows that must never be matched: a run (type 30), a hidden type 0 row, and a deleted assessment.
-    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 610; companyId = 9; title = 'Microsoft Secure Score'; type = 30; isDeleted = $false })
-    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 611; companyId = 9; title = 'Microsoft Secure Score'; type = 0; isDeleted = $false })
-    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 612; companyId = 9; title = 'Microsoft Secure Score'; type = 20; isDeleted = $true })
+    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 610; companyId = 123; title = 'Microsoft Secure Score'; type = 30; isDeleted = $false })
+    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 611; companyId = 123; title = 'Microsoft Secure Score'; type = 0; isDeleted = $false })
+    $null = $global:Assess.Add([pscustomobject]@{ assessmentId = 612; companyId = 123; title = 'Microsoft Secure Score'; type = 20; isDeleted = $true })
 
     function global:Get-NodeInput { $global:Sc.input }
     function global:Set-NodeOutput { param($o) $global:Out = $o }

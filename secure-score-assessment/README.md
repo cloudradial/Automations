@@ -12,6 +12,7 @@ These links point at the `main` branch, so they always open the current version.
 |---|---|
 | View `secure-score-assessment.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/secure-score-assessment/secure-score-assessment.yml) |
 | Download `secure-score-assessment.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/secure-score-assessment/secure-score-assessment.yml) |
+| View `test.ps1` (mocked strict-mode test: `pwsh -NoProfile -File test.ps1`) | [GitHub](https://github.com/cloudradial/Automations/blob/main/secure-score-assessment/test.ps1) |
 | All files in this automation | [secure-score-assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/secure-score-assessment) |
 | Marketplace listing | [AAI-00001](https://automations.cloudradial.com/marketplace/AAI-00001) |
@@ -80,11 +81,4 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 
 Graph's last page of control profiles has no `@odata.nextLink`. The previous version read that property directly, which throws in strict mode.
 
-The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live: assessment 159 on Westgate Tech Services imported all its questions and answers.
-
-## Files
-
-| File | What |
-|---|---|
-| [`secure-score-assessment.yml`](https://github.com/cloudradial/Automations/blob/main/automationai/secure-score-assessment/secure-score-assessment.yml) | The workflow export to import. |
-| [`test.ps1`](https://github.com/cloudradial/Automations/blob/main/automationai/secure-score-assessment/test.ps1) | Mocked strict-mode test of the PowerShell node: `pwsh -NoProfile -File test.ps1`. |
+The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live: a test assessment imported all its questions and answers.

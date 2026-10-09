@@ -130,7 +130,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
 
 - **Archive upload route.** `POST /api/beta/archive/{id}/item` takes the PDF as multipart/form-data. The create call doesn't always return the new archive's id, so the step looks the archive up again by name before uploading (a first live run uploaded to archive 0 and failed with "Sequence contains no elements").
 - **Live test checklist** (before this leaves draft):
-  1. On KMCO company 9, run the `assessments` phase twice. The second run should skip the assessment as up to date.
+  1. On a test company, run the `assessments` phase twice. The second run should skip the assessment as up to date.
   2. Click Run in the portal and check that the run copies the answers.
   3. ~~Compare question ids across two evaluations of the same `assessment_template_id`.~~ Done 2026-10-07: `assessment_template_question_id` is stable, and the Update Keys now use it (see Update Keys below).
   4. Re-upload a workbook with one question left out, and see whether the old question stays.
@@ -164,7 +164,7 @@ Results:
 - **New assessment not listed yet:** retried twice, counted as imported, warned.
 - **Workbook:** every question carries an Update Key. With ScalePad rewording two questions (harness `SP_REWORD=1`), the one with an `assessment_template_question_id` kept its key, the one without changed, and an unchanged question kept its key (2026-10-07).
 - **Report:** says to create the run in the portal.
-- **Full flow:** ran end to end. The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live (assessment 159 on Westgate Tech Services imported all its questions and answers); inline strings were never tried against the importer. Read back, the generated workbook had all 51 template columns, with every shared string resolving to its value.
+- **Full flow:** ran end to end. The workbook uses shared strings and a minimal `styles.xml`, the shape Excel writes, and strips XML-invalid control characters. That shape is the one proven live (a test assessment imported all its questions and answers); inline strings were never tried against the importer. Read back, the generated workbook had all 51 template columns, with every shared string resolving to its value.
 
 **Flexible assets by device type (third pass):** with a network device already in the old ScalePad Assets type, the `assets` phase created a Network Devices type and a Workstations (No Serial) type, moved the network device (created in the new type, then deleted from the old one), and created the no-serial workstation. With the ScalePad hardware read failing on a TLS error five times in a row, the requests retried and the devices step then ran again for the company and completed.
 

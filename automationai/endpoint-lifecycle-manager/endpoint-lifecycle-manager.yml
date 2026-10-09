@@ -341,7 +341,8 @@ definition:
                           if (Test-Completed $card) { $counts.cardsSkipped++; Add-Result $cid $cat '' 'skipped' (Get-Prop $card 'productId') 0 'Already closed; no computers in this category.'; continue }
                           if (-not $CloseEmpty) { continue }
                           # Write first, then count: a failed write is reported only as an error.
-                          if ($Apply) { Send-Patch (Get-Prop $card 'productId') @{ status = 40; body = "<p>No computers need action in this category as of $today.</p><p><em>$marker</em></p>"; notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today; none in $cat, so this card was closed. Marker: $marker." } }
+                          # Clients see a price once a card is Completed, so hide it; the stored price and cost stay for the MSP.
+                          if ($Apply) { Send-Patch (Get-Prop $card 'productId') @{ status = 40; isShowPrice = $false; body = "<p>No computers need action in this category as of $today.</p><p><em>$marker</em></p>"; notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today; none in $cat, so this card was closed. Marker: $marker." } }
                           $counts.cardsCompleted++
                           Add-Result $cid $cat '' 'completed' (Get-Prop $card 'productId') 0 "No computers need action in this category any more, so the card $(if ($Apply) { 'was' } else { 'would be' }) marked Completed."
                           continue

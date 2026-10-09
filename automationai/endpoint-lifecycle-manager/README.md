@@ -109,6 +109,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   
   Needs data cards get no cost line.
 - **Clients see the price, never the cost.** By default the card's Show price option is on and the card body gets an Estimated cost section listing the models, prices and total. Set `showPriceToClient` to `false` to hide prices too. The cost only goes into the card's project cost field and the internal note. Either way, the cards stay hidden from clients until you publish them.
+- **CloudRadial shows a card's price to clients only once the card is Completed.** When a category empties and the workflow marks its card Completed, it turns Show price off, so the client never sees a leftover price on a card that says nothing needs doing. The stored price and cost stay on the card for you. If computers come back, the card reopens and the next priced run sets the price and Show price again.
 - **`currency` only sets the symbol:** `USD`, `CAD`, `AUD` and `NZD` show $, `GBP` shows £, and `EUR` shows €. CloudRadial stores only the number, so use your portal's currency.
 - **The run output reports:**
   - `pricingApplied`

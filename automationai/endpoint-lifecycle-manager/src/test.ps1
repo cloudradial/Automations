@@ -24,7 +24,7 @@ $eps = @(
 $cards = @(
     @{ productId = 145; companyId = 1; subject = 'Endpoint Hardware Refresh - Replace'; status = 'Proposed'; body = '' },
     @{ productId = 146; companyId = 1; subject = 'Endpoint Hardware Refresh - Plan replacement'; status = 'Proposed'; body = '' },
-    @{ productId = 147; companyId = 1; subject = 'Endpoint Hardware Refresh - Upgrade in place'; status = 'Proposed'; body = '' },
+    @{ productId = 147; companyId = 1; subject = 'Endpoint Hardware Refresh - Upgrade in place'; status = 'Proposed'; body = ''; projectUnitPrice = 2900; isShowPrice = $true },   # priced card that empties: completing it must hide the price
     @{ productId = 148; companyId = 1; subject = 'Endpoint Hardware Refresh - Needs data'; status = 'Completed'; body = '' },
     @{ productId = 149; companyId = 1; subject = 'Endpoint Hardware Refresh - Human review'; status = 'Proposed'; body = '' },
     @{ productId = 150; companyId = 1; subject = 'Endpoint Hardware Refresh - Virtual machines'; status = 'Proposed'; body = '' },
@@ -53,5 +53,10 @@ $o = $global:Out
 $o.message
 "optionalFieldsDropped: $($o.optionalFieldsDropped) | pricingApplied: $($o.pricingApplied) | estimatedTotal: $(if ($o.Contains('estimatedTotal')) { $o.estimatedTotal }) | warnings: $(@($o.warnings) -join ' / ')"
 foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)" }
+foreach ($r in @($o.results | Where-Object { $_.action -eq 'completed' -and $_.productId })) {
+    $w = @($global:Writes | Where-Object { $_ -match "^PATCH /v2/product/$($r.productId) " })
+    $ok = $w.Count -and @(($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) | Where-Object { $_.path -eq '/isShowPrice' -and $_.value -eq $false }).Count -eq 1
+    "completed card $($r.productId) hides its price: $(if ($ok) { 'ok' } elseif ($w.Count) { 'MISSING isShowPrice=false' } else { 'no write (plan mode)' })"
+}
 "--- writes"
 foreach ($w in $global:Writes) { "  " + $w.Substring(0, [Math]::Min(260, $w.Length)) }

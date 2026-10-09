@@ -585,7 +585,7 @@ function Get-PsaTimeEntries {
             # billable hours and actionnonchargehours as the rest. Only actions with time count as time entries.
             foreach ($tid in @(& $loop)) {
                 $r = Invoke-PsaRead "/Actions?ticket_id=$tid&excludesys=true" $what $need
-                $list = @(Get-PsaProp $r 'actions'); if (-not @($list | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $list = @($r) }
+                $list = @(Get-PsaListReply $r @('actions'))
                 foreach ($e in @($list | Where-Object { $null -ne $_ })) {
                     $h = Get-PsaNumber (Get-PsaProp $e 'timetaken'); if ($h -le 0) { continue }
                     $chRaw = Get-PsaFirst $e @('chargehours', 'actionchargehours'); $ch = Get-PsaNumber $chRaw; $nch = Get-PsaNumber (Get-PsaProp $e 'actionnonchargehours')
@@ -688,7 +688,7 @@ function Get-PsaAgreements {
         'halopsa' {
             # Unverified: GET /api/ClientContract?client_id= and its field names (ref, contract_type, start_date, end_date, active).
             $r = Invoke-PsaRead "/ClientContract?client_id=$CompanyId" $what $need
-            $list = @(if ($r -is [array]) { $r } else { Get-PsaFirst $r @('contracts', 'clientcontracts') })
+            $list = @(Get-PsaListReply $r @('contracts', 'clientcontracts'))
             foreach ($a in @($list | Where-Object { $null -ne $_ })) {
                 if (-not (& $mine (Get-PsaProp $a 'client_id'))) { continue }
                 $null = $rows.Add(@{ id = [string](Get-PsaProp $a 'id'); name = [string](Get-PsaFirst $a @('ref', 'name')); type = [string](Get-PsaFirst $a @('contract_type_name', 'billing_description', 'contract_type')); status = $(if ((Get-PsaProp $a 'active') -eq $false) { 'Inactive' } else { 'Active' })
@@ -751,7 +751,7 @@ function Get-PsaInvoice {
         'halopsa' {
             # Unverified: GET /api/Invoice?search= ({ invoices: [...] }) and the fields invoicenumber, client_id, invoice_date, total.
             $r = Invoke-PsaRead "/Invoice?search=$(ConvertTo-PsaQuery $n)&count=20" $what $need
-            $list = @(if ($r -is [array]) { $r } else { Get-PsaProp $r 'invoices' })
+            $list = @(Get-PsaListReply $r @('invoices'))
             $inv = @($list | Where-Object { $null -ne $_ -and ([string](Get-PsaFirst $_ @('invoicenumber', 'invoice_number', 'id'))) -eq $n }) | Select-Object -First 1
             if (-not $inv) { return $null }
             $id = [string](Get-PsaProp $inv 'id'); $companyId = [string](Get-PsaProp $inv 'client_id'); $date = ConvertTo-PsaDate (Get-PsaFirst $inv @('invoice_date', 'invoicedate', 'date'))
@@ -799,7 +799,7 @@ function Get-PsaCompanyContacts {
         'halopsa' {
             # Unverified: /Users?client_id and the isprimarycontact flag name.
             $r = Invoke-PsaRead "/Users?client_id=$CompanyId&count=500" $what $need
-            $users = @(Get-PsaProp $r 'users'); if (-not @($users | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $users = @($r) }
+            $users = @(Get-PsaListReply $r @('users'))
             foreach ($p in @($users | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })) {
                 $pri = ((Get-PsaProp $p 'isprimarycontact') -eq $true) -or ((Get-PsaProp $p 'is_primary_contact') -eq $true)
                 $null = $list.Add(@{ id = [string](Get-PsaProp $p 'id'); name = [string](Get-PsaProp $p 'name'); email = [string](Get-PsaProp $p 'emailaddress'); primary = $pri })

@@ -15,19 +15,29 @@ function Get-AzKeyVaultSecret {
     return $null
 }
 function Start-Sleep { [CmdletBinding()] param([double]$Seconds = 0, [int]$Milliseconds = 0) $null = $Mock.Sleeps.Add($Seconds) }
+# Like the real cmdlet, a JSON array reply is written as ONE object (an [object[]]), not item by item: the real
+# Invoke-RestMethod does not enumerate it, so "Invoke-RestMethod ... | Where-Object" sees one array. A route that
+# returns several items, or one array (", @(...)"), is handed back that way. MaximumRedirection is recorded
+# (-1 when not sent) so tests can check that writes never follow a redirect.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
-    $call = [pscustomobject]@{ Method = ([string]$Method).ToUpperInvariant(); Uri = [string]$Uri; Headers = $Headers; Body = $(if ($Body -is [string]) { $Body } else { '' }); BodyObj = $Body; ContentType = [string]$ContentType; Form = $Form }
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
+    $call = [pscustomobject]@{ Method = ([string]$Method).ToUpperInvariant(); Uri = [string]$Uri; Headers = $Headers; Body = $(if ($Body -is [string]) { $Body } else { '' }); BodyObj = $Body; ContentType = [string]$ContentType; Form = $Form; MaxRedirect = $MaximumRedirection }
     $null = $Mock.Calls.Add($call)
     $key = "$($call.Method) $($call.Uri)"; $Mock.Count[$key] = 1 + $(if ($Mock.Count.Contains($key)) { $Mock.Count[$key] } else { 0 })
-    if ($null -ne $Mock.Handler) { return (& $Mock.Handler $call $Mock.Count[$key]) }
+    if ($null -ne $Mock.Handler) {
+        $res = & $Mock.Handler $call $Mock.Count[$key]
+        if ($res -is [array]) { Write-Output -NoEnumerate $res; return }
+        return $res
+    }
     return [pscustomobject]@{ id = 1 }
 }
 # Throws what Invoke-RestMethod throws for an HTTP error: an HttpResponseException carrying the response.
+# -Location sets the Location header (a 3xx reply, as Invoke-RestMethod -MaximumRedirection 0 throws it).
 function New-HttpError {
-    param([int]$Code, [string]$Body = '', [string]$RetryAfter = '')
+    param([int]$Code, [string]$Body = '', [string]$RetryAfter = '', [string]$Location = '')
     $r = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$Code)
     if ($RetryAfter) { $null = $r.Headers.TryAddWithoutValidation('Retry-After', $RetryAfter) }
+    if ($Location) { $r.Headers.Location = [uri]$Location }
     $ex = [Microsoft.PowerShell.Commands.HttpResponseException]::new("Response status code does not indicate success: $Code.", $r)
     $er = [System.Management.Automation.ErrorRecord]::new($ex, 'WebCmdletWebResponseException', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
     if ($Body) { $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($Body) }

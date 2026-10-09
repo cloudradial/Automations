@@ -1,0 +1,115 @@
+// Builds outage-broadcast.yml from the step sources in this folder, then pastes the shared libraries
+// (_shared/inject.js).
+// Usage: node build.js          rewrite the .yml
+//        node build.js --check  exit 1 if the .yml is out of date
+// Edit parse.ps1, identify.ps1 and broadcast.ps1 (or the _shared libraries), never the .yml.
+// Needs js-yaml: set JS_YAML_PATH (or NODE_PATH) to an existing copy, or npm install in _shared.
+const fs = require('fs');
+const path = require('path');
+const { injectText } = require('../../_shared/inject.js');
+
+function loadYaml() {
+  try { return require('js-yaml'); } catch { /* fall through */ }
+  if (process.env.JS_YAML_PATH) return require(process.env.JS_YAML_PATH);
+  throw new Error('js-yaml not found. Set JS_YAML_PATH, or npm install in _shared.');
+}
+
+const here = __dirname;
+const name = 'outage-broadcast.yml';
+const out = path.join(here, '..', name);
+const read = (f) => fs.readFileSync(path.join(here, f), 'utf8').replace(/\r\n/g, '\n').trimEnd();
+const block = (text, indent) => text.split('\n').map((l) => (l ? indent + l : '')).join('\n');
+
+// Placeholder test input: a preview (confirm false) for an outage of a hosted line-of-business app.
+const testInput = JSON.stringify({
+  affectedService: 'Contoso Hosted PBX',
+  message: 'Phones are not ringing for incoming calls. We are working with the provider and will update you within the hour.',
+  confirm: false,
+  problemTicketId: '',
+  companies: '',
+  companyGroup: '',
+  emailContacts: false,
+  mode: 'broadcast',
+  triggerSource: 'manual',
+}, null, 2);
+
+function psStep({ id, name: stepName, x, script, test, params }) {
+  const p = params && params.length
+    ? 'parameters:\n' + params.map(([n, e]) => `      - name: ${n}\n        expression: '${e.replace(/'/g, "''")}'\n`).join('')
+    : 'parameters: []\n';
+  let s = `  - id: ${id}
+    name: ${stepName}
+    type: powershell-script
+    position:
+      x: ${x}
+      y: 80
+    properties:
+      script: |-
+${block(script, '        ')}
+      timeoutSeconds: 600
+      retryCount: 0
+      ${p}      aiExtensions: []
+`;
+  if (test) s += `      testInput: |-\n${block(test, '        ')}\n`;
+  return s;
+}
+
+const yml = `automationsWorkflow: 1
+name: Outage / Incident Broadcast
+description: Tells every affected client about an outage in one go. Finds the companies (a list, a company
+  group, or every company with the service installed), previews the change, and on confirm sets each
+  portal's service status banner token, pins a Service Status article, optionally emails each primary
+  contact, and notes the problem ticket. A resolved run clears the banner and posts the resolution.
+definition:
+  schemaVersion: 1
+  activities:
+  - id: start
+    name: Start
+    type: start
+    position:
+      x: 100
+      y: 80
+    properties:
+      # Enable the webhook in Properties after import; AutomationAI issues the URL and secret.
+      webhookEnabled: false
+${psStep({ id: 'parse', name: 'Read the request', x: 280, script: read('parse.ps1'), test: testInput, params: [['trigger', '{{ nodes.trigger.output }}']] })}${psStep({ id: 'identify', name: 'Find the affected companies', x: 460, script: read('identify.ps1') })}${psStep({ id: 'broadcast', name: 'Post the notice and record it', x: 640, script: read('broadcast.ps1') })}  - id: end
+    name: End
+    type: end
+    position:
+      x: 820
+      y: 80
+  connections:
+  - source: start
+    target: parse
+    sourceHandle: null
+  - source: parse
+    target: identify
+    sourceHandle: null
+  - source: identify
+    target: broadcast
+    sourceHandle: null
+  - source: broadcast
+    target: end
+    sourceHandle: null
+  startActivityId: start
+`;
+
+const y = loadYaml();
+const { text } = injectText(yml, name, new Map());
+const doc = y.load(text);
+if (doc.automationsWorkflow !== 1) throw new Error('automationsWorkflow marker missing');
+const acts = doc.definition.activities;
+if (acts.find((a) => a.id === 'start').properties.webhookEnabled !== false) throw new Error('webhook must ship disabled');
+if (acts.some((a) => a.properties && 'model' in a.properties && a.properties.model)) throw new Error('model must be blank');
+if (/\{\{\s*input\./.test(text)) throw new Error('use nodes.<id>.output bindings, never input.*');
+if (text.includes(String.fromCharCode(0x2014))) throw new Error('no em dashes');
+const bscript = acts.find((a) => a.id === 'broadcast').properties.script;
+if (!bscript.includes('function Get-PsaPrimaryContact')) throw new Error('_shared/psa-tickets.ps1 was not pasted');
+if (!bscript.includes('function Send-PmMail')) throw new Error('_shared/postmark.ps1 was not pasted');
+
+const check = process.argv.includes('--check');
+const was = fs.existsSync(out) ? fs.readFileSync(out, 'utf8').replace(/\r\n/g, '\n') : '';
+if (text === was) { console.log(`${name}: current`); process.exit(0); }
+if (check) { console.log(`${name}: OUT OF DATE (run node src/build.js)`); process.exit(1); }
+fs.writeFileSync(out, text);
+console.log(`${name}: written`);

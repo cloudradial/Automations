@@ -29,7 +29,7 @@ Create a CIS Controls assessment for Contoso with these 20 questions
 
 - **Assessments are list-only** — `get_resource` doesn't work for individual assessments (API quirk). Use `list_resources` with a filter instead.
 - **Pair with [Endpoint Reporting](../endpoint-reporting)** for a full GAP picture (warranty + assessments).
-- **Microsoft Secure Score:** the plugin only talks to CloudRadial, so it can't read Secure Score. Use the AutomationAI workflow [Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/automationai/secure-score-assessment), or paste the controls in and ask for an assessment from them.
+- **Microsoft Secure Score:** the plugin only talks to CloudRadial, so it can't read Secure Score. Use the AutomationAI workflow [Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment), or paste the controls in and ask for an assessment from them.
 
 ## Related skills
 

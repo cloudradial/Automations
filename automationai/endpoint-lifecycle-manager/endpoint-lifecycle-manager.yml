@@ -28,7 +28,7 @@ definition:
           #  Plan replacement, Upgrade in place, Retain, Needs data, Human review,
           #  Virtual machines). Same rules as the Endpoint LifeCycle Manager agent,
           #  but deterministic: no model, no turn limit, any AI provider.
-          #  Run input (all optional): {"companyIds": "1,4,7", "mode": "plan"}
+          #  Run input (all optional): {"companyIds": "1,4,7", "mode": "plan", "pricing": {...}}
           #  Secrets (runner Key Vault): CloudRadial-BaseUrl, CloudRadial-PublicKey,
           #  CloudRadial-PrivateKey.
           # =====================================================================
@@ -59,6 +59,33 @@ definition:
           $ci = [System.Globalization.CultureInfo]::InvariantCulture
           $runDate = (Get-Date).ToUniversalTime()
           $today = $runDate.ToString('d MMM yyyy', $ci)
+
+          # ---- pricing (optional run input; the MSP's own approved models and labour rate) ----
+          # "pricing": { "currency": "USD", "hourlyRate": 150, "showPriceToClient": true,
+          #   "models": { "Windows laptop": { "model": "Dell Latitude 7450", "price": 1450, "cost": 1180 }, "Windows desktop": {...},
+          #               "Mac laptop": {...}, "Mac desktop": {...}, "Windows": {...}, "Mac": {...} } }
+          # Without it, cards carry no prices and existing card prices are left alone.
+          # Clients see the price unless showPriceToClient is false; the cost (projectUnitCost and the internal note) never shows.
+          $warnings = New-Object System.Collections.ArrayList
+          function Get-Number { param($v) $d = 0.0; if ($null -ne $v -and [string]$v -ne '' -and [double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float, $ci, [ref]$d) -and $d -ge 0) { return $d }; return $null }
+          $Pricing = $null
+          $pin = Get-Prop $in 'pricing'
+          if ($pin -is [string]) { if ($pin.Trim()) { try { $pin = $pin | ConvertFrom-Json } catch { $null = $warnings.Add("The pricing input isn't valid JSON, so no prices were added."); $pin = $null } } else { $pin = $null } }
+          if ($null -ne $pin) {
+              $cur = ([string](Get-Prop $pin 'currency')).Trim().ToUpperInvariant(); if (-not $cur) { $cur = 'USD' }
+              $sym = switch ($cur) { { $_ -in @('USD', 'CAD', 'AUD', 'NZD') } { '$' } 'GBP' { [string][char]0x00A3 } 'EUR' { [string][char]0x20AC } default { "$cur " } }
+              $Pricing = @{ symbol = $sym; hourlyRate = (Get-Number (Get-Prop $pin 'hourlyRate')); showToClient = ([string](Get-Prop $pin 'showPriceToClient') -notmatch '^(false|no|0)$'); models = @{} }
+              $m = Get-Prop $pin 'models'
+              $pairs = if ($m -is [System.Collections.IDictionary]) { @($m.GetEnumerator() | ForEach-Object { @{ k = [string]$_.Key; v = $_.Value } }) } elseif ($null -ne $m) { @($m.PSObject.Properties | ForEach-Object { @{ k = $_.Name; v = $_.Value } }) } else { @() }
+              foreach ($p in $pairs) {
+                  $isNum = $null -ne (Get-Number $p.v) -and -not ($p.v -is [System.Collections.IDictionary]) -and -not ($p.v -is [pscustomobject])
+                  $price = if ($isNum) { Get-Number $p.v } else { Get-Number (Get-Prop $p.v 'price') }
+                  if ($null -eq $price -or $price -le 0) { $null = $warnings.Add("Pricing for '$($p.k)' has no valid price, so it was ignored."); continue }
+                  $Pricing.models[$p.k.Trim()] = @{ model = $(if ($isNum) { '' } else { ([string](Get-Prop $p.v 'model')).Trim() }); price = $price; cost = $(if ($isNum) { $null } else { Get-Number (Get-Prop $p.v 'cost') }) }
+              }
+              if (-not $Pricing.models.Count -and $null -eq $Pricing.hourlyRate) { $null = $warnings.Add('The pricing input has no models and no hourlyRate, so no prices were added.'); $Pricing = $null }
+          }
+          function Format-Money { param([double]$v) $Pricing.symbol + $v.ToString($(if ($v -eq [math]::Floor($v)) { 'N0' } else { 'N2' }), $ci) }
           $SubjectPrefix = 'Endpoint Hardware Refresh - '
           $Categories = @('Replace', 'Plan replacement', 'Upgrade in place', 'Retain', 'Needs data', 'Human review', 'Virtual machines')
           $PriorityInt = @{ Critical = 1; High = 1; Medium = 0; Low = -1 }   # Planner has no Critical: stored as High
@@ -87,7 +114,8 @@ definition:
               for ($i = 1; $i -le 6; $i++) {
                   try {
                       $a = @{ Uri = $url; Method = $Method; Headers = $headers; ContentType = $ContentType }
-                      if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 }) }
+                      # Non-ASCII (curly apostrophes in Mac names, currency symbols) is sent as \u escapes, so the body's text encoding can't garble it.
+                      if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 -EscapeHandling EscapeNonAscii }) }
                       return Invoke-RestMethod @a
                   }
                   catch {
@@ -118,7 +146,9 @@ definition:
           function Enc { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
           function Parse-Date { param($v) $d = [datetime]::MinValue; if ($null -ne $v -and [string]$v -and [datetime]::TryParse([string]$v, $ci, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$d)) { if ($d.Year -gt 1900) { return $d } }; return $null }
           function Friendly { param([datetime]$d) $d.ToString('d MMM yyyy', $ci) }
-          function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed$') }
+          # A card is in Planner's Completed column when its status is Completed, or when someone marked it done in the portal,
+          # which sets currentlyInstalled and leaves status alone.
+          function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed$' -or [string](Get-Prop $card 'currentlyInstalled') -eq 'True') }
 
           # ---- rules (identical to the agent's decision tracks) ----
           function Get-Age { param($ep)
@@ -201,6 +231,46 @@ definition:
               return $s
           }
 
+          # ---- pricing helpers ----
+          # Windows or Mac, laptop or desktop: from the Mac model name, then the enclosure (name or SMBIOS chassis code), then a battery.
+          function Get-DeviceType { param($ep)
+              $isMac = (Get-OsType ([string](Get-Prop $ep 'os'))) -eq 'macos'
+              $enc = ([string](Get-Prop $ep 'enclosure')).Trim(); $md = [string](Get-Prop $ep 'model')
+              $form = $null
+              if ($isMac) { if ($md -match '(?i)macbook') { $form = 'laptop' } elseif ($md -match '(?i)imac|mac\s?mini|mac\s?studio|mac\s?pro') { $form = 'desktop' } }
+              if (-not $form -and $enc) {
+                  if ($enc -match '(?i)laptop|notebook|portable|convertible|detachable|tablet|hand\s?held') { $form = 'laptop' }
+                  elseif ($enc -match '(?i)desktop|tower|mini|all.in.one|lunch\s?box|space.saving|pizza|stick') { $form = 'desktop' }
+                  elseif ($enc -match '^\d+$') { if ([int]$enc -in @(8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32)) { $form = 'laptop' } elseif ([int]$enc -in @(3, 4, 5, 6, 7, 13, 15, 16, 24, 34, 35, 36)) { $form = 'desktop' } }
+              }
+              if (-not $form) { $b = Get-Prop $ep 'batteryInfo'; if ($null -ne $b -and (ConvertTo-Json -InputObject $b -Compress -Depth 4) -notmatch '^(\[\]|\{\}|null|""|\[null\])$') { $form = 'laptop' } }
+              $base = if ($isMac) { 'Mac' } else { 'Windows' }
+              return @{ base = $base; type = $(if ($form) { "$base $form" } else { '' }) }
+          }
+          # Replace / Plan replacement: the approved model for each device's type, times the number of devices.
+          function Get-ReplacementEstimate { param($devices)
+              $groups = [ordered]@{}; $missing = [ordered]@{}
+              foreach ($d in $devices) {
+                  $key = $null
+                  if ($d.deviceType.type -and $Pricing.models.ContainsKey($d.deviceType.type)) { $key = $d.deviceType.type } elseif ($Pricing.models.ContainsKey($d.deviceType.base)) { $key = $d.deviceType.base }
+                  if ($key) { $groups[$key] = 1 + [int]$groups[$key] } else { $label = $(if ($d.deviceType.type) { $d.deviceType.type } else { "$($d.deviceType.base) (laptop or desktop not recorded)" }); $missing[$label] = 1 + [int]$missing[$label] }
+              }
+              $lines = New-Object System.Collections.ArrayList; $total = 0.0; $cost = 0.0; $costKnown = $true; $priced = 0
+              foreach ($g in $groups.GetEnumerator()) {
+                  $mo = $Pricing.models[$g.Key]; $n = [int]$g.Value; $sub = $n * $mo.price; $total += $sub; $priced += $n
+                  if ($null -eq $mo.cost) { $costKnown = $false } else { $cost += $n * $mo.cost }
+                  $null = $lines.Add("$n $([char]0x00D7) $(if ($mo.model) { "$(Enc $mo.model) ($(Enc $g.Key))" } else { Enc $g.Key }) at $(Format-Money $mo.price) = $(Format-Money $sub)")
+              }
+              foreach ($g in $missing.GetEnumerator()) { $null = $lines.Add("$($g.Value) $([char]0x00D7) $(Enc $g.Key): no approved model is set for this type, so it isn't in the estimate") }
+              return @{ total = [math]::Round($total, 2); cost = $(if ($priced -and $costKnown) { [math]::Round($cost, 2) } else { $null }); priced = $priced; unpriced = ($devices.Count - $priced); lines = @($lines) }
+          }
+          # Upgrade in place, Retain, Human review, Virtual machines: what's needed depends on each device, so no flat price.
+          function Get-LabourNote { param([string]$cat)
+              $what = switch ($cat) { 'Human review' { 'server' } 'Virtual machines' { 'virtual machine' } default { 'computer' } }
+              if ($null -ne $Pricing.hourlyRate) { return "Labour is billed at $(Format-Money $Pricing.hourlyRate) an hour. Parts, software and licences will be quoted once a technician has checked each $what." }
+              return "Labour, parts, software and licences will be quoted once a technician has checked each $what."
+          }
+
           # ---- 1. read endpoints and sort them into categories ----
           $filter = if ($CompanyIds.Count) { '?$filter=' + (($CompanyIds | ForEach-Object { "companyId eq $_" }) -join ' or ') } else { '' }
           $endpoints = Get-CrAll "/v2/odata/endpoint$filter"
@@ -218,8 +288,9 @@ definition:
               if ($null -ne $knownCompanies -and -not $knownCompanies.Contains($cid)) { $counts.orphanedEndpoints++; $orphanedBy[$cid] = 1 + [int]$orphanedBy[$cid]; continue }
               # Every key present: the runner runs in strict mode, where reading a missing key throws.
               $found = Get-Assessment $ep
-              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null }
+              $a = @{ excluded = $false; flagged = $false; category = $null; tier = $null; line = $null; deviceType = $null }
               foreach ($k in @($found.Keys)) { $a[$k] = $found[$k] }
+              if ($a.flagged -and $null -ne $Pricing) { $a.deviceType = Get-DeviceType $ep }
               if ($a.excluded) { $counts.excludedNonComputer++; continue }
               $null = $companiesInScope.Add($cid)
               $counts.evaluated++; $evaluatedBy[$cid] = 1 + [int]$evaluatedBy[$cid]
@@ -233,7 +304,10 @@ definition:
 
           # ---- 2. one card per company and category ----
           $results = New-Object System.Collections.ArrayList
-          function Add-Result { param($cid, $cat, $prio, $action, $prodId, $n, $note) $null = $results.Add([ordered]@{ companyId = [string]$cid; category = $cat; priority = $prio; action = $action; productId = [string]$prodId; deviceCount = $n; note = $note }) }
+          function Add-Result { param($cid, $cat, $prio, $action, $prodId, $n, $note, $estimate = $null, $breakdown = $null) $null = $results.Add([ordered]@{ companyId = [string]$cid; category = $cat; priority = $prio; action = $action; productId = [string]$prodId; deviceCount = $n; note = $note; estimatedPrice = $estimate; priceBreakdown = $breakdown })
+              if ($null -ne $estimate) { $state.estimatedTotal += $estimate } }   # only cards that were written (or would be, in plan mode)
+          # Run-wide totals live in one table: the runner runs this script in a child scope, where $script: variables are not ours.
+          $state = @{ estimatedTotal = 0.0; optionalDropped = $false }
           function Send-Patch { param($id, $fields)
               $ops = @($fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = "/$($_.Key)"; value = $_.Value } })
               try { $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $ops -ContentType 'application/json-patch+json' }
@@ -242,10 +316,9 @@ definition:
                   $core = @($ops | Where-Object { $_.path -notin @('/notes', '/productType', '/scheduledQuarter', '/quarterOffset') })
                   if ($core.Count -eq $ops.Count) { throw }
                   $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $core -ContentType 'application/json-patch+json'
-                  $script:optionalDropped = $true
+                  $state.optionalDropped = $true
               }
           }
-          $optionalDropped = $false
           foreach ($oc in @($orphanedBy.Keys | Sort-Object)) { Add-Result $oc '' '' 'skipped' '' $orphanedBy[$oc] "Company $oc has been deleted, so its $(if ($orphanedBy[$oc] -eq 1) { 'leftover endpoint was' } else { "$($orphanedBy[$oc]) leftover endpoints were" }) skipped and no cards were written." }
 
           foreach ($cid in @($companiesInScope | Sort-Object)) {
@@ -270,7 +343,8 @@ definition:
                           if (Test-Completed $card) { $counts.cardsSkipped++; Add-Result $cid $cat '' 'skipped' (Get-Prop $card 'productId') 0 'Already closed; no computers in this category.'; continue }
                           if (-not $CloseEmpty) { continue }
                           # Write first, then count: a failed write is reported only as an error.
-                          if ($Apply) { Send-Patch (Get-Prop $card 'productId') @{ status = 40; body = "<p>No computers need action in this category as of $today.</p><p><em>$marker</em></p>"; notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today; none in $cat, so this card was closed. Marker: $marker." } }
+                          # Clients see a price once a card is Completed, so hide it; the stored price and cost stay for the MSP.
+                          if ($Apply) { Send-Patch (Get-Prop $card 'productId') @{ status = 40; isShowPrice = $false; body = "<p>No computers need action in this category as of $today.</p><p><em>$marker</em></p>"; notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today; none in $cat, so this card was closed. Marker: $marker." } }
                           $counts.cardsCompleted++
                           Add-Result $cid $cat '' 'completed' (Get-Prop $card 'productId') 0 "No computers need action in this category any more, so the card $(if ($Apply) { 'was' } else { 'would be' }) marked Completed."
                           continue
@@ -292,20 +366,39 @@ definition:
                           $inTier = @($devices | Where-Object { $_.tier -eq $tr }); if (-not $inTier.Count) { continue }
                           $null = $sb.Append("<h4>$tr</h4><ul>"); foreach ($d in $inTier) { $null = $sb.Append("<li>$($d.line)</li>") }; $null = $sb.Append('</ul>')
                       }
+                      # Pricing: replacement cards are priced from the approved models; the rest get the labour note.
+                      $priceFields = $null; $priceHtml = ''; $priceNote = ''; $estimate = $null; $breakdown = $null
+                      if ($null -ne $Pricing -and $cat -ne 'Needs data') {
+                          if ($cat -in @('Replace', 'Plan replacement')) {
+                              if ($Pricing.models.Count) {
+                                  $est = Get-ReplacementEstimate $devices; $estimate = $est.total
+                                  $breakdown = @($est.lines | ForEach-Object { [System.Net.WebUtility]::HtmlDecode($_) })   # plain text for the run output, so plan runs show it
+                                  $priceFields = [ordered]@{ projectUnits = $(if ($est.total -gt 0) { 1 } else { 0 }); projectUnitPrice = $est.total; isShowPrice = $Pricing.showToClient }
+                                  if ($null -ne $est.cost) { $priceFields.projectUnitCost = $est.cost }
+                                  $totalTxt = if ($est.priced) { "Estimated replacement cost: $(Format-Money $est.total) for $($est.priced) $(if ($est.priced -eq 1) { 'computer' } else { 'computers' })$(if ($est.unpriced) { ", with $($est.unpriced) not priced" })." } else { 'No approved model is set for these computers yet, so there is no estimate.' }
+                                  $priceHtml = '<h4>Estimated cost</h4><ul>' + (($est.lines | ForEach-Object { "<li>$_</li>" }) -join '') + "</ul><p>$totalTxt</p>"
+                                  $priceNote = " $totalTxt$(if ($null -ne $est.cost) { " Our cost: $(Format-Money $est.cost)." }) Breakdown: $($est.lines -join '; ')."
+                              }
+                          }
+                          else { $ln = Get-LabourNote $cat; $priceHtml = "<h4>Cost</h4><p>$ln</p>"; $priceNote = " $ln" }
+                      }
+                      # Prices go in the client-readable body only when the MSP chooses to show them; the internal note always has them.
+                      if ($priceHtml -and $Pricing.showToClient) { $null = $sb.Append($priceHtml) }
                       $null = $sb.Append("<h4>Summary</h4><p>$tierText.</p><p><em>$marker</em></p>")
                       $summary = Get-Summary $cat $n $top $tierCounts
-                      $notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today. This $cat card: $tierText. Marker: $marker."
+                      $notes = "Internal: company $cid. $([int]$evaluatedBy[$cid]) computers evaluated on $today. This $cat card: $tierText.$priceNote Marker: $marker."
                       $fields = [ordered]@{ subject = "$SubjectPrefix$cat"; body = $sb.ToString(); summary = $summary; notes = $notes; category = $PlannerCategory; productCategoryId = $ProductCategoryId; priority = $PriorityInt[$top] }
+                      if ($priceFields) { foreach ($pk in $priceFields.Keys) { $fields[$pk] = $priceFields[$pk] } }
                       $quarter = if ($cat -in @('Human review', 'Needs data')) { 1 } else { $RoadmapQuarter[$top] }
                       if ($OnRoadmap) { $fields.productType = 1; $fields.scheduledQuarter = $quarter; $fields.quarterOffset = $quarter - 1 }
 
                       if ($null -ne $card) {
                           $id = Get-Prop $card 'productId'
                           $reopen = Test-Completed $card
-                          if ($reopen) { $fields.status = $(if ($OnRoadmap) { 20 } else { 0 }) } elseif ($OnRoadmap) { $fields.status = 20 }
+                          if ($reopen) { $fields.status = $(if ($OnRoadmap) { 20 } else { 0 }); $fields.currentlyInstalled = $false } elseif ($OnRoadmap) { $fields.status = 20 }
                           if ($Apply) { Send-Patch $id $fields }
                           $counts.cardsUpdated++
-                          Add-Result $cid $cat $top $(if ($reopen) { 'reopened' } else { 'updated' }) $id $n $summary
+                          Add-Result $cid $cat $top $(if ($reopen) { 'reopened' } else { 'updated' }) $id $n $summary $estimate $breakdown
                       }
                       else {
                           $newId = ''
@@ -316,13 +409,13 @@ definition:
                               try { $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body }
                               catch {
                                   foreach ($k in @('notes', 'productType', 'scheduledQuarter', 'quarterOffset')) { $body.Remove($k) }
-                                  $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body; $optionalDropped = $true
+                                  $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body; $state.optionalDropped = $true
                               }
                               # POST replies { success, message, data = { productId, ... } }.
                               $newId = [string](Get-Prop $new 'productId'); if (-not $newId) { $newId = [string](Get-Prop (Get-Prop $new 'data') 'productId') }
                           }
                           $counts.cardsCreated++
-                          Add-Result $cid $cat $top 'created' $newId $n $summary
+                          Add-Result $cid $cat $top 'created' $newId $n $summary $estimate $breakdown
                       }
                   }
                   catch { $counts.errors++; Add-Result $cid $cat '' 'error' $(if ($card) { Get-Prop $card 'productId' }) $devices.Count $_.Exception.Message }
@@ -333,7 +426,10 @@ definition:
           $verb = if ($Apply) { '' } else { ' (plan - nothing written)' }
           $out = [ordered]@{ status = $(if ($counts.errors) { 'completed_with_errors' } else { 'ok' }); mode = $Mode }
           foreach ($k in $counts.Keys) { $out[$k] = $counts[$k] }
-          $out.optionalFieldsDropped = $optionalDropped
+          $out.optionalFieldsDropped = $state.optionalDropped
+          $out.pricingApplied = ($null -ne $Pricing)
+          if ($null -ne $Pricing) { $out.estimatedTotal = [math]::Round($state.estimatedTotal, 2) }
+          $out.warnings = @($warnings)
           $out.results = @($results)
           $out.message = "Endpoint LifeCycle Manager$verb for $scope : $($counts.evaluated) computers evaluated, $($counts.flaggedEndpoints) on cards, $($counts.excludedNonComputer) non-computers excluded$(if ($counts.orphanedEndpoints) { ", $($counts.orphanedEndpoints) skipped from deleted companies" }). Cards: $($counts.cardsCreated) created, $($counts.cardsUpdated) updated, $($counts.cardsCompleted) closed, $($counts.errors) errors."
           Set-NodeOutput $out

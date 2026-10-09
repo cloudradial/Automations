@@ -9,25 +9,27 @@ function Set-NodeOutput { param($o) $global:Out = $o }
 function Start-Sleep { param($Seconds) }
 $eps = @(
     @{ companyId = 1; name = "Alex's MacBook Air"; os = 'macOS 11.6'; manufacturer = 'Apple'; model = 'MacBook Air'; serialNumber = 'SN0001' },
-    @{ companyId = 1; name = 'DESKTOP-0001'; os = 'Windows 11 Pro'; manufacturer = 'Dell'; model = 'Precision 5570'; serialNumber = 'SN0002'; manufacturedDate = '2022-06-22T00:00:00Z'; expirationDate = '2025-06-24T00:00:00Z'; memory = 34359738368 },
+    @{ companyId = 1; name = 'DESKTOP-0001'; os = 'Windows 11 Pro'; manufacturer = 'Dell'; model = 'Precision 5570'; serialNumber = 'SN0002'; enclosure = 'Desktop'; manufacturedDate = '2022-06-22T00:00:00Z'; expirationDate = '2025-06-24T00:00:00Z'; memory = 34359738368 },
     @{ companyId = 1; name = "Sam's MacBook Pro"; os = 'macOS'; manufacturer = 'Apple' },
     @{ companyId = 1; name = 'CON-SERVER'; os = 'Windows Server 2016'; isServer = $true; expirationDate = '2020-03-01T00:00:00Z' },
     @{ companyId = 1; name = 'win-10-test'; os = 'Windows 10 Pro'; isVirtual = $true; memory = 0 },
     @{ companyId = 1; name = 'OK-LAPTOP'; os = 'Windows 11 Pro'; manufacturedDate = '2025-01-10T00:00:00Z'; expirationDate = '2028-01-10T00:00:00Z'; memory = 17179869184 },
     @{ companyId = 1; name = 'Draytek'; os = '' },
     @{ companyId = 2; name = 'OLD-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2017-01-01T00:00:00Z' },
+    @{ companyId = 2; name = 'OLD-LAPTOP'; os = 'Windows 10 Pro'; manufacturedDate = '2018-03-01T00:00:00Z'; enclosure = '10' },
     @{ companyId = 2; name = 'W11-READY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },      # expect Upgrade in place
     @{ companyId = 2; name = 'W11-NOTREADY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'NotReady'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },   # expect Replace
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(
     @{ productId = 145; companyId = 1; subject = 'Endpoint Hardware Refresh - Replace'; status = 'Proposed'; body = '' },
-    @{ productId = 146; companyId = 1; subject = 'Endpoint Hardware Refresh - Plan replacement'; status = 'Proposed'; body = '' },
-    @{ productId = 147; companyId = 1; subject = 'Endpoint Hardware Refresh - Upgrade in place'; status = 'Proposed'; body = '' },
+    @{ productId = 146; companyId = 1; subject = 'Endpoint Hardware Refresh - Plan replacement'; status = 'Proposed'; body = ''; currentlyInstalled = $true },   # marked done in the portal but still has a computer: must reopen
+    @{ productId = 147; companyId = 1; subject = 'Endpoint Hardware Refresh - Upgrade in place'; status = 'Proposed'; body = ''; projectUnitPrice = 2900; isShowPrice = $true },   # priced card that empties: completing it must hide the price
     @{ productId = 148; companyId = 1; subject = 'Endpoint Hardware Refresh - Needs data'; status = 'Completed'; body = '' },
     @{ productId = 149; companyId = 1; subject = 'Endpoint Hardware Refresh - Human review'; status = 'Proposed'; body = '' },
     @{ productId = 150; companyId = 1; subject = 'Endpoint Hardware Refresh - Virtual machines'; status = 'Proposed'; body = '' },
-    @{ productId = 151; companyId = 1; subject = 'Laptop Refresh'; status = 'Proposed'; body = '' }
+    @{ productId = 151; companyId = 1; subject = 'Laptop Refresh'; status = 'Proposed'; body = '' },
+    @{ productId = 152; companyId = 1; subject = 'Endpoint Hardware Refresh - Retain'; status = 'Proposed'; body = ''; currentlyInstalled = $true; isShowPrice = $true }   # marked done in the portal, no computers left: leave it alone
 )
 function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
     $u = [uri]::UnescapeDataString($Uri)
@@ -45,11 +47,25 @@ function Invoke-RestMethod { param($Uri, $Method, $Headers, $Body, $ContentType)
     throw "unmocked GET $u"
 }
 Set-StrictMode -Version Latest   # as on the runner
-. "$PSScriptRoot\elm.ps1"
+# Run it in a child scope, as the runner does: $script: variables set in elm.ps1 aren't visible there.
+& ([scriptblock]::Create((Get-Content -Raw "$PSScriptRoot\elm.ps1")))
 Set-StrictMode -Off
 $o = $global:Out
 $o.message
-"optionalFieldsDropped: $($o.optionalFieldsDropped)"
-foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | $($r.note)" }
+"optionalFieldsDropped: $($o.optionalFieldsDropped) | pricingApplied: $($o.pricingApplied) | estimatedTotal: $(if ($o.Contains('estimatedTotal')) { $o.estimatedTotal }) | warnings: $(@($o.warnings) -join ' / ')"
+foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)" }
+foreach ($r in @($o.results | Where-Object { $_.action -eq 'completed' -and $_.productId })) {
+    $w = @($global:Writes | Where-Object { $_ -match "^PATCH /v2/product/$($r.productId) " })
+    $ok = $w.Count -and @(($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) | Where-Object { $_.path -eq '/isShowPrice' -and $_.value -eq $false }).Count -eq 1
+    "completed card $($r.productId) hides its price: $(if ($ok) { 'ok' } elseif ($w.Count) { 'MISSING isShowPrice=false' } else { 'no write (plan mode)' })"
+}
+foreach ($r in @($o.results | Where-Object { $_.action -eq 'reopened' })) {
+    $w = @($global:Writes | Where-Object { $_ -match "^PATCH /v2/product/$($r.productId) " })
+    $ops = if ($w.Count) { @($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) } else { @() }
+    $ok = @($ops | Where-Object { $_.path -eq '/currentlyInstalled' -and $_.value -eq $false }).Count -eq 1 -and @($ops | Where-Object { $_.path -eq '/status' }).Count -eq 1
+    "reopened card $($r.productId) leaves Completed: $(if ($ok) { 'ok' } elseif ($w.Count) { 'MISSING status or currentlyInstalled=false' } else { 'no write (plan mode)' })"
+}
+$touched = @($global:Writes | Where-Object { $_ -match '^PATCH /v2/product/152 ' }).Count
+"card 152 (done in the portal, no computers left) untouched: $(if ($touched) { 'NO - it was written' } else { 'ok' })"
 "--- writes"
 foreach ($w in $global:Writes) { "  " + $w.Substring(0, [Math]::Min(260, $w.Length)) }

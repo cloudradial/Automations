@@ -97,8 +97,9 @@ function Get-Query { param([string]$Uri) $q = @{}; $i = $Uri.IndexOf('?'); if ($
 function Get-IdFrom { param([string]$Uri, [string]$Pattern) $m = [regex]::Match($Uri, $Pattern); return $m.Groups[1].Value }
 
 # ---- the mock API ----
+# Like the real cmdlet, a JSON array reply is handed back as ONE object (", @(...)"), not item by item.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
     $m = ([string]$Method).ToUpperInvariant(); $u = [string]$Uri
     $b = if ($Body -is [string] -and $Body -and [string]$ContentType -like "*json*") { $Body | ConvertFrom-Json -NoEnumerate } else { $null }
     $null = $MockWorld.calls.Add("$m $u")
@@ -110,21 +111,21 @@ function Invoke-RestMethod {
         'connectwise' {
             if ($m -eq 'GET' -and $u.StartsWith("$api/service/tickets?")) {
                 $q = Get-Query $u
-                if ([int]$q['page'] -gt 1) { return @() }
-                return @($MockWorld.tickets | ForEach-Object { [pscustomobject]@{ id = $_.id; summary = $_.summary; company = [pscustomobject]@{ id = $_.companyId; name = $_.companyName }; status = [pscustomobject]@{ name = $_.status }; priority = [pscustomobject]@{ name = (Get-PrioLabel $_) }; dateEntered = (Get-Iso $_.created); closedDate = $null; board = [pscustomobject]@{ id = 1 }; _info = [pscustomobject]@{ lastUpdated = (Get-Iso $_.updated) } } })
+                if ([int]$q['page'] -gt 1) { return , @() }
+                return , @($MockWorld.tickets | ForEach-Object { [pscustomobject]@{ id = $_.id; summary = $_.summary; company = [pscustomobject]@{ id = $_.companyId; name = $_.companyName }; status = [pscustomobject]@{ name = $_.status }; priority = [pscustomobject]@{ name = (Get-PrioLabel $_) }; dateEntered = (Get-Iso $_.created); closedDate = $null; board = [pscustomobject]@{ id = 1 }; _info = [pscustomobject]@{ lastUpdated = (Get-Iso $_.updated) } } })
             }
             if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') {
                 $t = Get-WorldTicket (Get-IdFrom $u '/service/tickets/(\d+)/notes')
-                return @($t.notes | Sort-Object { $_.id } -Descending | ForEach-Object {
+                return , @($t.notes | Sort-Object { $_.id } -Descending | ForEach-Object {
                         $o = [ordered]@{ id = $_.id; text = $_.text; dateCreated = (Get-Iso $_.created); internalAnalysisFlag = $_.internal; detailDescriptionFlag = (-not $_.internal) }
                         if ($_.client) { $o.contact = [pscustomobject]@{ id = 9; name = 'Pat Example' } } else { $o.member = [pscustomobject]@{ identifier = 'jlee' } }
                         [pscustomobject]$o })
             }
             if ($m -eq 'POST' -and $u -match '/service/tickets/(\d+)/notes$') { Add-WorldNote $Matches[1] $b.text ([bool]$b.internalAnalysisFlag); return [pscustomobject]@{ id = $MockWorld.next } }
             if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)$') { $t = Get-WorldTicket $Matches[1]; return [pscustomobject]@{ id = $t.id; board = [pscustomobject]@{ id = 1 }; status = [pscustomobject]@{ name = $t.status } } }
-            if ($m -eq 'GET' -and $u -like "$api/service/boards/1/statuses*") { return @($MockCwStatus.Keys | ForEach-Object { [pscustomobject]@{ id = [int]$_; name = $MockCwStatus[$_]; closedStatus = ($MockCwStatus[$_] -in @('Closed', 'Resolved')); defaultFlag = ($MockCwStatus[$_] -eq 'New'); inactive = $false } }) }
+            if ($m -eq 'GET' -and $u -like "$api/service/boards/1/statuses*") { return , @($MockCwStatus.Keys | ForEach-Object { [pscustomobject]@{ id = [int]$_; name = $MockCwStatus[$_]; closedStatus = ($MockCwStatus[$_] -in @('Closed', 'Resolved')); defaultFlag = ($MockCwStatus[$_] -eq 'New'); inactive = $false } }) }
             if ($m -eq 'PATCH' -and $u -match '/service/tickets/(\d+)$') { Set-WorldStatus $Matches[1] $MockCwStatus[[string]$b[0].value.id]; return [pscustomobject]@{ id = 1 } }
-            if ($m -eq 'GET' -and $u -like "$api/company/companies*") { return @([pscustomobject]@{ id = 42; name = 'Contoso' }) }
+            if ($m -eq 'GET' -and $u -like "$api/company/companies*") { return , @([pscustomobject]@{ id = 42; name = 'Contoso' }) }
         }
         'autotask' {
             if ($m -eq 'GET' -and $u -like "$api/Tickets/entityInformation/fields") {
@@ -152,7 +153,7 @@ function Invoke-RestMethod {
         }
         'halopsa' {
             if ($u -eq 'https://halo.example.com/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
-            if ($m -eq 'GET' -and $u -eq "$api/Status") { return @($MockHaloStatus.Keys | ForEach-Object { [pscustomobject]@{ id = [int]$_; name = $MockHaloStatus[$_] } }) }
+            if ($m -eq 'GET' -and $u -eq "$api/Status") { return , @($MockHaloStatus.Keys | ForEach-Object { [pscustomobject]@{ id = [int]$_; name = $MockHaloStatus[$_] } }) }
             if ($m -eq 'GET' -and $u.StartsWith("$api/Tickets?")) {
                 $q = Get-Query $u; if ([int]$q['page_no'] -gt 1) { return [pscustomobject]@{ tickets = @(); record_count = 0 } }
                 $rows = @($MockWorld.tickets | Where-Object { $_.status -eq $MockHaloStatus[$q['status_id']] } | ForEach-Object { [pscustomobject]@{ id = $_.id; summary = $_.summary; client_id = $_.companyId; client_name = $_.companyName; status_id = [int]$q['status_id']; priority_id = (Get-PrioLabel $_); dateoccurred = (Get-Iso $_.created); lastactiondate = (Get-Iso $_.updated) } })
@@ -162,8 +163,8 @@ function Invoke-RestMethod {
                 $t = Get-WorldTicket (Get-Query $u)['ticket_id']
                 return [pscustomobject]@{ actions = @($t.notes | ForEach-Object { [pscustomobject]@{ id = $_.id; note = $_.text; datetime = (Get-Iso $_.created); hiddenfromuser = $_.internal; who_type = $(if ($_.client) { 2 } else { 1 }); who = $(if ($_.client) { 'Pat Example' } else { 'J Lee' }) } }) }
             }
-            if ($m -eq 'POST' -and $u -eq "$api/Actions") { Add-WorldNote $b[0].ticket_id $b[0].note ([bool]$b[0].hiddenfromuser); return @([pscustomobject]@{ id = 1 }) }
-            if ($m -eq 'POST' -and $u -eq "$api/Tickets") { if ($b[0].PSObject.Properties['status_id']) { Set-WorldStatus $b[0].id $MockHaloStatus[[string]$b[0].status_id] }; return @([pscustomobject]@{ id = $b[0].id }) }
+            if ($m -eq 'POST' -and $u -eq "$api/Actions") { Add-WorldNote $b[0].ticket_id $b[0].note ([bool]$b[0].hiddenfromuser); return , @([pscustomobject]@{ id = 1 }) }
+            if ($m -eq 'POST' -and $u -eq "$api/Tickets") { if ($b[0].PSObject.Properties['status_id']) { Set-WorldStatus $b[0].id $MockHaloStatus[[string]$b[0].status_id] }; return , @([pscustomobject]@{ id = $b[0].id }) }
         }
         'kaseyabms' {
             if ($u -eq 'https://bms.example.com/v2/security/authenticate') { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }

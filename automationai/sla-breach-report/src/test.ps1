@@ -68,9 +68,9 @@ $TCwTickets = @(
 $global:TCw = @{ tickets = $TCwTickets; fail = 0; pm = 0 }
 $TCwHandler = { param($c, $n)
     if ($c.Uri -like 'https://api.postmarkapp.com/email') { if ($global:TCw.pm) { New-HttpError $global:TCw.pm '{"ErrorCode":10,"Message":"Bad or missing Server API token."}' }; return [pscustomobject]@{ ErrorCode = 0; MessageID = 'm1' } }
-    if ($c.Uri -like '*/service/tickets[?]*') { if ($global:TCw.fail) { New-HttpError $global:TCw.fail '{"message":"denied"}' }; return @($global:TCw.tickets) }
-    if ($c.Uri -like '*/company/companies*') { if ([uri]::UnescapeDataString($c.Uri) -match 'name="Contoso Ltd"') { return @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return @() }
-    if ($c.Uri -like '*/service/SLAs/5/priorities*') { return @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
+    if ($c.Uri -like '*/service/tickets[?]*') { if ($global:TCw.fail) { New-HttpError $global:TCw.fail '{"message":"denied"}' }; return , @($global:TCw.tickets) }
+    if ($c.Uri -like '*/company/companies*') { if ([uri]::UnescapeDataString($c.Uri) -match 'name="Contoso Ltd"') { return , @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return , @() }
+    if ($c.Uri -like '*/service/SLAs/5/priorities*') { return , @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
     if ($c.Uri -like '*/service/SLAs/5') { return [pscustomobject]@{ id = 5; respondHours = 4; resolutionHours = 24 } }
     throw "unmocked $($c.Method) $($c.Uri)"
 }

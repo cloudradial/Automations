@@ -1461,7 +1461,14 @@ definition:
                       # Unverified: not in PSA.md yet. Body and /service/priorities lookup from the CW swagger clients.
                       $b = [ordered]@{ summary = (Get-PsaText $Summary 100); company = @{ id = [int]$CompanyId }; initialDescription = $Description }
                       if ($Queue) { $b.board = $(if ($isNum) { @{ id = [int]$Queue } } else { @{ name = $Queue } }) }
-                      if ($hint) { $pr = Select-PsaByLabel @(Invoke-Psa GET '/service/priorities?pageSize=100') 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
+                      # An API member whose security role can't read priorities (403) still gets the ticket, at the board's
+                      # default priority, with a warning; a priority is a nice-to-have, a ticket that never opens is not.
+                      if ($hint) {
+                          $list = $null
+                          try { $list = @(Invoke-Psa GET '/service/priorities?pageSize=100') }
+                          catch { Add-PsaWarning "ConnectWise wouldn't list ticket priorities, so the new ticket uses the board's default priority instead of $hint. Give the API member's security role Inquire access to Service Desk priorities to fix this. ($($_.Exception.Message))" }
+                          if ($null -ne $list) { $pr = Select-PsaByLabel $list 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
+                      }
                       foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
                       $raw = Invoke-Psa POST '/service/tickets' $b
                       $id = Get-PsaProp $raw 'id'

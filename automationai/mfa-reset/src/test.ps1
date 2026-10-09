@@ -130,7 +130,7 @@ $Handler = {
             if ($S.tap -eq 'policy') { New-HttpError 400 '{"error":{"code":"badRequest","message":"Temporary Access Pass policy is not enabled for this user."}}' }
             return [pscustomobject]@{ id = 'newtap'; temporaryAccessPass = $TTapCode; startDateTime = '2026-10-07T15:00:00Z'; lifetimeInMinutes = 60; isUsableOnce = $true }
         }
-        "GET $TCW/service/tickets/777/notes*" { $i = 0; return @(Get-TNotes '777' | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public; dateCreated = '2026-10-08T10:00:00Z' } }) }
+        "GET $TCW/service/tickets/777/notes*" { $i = 0; return , @(Get-TNotes '777' | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public; dateCreated = '2026-10-08T10:00:00Z' } }) }
         "GET $TCW/service/tickets/777" { return [pscustomobject]@{ id = 777; summary = 'Reset my MFA'; company = [pscustomobject]@{ id = 42 }; owner = $null; status = [pscustomobject]@{ name = 'New' } } }
         "POST $TCW/service/tickets/777/notes" { $b = $c.Body | ConvertFrom-Json; Add-TNote '777' $b.text ([bool]$b.detailDescriptionFlag); return [pscustomobject]@{ id = 9001 } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(

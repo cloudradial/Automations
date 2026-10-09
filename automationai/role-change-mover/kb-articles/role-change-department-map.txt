@@ -1,0 +1,14 @@
+Department map for role changes. Columns: department, group (display name or object id), kind (security, distribution or m365), license_sku (optional).
+
+department,group,kind,license_sku
+Sales,Sales Team,security,
+Sales,sales@contoso.com list,distribution,
+Sales,CRM Users,security,
+Sales,,,Microsoft_365_Business_Standard
+Marketing,Marketing Team,m365,
+Marketing,marketing@contoso.com list,distribution,
+Marketing,Adobe Creative Cloud Users,security,
+Marketing,,,Microsoft_365_Business_Premium
+Finance,Finance Team,security,
+Finance,Finance Share Readers,security,
+Finance,,,Microsoft_365_Business_Premium

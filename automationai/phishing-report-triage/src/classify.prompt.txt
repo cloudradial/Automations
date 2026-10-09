@@ -1,0 +1,7 @@
+Classify this reported email. Reply with one JSON object in this shape:
+{"verdict": "malicious" | "suspicious" | "likely-safe", "confidence": 0.0, "reasons": ["..."]}
+
+The facts were gathered without AI from the reporter's mailbox. "flags" lists the warning signs the rules found; "auth" holds the SPF, DKIM, DMARC and Microsoft composite authentication results; "links" holds link domains with Safe Links removed; "attachments" holds names and types only.
+
+Email facts (JSON):
+{{ nodes.enrich.output.enrichment_json }}

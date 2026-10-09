@@ -34,6 +34,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`password-reset/`](password-reset/) | Workflow (self-service) |
 | [`password-reset-triage/`](password-reset-triage/) | Workflow (ServiceAI triage) |
 | [`patch-compliance/`](patch-compliance/) | Workflow (runs the RMM Agent) |
+| [`phishing-report-triage/`](phishing-report-triage/) | Workflow (one AI Prompt step; drafts a purge for review, never runs one) |
 | [`portal-lookup/`](portal-lookup/) | Workflow (runs the UCP Assistant) |
 | [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Workflow (runs the UCP Assistant; deletes one empty flexible asset type) |
 | [`rmm-agent/`](rmm-agent/) | Agent (run by Patch Compliance and RMM Auto-Remediation) |

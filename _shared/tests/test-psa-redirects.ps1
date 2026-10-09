@@ -169,6 +169,37 @@ Invoke-WithLib @('psa.ps1') {
     Check 'a rerun after the lagged write writes nothing' ($res2 -eq 'already-present' -and @(Write-Calls).Count -eq 1) "$res2 / $(Show-Calls)"
 }
 
+# ConnectWise staging: a new ticket is created, then the POST is answered with an https-to-http redirect.
+# The company's tickets are searched for the exact summary, so the ticket is found and never created twice.
+$Tickets = New-Object System.Collections.ArrayList
+$TicketCw = { param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/tickets?conditions=*') { return , @($Tickets | Sort-Object { -$_.id }) }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/service/tickets') {
+        $b = $c.Body | ConvertFrom-Json
+        if ($TicketSave) { $null = $Tickets.Add((O @{ id = 105018 + $Tickets.Count; summary = $b.summary; dateEntered = '2026-10-09T22:26:03Z' })) }
+        $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er
+    }
+    return $null
+}
+$Tickets.Clear(); $TicketSave = $true
+Use-Cw $TicketCw
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa
+    $t = New-PsaTicket -CompanyId 189 -Summary 'Phishing report (Suspicious): Invoice "INV-20481" overdue'
+    $get = @(Get-Calls 'GET' '*/service/tickets?conditions=*')[-1]
+    $cond = [uri]::UnescapeDataString(($get.Uri -split 'conditions=')[1].Split('&')[0])
+    Check 'a ticket create answered with a redirect: found by its summary, returned, sent once' ($t.id -eq '105018' -and @(Write-Calls).Count -eq 1 -and $Tickets.Count -eq 1) "$($t.id) / $(Show-Calls)"
+    Check 'the search is for this company, the exact (escaped) summary and recent tickets' ($cond -match '^company/id=189 and summary="Phishing report \(Suspicious\): Invoice \\"INV-20481\\" overdue" and dateEntered>=\[\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\]$') $cond
+    Check 'a warning says the redirected ticket was found, not created again' (@($PsaState.Warnings | Where-Object { $_ -match 'found ticket 105018, so it was not created again' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
+}
+$Tickets.Clear(); $TicketSave = $false
+Use-Cw $TicketCw
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa
+    $m = Get-ThrowMessage { New-PsaTicket -CompanyId 189 -Summary 'Phishing report (Suspicious): Invoice overdue' }
+    Check 'a redirected create that made no ticket: not resent, says so after 3 searches' ($m -match 'answered with a redirect' -and $m -match '\(3 times over 9 seconds\) found none, so it was not created' -and @(Write-Calls).Count -eq 1) "$m / $(Show-Calls)"
+}
+
 # A redirect after a POST that was NOT saved: one POST, then a plain failure.
 Reset-Store -Filler 1
 Use-Cw { param($c, $n)

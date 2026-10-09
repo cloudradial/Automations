@@ -170,6 +170,7 @@ if ($r -eq 'already-present') { $actions += 'The invoice note was already on the
 - If the notes can't be read, `Add-PsaNote -Marker` throws instead of risking a second copy.
 - For other writes (status, queue, contact, relation), check the ticket's current state first, or check for the marker with `Test-PsaNoteMarker` and skip the whole action. Write the marker note last, after the change, so a failed run is retried in full.
 - A note write answered with a redirect is never sent again: the ticket is read back, and read again after 3 and 6 seconds (`$PsaState.ReadBackWaits`) when the note isn't listed yet, because ConnectWise staging saved a note that the very next read didn't show (see [Redirects](#redirects)).
+- A ConnectWise ticket create answered with a redirect is never sent again either: `New-PsaTicket` searches the company's tickets for the exact summary entered in the last 10 minutes (with the same waits) and returns that ticket, because ConnectWise staging created ticket 105018 and then answered the POST with a redirect.
 
 ## Redirects
 

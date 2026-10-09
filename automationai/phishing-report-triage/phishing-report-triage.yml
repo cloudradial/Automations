@@ -223,7 +223,11 @@ definition:
         function Get-PsaRedirect {
             param($Err, [string]$Uri)
             $code = Get-PsaHttpStatus $Err
+            # PowerShell 7 refuses an https-to-http redirect before -MaximumRedirection applies. That error's text is in
+            # ErrorDetails (the exception only says "Operation is not valid"), with no status code and no Location.
             $msg = ''; try { $msg = [string]$Err.Exception.Message } catch { }
+            try { if ($Err.ErrorDetails -and $Err.ErrorDetails.Message) { $msg += ' ' + [string]$Err.ErrorDetails.Message } } catch { }
+            try { $msg += ' ' + [string]$Err.FullyQualifiedErrorId } catch { }
             if (-not (($code -ge 300 -and $code -lt 400) -or ($code -eq 0 -and $msg -match '(?i)redirect'))) { return $null }
             $loc = $null
             try { $l = $Err.Exception.Response.Headers.Location; if ($null -ne $l) { $loc = $(if ($l.IsAbsoluteUri) { $l } else { [uri]::new([uri]$Uri, $l) }) } } catch { }
@@ -2207,7 +2211,11 @@ definition:
         function Get-PsaRedirect {
             param($Err, [string]$Uri)
             $code = Get-PsaHttpStatus $Err
+            # PowerShell 7 refuses an https-to-http redirect before -MaximumRedirection applies. That error's text is in
+            # ErrorDetails (the exception only says "Operation is not valid"), with no status code and no Location.
             $msg = ''; try { $msg = [string]$Err.Exception.Message } catch { }
+            try { if ($Err.ErrorDetails -and $Err.ErrorDetails.Message) { $msg += ' ' + [string]$Err.ErrorDetails.Message } } catch { }
+            try { $msg += ' ' + [string]$Err.FullyQualifiedErrorId } catch { }
             if (-not (($code -ge 300 -and $code -lt 400) -or ($code -eq 0 -and $msg -match '(?i)redirect'))) { return $null }
             $loc = $null
             try { $l = $Err.Exception.Response.Headers.Location; if ($null -ne $l) { $loc = $(if ($l.IsAbsoluteUri) { $l } else { [uri]::new([uri]$Uri, $l) }) } } catch { }

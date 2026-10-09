@@ -1146,6 +1146,10 @@ definition:
             Sla           = @{}                                       # Get-PsaTicketSla cache (ConnectWise SLA definitions)
             MaxPages      = 50
             MaxTicketLoop = 50
+            # Redirect handling in Invoke-Psa (see "Redirects" in _shared/README.md).
+            StopRedirects     = $null                                 # Invoke-RestMethod takes -MaximumRedirection (checked once)
+            LastWriteRedirect = $null                                 # the last write answered with a redirect: @{ Method; Path; Code; Location }
+            CwInfoHost        = ''                                    # the https host ConnectWise names in its own _info links
         }
 
         # ---- small helpers (all Psa-prefixed so they don't clash with other shared files) ----
@@ -1161,6 +1165,33 @@ definition:
         function Get-PsaCwOwner { param([string]$u) if ($u -match '^\d+$') { return "owner/id=$u" }; return "owner/identifier=`"$u`"" }
         function Get-PsaHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
         function Get-PsaRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+        # An API base URL from a secret: trimmed, no trailing slash, and no doubled slashes in the path
+        # ("https://host//v4_6_release/apis/3.0/" becomes "https://host/v4_6_release/apis/3.0"). The scheme's "//" stays.
+        function ConvertTo-PsaBaseUrl {
+            param([string]$Url)
+            $u = ([string]$Url).Trim()
+            if ($u -match '^(?<s>[A-Za-z][A-Za-z0-9+.-]*://)(?<r>.*)$') { $u = $Matches['s'] + ($Matches['r'] -replace '/{2,}', '/') }
+            else { $u = $u -replace '/{2,}', '/' }
+            return $u.TrimEnd('/')
+        }
+        # The items of a list reply. Invoke-Psa hands back a one-item JSON array as just that item, so "-is [array]"
+        # can't tell a bare list from an object that holds the list: an object with one of $Names is the holder
+        # (the first of them that has items wins).
+        function Get-PsaListReply {
+            param($Reply, [string[]]$Names)
+            if ($null -eq $Reply) { return @() }
+            if ($Reply -is [array]) { return @($Reply | Where-Object { $null -ne $_ }) }
+            $holder = $false
+            foreach ($n in $Names) {
+                $has = if ($Reply -is [System.Collections.IDictionary]) { $Reply.Contains($n) } else { $null -ne $Reply.PSObject.Properties[$n] }
+                if (-not $has) { continue }
+                $holder = $true
+                $items = @(Get-PsaProp $Reply $n | Where-Object { $null -ne $_ })
+                if ($items.Count) { return $items }
+            }
+            if ($holder) { return @() }
+            return @($Reply)
+        }
         function Get-PsaErrorText { param($Err) $d = $null; try { if ($Err.ErrorDetails -and $Err.ErrorDetails.Message) { $d = $Err.ErrorDetails.Message } } catch { }; if (-not $d) { $d = [string]$Err.Exception.Message }; return $d }
 
         # Normalizes a priority hint to critical, high, medium or low ('' when blank).
@@ -1218,14 +1249,14 @@ definition:
             switch ($Psa) {
                 'connectwise' {
                     $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['CW-CompanyID'])+$($v['CW-PublicKey']):$($v['CW-PrivateKey'])"))
-                    $c = @{ Base = $v['CW-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Basic $b"; clientId = $v['CW-ClientId']; Accept = $json } }
+                    $c = @{ Base = (ConvertTo-PsaBaseUrl $v['CW-ApiUrl']); Headers = @{ Authorization = "Basic $b"; clientId = $v['CW-ClientId']; Accept = $json } }
                 }
                 'autotask' {
-                    $c = @{ Base = ($v['Autotask-ApiUrl'].TrimEnd('/') -replace '/atservicesrest/v1\.0$', '') + '/atservicesrest/v1.0'
+                    $c = @{ Base = ((ConvertTo-PsaBaseUrl $v['Autotask-ApiUrl']) -replace '/atservicesrest/v1\.0$', '') + '/atservicesrest/v1.0'
                         Headers = @{ ApiIntegrationCode = $v['Autotask-ApiIntegrationCode']; UserName = $v['Autotask-Username']; Secret = $v['Autotask-Secret']; Accept = $json } }
                 }
                 'halopsa' {
-                    $base = $v['Halo-ApiUrl'].TrimEnd('/') -replace '/api$', ''
+                    $base = (ConvertTo-PsaBaseUrl $v['Halo-ApiUrl']) -replace '/api$', ''
                     $form = "grant_type=client_credentials&client_id=$([uri]::EscapeDataString($v['Halo-ClientId']))&client_secret=$([uri]::EscapeDataString($v['Halo-ClientSecret']))&scope=all"
                     $tok = $null
                     try { $tok = Invoke-RestMethod -Method POST -Uri "$base/auth/token" -Body $form -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop }
@@ -1239,17 +1270,17 @@ definition:
                     $c = @{ Base = "$base/api"; Headers = @{ Authorization = "Bearer $access"; Accept = $json } }
                 }
                 'kaseyabms' {
-                    $base = $v['KaseyaBMS-ApiUrl'].TrimEnd('/') -replace '/v2$', ''
+                    $base = (ConvertTo-PsaBaseUrl $v['KaseyaBMS-ApiUrl']) -replace '/v2$', ''
                     # Unverified: the GrantType value 'password' (PSA.md).
                     $r = Invoke-RestMethod -Method POST -Uri "$base/v2/security/authenticate" -Form @{ UserName = $v['KaseyaBMS-Username']; Password = $v['KaseyaBMS-Password']; Tenant = $v['KaseyaBMS-CompanyName']; GrantType = 'password' } -ErrorAction Stop
                     $token = Get-PsaPath $r 'Result.AccessToken'; if (-not $token) { $token = Get-PsaPath $r 'result.accessToken' }
                     if (-not $token) { throw 'Kaseya BMS sign-in returned no Result.AccessToken. Check the KaseyaBMS-* secrets.' }
                     $c = @{ Base = "$base/v2"; Headers = @{ Authorization = "Bearer $token"; Accept = $json } }
                 }
-                'syncro' { $c = @{ Base = $v['Syncro-ApiUrl'].TrimEnd('/'); Headers = @{ Authorization = "Bearer $($v['Syncro-ApiKey'])"; Accept = $json } } }
+                'syncro' { $c = @{ Base = (ConvertTo-PsaBaseUrl $v['Syncro-ApiUrl']); Headers = @{ Authorization = "Bearer $($v['Syncro-ApiKey'])"; Accept = $json } } }
                 'zendesk' {
                     # Unverified: whether the Zendesk-BaseUrl secret already ends in /api/v2, so it is added when missing.
-                    $base = $v['Zendesk-BaseUrl'].TrimEnd('/'); if ($base -notmatch '/api/v2$') { $base += '/api/v2' }
+                    $base = ConvertTo-PsaBaseUrl $v['Zendesk-BaseUrl']; if ($base -notmatch '/api/v2$') { $base += '/api/v2' }
                     $b = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($v['Zendesk-Email'])/token:$($v['Zendesk-ApiToken'])"))
                     $c = @{ Base = $base; Headers = @{ Authorization = "Basic $b"; Accept = $json } }
                 }
@@ -1258,24 +1289,127 @@ definition:
             $PsaState.Conn = $c
             $PsaState.Picklists = @{}
             $PsaState.Statuses = $null; $PsaState.UrlTemplate = $null; $PsaState.Lookups = @{}; $PsaState.Sla = @{}
+            $PsaState.LastWriteRedirect = $null; $PsaState.CwInfoHost = ''
             return $c
+        }
+
+        # ---- redirects (see "Redirects" in _shared/README.md) ----
+        # Invoke-Psa asks Invoke-RestMethod not to follow redirects (-MaximumRedirection 0), so a 3xx comes back as an
+        # error it can look at. A test mock without that parameter just doesn't get it.
+        function Test-PsaStopRedirects {
+            if ($null -eq $PsaState.StopRedirects) {
+                $ok = $false; try { $ok = (Get-Command Invoke-RestMethod -ErrorAction Stop).Parameters.ContainsKey('MaximumRedirection') } catch { }
+                $PsaState.StopRedirects = $ok
+            }
+            return [bool]$PsaState.StopRedirects
+        }
+        # @{ Code; Location } when the error is a redirect (a 3xx, or Invoke-RestMethod refusing to follow one), else $null.
+        function Get-PsaRedirect {
+            param($Err, [string]$Uri)
+            $code = Get-PsaHttpStatus $Err
+            $msg = ''; try { $msg = [string]$Err.Exception.Message } catch { }
+            if (-not (($code -ge 300 -and $code -lt 400) -or ($code -eq 0 -and $msg -match '(?i)redirect'))) { return $null }
+            $loc = $null
+            try { $l = $Err.Exception.Response.Headers.Location; if ($null -ne $l) { $loc = $(if ($l.IsAbsoluteUri) { $l } else { [uri]::new([uri]$Uri, $l) }) } } catch { }
+            return @{ Code = $code; Location = $loc }
+        }
+        # Where a redirect from $From to $To may be followed with the PSA's credentials: the same host, or a sibling
+        # under the same parent domain (staging.example.com and api.example.com), and always https (an http address is
+        # upgraded, so credentials never go over http). $null when it isn't safe.
+        function Get-PsaRedirectTarget {
+            param([string]$From, $To)
+            if ($null -eq $To) { return $null }
+            $f = $null; $t = $null
+            try { $f = [uri]$From; $t = [uri]$To } catch { return $null }
+            if (-not $t.IsAbsoluteUri -or $t.Scheme -notin @('http', 'https')) { return $null }
+            $a = $f.Host.ToLowerInvariant(); $b = $t.Host.ToLowerInvariant()
+            if ($a -ne $b) {
+                $ia = $a.IndexOf('.'); $ib = $b.IndexOf('.')
+                if ($ia -lt 1 -or $ib -lt 1) { return $null }
+                $pa = $a.Substring($ia + 1); $pb = $b.Substring($ib + 1)
+                if ($pa -ne $pb -or $pa.IndexOf('.') -lt 1) { return $null }
+            }
+            $ub = [UriBuilder]::new($t); $ub.Scheme = 'https'
+            if ($t.Scheme -eq 'http' -and $t.IsDefaultPort) { $ub.Port = -1 }
+            return $ub.Uri.AbsoluteUri
+        }
+        # Points the connection at $Target's host (https, same API path) for the rest of the run, and says so.
+        function Move-PsaBaseHost {
+            param([string]$Target)
+            $c = Get-PsaConn
+            $old = [uri]$c.Base; $new = [uri]$Target
+            if ($old.Scheme -eq 'https' -and $old.Authority -ieq $new.Authority) { return }
+            $c.Base = "https://$($new.Authority)$($old.AbsolutePath.TrimEnd('/'))"
+            Add-PsaWarning "$(Get-PsaName) redirected calls for $($old.Host) to $($new.Host), so the rest of this run used $($c.Base). Set the API URL secret to that address."
+        }
+        # ConnectWise names its own host in the _info links of its records. When a reply's links name another https
+        # host, it is remembered; Invoke-Psa only moves to it if a write is then redirected without a usable Location.
+        function Save-PsaCwInfoHost {
+            param($Reply)
+            if ($PsaState.CwInfoHost) { return }
+            try {
+                $first = $Reply
+                if ($Reply -is [array]) { if (-not $Reply.Count) { return }; $first = $Reply[0] }
+                if ($null -eq $first -or $first -is [string] -or $first -is [valuetype]) { return }
+                $infos = @(Get-PsaProp $first '_info')
+                foreach ($p in @($first.PSObject.Properties)) {
+                    $v = $p.Value
+                    if ($null -ne $v -and $v -isnot [string] -and $v -isnot [valuetype] -and $v -isnot [array]) { $infos += Get-PsaProp $v '_info' }
+                }
+                foreach ($i in @($infos | Where-Object { $null -ne $_ -and $_ -isnot [string] })) {
+                    foreach ($p in @($i.PSObject.Properties)) {
+                        if ([string]$p.Value -match '^https://([^/?#]+)/[^?#]*/apis/') { $PsaState.CwInfoHost = $Matches[1]; return }
+                    }
+                }
+            }
+            catch { }
         }
 
         # One call to the connected PSA. Path is relative to the API base (or a full URL).
         # Retries 429 (and 502, 503, 504 on GET) honoring Retry-After; other errors throw a plain message.
+        # A JSON array reply comes back as its items (Invoke-RestMethod itself hands it over as ONE [object[]], which
+        # "@(...) | Where-Object" would see as a single record), so a one-item list is just that item.
+        # Redirects are never followed blindly: a GET follows up to 3 to a safe https address (Get-PsaRedirectTarget);
+        # a write (POST, PUT, PATCH, DELETE) is never sent twice. It sets $PsaState.LastWriteRedirect and throws, and
+        # the caller checks whether the change was saved (Add-PsaNote reads the ticket back).
         function Invoke-Psa {
             param([string]$Method, [string]$Path, $Body = $null, [string]$ContentType = 'application/json')
             $c = Get-PsaConn
+            $isRead = ([string]$Method).ToUpperInvariant() -eq 'GET'
             $uri = if ($Path -match '^https?://') { $Path } else { "$($c.Base)$Path" }
+            $hops = 0
             for ($i = 1; $i -le $PsaState.MaxRetries; $i++) {
                 $p = @{ Method = $Method; Uri = $uri; Headers = $c.Headers; ErrorAction = 'Stop' }
+                if (Test-PsaStopRedirects) { $p.MaximumRedirection = 0 }
                 if ($null -ne $Body) { $p.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 10 -Compress }); $p.ContentType = $ContentType }
-                try { return Invoke-RestMethod @p }
-                catch {
-                    $code = Get-PsaHttpStatus $_
-                    if (($code -eq 429 -or ($Method -eq 'GET' -and $code -in @(502, 503, 504))) -and $i -lt $PsaState.MaxRetries) { Start-Sleep -Seconds (Get-PsaRetryAfter $_ $i); continue }
-                    throw "$(Get-PsaName) $Method $Path failed$(if ($code) { " (HTTP $code)" }): $(Get-PsaErrorText $_)"
+                $r = $null; $err = $null
+                try { $r = Invoke-RestMethod @p } catch { $err = $_ }
+                if ($null -eq $err) {
+                    if ($isRead -and $c.Psa -eq 'connectwise') { Save-PsaCwInfoHost $r }
+                    return $r   # returning the variable hands back an array's items, not the array as one object
                 }
+                $rd = Get-PsaRedirect $err $uri
+                if ($null -ne $rd) {
+                    $to = Get-PsaRedirectTarget $uri $rd.Location
+                    $codeText = $(if ($rd.Code) { " (HTTP $($rd.Code))" } else { '' })
+                    if ($isRead) {
+                        if ($to -and $hops -lt 3) {
+                            $hops++
+                            if ($uri.StartsWith($c.Base)) { Move-PsaBaseHost $to }
+                            $uri = $to; $i--; continue
+                        }
+                        $where = $(if ($null -ne $rd.Location) { "to $(([uri]$rd.Location).GetLeftPart([UriPartial]::Authority))" } else { 'elsewhere' })
+                        throw "$(Get-PsaName) $Method $Path was redirected$codeText $where, which isn't followed (it must stay https on the same or a sibling host). Set the API URL secret to the address the PSA uses."
+                    }
+                    # A write may have been saved before the redirect, so it is never sent again here.
+                    if (-not $to -and $c.Psa -eq 'connectwise' -and $PsaState.CwInfoHost) { $to = Get-PsaRedirectTarget $uri "https://$($PsaState.CwInfoHost)/" }
+                    if ($to -and $uri.StartsWith($c.Base)) { Move-PsaBaseHost $to }
+                    $PsaState.LastWriteRedirect = @{ Method = $Method; Path = $Path; Code = $rd.Code; Location = [string]$rd.Location }
+                    throw "$(Get-PsaName) $Method $Path was answered with a redirect$codeText instead of a result, so the change may or may not have been saved. It was not sent again. Set the API URL secret to the address the PSA uses."
+                }
+                $code = Get-PsaHttpStatus $err
+                if (($code -eq 429 -or ($isRead -and $code -in @(502, 503, 504))) -and $i -lt $PsaState.MaxRetries) { Start-Sleep -Seconds (Get-PsaRetryAfter $err $i); continue }
+                throw "$(Get-PsaName) $Method $Path failed$(if ($code) { " (HTTP $code)" }): $(Get-PsaErrorText $err)"
             }
         }
 
@@ -1461,6 +1595,39 @@ definition:
                 }
                 elseif ($Text.IndexOf($tag, [StringComparison]::OrdinalIgnoreCase) -lt 0) { $Text = "$($Text.TrimEnd())`n$tag" }
             }
+            # A write answered with a redirect may still have been saved (ConnectWise did exactly that), so the note is
+            # never sent twice: the ticket is read back, and only a note that isn't there is reported as a failure.
+            $PsaState.LastWriteRedirect = $null
+            try { Send-PsaNote -Id $Id -Text $Text -Title $Title -Pub $pub }
+            catch {
+                if ($null -eq $PsaState.LastWriteRedirect) { throw }
+                $first = [string]$_.Exception.Message
+                $found = $false
+                try { $found = Test-PsaNoteSaved -Id $Id -Text $Text -Tag $tag }
+                catch { throw "$first Reading ticket $Id back to check also failed: $($_.Exception.Message)" }
+                if (-not $found) { throw "$first Reading ticket $Id back found no such note, so it was not saved." }
+                Add-PsaWarning "$(Get-PsaName) answered the note on ticket $Id with a redirect; reading the ticket back showed the note was saved, so it was not sent again."
+            }
+            if ($tag) { return 'written' }
+        }
+        # $true when the note just sent is on the ticket: by its marker (or a public note's Ref line) when it has one,
+        # otherwise by its text (case, spaces and line breaks ignored).
+        function Test-PsaNoteSaved {
+            param([string]$Id, [string]$Text, [string]$Tag = '')
+            $notes = @(Get-PsaTicketNotes -Id $Id -TextOnly)
+            if ($Tag) { return (Test-PsaNoteMarker -Id $Id -Marker $Tag -Notes $notes) }
+            $want = ((ConvertTo-PsaPlainText $Text) -replace '\s+', ' ').Trim()
+            if (-not $want) { return $false }
+            foreach ($n in $notes) {
+                $have = ((ConvertTo-PsaPlainText ([string]$n.text)) -replace '\s+', ' ').Trim()
+                if ($have.IndexOf($want, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+            }
+            return $false
+        }
+        # The PSA call behind Add-PsaNote (no marker check, no read-back).
+        function Send-PsaNote {
+            param([string]$Id, [string]$Text, [string]$Title, [bool]$Pub)
+            $c = Get-PsaConn
             switch ($c.Psa) {
                 'connectwise' {
                     # Public notes go on the Discussion tab (detailDescriptionFlag). Unverified for public notes; internal is [ext].
@@ -1498,7 +1665,6 @@ definition:
                 'syncro' { $null = Invoke-Psa POST "/tickets/$Id/comment" @{ subject = $Title; body = $Text; hidden = (-not $pub); do_not_email = (-not $pub) } }
                 'zendesk' { $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ comment = @{ body = $Text; public = $pub } } } }
             }
-            if ($tag) { return 'written' }
         }
 
         # Assigns the ticket. Autotask also needs the resource's role id.
@@ -1614,7 +1780,7 @@ definition:
                 'halopsa' {
                     # Unverified: not in PSA.md yet. GET /api/Client?search= (halo_query_clients) returns { clients: [...] }.
                     $r = Invoke-Psa GET "/Client?search=$(ConvertTo-PsaQuery $n)&count=50"
-                    $rows = @(Get-PsaProp $r 'clients'); if (-not @($rows | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $rows = @($r) }
+                    $rows = @(Get-PsaListReply $r @('clients'))
                 }
                 'kaseyabms' {
                     # Unverified: not in PSA.md yet. The account list filter name is a guess; results are filtered here as well.
@@ -1901,7 +2067,7 @@ definition:
                     # Unverified: GET /api/Actions?ticket_id= returns { actions } with note (or note_html), hiddenfromuser and
                     # datetime; who_type 2 is taken to mean the end user wrote it.
                     $r = Invoke-PsaRead "/Actions?ticket_id=$Id&excludesys=true&count=500" $what
-                    $rows = @(Get-PsaProp $r 'actions'); if (-not @($rows | Where-Object { $null -ne $_ }).Count -and $r -is [array]) { $rows = @($r) }
+                    $rows = @(Get-PsaListReply $r @('actions'))
                     foreach ($n in @($rows | Where-Object { $null -ne $_ })) {
                         & $add (Get-PsaProp $n 'id') (ConvertTo-PsaPlainText ([string](Get-PsaFirst $n @('note', 'note_html')))) ([string](Get-PsaProp $n 'outcome')) (Get-PsaFirst $n @('datetime', 'actiondatecreated')) ((Get-PsaProp $n 'hiddenfromuser') -eq $true) ([string](Get-PsaProp $n 'who_type') -eq '2') ([string](Get-PsaProp $n 'who')) $n
                     }

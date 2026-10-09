@@ -59,10 +59,12 @@ function Get-Users {
         (New-U 'aaaaaaaa-0000-0000-0000-000000000012' 'background.only@contoso.com' 900 200 3))
 }
 
+# Like the real cmdlet, a JSON array reply is handed back as ONE object (", @(...)"), not item by item, and
+# -MaximumRedirection is accepted (recorded as MaxRedirect, -1 when not sent) so the shared PSA code takes its no-redirect path.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
     $m = ([string]$Method).ToUpperInvariant(); $u = [string]$Uri
-    $null = $Mock.Calls.Add([pscustomobject]@{ Method = $m; Uri = $u; Body = $(if ($Body -is [string]) { $Body } else { '' }) })
+    $null = $Mock.Calls.Add([pscustomobject]@{ MaxRedirect = $MaximumRedirection; Method = $m; Uri = $u; Body = $(if ($Body -is [string]) { $Body } else { '' }) })
     if ($u -like 'https://login.microsoftonline.com/*') { return [pscustomobject]@{ access_token = 'mock'; expires_in = 3600 } }
     if ($u -like 'https://graph.microsoft.com/v1.0/users[?]*') {
         if ($Mock.Opt.Contains('Users403')) { New-HttpError 403 $Mock.Opt['Users403'] }
@@ -83,7 +85,7 @@ function Invoke-RestMethod {
         return $null
     }
     if ($m -eq 'POST' -and $u -like 'https://graph.microsoft.com/v1.0/users/*/revokeSignInSessions') { return [pscustomobject]@{ value = $true } }
-    if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return @([pscustomobject]@{ id = 55; companyId = 9; name = 'Account Reviews' }) }
+    if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return , @([pscustomobject]@{ id = 55; companyId = 9; name = 'Account Reviews' }) }
     if ($u -like 'https://portal.example-msp.test/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @() } }
     if ($u -eq 'https://portal.example-msp.test/v2/archiveitem' -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
     # Ticket notes are kept in $Mock.Notes, so a rerun (KeepNotes) sees what the first run wrote.
@@ -91,7 +93,7 @@ function Invoke-RestMethod {
         $b = $Body | ConvertFrom-Json; $null = $Mock.Notes.Add([pscustomobject]@{ id = $Mock.Notes.Count + 1; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag })
         return [pscustomobject]@{ id = $Mock.Notes.Count }
     }
-    if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes[?]*' -and $m -eq 'GET') { if ($u -like '*page=1') { return @($Mock.Notes) }; return @() }
+    if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes[?]*' -and $m -eq 'GET') { if ($u -like '*page=1') { return , @($Mock.Notes) }; return , @() }
     if ($u -like 'https://examplemsp.zendesk.test/api/v2/tickets/*' -and $m -eq 'PUT') {
         $c = ($Body | ConvertFrom-Json).ticket.comment; $null = $Mock.Notes.Add([pscustomobject]@{ id = $Mock.Notes.Count + 1; body = $c.body; public = $c.public; author_id = 1 })
         return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 123 } }
@@ -152,6 +154,7 @@ Check 'preview: report is HTML in archive 55 with the subject' ($ab.isHtml -and 
 $note = @(Get-Calls POST 'https://cw.example-msp.test/*/service/tickets/123/notes')
 Check 'preview: ConnectWise internal note' ($note.Count -eq 1 -and ($note[0].Body | ConvertFrom-Json).internalAnalysisFlag -eq $true) ''
 Check 'preview: note points at the archive' (($note[0].Body | ConvertFrom-Json).text -match 'Account Reviews') ''
+Check 'ConnectWise calls are sent with -MaximumRedirection 0' ((@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' }).Count -gt 0) -and -not @($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' -and $_.MaxRedirect -ne 0 }).Count) (@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' } | ForEach-Object { "$($_.Method) $($_.MaxRedirect)" }) -join ', ')
 Check 'preview: message is plain and says nothing changed' ($o.message -match 'Nothing was changed' -and $o.message -match '7 accounts have not signed in for 90 days') $o.message
 Check 'preview: no report_html when archived' ($null -eq $o.PSObject.Properties['report_html']) ''
 $nt = ($note[0].Body | ConvertFrom-Json).text

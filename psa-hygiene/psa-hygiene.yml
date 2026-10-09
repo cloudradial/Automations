@@ -557,8 +557,18 @@ definition:
                         if ($null -ne $list) { $pr = Select-PsaByLabel $list 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
                     }
                     foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
-                    $raw = Invoke-Psa POST '/service/tickets' $b
-                    $id = Get-PsaProp $raw 'id'
+                    # ConnectWise staging created the ticket and then answered the POST with a redirect, so a redirected
+                    # create is never resent: the company's newest tickets are searched for this exact summary instead.
+                    $sentAt = [datetime]::UtcNow
+                    $PsaState.LastWriteRedirect = $null
+                    try {
+                        $raw = Invoke-Psa POST '/service/tickets' $b
+                        $id = Get-PsaProp $raw 'id'
+                    }
+                    catch {
+                        if ($null -eq $PsaState.LastWriteRedirect) { throw }
+                        $id = Find-PsaCwCreatedTicket -CompanyId $CompanyId -Summary ([string]$b.summary) -SentAt $sentAt -First ([string]$_.Exception.Message)
+                    }
                 }
                 'autotask' {
                     # From the at_create_ticket extension descriptor: title, companyID, status, priority and dueDateTime are required.
@@ -625,6 +635,31 @@ definition:
             }
             if (Test-PsaBlank $id) { throw "$(Get-PsaName) accepted the new ticket but returned no id." }
             return @{ id = [string]$id; raw = $raw }
+        }
+
+        # After a ConnectWise ticket create was answered with a redirect: the id of the ticket it made, found by company,
+        # exact summary and entered time (read again after the ReadBackWaits), or a throw that says it wasn't created.
+        function Find-PsaCwCreatedTicket {
+            param([string]$CompanyId, [string]$Summary, [datetime]$SentAt, [string]$First)
+            $q = $Summary.Replace('\', '\\').Replace('"', '\"')
+            $since = $SentAt.AddMinutes(-10).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+            $cond = ConvertTo-PsaQuery ('company/id=' + [int]$CompanyId + ' and summary="' + $q + '" and dateEntered>=[' + $since + ']')
+            $waits = @(0) + @($PsaState.ReadBackWaits | Where-Object { $null -ne $_ })
+            $tries = 0
+            foreach ($wait in $waits) {
+                if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+                $tries++
+                $rows = @()
+                try { $rows = @(Invoke-PsaRead "/service/tickets?conditions=$cond&orderBy=$(ConvertTo-PsaQuery 'id desc')&pageSize=5&fields=id,summary,dateEntered" 'the new ticket' | Where-Object { $null -ne $_ }) }
+                catch { throw "$First Searching ConnectWise for the new ticket also failed: $($_.Exception.Message)" }
+                $hit = @($rows | Where-Object { [string](Get-PsaProp $_ 'summary') -ceq $Summary }) | Select-Object -First 1
+                if ($hit) {
+                    $id = [string](Get-PsaProp $hit 'id')
+                    Add-PsaWarning "ConnectWise answered the new ticket with a redirect; searching for it found ticket $id, so it was not created again."
+                    return $id
+                }
+            }
+            throw "$First Searching ConnectWise for the new ticket ($tries times over $(($waits | Measure-Object -Sum).Sum) seconds) found none, so it was not created."
         }
 
         # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
@@ -2851,8 +2886,18 @@ definition:
                         if ($null -ne $list) { $pr = Select-PsaByLabel $list 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
                     }
                     foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
-                    $raw = Invoke-Psa POST '/service/tickets' $b
-                    $id = Get-PsaProp $raw 'id'
+                    # ConnectWise staging created the ticket and then answered the POST with a redirect, so a redirected
+                    # create is never resent: the company's newest tickets are searched for this exact summary instead.
+                    $sentAt = [datetime]::UtcNow
+                    $PsaState.LastWriteRedirect = $null
+                    try {
+                        $raw = Invoke-Psa POST '/service/tickets' $b
+                        $id = Get-PsaProp $raw 'id'
+                    }
+                    catch {
+                        if ($null -eq $PsaState.LastWriteRedirect) { throw }
+                        $id = Find-PsaCwCreatedTicket -CompanyId $CompanyId -Summary ([string]$b.summary) -SentAt $sentAt -First ([string]$_.Exception.Message)
+                    }
                 }
                 'autotask' {
                     # From the at_create_ticket extension descriptor: title, companyID, status, priority and dueDateTime are required.
@@ -2919,6 +2964,31 @@ definition:
             }
             if (Test-PsaBlank $id) { throw "$(Get-PsaName) accepted the new ticket but returned no id." }
             return @{ id = [string]$id; raw = $raw }
+        }
+
+        # After a ConnectWise ticket create was answered with a redirect: the id of the ticket it made, found by company,
+        # exact summary and entered time (read again after the ReadBackWaits), or a throw that says it wasn't created.
+        function Find-PsaCwCreatedTicket {
+            param([string]$CompanyId, [string]$Summary, [datetime]$SentAt, [string]$First)
+            $q = $Summary.Replace('\', '\\').Replace('"', '\"')
+            $since = $SentAt.AddMinutes(-10).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+            $cond = ConvertTo-PsaQuery ('company/id=' + [int]$CompanyId + ' and summary="' + $q + '" and dateEntered>=[' + $since + ']')
+            $waits = @(0) + @($PsaState.ReadBackWaits | Where-Object { $null -ne $_ })
+            $tries = 0
+            foreach ($wait in $waits) {
+                if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+                $tries++
+                $rows = @()
+                try { $rows = @(Invoke-PsaRead "/service/tickets?conditions=$cond&orderBy=$(ConvertTo-PsaQuery 'id desc')&pageSize=5&fields=id,summary,dateEntered" 'the new ticket' | Where-Object { $null -ne $_ }) }
+                catch { throw "$First Searching ConnectWise for the new ticket also failed: $($_.Exception.Message)" }
+                $hit = @($rows | Where-Object { [string](Get-PsaProp $_ 'summary') -ceq $Summary }) | Select-Object -First 1
+                if ($hit) {
+                    $id = [string](Get-PsaProp $hit 'id')
+                    Add-PsaWarning "ConnectWise answered the new ticket with a redirect; searching for it found ticket $id, so it was not created again."
+                    return $id
+                }
+            }
+            throw "$First Searching ConnectWise for the new ticket ($tries times over $(($waits | Measure-Object -Sum).Sum) seconds) found none, so it was not created."
         }
 
         # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.
@@ -5179,8 +5249,18 @@ definition:
                         if ($null -ne $list) { $pr = Select-PsaByLabel $list 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
                     }
                     foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }
-                    $raw = Invoke-Psa POST '/service/tickets' $b
-                    $id = Get-PsaProp $raw 'id'
+                    # ConnectWise staging created the ticket and then answered the POST with a redirect, so a redirected
+                    # create is never resent: the company's newest tickets are searched for this exact summary instead.
+                    $sentAt = [datetime]::UtcNow
+                    $PsaState.LastWriteRedirect = $null
+                    try {
+                        $raw = Invoke-Psa POST '/service/tickets' $b
+                        $id = Get-PsaProp $raw 'id'
+                    }
+                    catch {
+                        if ($null -eq $PsaState.LastWriteRedirect) { throw }
+                        $id = Find-PsaCwCreatedTicket -CompanyId $CompanyId -Summary ([string]$b.summary) -SentAt $sentAt -First ([string]$_.Exception.Message)
+                    }
                 }
                 'autotask' {
                     # From the at_create_ticket extension descriptor: title, companyID, status, priority and dueDateTime are required.
@@ -5247,6 +5327,31 @@ definition:
             }
             if (Test-PsaBlank $id) { throw "$(Get-PsaName) accepted the new ticket but returned no id." }
             return @{ id = [string]$id; raw = $raw }
+        }
+
+        # After a ConnectWise ticket create was answered with a redirect: the id of the ticket it made, found by company,
+        # exact summary and entered time (read again after the ReadBackWaits), or a throw that says it wasn't created.
+        function Find-PsaCwCreatedTicket {
+            param([string]$CompanyId, [string]$Summary, [datetime]$SentAt, [string]$First)
+            $q = $Summary.Replace('\', '\\').Replace('"', '\"')
+            $since = $SentAt.AddMinutes(-10).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+            $cond = ConvertTo-PsaQuery ('company/id=' + [int]$CompanyId + ' and summary="' + $q + '" and dateEntered>=[' + $since + ']')
+            $waits = @(0) + @($PsaState.ReadBackWaits | Where-Object { $null -ne $_ })
+            $tries = 0
+            foreach ($wait in $waits) {
+                if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+                $tries++
+                $rows = @()
+                try { $rows = @(Invoke-PsaRead "/service/tickets?conditions=$cond&orderBy=$(ConvertTo-PsaQuery 'id desc')&pageSize=5&fields=id,summary,dateEntered" 'the new ticket' | Where-Object { $null -ne $_ }) }
+                catch { throw "$First Searching ConnectWise for the new ticket also failed: $($_.Exception.Message)" }
+                $hit = @($rows | Where-Object { [string](Get-PsaProp $_ 'summary') -ceq $Summary }) | Select-Object -First 1
+                if ($hit) {
+                    $id = [string](Get-PsaProp $hit 'id')
+                    Add-PsaWarning "ConnectWise answered the new ticket with a redirect; searching for it found ticket $id, so it was not created again."
+                    return $id
+                }
+            }
+            throw "$First Searching ConnectWise for the new ticket ($tries times over $(($waits | Measure-Object -Sum).Sum) seconds) found none, so it was not created."
         }
 
         # Adds a note. Internal (technician-only) by default; -Public makes it visible to the client.

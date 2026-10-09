@@ -143,6 +143,32 @@ Invoke-WithLib @('psa.ps1') {
     Check 'redirect after a POST: a rerun writes nothing' ($res2 -eq 'already-present' -and @(Write-Calls).Count -eq 1 -and $Store.Count -eq 2) "$res2 / $(Show-Calls)"
 }
 
+# ConnectWise staging: the note is saved, but a read made straight after the redirect doesn't list it yet.
+# The read-back waits and tries again, so the note is reported as written, and it is never sent twice.
+Reset-Store -Filler 1
+$Lag = @{ Pending = $null; Reads = 0 }
+Use-Cw { param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/tickets/29000/notes[?]*') {
+        if ($null -ne $Lag.Pending) { $Lag.Reads++; if ($Lag.Reads -ge 3) { $null = $Store.Add($Lag.Pending); $Lag.Pending = $null } }
+        return (& $NotesGet $c $n)
+    }
+    if ($c.Method -eq 'POST') {
+        $b = $c.Body | ConvertFrom-Json
+        $Lag.Pending = New-CwNote ($Store.Count + 1) $b.text
+        $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er
+    }
+    return $null
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa
+    $res = Add-PsaNote -Id 29000 -Text 'Satisfaction score received: 1 out of 5.' -Marker 'aai-test: lag 1'
+    $reads = @(Get-Calls 'GET' '*/service/tickets/29000/notes?*').Count
+    Check 'a note that shows up only on a later read-back is reported as written, sent once' ($res -eq 'written' -and @(Write-Calls).Count -eq 1 -and $Store.Count -eq 2) "$res / $(Show-Calls)"
+    Check 'the read-back waited between tries (3 then 6 seconds) and stopped once it found the note' ($reads -eq 4 -and (@($Mock.Sleeps) -join ',') -eq '3,6') "reads $reads, sleeps $(@($Mock.Sleeps) -join ',')"
+    $res2 = Add-PsaNote -Id 29000 -Text 'Satisfaction score received: 1 out of 5.' -Marker 'aai-test: lag 1'
+    Check 'a rerun after the lagged write writes nothing' ($res2 -eq 'already-present' -and @(Write-Calls).Count -eq 1) "$res2 / $(Show-Calls)"
+}
+
 # A redirect after a POST that was NOT saved: one POST, then a plain failure.
 Reset-Store -Filler 1
 Use-Cw { param($c, $n)
@@ -153,7 +179,7 @@ Use-Cw { param($c, $n)
 Invoke-WithLib @('psa.ps1') {
     $null = Connect-Psa
     $m = Get-ThrowMessage { Add-PsaNote -Id 29000 -Text 'Checked the printer.' -Marker 'aai-test: redirect 2' }
-    Check 'redirect after a POST that was not saved: not resent, says so' ($m -match 'answered with a redirect \(HTTP 302\)' -and $m -match 'It was not sent again' -and $m -match 'found no such note' -and @(Write-Calls).Count -eq 1) "$m / $(Show-Calls)"
+    Check 'redirect after a POST that was not saved: not resent, says so' ($m -match 'answered with a redirect \(HTTP 302\)' -and $m -match 'It was not sent again' -and $m -match 'back \(3 times over 9 seconds\) found no such note' -and @(Write-Calls).Count -eq 1) "$m / $(Show-Calls)"
     $m = Get-ThrowMessage { Add-PsaNote -Id 29000 -Text 'No marker here.' }
     Check 'redirect after a POST without a marker, not saved: not resent, says so' ($m -match 'found no such note' -and @(Write-Calls).Count -eq 2) "$m / $(Show-Calls)"
 }

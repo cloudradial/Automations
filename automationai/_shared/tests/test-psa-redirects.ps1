@@ -171,11 +171,12 @@ Invoke-WithLib @('psa.ps1') {
     Check 'redirect after a POST without a marker: the saved text is found, nothing thrown or resent' ($null -eq $res -and @(Write-Calls).Count -eq 1) "$res / $(Show-Calls)"
 }
 
-# Invoke-RestMethod refusing an https-to-http redirect itself (no status code, as the live error read).
+# Invoke-RestMethod refusing an https-to-http redirect itself, shaped like PowerShell 7's real error: no status code, no
+# Location, a generic exception message, and the text in ErrorDetails (reproduced with pwsh 7.6 against an https-to-http 302).
 Reset-Store -Filler 1 -InfoHost 'automation.cw.example.com'
 Use-Cw { param($c, $n)
     if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/tickets/29000/notes[?]*') { return (& $NotesGet $c $n) }
-    if ($c.Method -eq 'POST') { $null = & $NotesPost $c $n; throw [System.InvalidOperationException]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.') }
+    if ($c.Method -eq 'POST') { $null = & $NotesPost $c $n; $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
     return $null
 }
 Invoke-WithLib @('psa.ps1') {

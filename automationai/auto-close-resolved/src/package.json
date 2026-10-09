@@ -1,0 +1,12 @@
+{
+  "name": "auto-close-resolved-build",
+  "private": true,
+  "description": "Builds and tests the auto-close-resolved workflow export from its PowerShell source. Not an extension.",
+  "scripts": {
+    "build": "node build.js",
+    "test": "pwsh -NoProfile -File test.ps1"
+  },
+  "devDependencies": {
+    "js-yaml": "^5.4.2"
+  }
+}

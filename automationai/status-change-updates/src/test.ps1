@@ -59,7 +59,7 @@ $Handler = {
     param($c, $n)
     $k = "$($c.Method) $($c.Uri)"
     switch -Wildcard -CaseSensitive ($k) {
-        "GET $TCW/service/tickets/1001/notes*" { return @($TScenario.cwNotes) }
+        "GET $TCW/service/tickets/1001/notes*" { return , @($TScenario.cwNotes) }
         "GET $TCW/service/tickets/1001" { return [pscustomobject]@{ id = 1001; summary = 'Printer on floor 2 not printing'; company = [pscustomobject]@{ id = 42 }; status = [pscustomobject]@{ name = $TScenario.cwStatus }; owner = $null } }
         "POST $TCW/service/tickets/1001/notes" { if ($TScenario.noteFail) { New-HttpError $TScenario.noteFail '{"message":"Insufficient security level"}' }; return [pscustomobject]@{ id = 9001 } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(

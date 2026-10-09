@@ -1,0 +1,7 @@
+Decide which candidate tickets describe the same issue as this ticket. Reply with one JSON object in this shape:
+{"matches": [{"id": "<candidate id>", "relation": "duplicate" | "related", "confidence": 0.0, "reason": "<one plain sentence>"}]}
+
+The facts were gathered without AI from the PSA. "ticket" is the ticket being checked. "candidates" are open tickets for the same company from the last few days, each with a word-overlap "score" from 0 to 1, and whether it has the same contact or the same device. "serviceAiReason", when present, is why ServiceAI thought some candidates were related; candidates with "suggestedByServiceAI": true are the ones it picked.
+
+Facts (JSON):
+{{ nodes.gather.output.facts_json }}

@@ -27,6 +27,7 @@ Each subfolder is one automation, with a README that covers what it does, what t
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Workflow (no AI) + optional agent and agent workflow |
 | [`endpoint-names-token/`](endpoint-names-token/) | Workflow |
 | [`feedback-csat-report/`](feedback-csat-report/) | Workflow |
+| [`invoice-context/`](invoice-context/) | Workflow (one AI Prompt step; read-only apart from one internal note) |
 | [`knowbe4/`](knowbe4/) | Workflow |
 | [`license-reclamation/`](license-reclamation/) | Workflow (monthly, read-only Microsoft 365 licence review to a Planner card) |
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Workflow (no AI; Microsoft 365 security review into a CloudRadial assessment) |

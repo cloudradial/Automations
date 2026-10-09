@@ -1,0 +1,6 @@
+Write a short, neutral summary of this company's billing records for the account manager who is answering an invoice question.
+
+The facts were gathered and added up without AI from the PSA, for one company and one billing period: tickets opened, time logged (billable and not billable, and how much was logged against an agreement), the tickets with the most time, the agreements in effect, and the invoice when one was found. "notes" lists anything that could not be read.
+
+Facts (JSON):
+{{ nodes.gather.output.facts_json }}

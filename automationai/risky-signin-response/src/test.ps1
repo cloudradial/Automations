@@ -63,11 +63,13 @@ function Get-Detections {
     return @()
 }
 
+# Like the real cmdlet, a JSON array reply is handed back as ONE object (", @(...)"), not item by item, and
+# -MaximumRedirection is accepted (recorded as MaxRedirect, -1 when not sent) so the shared PSA code takes its no-redirect path.
 function Invoke-RestMethod {
-    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form)
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
     $m = ([string]$Method).ToUpperInvariant(); $u = [uri]::UnescapeDataString([string]$Uri)
     $b = if ($Body -is [string]) { $Body } else { '' }
-    $null = $Mock.Calls.Add([pscustomobject]@{ Method = $m; Uri = $u; Body = $b })
+    $null = $Mock.Calls.Add([pscustomobject]@{ MaxRedirect = $MaximumRedirection; Method = $m; Uri = $u; Body = $b })
     if ($u -like 'https://login.microsoftonline.com/*') { return [pscustomobject]@{ access_token = 'mock'; expires_in = 3600 } }
 
     # Graph
@@ -119,21 +121,21 @@ function Invoke-RestMethod {
     if ($m -eq 'GET' -and $u -like "$cw/service/tickets[?]conditions=*") {
         if ($Mock.Opt.Contains('SearchFail')) { New-HttpError 500 '{"message":"Mock search error"}' }
         $co = [pscustomobject]@{ id = 250; name = 'Contoso' }
-        if ($Mock.Opt.Contains('OpenRisky') -and $u -match [regex]::Escape($Mock.Opt['OpenRisky'].upn)) { return @([pscustomobject]@{ id = $Mock.Opt['OpenRisky'].id; summary = "[Risky sign-in] $($Mock.Opt['OpenRisky'].upn): Microsoft flagged high risk"; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
-        if ($u -match 'existing@contoso\.com') { return @([pscustomobject]@{ id = 4242; summary = '[Risky sign-in] existing@contoso.com: Microsoft flagged high risk'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
-        if ($u -match 'alice@contoso\.com') { return @([pscustomobject]@{ id = 4100; summary = 'Printer for alice@contoso.com'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
-        return @()
+        if ($Mock.Opt.Contains('OpenRisky') -and $u -match [regex]::Escape($Mock.Opt['OpenRisky'].upn)) { return , @([pscustomobject]@{ id = $Mock.Opt['OpenRisky'].id; summary = "[Risky sign-in] $($Mock.Opt['OpenRisky'].upn): Microsoft flagged high risk"; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
+        if ($u -match 'existing@contoso\.com') { return , @([pscustomobject]@{ id = 4242; summary = '[Risky sign-in] existing@contoso.com: Microsoft flagged high risk'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
+        if ($u -match 'alice@contoso\.com') { return , @([pscustomobject]@{ id = 4100; summary = 'Printer for alice@contoso.com'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
+        return , @()
     }
-    if ($m -eq 'GET' -and $u -like "$cw/service/priorities*") { return @([pscustomobject]@{ id = 1; name = 'Priority 1 - Critical' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - High' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal' }) }
+    if ($m -eq 'GET' -and $u -like "$cw/service/priorities*") { return , @([pscustomobject]@{ id = 1; name = 'Priority 1 - Critical' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - High' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal' }) }
     if ($m -eq 'GET' -and $u -like "$cw/company/companies*") {
-        if ($Mock.Opt.Contains('NoPsaCompany')) { return @() }
+        if ($Mock.Opt.Contains('NoPsaCompany')) { return , @() }
         # Strict: only a real name condition matches, so a lost condition shows up as no match.
-        if ($u -match 'name="Contoso"' -or $u -match 'name contains "Contoso"') { return @([pscustomobject]@{ id = 250; name = 'Contoso' }) }
-        return @()
+        if ($u -match 'name="Contoso"' -or $u -match 'name contains "Contoso"') { return , @([pscustomobject]@{ id = 250; name = 'Contoso' }) }
+        return , @()
     }
     if ($m -eq 'POST' -and $u -eq "$cw/service/tickets") { $Mock.NextId++; return [pscustomobject]@{ id = $Mock.NextId } }
     if ($m -eq 'POST' -and $u -like "$cw/service/tickets/*/notes") { $bo = $b | ConvertFrom-Json; Add-MockNote ($u -split '/')[-2] $bo.text ([bool]$bo.detailDescriptionFlag); return [pscustomobject]@{ id = 1 } }
-    if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
+    if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return , @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
 
     # Zendesk
     $zd = 'https://examplemsp.zendesk.test/api/v2'
@@ -164,8 +166,8 @@ function Invoke-RestMethod {
     $cr = 'https://portal.example-msp.test'
     if ($m -eq 'GET' -and $u -like "$cr/v2/odata/company*") { return [pscustomobject]@{ value = @([pscustomobject]@{ companyId = 9; name = 'Contoso' }) } }
     if ($m -eq 'GET' -and $u -like "$cr/api/beta/archive*") {
-        if ($Mock.Opt.Contains('HasArchive')) { return @([pscustomobject]@{ id = 66; companyId = 9; name = 'Risky Sign-ins' }) }
-        return @()
+        if ($Mock.Opt.Contains('HasArchive')) { return , @([pscustomobject]@{ id = 66; companyId = 9; name = 'Risky Sign-ins' }) }
+        return , @()
     }
     if ($m -eq 'POST' -and $u -eq "$cr/api/beta/archive") { $Mock.Opt['HasArchive'] = $true; return [pscustomobject]@{ id = 66 } }
     if ($m -eq 'GET' -and $u -like "$cr/v2/odata/archiveitem*") {
@@ -240,6 +242,7 @@ Check 'live: internal note per ticket' ($notes.Count -eq 3 -and @($notes | Where
 $an = ($aliceNote[0].Body | ConvertFrom-Json).text
 Check 'live: note has IP, location, detection types and times' ($an -match '203\.0\.113\.45' -and $an -match 'Lagos, Lagos, NG' -and $an -match 'Unfamiliar sign-in properties' -and $an -match 'Leaked credentials' -and $an -match 'detected \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC') $an
 Check 'live: note says how to block' ($an -match 'block_upns set to alice@contoso\.com') ''
+Check 'ConnectWise calls are sent with -MaximumRedirection 0' ((@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' }).Count -gt 0) -and -not @($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' -and $_.MaxRedirect -ne 0 }).Count) (@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' } | ForEach-Object { "$($_.Method) $($_.MaxRedirect)" }) -join ', ')
 Check 'live: sessions revoked for the three new users only' (@(Get-Calls POST '*/revokeSignInSessions').Count -eq 3 -and @(Get-Calls POST '*/users/u6/revokeSignInSessions').Count -eq 0) ''
 $pw = @(Get-Calls PATCH 'https://graph.microsoft.com/v1.0/users/*' | Where-Object { $_.Body -match 'passwordProfile' })
 Check 'live: password change required for alice, attempted for admin, never for synced' (@($pw | Where-Object { $_.Uri -like '*/u1' }).Count -eq 1 -and @($pw | Where-Object { $_.Uri -like '*/u3' }).Count -eq 0 -and (($pw[0].Body | ConvertFrom-Json).passwordProfile.forceChangePasswordNextSignIn -eq $true)) (@($pw | ForEach-Object { $_.Uri }) -join ', ')

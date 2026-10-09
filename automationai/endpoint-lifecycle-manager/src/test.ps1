@@ -19,6 +19,8 @@ $eps = @(
     @{ companyId = 2; name = 'OLD-LAPTOP'; os = 'Windows 10 Pro'; manufacturedDate = '2018-03-01T00:00:00Z'; enclosure = '10' },
     @{ companyId = 2; name = 'W11-READY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },      # expect Upgrade in place
     @{ companyId = 2; name = 'W11-NOTREADY-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'NotReady'; manufacturedDate = '2024-03-01T00:00:00Z'; expirationDate = '2027-03-01T00:00:00Z'; memory = 17179869184 },   # expect Replace
+    @{ companyId = 2; name = 'W11-READY-HDD'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-05-01T00:00:00Z'; expirationDate = '2027-05-01T00:00:00Z'; memory = 6442450944; isSSD = $false },   # Upgrade in place: needs RAM + SSD
+    @{ companyId = 2; name = 'RETAIN-PC'; os = 'Windows 11 Pro'; manufacturedDate = '2024-02-01T00:00:00Z'; expirationDate = '2026-01-15T00:00:00Z'; memory = 17179869184; isSSD = $true },   # Retain: needs a warranty extension
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
 $cards = @(
@@ -53,7 +55,7 @@ Set-StrictMode -Off
 $o = $global:Out
 $o.message
 "optionalFieldsDropped: $($o.optionalFieldsDropped) | pricingApplied: $($o.pricingApplied) | estimatedTotal: $(if ($o.Contains('estimatedTotal')) { $o.estimatedTotal }) | warnings: $(@($o.warnings) -join ' / ')"
-foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)" }
+foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)"; foreach ($b in @($r.priceBreakdown | Where-Object { $_ })) { "        - $b" } }
 foreach ($r in @($o.results | Where-Object { $_.action -eq 'completed' -and $_.productId })) {
     $w = @($global:Writes | Where-Object { $_ -match "^PATCH /v2/product/$($r.productId) " })
     $ok = $w.Count -and @(($w[-1] -replace '^\S+ \S+ ', '' | ConvertFrom-Json) | Where-Object { $_.path -eq '/isShowPrice' -and $_.value -eq $false }).Count -eq 1

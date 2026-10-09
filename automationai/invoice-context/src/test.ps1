@@ -70,27 +70,27 @@ $Handler = {
     $u = [uri]::UnescapeDataString($c.Uri)
     switch -Wildcard -CaseSensitive ($k) {
         # ---- ConnectWise ----
-        "GET $TCW/company/companies*" { if ($u -like '*Contoso*') { return @([pscustomobject]@{ id = 42; name = 'Contoso' }) }; return @() }
-        "GET $TCW/service/tickets/1001/notes*" { if ($c.Uri -like '*page=*' -and $c.Uri -notlike '*page=1') { return @() }; return @(@([pscustomobject]@{ id = 1; text = 'We think the September invoice is too high.'; internalAnalysisFlag = $false; detailDescriptionFlag = $true }) + @(TNote '1001' | ForEach-Object { [pscustomobject]@{ id = 2; text = $_; internalAnalysisFlag = $true; detailDescriptionFlag = $false } })) }
+        "GET $TCW/company/companies*" { if ($u -like '*Contoso*') { return , @([pscustomobject]@{ id = 42; name = 'Contoso' }) }; return , @() }
+        "GET $TCW/service/tickets/1001/notes*" { if ($c.Uri -like '*page=*' -and $c.Uri -notlike '*page=1') { return , @() }; return , @(@([pscustomobject]@{ id = 1; text = 'We think the September invoice is too high.'; internalAnalysisFlag = $false; detailDescriptionFlag = $true }) + @(TNote '1001' | ForEach-Object { [pscustomobject]@{ id = 2; text = $_; internalAnalysisFlag = $true; detailDescriptionFlag = $false } })) }
         "GET $TCW/service/tickets/1001" { return (TCwT 1001 'Question about invoice INV-100' '2026-10-02T09:00:00Z') }
         "GET $TCW/service/tickets?conditions=*" {
-            if ($TS.empty) { return @() }
-            return @((TCwT 1011 'Printer setup for reception' '2026-09-15T10:00:00Z' $true), (TCwT 1010 'Server patching weekend' '2026-09-03T10:00:00Z'), (TCwT 1012 'Email migration to Microsoft 365' '2026-08-20T10:00:00Z'))
+            if ($TS.empty) { return , @() }
+            return , @((TCwT 1011 'Printer setup for reception' '2026-09-15T10:00:00Z' $true), (TCwT 1010 'Server patching weekend' '2026-09-03T10:00:00Z'), (TCwT 1012 'Email migration to Microsoft 365' '2026-08-20T10:00:00Z'))
         }
         "GET $TCW/time/entries?conditions=*" {
             if ($TS.time403) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to Time Entries."}' }
-            if ($TS.empty) { return @() }
-            return @((TCwTime 1 1010 '2026-09-04T09:00:00Z' 3.5 'Billable'), (TCwTime 2 1010 '2026-09-05T09:00:00Z' 1 'DoNotBill' 501), (TCwTime 3 1011 '2026-09-15T11:00:00Z' 0.5 'Billable'), (TCwTime 4 1012 '2026-09-10T09:00:00Z' 4 'Billable' 501))
+            if ($TS.empty) { return , @() }
+            return , @((TCwTime 1 1010 '2026-09-04T09:00:00Z' 3.5 'Billable'), (TCwTime 2 1010 '2026-09-05T09:00:00Z' 1 'DoNotBill' 501), (TCwTime 3 1011 '2026-09-15T11:00:00Z' 0.5 'Billable'), (TCwTime 4 1012 '2026-09-10T09:00:00Z' 4 'Billable' 501))
         }
         "GET $TCW/finance/agreements?conditions=*" {
-            if ($TS.empty) { return @() }
-            return @([pscustomobject]@{ id = 501; name = 'Managed Services'; type = [pscustomobject]@{ name = 'Managed' }; company = [pscustomobject]@{ id = 42 }; agreementStatus = 'Active'; startDate = '2026-01-01T00:00:00Z'; endDate = $null; billAmount = 1500; billingCycle = [pscustomobject]@{ name = 'Monthly' }; applicationUnits = 'Hours'; applicationLimit = 20; applicationCycle = 'Monthly'; cancelledFlag = $false },
+            if ($TS.empty) { return , @() }
+            return , @([pscustomobject]@{ id = 501; name = 'Managed Services'; type = [pscustomobject]@{ name = 'Managed' }; company = [pscustomobject]@{ id = 42 }; agreementStatus = 'Active'; startDate = '2026-01-01T00:00:00Z'; endDate = $null; billAmount = 1500; billingCycle = [pscustomobject]@{ name = 'Monthly' }; applicationUnits = 'Hours'; applicationLimit = 20; applicationCycle = 'Monthly'; cancelledFlag = $false },
                 [pscustomobject]@{ id = 502; name = 'Old block hours'; type = [pscustomobject]@{ name = 'Block' }; company = [pscustomobject]@{ id = 42 }; agreementStatus = 'Expired'; startDate = '2025-01-01T00:00:00Z'; endDate = '2026-06-30T00:00:00Z'; billAmount = 900; cancelledFlag = $false })
         }
         "GET $TCW/finance/invoices?conditions=*" {
-            if ($u -like '*INV-100*') { return @([pscustomobject]@{ id = 900; invoiceNumber = 'INV-100'; company = [pscustomobject]@{ id = 42 }; date = '2026-10-01T00:00:00Z'; total = 2100.5 }) }
-            if ($u -like '*INV-200*') { return @([pscustomobject]@{ id = 901; invoiceNumber = 'INV-200'; company = [pscustomobject]@{ id = 77 }; date = '2026-10-01T00:00:00Z'; total = 5000 }) }
-            return @()
+            if ($u -like '*INV-100*') { return , @([pscustomobject]@{ id = 900; invoiceNumber = 'INV-100'; company = [pscustomobject]@{ id = 42 }; date = '2026-10-01T00:00:00Z'; total = 2100.5 }) }
+            if ($u -like '*INV-200*') { return , @([pscustomobject]@{ id = 901; invoiceNumber = 'INV-200'; company = [pscustomobject]@{ id = 77 }; date = '2026-10-01T00:00:00Z'; total = 5000 }) }
+            return , @()
         }
         "POST $TCW/service/tickets/*/notes" { $id = ($c.Uri -split '/service/tickets/')[1].Split('/')[0]; $null = (TNote $id).Add((Read-Body $c).text); return [pscustomobject]@{ id = 9001 } }
         # ---- Autotask ----
@@ -116,7 +116,7 @@ $Handler = {
         # ---- HaloPSA, Kaseya BMS and Syncro (library shape only) ----
         "POST $THA/auth/token" { return [pscustomobject]@{ access_token = 'halo-token' } }
         "GET $THA/api/Actions?ticket_id=4000*" { return [pscustomobject]@{ actions = @([pscustomobject]@{ id = 1; timetaken = 1.5; chargehours = 1.5; datetime = '2026-09-10T09:00:00Z'; who = 'Jo'; note = 'x' }, [pscustomobject]@{ id = 2; timetaken = 0; datetime = '2026-09-10T09:00:00Z' }, [pscustomobject]@{ id = 3; timetaken = 2; chargehours = 0; datetime = '2026-09-11T09:00:00Z'; who = 'Jo' }) } }
-        "GET $THA/api/ClientContract?client_id=42" { return @([pscustomobject]@{ id = 9; ref = 'Contoso support'; client_id = 42; start_date = '2026-01-01T00:00:00Z'; end_date = $null; active = $true; periodchargeamount = 1200 }, [pscustomobject]@{ id = 10; ref = 'Fabrikam'; client_id = 77 }) }
+        "GET $THA/api/ClientContract?client_id=42" { return , @([pscustomobject]@{ id = 9; ref = 'Contoso support'; client_id = 42; start_date = '2026-01-01T00:00:00Z'; end_date = $null; active = $true; periodchargeamount = 1200 }, [pscustomobject]@{ id = 10; ref = 'Fabrikam'; client_id = 77 }) }
         "GET $THA/api/Invoice?search=*" { return [pscustomobject]@{ invoices = @([pscustomobject]@{ id = 55; invoicenumber = 'H-55'; client_id = 42; invoice_date = '2026-10-01T00:00:00Z'; total = 300 }) } }
         "POST $TKB/security/authenticate" { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }
         "GET $TKB/timelogs?Filter.TicketId=61*" { return [pscustomobject]@{ Result = @([pscustomobject]@{ Id = 1; Timespent = 1.25; IsBillable = $true; FirstName = 'Jo'; StartDate = '2026-09-12T09:00:00Z'; AssigneeName = 'Jo' }) } }

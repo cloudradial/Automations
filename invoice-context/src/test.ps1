@@ -267,4 +267,21 @@ Check 'syncro: ticket timer of 1.5 h' ($TT.Count -eq 1 -and $TT[0].hours -eq 1.5
 $TA = @(Invoke-Lib '$null = Connect-Psa; @((Get-PsaAgreements -CompanyId 42).agreements)')
 Check 'syncro: contracts read' ($TA.Count -eq 1 -and $TA[0].amount -eq 800)
 
+# ---- 11. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise saves the invoice context note on 1001, then answers the POST with an insecure redirect (what
+# staging did). Add-PsaNote reads the ticket back, finds the note and records a warning in $PsaState.Warnings;
+# the note step's warnings must carry it, once.
+Reset-Mock $Psa.connectwise { param($c, $n)
+    $TRes = & $Handler $c $n
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/service/tickets/1001/notes') {
+        $TEr = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $TEr.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $TEr
+    }
+    if ($TRes -is [array]) { return , $TRes }; return $TRes
+}
+$TNotes.Clear(); $TS.time403 = $false; $TS.empty = $false
+$f = Invoke-Flow (New-Body @{}) $aiText
+$TWant = 'ConnectWise answered the note on ticket 1001 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected note was saved once and the run succeeds' ($f.stage -eq 'note' -and $f.r.out.status -eq 'success' -and $f.r.out.note_written -eq $true -and @(Get-Calls POST '*/service/tickets/1001/notes').Count -eq 1) "$($f.r.error) $(Show-Calls)"
+Check 'shared warning: $PsaState.Warnings reaches the note step warnings, once' (@($f.r.out.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) ($f.r.out.warnings -join ' | ')
+
 Complete-Test

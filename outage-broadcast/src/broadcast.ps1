@@ -24,12 +24,21 @@ $ErrorActionPreference = 'Stop'
 
 function Get-ObState { $in = Get-NodeInput; $s = [ordered]@{}; if ($null -ne $in) { if ($in -is [System.Collections.IDictionary]) { foreach ($k in @($in.Keys)) { $s[[string]$k] = $in[$k] } } else { foreach ($p in $in.PSObject.Properties) { $s[$p.Name] = $p.Value } } }; return $s }
 function Get-ObList { param($S, [string]$Key) if (-not $S.Contains($Key)) { return @() }; return @(@($S[$Key]) | Where-Object { $null -ne $_ -and [string]$_ -ne '' }) }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-ObWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function ConvertTo-ObHtml { param([string]$t) return (@(([System.Net.WebUtility]::HtmlEncode($t)) -split "\r?\n\r?\n" | Where-Object { $_.Trim() } | ForEach-Object { '<p>' + ($_.Trim() -replace "\r?\n", '<br>') + '</p>' }) -join '') }
 
 $st = Get-ObState
 $status = [string]$st['status']
 if ($status -ne 'ok') {
     if (-not [string]$st['chatReply']) { $st['chatReply'] = [string]$st['message'] }
+    $st['warnings'] = @(Get-ObWarnings (Get-ObList $st 'warnings'))
     Set-NodeOutput $st; return
 }
 $warnings = New-Object System.Collections.ArrayList; foreach ($w in @(Get-ObList $st 'warnings')) { $null = $warnings.Add([string]$w) }
@@ -196,6 +205,7 @@ switch ($result.status) {
 foreach ($r in @($result.ran)) { $null = $actions.Add([ordered]@{ action = $r.description; result = [string]$r.output }) }
 if ($null -ne $result.failed) { $null = $actions.Add([ordered]@{ action = $result.failed.description; result = "failed: $($result.failed.error)" }) }
 
+$noteWarnings = @(Get-ObWarnings $warnings)
 $noteText = @(
     "Outage broadcast ($mode) for $service, $when."
     "Run by: $by$(if ($st['triggerSource']) { " (via $($st['triggerSource']))" })."
@@ -204,7 +214,7 @@ $noteText = @(
     $(if ($recipients.Count) { "Primary contacts$(if ($null -eq $pm) { ' (not emailed, Postmark is not set up)' }): $(@($recipients) -join '; ')" })
     "Client message: $notice"
     "Result: $($result.message)"
-    $(if ($warnings.Count) { "Warnings: $(@($warnings) -join ' ')" })
+    $(if ($noteWarnings.Count) { "Warnings: $($noteWarnings -join ' ')" })
 ) | Where-Object { $_ }
 $out.internal_note = ($noteText -join "`n")
 
@@ -231,5 +241,5 @@ if ($confirm -and $ticketId) {
 elseif ($confirm -and -not $ticketId) { $null = $warnings.Add('No problemTicketId was sent, so no ticket note was written. The summary is in internal_note.') }
 
 $out.actions = @($actions)
-$out.warnings = @($warnings)
+$out.warnings = @(Get-ObWarnings $warnings)
 Set-NodeOutput $out

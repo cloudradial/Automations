@@ -92,7 +92,11 @@ function Invoke-RestMethod {
         return , @(J @{ id = 11; firstName = 'Alex'; lastName = 'Fabrikam'; defaultFlag = $true }; J @{ id = 12; firstName = 'Jo'; lastName = 'Fabrikam'; defaultFlag = $true })
     }
     if ($u -like "$cw/service/tickets/*/notes[?]*" -and $m -eq 'GET') { return , @($Mock.Notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
-    if ($u -like "$cw/service/tickets/*/notes" -and $m -eq 'POST') { $null = $Mock.Notes.Add(($Body | ConvertFrom-Json).text); return [pscustomobject]@{ id = 1 } }
+    if ($u -like "$cw/service/tickets/*/notes" -and $m -eq 'POST') {
+        $null = $Mock.Notes.Add(($Body | ConvertFrom-Json).text)
+        # ConnectWise staging: the note is saved, then the POST is answered with an insecure redirect.
+        if ($Mock.Opt.Contains('NoteRedirect')) { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
+        return [pscustomobject]@{ id = 1 } }
     if ($u -like "$cw/service/tickets/*" -and $m -eq 'PATCH') { return [pscustomobject]@{ id = 1 } }
     # Autotask
     $at = 'https://webservices.example-msp.test/atservicesrest/v1.0'
@@ -297,6 +301,16 @@ Check 'bad archive id: incomplete' ($r.step -eq 'node-inputs' -and $r.error -mat
 $r = Invoke-Workflow @{ stale_days = 30; company_id = '5' }
 Check 'stale_days 30: 201 no longer stale' ($r.error -eq '' -and (Get-Cat $r.out 'stale') -eq '') (Get-Cat $r.out 'stale')
 Check 'company filter in conditions' (@(Get-Calls GET 'https://cw.example-msp.test/*/service/tickets[?]*')[0].Decoded -match 'closedFlag=false and company/id=5') ''
+
+# 16. A warning from _shared/psa.ps1 reaches the output: ConnectWise saves the summary note on 9001, then answers the
+# POST with an insecure redirect. Add-PsaNote reads the ticket back, finds the note and records a warning in
+# $PsaState.Warnings; the report step's warnings must carry it, once.
+$Mock.Notes.Clear()
+$r = Invoke-Workflow @{ ticket_id = '9001'; to = 'service.manager@example-msp.test' } @{ 'Postmark-ServerToken' = $null } @{ NoteRedirect = $true }
+$o = $r.out
+$want = 'ConnectWise answered the note on ticket 9001 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected summary note was saved once' ($r.error -eq '' -and @(Get-Calls POST 'https://cw.example-msp.test/*/service/tickets/9001/notes').Count -eq 1 -and $Mock.Notes.Count -eq 1) "$($r.error)"
+Check 'shared warning: $PsaState.Warnings reaches the report step warnings, once' (@($o.warnings | Where-Object { $_ -eq $want }).Count -eq 1) (@($o.warnings) -join ' | ')
 
 Write-Host "$($Tally.pass) passed, $($Tally.fail) failed"
 if ($Tally.fail) { exit 1 }

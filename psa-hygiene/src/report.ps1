@@ -17,6 +17,14 @@ function Read-PhState {
     foreach ($k in @('inputs', 'counts', 'fix')) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the Fix missing contacts step (no '$k')." } }
     return $st
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-PhWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function ConvertTo-PhHtml { param($v) return [System.Net.WebUtility]::HtmlEncode([string]$v) }
 function Get-PhHash { param([string]$s) $h = [System.Security.Cryptography.SHA256]::Create(); try { return (-join @($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($s)) | Select-Object -First 6 | ForEach-Object { $_.ToString('x2') })) } finally { $h.Dispose() } }
 function Get-PhPlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1) { return "1 $one" }; return "$n $many" }
@@ -103,6 +111,7 @@ if ($planned.Count -or $skipped.Count) {
         Add-PhHtml '</ul>'
     }
 }
+$warnings = @(Get-PhWarnings $warnings)
 if ($warnings.Count) { Add-PhHtml '<p>Notes:</p><ul>'; foreach ($w in $warnings) { Add-PhHtml "<li>$(ConvertTo-PhHtml $w)</li>" }; Add-PhHtml '</ul>' }
 Add-PhHtml '<p>Only a missing contact is ever fixed, and only when the company has exactly one primary contact and the run says confirm. Everything else needs a person.</p>'
 $html = $phHtml.ToString()
@@ -160,7 +169,7 @@ $out = [ordered]@{
     internal_note = "PSA hygiene check in $psaName. $message"
     ticket_id     = $noteTicket
     actions       = @($actions)
-    warnings      = @($warnings)
+    warnings      = @(Get-PhWarnings $warnings)
     counts        = $cnt
     issues        = @($issues | Select-Object -First 1000)
     fix           = [ordered]@{ planned = @($planned); skipped = @($skipped); changed = @(Get-PhProp $res 'ran' | Where-Object { $null -ne $_ } | ForEach-Object { [string](Get-PhProp $_ 'description') }); failed = (Get-PhProp $res 'failed') }

@@ -2249,17 +2249,26 @@ definition:
 
         function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
         $stopState = @{ done = $false }
+        $warnings = New-Object System.Collections.ArrayList
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-AllWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         function Stop-Run {
             param([string]$Status, [string]$Why, [string]$TicketId = '')
             $stopState.done = $true
             Set-NodeOutput ([ordered]@{
                     status = $Status; message = $Why; public_note = ''
                     internal_note = "Invoice context stopped before anything was written: $Why"
-                    ticket_id = $TicketId; actions = @(); warnings = @(); chatReply = $Why
+                    ticket_id = $TicketId; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = $Why
                 })
             throw $Why
         }
-        trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Invoice context failed while reading the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(); chatReply = "Invoice context failed: $($_.Exception.Message)" }) }; break }
+        trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Invoice context failed while reading the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = "Invoice context failed: $($_.Exception.Message)" }) }; break }
 
         $raw = Get-NodeInput
         if ($null -eq $raw) { Stop-Run 'incomplete' 'No input was received. Send at least ticketId.' }
@@ -2326,7 +2335,6 @@ definition:
             $f.periodSource = 'input'
         }
 
-        $warnings = New-Object System.Collections.ArrayList
         $actions = New-Object System.Collections.ArrayList
 
         # ---- the ticket and its company ----
@@ -2390,7 +2398,6 @@ definition:
         if (-not $agreementsAvailable) { $null = $warnings.Add("$psaName has no agreements or contracts, so none were read.") }
         $inEffect = @($agreements | Where-Object { (-not $_.startDate -or $_.startDate -lt $pEnd) -and (-not $_.endDate -or $_.endDate -ge $pStart) })
         if ($agreementsAvailable) { $null = $actions.Add("Read $($agreements.Count) agreement(s); $($inEffect.Count) were in effect during the period.") }
-        foreach ($w in @($PsaState.Warnings)) { $null = $warnings.Add([string]$w) }
 
         # ---- the figures, added up without AI ----
         function Get-Sum { param($Rows, [string]$Key) $s = 0.0; foreach ($x in @($Rows)) { if ($null -ne $x) { $s += [double]$x[$Key] } }; return [Math]::Round($s, 2) }
@@ -2426,6 +2433,7 @@ definition:
             hoursOnAgreements = $onAgreement; ticketsWithTime = $groups.Count
             topTickets = @($top); agreementsAvailable = $agreementsAvailable; agreements = @($agreementRows)
         }
+        $warnings = @(Get-AllWarnings $warnings)
         # What the AI sees: the figures without ids, links or anything from another company.
         $facts = [ordered]@{
             company = $f.companyName; period = $f.periodLabel; periodSource = $f.periodSource
@@ -3784,20 +3792,28 @@ definition:
         function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
         function Read-Json { param($v) if ($null -eq $v) { return $null }; if ($v -isnot [string]) { return $v }; if (-not $v.Trim()) { return $null }; try { return ($v | ConvertFrom-Json -NoEnumerate) } catch { return $null } }
         $stopState = @{ done = $false; ticket = '' }
+        $warnings = New-Object System.Collections.ArrayList
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-AllWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         function Stop-Note {
             param([string]$Status, [string]$Why)
             $stopState.done = $true
-            Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Invoice context stopped: $Why"; ticket_id = $stopState.ticket; actions = @(); warnings = @(); chatReply = $Why })
+            Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Invoice context stopped: $Why"; ticket_id = $stopState.ticket; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = $Why })
             throw $Why
         }
-        trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Invoice context failed while writing the note: $($_.Exception.Message)"; ticket_id = $stopState.ticket; actions = @(); warnings = @(); chatReply = "Invoice context failed: $($_.Exception.Message)" }) }; break }
+        trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Invoice context failed while writing the note: $($_.Exception.Message)"; ticket_id = $stopState.ticket; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = "Invoice context failed: $($_.Exception.Message)" }) }; break }
 
         $req = Read-Json (Get-NodeInput -Name 'request')
         $fig = Read-Json (Get-NodeInput -Name 'figures')
         $aiRaw = Get-NodeInput -Name 'summary'
         if ($null -eq $req -or $null -eq $fig) { Stop-Note 'error' 'The billing figures from the first step are missing. Run the workflow from the start.' }
         $stopState.ticket = [string](Get-Prop $req 'ticketId')
-        $warnings = New-Object System.Collections.ArrayList
         $actions = New-Object System.Collections.ArrayList
         foreach ($w in @(Read-Json (Get-NodeInput -Name 'warnings_json'))) { if ($w) { $null = $warnings.Add([string]$w) } }
         foreach ($a in @(Read-Json (Get-NodeInput -Name 'actions_json'))) { if ($a) { $null = $actions.Add([string]$a) } }
@@ -3887,7 +3903,7 @@ definition:
                 status = $(if ($written -or $already) { 'success' } else { 'pending_confirmation' }); message = $message; public_note = ''; internal_note = $note
                 ticket_id = $ticketRef; psa = [string](Get-Prop $req 'psa'); period = $period; summary = $text; summarized_by = $by; note_written = $written
                 counts = [ordered]@{ ticketsOpened = Get-Prop $fig 'ticketsOpened'; ticketsWithTime = Get-Prop $fig 'ticketsWithTime'; agreements = $agr.Count; topTickets = $top.Count }
-                actions = @($actions); warnings = @($warnings)
+                actions = @($actions); warnings = @(Get-AllWarnings $warnings)
                 chatReply = "Invoice context for $company, $($period): $hoursLine$topLine.$(if ($written) { " Full summary added as an internal note on #$ticketRef." } elseif ($already) { " The summary was already on #$ticketRef, so it wasn't added again." } else { ' Nothing was written.' })"
             })
       timeoutSeconds: 300

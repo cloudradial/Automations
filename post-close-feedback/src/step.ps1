@@ -53,4 +53,12 @@ function Read-StepContext {
     if ($null -eq $ctx) { $ctx = Read-StepJson (Get-StepProp $in 'ctx') }
     return $ctx
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-StepWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 # ---------- end src/step.ps1 ----------

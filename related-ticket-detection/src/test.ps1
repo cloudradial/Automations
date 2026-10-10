@@ -298,4 +298,23 @@ Check 'syncro: ticket number 1071 resolves to id 71' ($TId -eq '71') $TId
 $TSup = Invoke-Lib '$null = Connect-Psa; Get-PsaCapabilities'
 Check 'syncro: relation is notes only' ($TSup.relation -eq 'note')
 
+# ---- 9. A warning from _shared/psa.ps1 reaches the output and the summary note ----
+# ConnectWise saves the cross-reference note on 1002, then answers the POST with an insecure redirect (what staging
+# did). Add-PsaNote reads the ticket back, finds the note and records a warning in $PsaState.Warnings; the write
+# step's warnings and the summary note on 1001 must carry it, once.
+TReset $Psa.connectwise
+$Mock.Handler = { param($c, $n)
+    $TRes = & $Handler $c $n
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$TCW/service/tickets/1002/notes") {
+        $TEr = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $TEr.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $TEr
+    }
+    if ($TRes -is [array]) { return , $TRes }; return $TRes
+}
+$f = Invoke-Flow (New-Body @{ confirm = $true }) $aiDup
+$o = $f.r.out
+$TWant = 'ConnectWise answered the note on ticket 1002 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected cross-reference note was saved once and the run succeeds' ($o.status -eq 'success' -and $o.counts.linked -eq 1 -and @(Get-Calls 'POST' "$TCW/service/tickets/1002/notes").Count -eq 1) "$($o.status) $($f.r.error) $(Show-Calls)"
+Check 'shared warning: $PsaState.Warnings reaches the write step warnings, once' (@($o.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) (@($o.warnings) -join ' | ')
+Check 'shared warning: the summary note lists it' ($o.internal_note.Contains("Note: $TWant") -and (Read-Body @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")[0]).text.Contains("Note: $TWant")) $o.internal_note
+
 Complete-Test

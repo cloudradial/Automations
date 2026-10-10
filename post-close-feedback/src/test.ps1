@@ -221,4 +221,22 @@ $cr = @{ Ticket = @{ TicketId = 2222; Questions = @(@{ Id = 'ticketId'; Value = 
 $f = Invoke-Flow $cr
 Check 'CloudRadial shape: the answered ticket (question) wins over the form ticket' ($f.r.out.status -eq 'success' -and $f.r.out.ticket_id -eq '1001' -and $f.r.out.score -eq 5) "$($f.r.out.ticket_id) $($f.r.error)"
 
+# ---- 15. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise saves the score note on 1001, then answers the POST with an insecure redirect (what staging did).
+# Add-PsaNote reads the ticket back, finds the note and records a warning in $PsaState.Warnings; the route step's
+# warnings must carry it, once.
+Reset-Mock (Get-Secrets 'connectwise') { param($c, $n)
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$TCW/service/tickets/1001/notes") {
+        $TScenario.cwNotes = @($TScenario.cwNotes) + @(New-CwNote (Read-Body $c).text $false 7)
+        $TEr = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $TEr.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $TEr
+    }
+    $TRes = & $Handler $c $n; if ($TRes -is [array]) { return , $TRes }; return $TRes
+}
+Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5' }
+$o = $f.r.out
+$TWant = 'ConnectWise answered the note on ticket 1001 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected score note was saved once and the run succeeds' ($o.status -eq 'success' -and @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes").Count -eq 1) "$($o.status) $($f.r.error) $(Show-Calls)"
+Check 'shared warning: $PsaState.Warnings reaches the route step warnings, once' (@($o.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) (@($o.warnings) -join ' | ')
+
 Complete-Test

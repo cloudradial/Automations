@@ -76,7 +76,7 @@ $TMsg = @{
         body = [pscustomobject]@{ contentType = 'html'; content = '<p>Hello.</p><a href="https://www.fabrikam.example/october">Read more</a>' }
     }
 }
-$TScenario = @{ message = 'bad'; graph403 = $false; empty = $false; atCompany = 42; findFail = $false }
+$TScenario = @{ message = 'bad'; graph403 = $false; empty = $false; atCompany = 42; findFail = $false; prio403 = $false }
 $TState = @{ notes = @{}; tickets = (New-Object System.Collections.ArrayList) }
 function Add-TNote { param([string]$TicketId, $Note) if (-not $TState.notes.Contains($TicketId)) { $TState.notes[$TicketId] = New-Object System.Collections.ArrayList }; $null = $TState.notes[$TicketId].Add($Note) }
 function Get-TNotes { param([string]$TicketId) if ($TState.notes.Contains($TicketId)) { return @($TState.notes[$TicketId]) }; return @() }
@@ -99,7 +99,7 @@ $Handler = {
             if ($TScenario.empty) { return [pscustomobject]@{ value = @() } }
             return [pscustomobject]@{ value = @($m) }
         }
-        "GET $TCW/service/priorities*" { return , @([pscustomobject]@{ id = 1; name = 'Priority 1 - Emergency Response' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - Quick Response' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 4; name = 'Priority 4 - Schedule Maintenance' }) }
+        "GET $TCW/service/priorities*" { if ($TScenario.prio403) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to Service Desk priorities."}' }; return , @([pscustomobject]@{ id = 1; name = 'Priority 1 - Emergency Response' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - Quick Response' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 4; name = 'Priority 4 - Schedule Maintenance' }) }
         "GET $TCW/company/companies*" { return , @([pscustomobject]@{ id = 43; name = 'Contoso Ltd' }, [pscustomobject]@{ id = 42; name = 'Contoso' }) }
         "GET $TCW/service/tickets/777/notes*" { return , @([pscustomobject]@{ id = 1; text = "Please check this.`n---------- Forwarded message ----------`nFrom: Microsoft 365 Security <alerts@c0ntoso.com>`nSubject: Your password expires today`nMessage-ID: <phish-0001@c0ntoso.com>" }) }
         "GET $TCW/service/tickets/777" { return [pscustomobject]@{ id = 777; summary = 'FW: Your password expires today'; company = [pscustomobject]@{ id = 42 }; owner = $null; status = [pscustomobject]@{ name = 'New' } } }
@@ -268,5 +268,17 @@ $f = Invoke-Flow (New-Body @{ confirm = $true }) $aiMal
 $o = $f.r.out
 Check 'lookup failure: ticket still opened, with a warning' ($o.status -eq 'success' -and @(Get-Calls 'POST' "$TCW/service/tickets").Count -eq 1 -and @($o.warnings | Where-Object { $_ -like '*earlier run*' }).Count -eq 1) "$($o.status) $($f.r.error) $($o.warnings -join ' | ')"
 $TScenario.findFail = $false
+
+# ---- 11. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise refuses to list ticket priorities (403), so the ticket opens at the board's default priority and
+# New-PsaTicket records a warning in $PsaState.Warnings; the ticket step's warnings must carry it, once.
+Reset-T 'connectwise'; $TScenario.prio403 = $true
+$f = Invoke-Flow (New-Body @{ confirm = $true }) $aiMal
+$o = $f.r.out
+$create = @(Get-Calls 'POST' "$TCW/service/tickets")
+Check 'shared warning: the ticket still opens, with no priority set' ($o.status -eq 'success' -and $create.Count -eq 1 -and $null -eq (Read-Body $create[0]).PSObject.Properties['priority']) "$($o.status) $($f.r.error) $(Show-Calls)"
+Check 'shared warning: $PsaState.Warnings reaches the ticket step warnings, once' (@($o.warnings | Where-Object { $_ -like "ConnectWise wouldn't list ticket priorities*" }).Count -eq 1) ($o.warnings -join ' | ')
+Check 'shared warning: the action says the priority was only requested' (@($o.actions | Where-Object { $_ -like 'Open a ticket (requested high priority): Phishing report*' }).Count -eq 1 -and -not @($o.actions | Where-Object { $_ -like 'Open a high priority ticket*' }).Count) ($o.actions -join ' | ')
+$TScenario.prio403 = $false
 
 Complete-Test

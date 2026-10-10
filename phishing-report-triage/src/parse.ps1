@@ -9,13 +9,22 @@
 # <<< _shared/psa.ps1
 $ErrorActionPreference = 'Stop'
 
+$warnings = New-Object System.Collections.ArrayList
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-AllWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Stop-Report {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
     Set-NodeOutput ([ordered]@{
             status = $Status; message = $Why
             public_note = 'Thanks for reporting this email. We could not process the report automatically, so a technician will follow up.'
             internal_note = "Phishing report triage stopped before any lookup: $Why"
-            ticket_id = $TicketId; actions = @(); warnings = @()
+            ticket_id = $TicketId; actions = @(); warnings = @(Get-AllWarnings $warnings)
         })
     throw $Why
 }
@@ -66,7 +75,6 @@ $f = [ordered]@{
 }
 $confirmRaw = (Get-Field @('confirm')).ToLowerInvariant()
 $f.confirm = @('true', 'yes', '1', 'y') -contains $confirmRaw
-$warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 
 # A sender typed as "Name <address>" keeps the address only.
@@ -96,5 +104,5 @@ $null = $actions.Add("Read the report from $($f.reporter_upn).")
 Set-NodeOutput ([ordered]@{
         status = 'ok'; request = $f; request_json = ($f | ConvertTo-Json -Compress)
         message = "Report read from $($f.reporter_upn)$(if (-not $f.confirm) { ' (preview only: confirm is false)' })."
-        actions = @($actions); warnings = @($warnings)
+        actions = @($actions); warnings = @(Get-AllWarnings $warnings)
     })

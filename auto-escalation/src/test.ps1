@@ -307,4 +307,19 @@ Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler { param($c, $n)
 $TR = Invoke-Flow $TBody
 Check 'Marker note refused (403): 2001 is not moved, the run is incomplete and says why' ($TR.out.status -eq 'incomplete' -and @(Get-Calls PATCH '*/2001').Count -eq 0 -and @(Get-Calls PATCH '*/2007').Count -eq 2 -and (Get-TEsc $TR '2001').error -match 'permission to add ticket notes' -and $TR.out.message -match '1 escalation note could not be added, so that ticket was not moved') "$($TR.out.message) | $((Get-TEsc $TR '2001') | ConvertTo-Json -Compress)"
 
+# ---- 15. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise saves the escalation note on 2001, then answers the POST with an insecure redirect (what staging
+# did). Add-PsaNote reads the ticket back, finds the note and records a warning in $PsaState.Warnings; the run's
+# warnings must carry it, once, through the notify and note steps.
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler { param($c, $n)
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/service/tickets/2001/notes') {
+        $TEr = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $TEr.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $TEr
+    }
+    $TRes = & $TCwHandler $c $n; if ($TRes -is [array]) { return , $TRes }; return $TRes
+}
+$TR = Invoke-Flow $TBody
+$TWant = 'ConnectWise answered the note on ticket 2001 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'Shared warning: the redirected note on 2001 was saved, sent once, and 2001 still moved' ($TR.out.status -eq 'success' -and @(Get-Calls POST '*/service/tickets/2001/notes').Count -eq 1 -and @(Get-Calls PATCH '*/2001').Count -eq 1) "$($TR.error) $(Show-Calls)"
+Check 'Shared warning: $PsaState.Warnings reaches the run output warnings, once' (@($TR.out.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) ($TR.out.warnings -join ' | ')
+
 Complete-Test

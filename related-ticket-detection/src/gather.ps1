@@ -15,17 +15,26 @@ $ErrorActionPreference = 'Stop'
 
 function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 $stopState = @{ done = $false }
+$warnings = New-Object System.Collections.ArrayList
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-AllWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Stop-Run {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
     $stopState.done = $true
     Set-NodeOutput ([ordered]@{
             status = $Status; message = $Why; public_note = ''
             internal_note = "Related ticket check stopped before anything was written: $Why"
-            ticket_id = $TicketId; actions = @(); warnings = @(); chatReply = $Why
+            ticket_id = $TicketId; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = $Why
         })
     throw $Why
 }
-trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Related ticket check failed while reading the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(); chatReply = "The related ticket check failed: $($_.Exception.Message)" }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Related ticket check failed while reading the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = "The related ticket check failed: $($_.Exception.Message)" }) }; break }
 
 $raw = Get-NodeInput
 if ($null -eq $raw) { Stop-Run 'incomplete' 'No input was received. Send at least ticketId.' }
@@ -87,7 +96,6 @@ foreach ($pair in @(@('minScore', 0.25), @('minConfidence', 0.6))) {
 }
 if (-not $f.ticketId) { Stop-Run 'incomplete' 'ticketId is missing. Send the PSA ticket number of the ticket to check. Nothing was read.' }
 
-$warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 
 # ---- the ticket and its company ----
@@ -195,7 +203,6 @@ foreach ($row in $short) {
 }
 $short = @($short | Sort-Object -Property @{ Expression = { $_.score } } -Descending)
 $null = $actions.Add("Shortlisted $($short.Count) ticket(s) that share words, a contact or a device with ticket $($f.ticketId).")
-foreach ($w in @($PsaState.Warnings)) { $null = $warnings.Add([string]$w) }
 
 $candidates = @(foreach ($row in $short) {
         [ordered]@{
@@ -225,7 +232,7 @@ Set-NodeOutput ([ordered]@{
         candidates_json = (ConvertTo-Json -InputObject @($candidates) -Compress -Depth 6)
         suggested_json = (ConvertTo-Json -InputObject @($suggested) -Compress -Depth 5)
         facts_json = ($facts | ConvertTo-Json -Depth 6)
-        warnings_json = (ConvertTo-Json -InputObject @($warnings) -Compress)
+        warnings_json = (ConvertTo-Json -InputObject @(Get-AllWarnings $warnings) -Compress)
         actions_json = (ConvertTo-Json -InputObject @($actions) -Compress)
         counts = [ordered]@{ open = $open.Count; candidates = $candidates.Count; suggested = $suggested.Count; suggestedValid = $suggestedIds.Count }
     })

@@ -2375,6 +2375,10 @@ definition:
               Base        = $null
               Headers     = $null
               MaxAttempts = 6
+              # A new Planner card needs a category: POST /v2/product answers 400 "The Category field is required" without one.
+              # These are Endpoint LifeCycle Manager's defaults; a build's own category and productCategoryId always win.
+              CardCategory          = 'Efficiency'
+              CardProductCategoryId = 7
           }
 
           # ---- small helpers (all Cr-prefixed so they don't clash with other shared files) ----
@@ -2498,6 +2502,8 @@ definition:
               if ($Preview) { return @{ action = 'would-create'; productId = ''; optionalFieldsDropped = $false } }
               $body = [ordered]@{ companyId = $CompanyId; datePublished = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); isRequired = $false; isShowPrice = $false; isClientVisible = $false; status = 0 }
               foreach ($k in $f.Keys) { $body[$k] = $f[$k] }
+              if ([string]::IsNullOrWhiteSpace([string]$body['category'])) { $body['category'] = $CrState.CardCategory }
+              if (-not $body.Contains('productCategoryId') -or $null -eq $body['productCategoryId']) { $body['productCategoryId'] = $CrState.CardProductCategoryId }
               $new = $null
               try { $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body }
               catch {

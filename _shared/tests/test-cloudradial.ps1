@@ -69,6 +69,16 @@ Invoke-WithLib @('cloudradial.ps1') {
     $r = Set-CrPlannerCard -CompanyId 7 -Subject 'Endpoint Hardware Refresh - Needs data' -Fields @{ body = '<p>3 computers</p>'; category = 'Efficiency'; productCategoryId = 7; priority = 0 }
     $c = Get-LastCall; $b = Read-Body $c
     Check 'Set-CrPlannerCard: no match creates one' ($r.action -eq 'created' -and $r.productId -eq '99' -and $c.Method -eq 'POST' -and $b.companyId -eq 7 -and $b.subject -eq 'Endpoint Hardware Refresh - Needs data' -and $b.isClientVisible -eq $false -and $b.status -eq 0 -and $b.productCategoryId -eq 7 -and $null -ne $b.datePublished) $c.Body
+    Check 'Set-CrPlannerCard: a build''s own category is kept' ($b.category -eq 'Efficiency' -and $b.productCategoryId -eq 7) $c.Body
+    $r = Set-CrPlannerCard -CompanyId 7 -Subject 'Reclaim unused Microsoft 365 licences' -Fields @{ body = '<p>2 licences</p>'; summary = '2 unused licences'; priority = 0 }
+    $c = Get-LastCall; $b = Read-Body $c
+    Check 'Set-CrPlannerCard: a new card with no category gets the default category and product category (CloudRadial requires one)' ($r.action -eq 'created' -and $c.Method -eq 'POST' -and $b.category -eq 'Efficiency' -and $b.productCategoryId -eq 7) $c.Body
+    $r = Set-CrPlannerCard -CompanyId 7 -Subject 'Another new card' -Fields @{ body = 'x'; category = 'Security'; productCategoryId = 3 }
+    $b = Read-Body (Get-LastCall)
+    Check 'Set-CrPlannerCard: an explicit category and product category are never replaced' ($b.category -eq 'Security' -and $b.productCategoryId -eq 3) (Get-LastCall).Body
+    $r = Set-CrPlannerCard -CompanyId 7 -Subject 'Endpoint Hardware Refresh - Replace' -Fields @{ summary = 'update only' }
+    $c = Get-LastCall
+    Check 'Set-CrPlannerCard: an update does not add a category' ($c.Method -eq 'PATCH' -and $c.Body -notmatch '/category' -and $c.Body -notmatch '/productCategoryId') $c.Body
 
     $before = $Mock.Calls.Count
     $r1 = Set-CrPlannerCard -CompanyId 7 -Subject 'Endpoint Hardware Refresh - Replace' -Existing $cards -Preview

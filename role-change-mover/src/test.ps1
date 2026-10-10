@@ -114,7 +114,7 @@ $Handler = {
     }
     # ---- PSAs ----
     # Notes are kept in $Sc.notes, so a rerun in the same scenario sees what the first run wrote.
-    if ($u -like 'https://cw.example/*' -and $m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add((J @{ id = $Sc.notes.Count + 1; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag })); return J @{ id = $Sc.notes.Count } }
+    if ($u -like 'https://cw.example/*' -and $m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add((J @{ id = $Sc.notes.Count + 1; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag })); if ($Sc.ContainsKey('noteRedirect')) { Throw-InsecureRedirect }; return J @{ id = $Sc.notes.Count } }
     if ($u -like 'https://cw.example/*' -and $m -eq 'GET' -and $u -like '*/service/tickets/12345/notes?*') { if ($u -like '*page=1') { return @($Sc.notes) }; return @() }
     if ($u -like 'https://at.example/*') {
         if ($m -eq 'GET' -and $u -like '*/TicketNotes/entityInformation/fields') { return J @{ fields = @((J @{ name = 'publish'; picklistValues = @((J @{ value = '1'; label = 'All Autotask Users'; isActive = $true }), (J @{ value = '2'; label = 'Internal Only'; isActive = $true })) }), (J @{ name = 'noteType'; picklistValues = @((J @{ value = '13'; label = 'System Workflow Note'; isActive = $true }), (J @{ value = '1'; label = 'Task Detail'; isActive = $true })) })) } }
@@ -130,6 +130,10 @@ $Handler = {
     if ($u -like 'https://zd.example/*' -and $m -eq 'GET' -and $u -like '*/tickets/12345/comments*') { return J @{ comments = @($Sc.notes); next_page = $null } }
     throw "unmocked $m $u"
 }
+
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 
 # ---------- runner ----------
 $Node = @{ In = $null; Out = $null }
@@ -310,5 +314,11 @@ New-Scenario 'connectwise'
 $rd = Invoke-Step $ReadScript (New-Body)
 $a = Invoke-Step $ApplyScript ($rd.out | ConvertTo-Json -Depth 20)
 Check 'Apply step: accepts the Read output unwrapped, as JSON text' ($a.out.status -eq 'pending_confirmation' -and @($a.out.planned).Count -eq 6) "$($a.out.status) $($a.out.message)"
+
+# ---------- a warning from the shared PSA library reaches the output ----------
+New-Scenario 'connectwise' -Over @{ noteRedirect = $true }
+$r = Invoke-Mover (New-Body)
+$sw = @(@($r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 12345 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the output warnings once' ($r.out.status -eq 'pending_confirmation' -and $r.out.note_written -and $Sc.notes.Count -eq 1 -and $sw.Count -eq 1) (@($r.out.warnings) -join ' | ')
 
 Complete-Test

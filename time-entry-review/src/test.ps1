@@ -25,8 +25,9 @@ function Start-Sleep { [CmdletBinding()] param([double]$Seconds = 0, [int]$Milli
 function Get-NodeInput { return $global:NodeIn }
 function Set-NodeOutput { param($o) $global:NodeOut = $o }
 function New-HttpError {
-    param([int]$Code, [string]$Body = '')
+    param([int]$Code, [string]$Body = '', [string]$Location = '')
     $r = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$Code)
+    if ($Location) { $r.Headers.Location = [uri]$Location }
     $ex = [Microsoft.PowerShell.Commands.HttpResponseException]::new("Response status code does not indicate success: $Code.", $r)
     $er = [System.Management.Automation.ErrorRecord]::new($ex, 'WebCmdletWebResponseException', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
     if ($Body) { $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($Body) }
@@ -66,7 +67,12 @@ function Invoke-RestMethod {
         if ($Mock.Opt.Contains('PostmarkRefuse')) { return [pscustomobject]@{ ErrorCode = 300; Message = 'Invalid ''From'' address.' } }
         return [pscustomobject]@{ ErrorCode = 0; Message = 'OK'; MessageID = 'msg-1' }
     }
-    # ConnectWise
+    # ConnectWise. With Redirect, the ticket list on cw.example-msp.test answers 301 to the sibling api.example-msp.test,
+    # which then serves everything (the shared library moves the run there and warns).
+    if ($Mock.Opt.Contains('Redirect')) {
+        if ($u -like 'https://cw.example-msp.test/*/service/tickets[?]*') { New-HttpError 301 '' $u.Replace('https://cw.example-msp.test/', 'https://api.example-msp.test/') }
+        $u = $u.Replace('https://api.example-msp.test/', 'https://cw.example-msp.test/'); $d = [uri]::UnescapeDataString($u)
+    }
     if ($u -like 'https://cw.example-msp.test/v4_6_release/apis/3.0/service/tickets[?]*' -and $m -eq 'GET') { if ($d -like '*page=1*') { return , @(Get-TicketsFor 'cw') }; return , @() }
     if ($u -like 'https://cw.example-msp.test/v4_6_release/apis/3.0/time/entries[?]*') {
         if ($Mock.Opt.Contains('Time403')) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to this resource."}' }
@@ -274,6 +280,13 @@ Check 'bad min_note_chars: incomplete' ($r.step -eq 'node-inputs' -and $r.error 
 # 16. No PSA configured.
 $r = Invoke-Workflow @{ date = $DayText } @{ 'PSA-Type' = $null; 'CW-ApiUrl' = $null }
 Check 'no psa: plain error in Find step' ($r.step -eq 'node-find' -and $r.error -match 'No PSA is set up') $r.error
+
+# 17. A warning from the shared PSA library reaches the output and the email: ConnectWise redirects the ticket
+# list to a sibling host, and the shared library follows it for the rest of the run and warns.
+$r = Invoke-Workflow @{ date = $DayText; to = 'service.manager@example-msp.test' } @{} @{ Redirect = $true }
+$TSw = 'ConnectWise redirected calls for cw.example-msp.test to api.example-msp.test'
+$pm = @(Get-Calls POST 'https://api.postmark.test/email')
+Check 'shared warning: a redirected API address is in the output warnings once and in the email notes' ($r.error -eq '' -and $r.out.counts.tickets_checked -eq 3 -and @(@($r.out.warnings) | Where-Object { $_ -match $TSw }).Count -eq 1 -and $pm.Count -eq 1 -and ($pm[0].Body | ConvertFrom-Json).HtmlBody -match $TSw) "$($r.step) $($r.error) / $(@($r.out.warnings) -join ' | ')"
 
 Write-Host "$($Tally.pass) passed, $($Tally.fail) failed"
 if ($Tally.fail) { exit 1 }

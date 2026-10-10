@@ -54,15 +54,18 @@ $mode = [string]$st['mode']
 $ticketId = [string]$st['ticket_id']
 $st['decision'] = ''; $st['reason'] = ''; $st['ticketSummary'] = ''; $st['companyName'] = ''; $st['firstName'] = ''
 $st['article'] = $null; $st['notesReadable'] = $false; $st['sentTo'] = ''
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-TaPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 function Set-TaDecision {
     param([string]$Decision, [string]$Reason)
+    Add-TaPsaWarnings
     $st['decision'] = $Decision; $st['reason'] = $Reason; $st['warnings'] = @($warnings)
     Set-NodeOutput $st
 }
 
 # The PSA is required: the ticket is read and written there.
 try { $null = Connect-Psa (Get-PsaType ([string]$st['psa'])) }
-catch { $st['status'] = 'error'; $st['message'] = "The PSA isn't connected: $($_.Exception.Message)"; $st['chatReply'] = $st['message']; $st['internal_note'] = $st['message']; Set-NodeOutput $st; return }
+catch { $st['status'] = 'error'; $st['message'] = "The PSA isn't connected: $($_.Exception.Message)"; $st['chatReply'] = $st['message']; $st['internal_note'] = $st['message']; Add-TaPsaWarnings; $st['warnings'] = @($warnings); Set-NodeOutput $st; return }
 
 $ticket = $null
 try { $ticket = Get-PsaTicket $ticketId }

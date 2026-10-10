@@ -132,7 +132,7 @@ $Handler = {
     # Notes are kept in $Sc.notes and read back, so Add-PsaNote -Marker can find an earlier copy.
     if ($u -like 'https://cw.example/*') {
         if ($m -eq 'GET' -and $u -like '*/service/tickets/12345/notes*') { $i = 0; return , @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; text = $_.text; internalAnalysisFlag = $_.internal; detailDescriptionFlag = (-not $_.internal); member = (J @{ identifier = 'api' }) } }) }
-        if ($m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.text; internal = [bool]$b.internalAnalysisFlag }); return J @{ id = $Sc.notes.Count } }
+        if ($m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.text; internal = [bool]$b.internalAnalysisFlag }); if ($Sc.ContainsKey('noteRedirect')) { Throw-InsecureRedirect }; return J @{ id = $Sc.notes.Count } }
     }
     if ($u -like 'https://at.example/*') {
         if ($m -eq 'GET' -and $u -like '*/TicketNotes/query?*') { $i = 0; return J @{ items = @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; description = $_.text; publish = $(if ($_.internal) { 2 } else { 1 }); creatorResourceID = 1 } }); pageDetails = (J @{ nextPageUrl = $null }) } }
@@ -158,6 +158,10 @@ function Add-MailboxPermission { [CmdletBinding(SupportsShouldProcess)] param($I
 function Add-RecipientPermission { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Trustee, $AccessRights) Invoke-FakeExo 'Add-RecipientPermission' (ConvertTo-FakeArgs $PSBoundParameters) }
 function New-DistributionGroup { [CmdletBinding(SupportsShouldProcess)] param($Name, $DisplayName, $Alias, $PrimarySmtpAddress, $Type, $ManagedBy, $RequireSenderAuthenticationEnabled) Invoke-FakeExo 'New-DistributionGroup' (ConvertTo-FakeArgs $PSBoundParameters) }
 function Add-DistributionGroupMember { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Member, [switch]$BypassSecurityGroupManagerCheck) Invoke-FakeExo 'Add-DistributionGroupMember' (ConvertTo-FakeArgs $PSBoundParameters) }
+
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 
 # ---------- runner ----------
 $Node = @{ In = $null; Out = $null }
@@ -375,5 +379,11 @@ Check 'rerun on Autotask: nothing written twice' ($n1 -ge 1 -and @(Get-PsaNotes)
 $pub = @($Sc.notes | Where-Object { -not $_.internal })
 Check 'public notes: only the message and an opaque Ref, no marker, tag or internal status word' ($pub.Count -eq 1 -and @($pub | Where-Object { $_.text -match '\[|distribution_list|shared_mailbox|smdl|success|pending|confirmation|error|rejected|sam\.doe' -or $_.text -notmatch '^The new distribution list [^\n]+ is ready at [^\n]+\.\nRef: [0-9a-f]{8}$' }).Count -eq 0) (@($pub | ForEach-Object { $_.text }) -join ' || ')
 Check 'internal notes keep the readable marker' (@($Sc.notes | Where-Object { $_.internal -and $_.text -match '\[distribution_list created contoso-sales-team@contoso\.com\]$' }).Count -eq 1) (@($Sc.notes | ForEach-Object { $_.text }) -join ' || ')
+
+# =================== a warning from the shared PSA library reaches the output ===================
+New-Scenario 'connectwise' 'rest' @{ noteRedirect = $true }
+$r = Invoke-Request (New-Body @{ preview = 'true' })
+$sw = @(@($r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 12345 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the output warnings once' ($r.out.status -eq 'pending_confirmation' -and $Sc.notes.Count -eq 1 -and $sw.Count -eq 1) "$($r.out.status) / $(@($r.out.warnings) -join ' | ')"
 
 Complete-Test

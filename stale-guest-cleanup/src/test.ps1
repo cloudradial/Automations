@@ -33,6 +33,9 @@ function New-HttpError {
     throw $er
 }
 
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 function Get-Iso { param([int]$DaysAgo) return (Get-Date).ToUniversalTime().AddDays(-$DaysAgo).ToString('yyyy-MM-ddTHH:mm:ssZ') }
 function New-U {
     param([string]$Id, [string]$Upn, [int]$Created, $Last = $null, $NonInt = $null, [string]$Type = 'Member', [bool]$Enabled = $true, [bool]$Synced = $false)
@@ -91,6 +94,7 @@ function Invoke-RestMethod {
     # Ticket notes are kept in $Mock.Notes, so a rerun (KeepNotes) sees what the first run wrote.
     if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes' -and $m -eq 'POST') {
         $b = $Body | ConvertFrom-Json; $null = $Mock.Notes.Add([pscustomobject]@{ id = $Mock.Notes.Count + 1; text = $b.text; internalAnalysisFlag = $b.internalAnalysisFlag; detailDescriptionFlag = $b.detailDescriptionFlag })
+        if ($Mock.Opt.Contains('NoteRedirect')) { Throw-InsecureRedirect }
         return [pscustomobject]@{ id = $Mock.Notes.Count }
     }
     if ($u -like 'https://cw.example-msp.test/*/service/tickets/*/notes[?]*' -and $m -eq 'GET') { if ($u -like '*page=1') { return , @($Mock.Notes) }; return , @() }
@@ -264,6 +268,11 @@ Check 'wrong tenant: rejected before reading users' ($r.out.status -eq 'rejected
 # 15. Archive failure keeps the report in the output.
 $r = Invoke-Workflow @{ company_id = '9' } @{ 'CloudRadial-PrivateKey' = $null }
 Check 'archive failure: warning and report_html' ($r.error -eq '' -and (@($r.out.warnings) -join ' ') -match "Couldn't write the report" -and $r.out.report_html -match '<h2>') (@($r.out.warnings) -join ' | ')
+
+# 16. A warning from the shared PSA library reaches the output: the note POST is saved, then answered with a redirect.
+$r = Invoke-Workflow @{ ticket_id = '123'; company_id = '9' } @{} @{ NoteRedirect = $true }
+$sw = @(@($r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 123 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the output warnings once' ($r.error -eq '' -and $Mock.Notes.Count -eq 1 -and $sw.Count -eq 1) "$($r.error) / $(@($r.out.warnings) -join ' | ')"
 
 Write-Host "$($Tally.pass) passed, $($Tally.fail) failed"
 if ($Tally.fail) { exit 1 }

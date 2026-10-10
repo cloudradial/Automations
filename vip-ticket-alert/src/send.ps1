@@ -4,8 +4,11 @@
 # If Postmark isn't set up or refuses the email, the internal note carries the alert instead.
 # It never changes the ticket's status, priority or assignee, and never writes a client-visible note.
 $stopState = @{ done = $false }
+$warnings = New-Object System.Collections.ArrayList
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-SendPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 $ctx = Read-StepContext (Get-NodeInput)
-trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The VIP alert for ticket $tid could not be completed: $m"; public_note = ''; internal_note = "VIP ticket alert failed: $m"; ticket_id = $tid; vip = $true; alerted = $false; recipients = @(); actions = @(); warnings = @(); chatReply = 'The VIP ticket alert failed. See the run for details.' }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx) { $tid = [string]$ctx.ticket_id }; Add-SendPsaWarnings; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The VIP alert for ticket $tid could not be completed: $m"; public_note = ''; internal_note = "VIP ticket alert failed: $m"; ticket_id = $tid; vip = $true; alerted = $false; recipients = @(); actions = @(); warnings = @($warnings); chatReply = 'The VIP ticket alert failed. See the run for details.' }) }; break }
 if ($null -eq $ctx -or $null -eq $ctx.PSObject.Properties['skip']) { throw 'The VIP check result is missing. Run the workflow from the start.' }
 if ($ctx.skip) { $stopState.done = $true; Set-NodeOutput $ctx.result; return }
 if ($null -eq $ctx.PSObject.Properties['alert']) { throw 'The alert text from the build step is missing. Run the workflow from the start.' }
@@ -47,6 +50,7 @@ catch {
     if (-not $mail.sent) { throw }
     # The email went out but the note didn't: say so plainly, because the note is what stops a second alert.
     $stopState.done = $true
+    Add-SendPsaWarnings
     $m = "The VIP alert for ticket $id was emailed to $toText, but the internal note could not be added: $($_.Exception.Message) Add an internal note that contains [vip-ticket-alert] by hand; without it, a rerun would email again."
     Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; vip = $true; alerted = $true; recipients = $to; postmark_message_id = [string]$mail.messageId; actions = @($actions); warnings = @($warnings); chatReply = $m })
     throw $m
@@ -54,6 +58,7 @@ catch {
 if ($noted -eq 'already-present') { $null = $warnings.Add("Ticket $id already had the VIP alert note (another run added it), so no second note was added.") }
 else { $null = $actions.Add("Added an internal note to ticket $id.") }
 $stopState.done = $true
+Add-SendPsaWarnings
 $msg = if ($mail.sent) { "VIP alert for ticket $id sent to $toText." } else { "Ticket $id is from a VIP, but the email could not be sent, so the alert is in an internal note on the ticket." }
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $note; ticket_id = $id; vip = $true; alerted = [bool]$mail.sent

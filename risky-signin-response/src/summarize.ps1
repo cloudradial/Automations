@@ -51,8 +51,11 @@ else {
     if ($would.Count) { $parts += "Preview only, nothing was changed. A real run would open a ticket, sign the user out and require a password change where Microsoft 365 allows it, for: $(Get-RsUpns $would)." }
     if ($open.Count) { $parts += "Already handled, so nothing was repeated: $(@($open | ForEach-Object { if (Get-RsProp $_ 'ticket_id') { "$(Get-RsProp $_ 'upn') (ticket $(Get-RsProp $_ 'ticket_id'))" } else { "$(Get-RsProp $_ 'upn') (logged as handled)" } }) -join ', ')." }
     if ($failed.Count) { $parts += "Problems with: $(@($failed | ForEach-Object { "$(Get-RsProp $_ 'upn') ($(@(Get-RsProp $_ 'errors') -join ' '))" }) -join '; ')" }
-    $crit = @($resp | Where-Object { [bool](Get-RsProp $_ 'is_admin') -and [string](Get-RsProp $_ 'outcome') -in @('handled', 'would-handle') })
+    # A ticket whose priority the PSA couldn't set directly (ConnectWise wouldn't list its priorities) is only "requested" critical or high.
+    $crit = @($resp | Where-Object { [bool](Get-RsProp $_ 'is_admin') -and [string](Get-RsProp $_ 'outcome') -in @('handled', 'would-handle') -and -not [bool](Get-RsProp $_ 'priority_fallback') })
     if ($crit.Count) { $parts += "$(Get-RsUpns $crit) $(if ($crit.Count -eq 1) { 'holds' } else { 'hold' }) an admin role, so $(if ($crit.Count -eq 1) { 'its ticket is' } else { 'their tickets are' }) critical." }
+    $fb = @($resp | Where-Object { [bool](Get-RsProp $_ 'priority_fallback') -and [string](Get-RsProp $_ 'ticket_id') })
+    if ($fb.Count) { $parts += "The ticket$(if ($fb.Count -ne 1) { 's' }) for $(@($fb | ForEach-Object { "$(Get-RsProp $_ 'upn') (requested $(Get-RsProp $_ 'priority') priority)" }) -join ', ') couldn't be given $(if ($fb.Count -eq 1) { 'its' } else { 'their' }) priority directly, because the PSA wouldn't list its ticket priorities. Check the priority on $(if ($fb.Count -eq 1) { 'the ticket' } else { 'each ticket' })." }
 }
 if ($requested.Count) {
     if (-not $confirm) {
@@ -88,7 +91,7 @@ $out = [ordered]@{
     internal_note = ($lines -join "`n")
     ticket_id     = $(if ($tickets.Count) { $tickets[0] } else { '' })
     tickets       = @($tickets)
-    actions       = @(@($rs['actions']) + @($handled | ForEach-Object { "Handled $(Get-RsProp $_ 'upn'): ticket $(Get-RsProp $_ 'ticket_id') ($(Get-RsProp $_ 'priority')), sessions revoked, password change $(Get-RsProp $_ 'password'), manager email $(Get-RsProp $_ 'manager_mail')." }))
+    actions       = @(@($rs['actions']) + @($handled | ForEach-Object { "Handled $(Get-RsProp $_ 'upn'): ticket $(Get-RsProp $_ 'ticket_id') ($(if ([bool](Get-RsProp $_ 'priority_fallback')) { "requested $(Get-RsProp $_ 'priority') priority" } else { Get-RsProp $_ 'priority' })), sessions revoked, password change $(Get-RsProp $_ 'password'), manager email $(Get-RsProp $_ 'manager_mail')." }))
     warnings      = @($rs['warnings'])
     tenant_id     = [string]$rs['tenant_id']
     company_id    = [string](Get-RsProp $opt 'company_id')

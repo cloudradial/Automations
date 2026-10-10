@@ -2283,8 +2283,11 @@ definition:
                   warnings  = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
               }
           }
+          # The step's warnings, then the shared PSA library's (for example a ConnectWise note redirect) not already there.
+          function Get-NudgeWarnings { param($Have) $all = @($Have | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }); foreach ($w in @($PsaState.Warnings)) { if ($w -and $all -notcontains $w) { $all += [string]$w } }; return $all }
           function Write-NudgeState {
               param([hashtable]$State)
+              $State.warnings = @(Get-NudgeWarnings $State.warnings)
               Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @($State.warnings) })
           }
 
@@ -2474,6 +2477,7 @@ definition:
               $null = $plan.Add($item)
           }
 
+          $warnings = @(Get-NudgeWarnings $warnings)
           Set-NodeOutput ([ordered]@{
                   settings  = [ordered]@{ psa = $psa; psaName = $psaName; preview = $preview; waitingStatus = $waiting; reminderDays = @($reminderDays); closeDay = $closeDay; closeStatus = $closeStatus; maxTickets = $maxTickets; companyId = $companyId; companyName = $companyName; runAt = (Format-NudgeStamp $now) }
                   found     = $found.Count
@@ -4759,8 +4763,11 @@ definition:
                   warnings  = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
               }
           }
+          # The step's warnings, then the shared PSA library's (for example a ConnectWise note redirect) not already there.
+          function Get-NudgeWarnings { param($Have) $all = @($Have | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }); foreach ($w in @($PsaState.Warnings)) { if ($w -and $all -notcontains $w) { $all += [string]$w } }; return $all }
           function Write-NudgeState {
               param([hashtable]$State)
+              $State.warnings = @(Get-NudgeWarnings $State.warnings)
               Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @($State.warnings) })
           }
 
@@ -7101,8 +7108,11 @@ definition:
                   warnings  = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
               }
           }
+          # The step's warnings, then the shared PSA library's (for example a ConnectWise note redirect) not already there.
+          function Get-NudgeWarnings { param($Have) $all = @($Have | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }); foreach ($w in @($PsaState.Warnings)) { if ($w -and $all -notcontains $w) { $all += [string]$w } }; return $all }
           function Write-NudgeState {
               param([hashtable]$State)
+              $State.warnings = @(Get-NudgeWarnings $State.warnings)
               Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @($State.warnings) })
           }
 
@@ -9460,8 +9470,11 @@ definition:
                   warnings  = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
               }
           }
+          # The step's warnings, then the shared PSA library's (for example a ConnectWise note redirect) not already there.
+          function Get-NudgeWarnings { param($Have) $all = @($Have | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }); foreach ($w in @($PsaState.Warnings)) { if ($w -and $all -notcontains $w) { $all += [string]$w } }; return $all }
           function Write-NudgeState {
               param([hashtable]$State)
+              $State.warnings = @(Get-NudgeWarnings $State.warnings)
               Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @($State.warnings) })
           }
 
@@ -9576,6 +9589,7 @@ definition:
 
           $lines = @("$wf run at $($s.runAt)$(if ($s.preview) { ' (preview, nothing changed)' }). Reminder days: $(@($s.reminderDays) -join ', '); close day: $($s.closeDay).")
           foreach ($a in $actions) { $lines += "#$($a.ticket)$(if ($a.company) { " ($($a.company))" }): waited $($a.days_waiting) days; $($a.result)$(if ($a.error) { ". Problem: $($a.error)" })." }
+          $state.warnings = @(Get-NudgeWarnings $state.warnings)
           foreach ($w in $state.warnings) { $lines += "Warning: $w" }
 
           $status = if ($failed) { 'incomplete' } elseif ($s.preview -and $todo.Count) { 'pending_confirmation' } else { 'success' }

@@ -59,12 +59,15 @@ function Get-TRef { param([string]$Marker) $h = [System.Security.Cryptography.SH
 # A client-visible note: no bracketed marker, no internal AAI tag, no contact address, and it ends with only the opaque ref.
 function Test-TCleanPublic { param([string]$Text, [string]$Marker) return ($Text -notmatch '\[|AAI|megan\.bowen|@contoso\.com|already-sent|low-confidence|not-clear' -and $Text.TrimEnd().EndsWith("`n$(Get-TRef $Marker)")) }
 
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 function Reset-TScenario {
     $global:TS = @{
         notes = @(); article = [pscustomobject]@{ articleId = 321; companyId = 1; subject = 'Fix Outlook not opening'; datePublished = '2026-09-01T00:00:00Z'; url = $null }
         byTitle = @(); users = @([pscustomobject]@{ userId = 'u1'; email = 'megan.bowen@contoso.com'; firstName = 'Megan'; companyId = 1 })
         psaKeyCompanies = @([pscustomobject]@{ companyId = 1; name = 'Contoso'; psaKey = 101 })
-        ticketStatus = 'New'; articleForbidden = $false; publicForbidden = $false; ticket404 = $false
+        ticketStatus = 'New'; articleForbidden = $false; publicForbidden = $false; ticket404 = $false; noteRedirect = $false
     }
 }
 Reset-TScenario
@@ -85,7 +88,7 @@ $Handler = {
         "GET $TCW/service/tickets/12345" { return [pscustomobject]@{ id = 12345; summary = 'Outlook will not open'; company = [pscustomobject]@{ id = 101 }; status = [pscustomobject]@{ name = $S.ticketStatus }; board = [pscustomobject]@{ id = 1 }; owner = $null } }
         "GET $TCW/service/tickets/404" { New-HttpError 404 '{"message":"Ticket not found"}' }
         "GET $TCW/service/tickets/12345/notes[?]*" { return , @($S.notes | ForEach-Object { [pscustomobject]@{ id = 1; text = $_; internalAnalysisFlag = $true } }) }
-        "POST $TCW/service/tickets/12345/notes" { if ($S.publicForbidden -and $c.Body -like '*"detailDescriptionFlag":true*') { New-HttpError 403 '{"message":"Member cannot add discussion notes."}' }; $S.notes = @($S.notes) + @((Read-Body $c).text); return [pscustomobject]@{ id = 2 } }
+        "POST $TCW/service/tickets/12345/notes" { if ($S.publicForbidden -and $c.Body -like '*"detailDescriptionFlag":true*') { New-HttpError 403 '{"message":"Member cannot add discussion notes."}' }; $S.notes = @($S.notes) + @((Read-Body $c).text); if ($S.noteRedirect) { Throw-InsecureRedirect }; return [pscustomobject]@{ id = 2 } }
         # Autotask ticket 555
         "GET $TAT/Tickets/555" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 555; title = 'Printer offline'; description = ''; companyID = 101; status = 1; assignedResourceID = $null } } }
         "GET $TAT/TicketNotes/query[?]*" { return [pscustomobject]@{ items = @($S.notes | ForEach-Object { [pscustomobject]@{ title = 'Troubleshooting article sent'; description = $_ } }) } }
@@ -289,5 +292,12 @@ Check 'input: reply without replyText refused' ($f.r.out.status -eq 'incomplete'
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
 $f = Invoke-Flow (New-TBody $TSend @{ confidence = 90 }) -Manual
 Check 'input: manual unwrapped input; 90 means 0.9' ($f.r.out.sent -eq $true -and [double]$f.r.out.confidence -eq 0.9) "$($f.r.out.confidence) $($f.r.out.reason)"
+
+# ---- A warning from the shared PSA library reaches the output: each note POST is saved, then answered with a redirect ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario; $global:TS.noteRedirect = $true
+$f = Invoke-Flow (New-TBody $TSend)
+$TSw = @(@($f.r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 12345 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the act step warnings once' ($f.r.out.status -eq 'success' -and $f.r.out.sent -eq $true -and @(Get-TCwNotes).Count -eq 2 -and $TSw.Count -eq 1) "$($f.r.out.status) $($f.r.error) / $(@($f.r.out.warnings) -join ' | ')"
+Reset-TScenario
 
 Complete-Test

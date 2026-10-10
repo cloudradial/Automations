@@ -69,6 +69,7 @@ if ($s.preview) { $message = "Preview only, nothing was changed. $message" }
 
 $lines = @("$wf run at $($s.runAt)$(if ($s.preview) { ' (preview, nothing changed)' }). Reminder days: $(@($s.reminderDays) -join ', '); close day: $($s.closeDay).")
 foreach ($a in $actions) { $lines += "#$($a.ticket)$(if ($a.company) { " ($($a.company))" }): waited $($a.days_waiting) days; $($a.result)$(if ($a.error) { ". Problem: $($a.error)" })." }
+$state.warnings = @(Get-NudgeWarnings $state.warnings)
 foreach ($w in $state.warnings) { $lines += "Warning: $w" }
 
 $status = if ($failed) { 'incomplete' } elseif ($s.preview -and $todo.Count) { 'pending_confirmation' } else { 'success' }

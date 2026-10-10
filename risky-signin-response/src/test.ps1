@@ -126,6 +126,7 @@ function Invoke-RestMethod {
         if ($u -match 'alice@contoso\.com') { return , @([pscustomobject]@{ id = 4100; summary = 'Printer for alice@contoso.com'; company = $co; closedFlag = $false; status = [pscustomobject]@{ name = 'New' } }) }
         return , @()
     }
+    if ($m -eq 'GET' -and $u -like "$cw/service/priorities*" -and $Mock.Opt.Contains('Prio403')) { New-HttpError 403 '{"code":"Forbidden","message":"Mock: no access to priorities"}' }
     if ($m -eq 'GET' -and $u -like "$cw/service/priorities*") { return , @([pscustomobject]@{ id = 1; name = 'Priority 1 - Critical' }, [pscustomobject]@{ id = 2; name = 'Priority 2 - High' }, [pscustomobject]@{ id = 3; name = 'Priority 3 - Normal' }) }
     if ($m -eq 'GET' -and $u -like "$cw/company/companies*") {
         if ($Mock.Opt.Contains('NoPsaCompany')) { return , @() }
@@ -387,6 +388,23 @@ $TBefore = @(Get-MockNotes $TBlockT | Where-Object { $_.text -match 'confirmed b
 $r = Invoke-Workflow @{ confirm = 'true'; block_upns = 'alice@contoso.com' } @{ 'PSA-CompanyId' = '250' } @{ OpenRisky = @{ upn = 'alice@contoso.com'; id = [int]$TBlockT } }
 Check 'rerun block: block note written once, marked with ticket id and date' ($TBefore -eq 1 -and @(Get-MockNotes $TBlockT | Where-Object { $_.text -match 'confirmed blocking' }).Count -eq 1 -and @(Get-MockNotes $TBlockT | Where-Object { $_.text.Contains("[risky-signin-block: $TBlockT $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd'))]") }).Count -eq 1 -and (@($r.out.actions) -join ' ') -match 'already noted') (@($r.out.actions) -join ' | ')
 Check 'every ticket note this workflow writes is internal' (-not @($Mock.Notes.Values | ForEach-Object { $_ } | Where-Object { $_.public }).Count) ''
+
+# 17c. A warning from the shared PSA library reaches the output: ConnectWise refuses to list priorities (403),
+# so New-PsaTicket can't set the priority directly and says so. Respond carries it and Summarize re-emits it once.
+# Only the warning's opening words are checked, so the test holds whatever the shared library says after them.
+$Mock.NextId = 8700
+$r = Invoke-Workflow $null @{ 'PSA-CompanyId' = '250' } @{ Prio403 = $true }
+$pw = @(@($r.out.warnings) | Where-Object { $_ -match "^ConnectWise wouldn't list ticket priorities" })
+Check 'shared warning: priority 403 reaches the summary warnings, once each' ($r.error -eq '' -and $r.out.counts.handled -eq 3 -and $pw.Count -ge 1 -and @($pw | Select-Object -Unique).Count -eq $pw.Count) (@($r.out.warnings) -join ' | ')
+Check 'shared warning: the step''s own warnings come first' ((@($r.out.warnings) | Select-Object -Last 1) -eq $pw[-1] -and ([string]@($r.out.warnings)[0]) -notmatch 'ConnectWise wouldn''t list' -and (@($r.out.warnings) -join ' ') -match 'admin\.ceo@contoso\.com has no manager') (@($r.out.warnings) -join ' | ')
+$TFb = @($r.out.responses | Where-Object { $_.priority_fallback })
+$TAdminNote = (@(Get-Calls POST "https://cw.example-msp.test/*/service/tickets/$((Get-Resp $r.out 'admin.ceo@contoso.com').ticket_id)/notes")[0].Body | ConvertFrom-Json).text
+Check 'priority fallback: every ticket of the run is marked, the second one with the same hint too' ($TFb.Count -eq 3 -and (Get-Resp $r.out 'admin.ceo@contoso.com').priority -eq 'critical') (@($r.out.responses | ForEach-Object { "$($_.upn)=$($_.priority_fallback)" }) -join ', ')
+Check 'priority fallback: no text claims the priority was set' ($r.out.message -notmatch "ticket is critical|tickets are critical|board's default" -and $r.out.internal_note -notmatch "critical-priority ticket|high-priority ticket|the ticket is critical|ticket is high priority|board's default" -and (@($r.out.actions) -join ' ') -notmatch '\((critical|high)\), sessions') "$($r.out.message) || $(@($r.out.actions) -join ' | ')"
+Check 'priority fallback: the summary, actions and note say critical priority was requested' ($r.out.message -match "admin\.ceo@contoso\.com \(requested critical priority\)" -and $r.out.message -match "Check the priority on each ticket" -and (@($r.out.actions) -join ' ') -match "ticket \d+ \(requested critical priority\)" -and $TAdminNote -match "Opened ticket \d+ \(requested critical priority\)\." -and $TAdminNote -match "so critical priority was requested for the ticket\.") "$($r.out.message) || $TAdminNote"
+Check 'priority fallback: the ticket description only says critical was requested' (@(Get-Calls POST 'https://cw.example-msp.test/v4_6_release/apis/3.0/service/tickets' | Where-Object { ($_.Body | ConvertFrom-Json).initialDescription -match 'so the ticket was requested as critical.' }).Count -eq 1) ''
+$r = Invoke-Workflow $null @{ 'PSA-CompanyId' = '250' }
+Check 'priority set: no fallback, the text still says critical' (-not @($r.out.responses | Where-Object { $_.priority_fallback }).Count -and $r.out.message -match 'its ticket is critical' -and $r.out.internal_note -match 'Opened critical-priority ticket') $r.out.message
 
 # 18. Bad input fails closed before any call.
 $r = Invoke-Workflow @{ min_risk = 'low' }

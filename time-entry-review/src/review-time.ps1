@@ -17,9 +17,12 @@ function Read-TeState {
     foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the previous step (no '$k')." } }
     return $st
 }
+# Adds the shared PSA library's warnings (for example a redirected API address) after the step's own.
+function Add-TePsaWarnings { param($St) $have = @($St['warnings']); foreach ($w in @($PsaState.Warnings)) { if ($w -and $have -notcontains $w) { $have += [string]$w } }; $St['warnings'] = @($have) }
 function Stop-TeRun {
     param($St, [string]$Msg)
     $St['status'] = 'error'; $St['message'] = $Msg; $St['internal_note'] = "Time entry review stopped: $Msg"
+    Add-TePsaWarnings $St
     Set-NodeOutput $St
     throw $Msg
 }
@@ -102,4 +105,5 @@ $te['counts'] = $counts
 $te['time_supported'] = $timeSupported
 $te['time_reason'] = $timeReason
 $te['actions'] = @($te['actions']) + $(if ($timeSupported) { "Read $($counts.entries_read) time entr$(if ($counts.entries_read -eq 1) { 'y' } else { 'ies' }) on $($counts.tickets_checked) ticket(s)." } else { "Skipped the time check: $timeReason" })
+Add-TePsaWarnings $te
 Set-NodeOutput $te

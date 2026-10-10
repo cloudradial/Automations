@@ -54,14 +54,19 @@ $TCwNotesDefault = @(
     [pscustomobject]@{ id = 2; text = 'Could you send a photo of the error on the printer screen?'; internalAnalysisFlag = $false; detailDescriptionFlag = $true; resolutionFlag = $false; dateCreated = '2026-10-08T09:30:00Z' },
     [pscustomobject]@{ id = 1; text = 'The printer on floor 2 shows an error and will not print.'; internalAnalysisFlag = $false; detailDescriptionFlag = $true; resolutionFlag = $false; dateCreated = '2026-10-08T09:00:00Z' }
 )
-$TScenario = @{ cwNotes = $TCwNotesDefault; noteFail = 0; cwStatus = 'Waiting on Client' }
+$TScenario = @{ cwNotes = $TCwNotesDefault; noteFail = 0; noteRedirect = $false; cwStatus = 'Waiting on Client' }
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 $Handler = {
     param($c, $n)
     $k = "$($c.Method) $($c.Uri)"
     switch -Wildcard -CaseSensitive ($k) {
         "GET $TCW/service/tickets/1001/notes*" { return , @($TScenario.cwNotes) }
         "GET $TCW/service/tickets/1001" { return [pscustomobject]@{ id = 1001; summary = 'Printer on floor 2 not printing'; company = [pscustomobject]@{ id = 42 }; status = [pscustomobject]@{ name = $TScenario.cwStatus }; owner = $null } }
-        "POST $TCW/service/tickets/1001/notes" { if ($TScenario.noteFail) { New-HttpError $TScenario.noteFail '{"message":"Insufficient security level"}' }; return [pscustomobject]@{ id = 9001 } }
+        "POST $TCW/service/tickets/1001/notes" { if ($TScenario.noteFail) { New-HttpError $TScenario.noteFail '{"message":"Insufficient security level"}' }
+            if ($TScenario.noteRedirect) { $TScenario.cwNotes = @([pscustomobject]@{ id = 9001; text = (Read-Body $c).text; internalAnalysisFlag = $false; detailDescriptionFlag = $true; resolutionFlag = $false; dateCreated = '2026-10-08T13:00:00Z' }) + @($TScenario.cwNotes); Throw-InsecureRedirect }
+            return [pscustomobject]@{ id = 9001 } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
@@ -76,7 +81,7 @@ $Handler = {
     throw "Unexpected call in test: $k"
 }
 function Get-WriteCalls { return @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }) }
-function Reset-Scenario { $TScenario.cwNotes = $TCwNotesDefault; $TScenario.noteFail = 0; $TScenario.cwStatus = 'Waiting on Client' }
+function Reset-Scenario { $TScenario.cwNotes = $TCwNotesDefault; $TScenario.noteFail = 0; $TScenario.noteRedirect = $false; $TScenario.cwStatus = 'Waiting on Client' }
 $TAiGood = 'We need one more thing from you on ticket 1001: please send a photo of the error on the printer screen. Once we have it, we will carry on straight away.'
 $base = @{ ticketId = '1001'; oldStatus = 'New'; newStatus = 'Waiting on Client'; contactEmail = 'megan.bowen@contoso.com' }
 function New-Body { param([hashtable]$Over) $b = @{}; foreach ($k in $base.Keys) { $b[$k] = $base[$k] }; foreach ($k in $Over.Keys) { $b[$k] = $Over[$k] }; return $b }
@@ -175,5 +180,12 @@ Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario
 $cr = @{ Ticket = @{ TicketId = 1001; Questions = @(@{ Id = 'oldStatus'; Value = 'New' }, @{ Id = 'newStatus'; Value = 'Waiting on Client' }) }; Company = @{ CompanyName = 'Contoso' }; preview = 'true' }
 $f = Invoke-Flow $cr $TAiGood
 Check 'CloudRadial shape: preview built' ($f.r.out.status -eq 'pending_confirmation' -and $f.r.out.ticket_id -eq '1001' -and $f.r.out.old_status -eq 'New') "$($f.r.out.status) $($f.r.error)"
+
+# ---- A warning from the shared PSA library reaches the output: the note POST is saved, then answered with a redirect ----
+Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.noteRedirect = $true
+$f = Invoke-Flow (New-Body @{ }) $TAiGood
+$TSw = @(@($f.r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 1001 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the post step warnings once' ($f.r.out.status -eq 'success' -and $f.r.out.posted -eq $true -and @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes").Count -eq 1 -and $TSw.Count -eq 1) "$($f.r.out.status) $($f.r.error) / $(@($f.r.out.warnings) -join ' | ')"
+Reset-Scenario
 
 Complete-Test

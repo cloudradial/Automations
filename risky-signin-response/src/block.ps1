@@ -21,9 +21,12 @@ function Read-RsState {
     if (-not $st.Contains('inputs') -or $null -eq $st['inputs'] -or ($Needs -and -not $st.Contains($Needs))) { throw "This step expects the output of the $From step." }
     return $st
 }
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-RsPsaWarnings { param($St) $have = @($St['warnings']); foreach ($w in @($PsaState.Warnings)) { if ($w -and $have -notcontains $w) { $have += [string]$w } }; $St['warnings'] = @($have) }
 function Stop-RsRun {
     param($St, [string]$Msg, [string]$Status = 'error')
     $St['status'] = $Status; $St['message'] = $Msg; $St['internal_note'] = "Risky sign-in response stopped: $Msg"
+    Add-RsPsaWarnings $St
     Set-NodeOutput $St
     throw $Msg
 }
@@ -97,4 +100,5 @@ $rs['block'] = [ordered]@{
     blocked   = @($blocked)
     result    = $result
 }
+Add-RsPsaWarnings $rs
 Set-NodeOutput $rs

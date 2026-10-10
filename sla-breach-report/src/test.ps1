@@ -68,6 +68,7 @@ $TCwTickets = @(
 $global:TCw = @{ tickets = $TCwTickets; fail = 0; pm = 0 }
 $TCwHandler = { param($c, $n)
     if ($c.Uri -like 'https://api.postmarkapp.com/email') { if ($global:TCw.pm) { New-HttpError $global:TCw.pm '{"ErrorCode":10,"Message":"Bad or missing Server API token."}' }; return [pscustomobject]@{ ErrorCode = 0; MessageID = 'm1' } }
+    if ($global:TCw.Contains('redirect') -and $c.Uri -like 'https://cw.example.com/*/service/tickets[?]*') { New-HttpError 301 '' '' $c.Uri.Replace('https://cw.example.com/', 'https://api.example.com/') }
     if ($c.Uri -like '*/service/tickets[?]*') { if ($global:TCw.fail) { New-HttpError $global:TCw.fail '{"message":"denied"}' }; return , @($global:TCw.tickets) }
     if ($c.Uri -like '*/company/companies*') { if ([uri]::UnescapeDataString($c.Uri) -match 'name="Contoso Ltd"') { return , @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return , @() }
     if ($c.Uri -like '*/service/SLAs/5/priorities*') { return , @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
@@ -227,5 +228,14 @@ foreach ($TO in $TOthers) {
     $TR = Invoke-Flow $TBody
     Check "$($TO.psa): $($TO.breached) breached, $($TO.near) near, emailed, no writes" ($TR.out.status -eq 'success' -and $TR.find.counts.breached -eq $TO.breached -and $TR.find.counts.nearBreach -eq $TO.near -and $TR.out.email_sent -eq $true -and @(Get-TWrites).Count -eq 0) "$($TR.error) $($TR.find.counts | ConvertTo-Json -Compress) $(Show-Calls)"
 }
+
+# ---- 10. A warning from the shared PSA library reaches the output ----
+# ConnectWise answers the ticket list with a redirect to a sibling host; the shared library follows it and warns.
+$global:TCw = @{ tickets = $TCwTickets; fail = 0; pm = 0; redirect = $true }
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow $TBody
+$TSw = 'ConnectWise redirected calls for cw.example.com to api.example.com'
+Check 'shared warning: a redirected API address is in the find and send warnings once' ($TR.out.status -eq 'success' -and @(@($TR.find.warnings) | Where-Object { $_ -match $TSw }).Count -eq 1 -and @(@($TR.out.warnings) | Where-Object { $_ -match $TSw }).Count -eq 1) "$($TR.error) / $(@($TR.out.warnings) -join ' | ')"
+$global:TCw = @{ tickets = $TCwTickets; fail = 0; pm = 0 }
 
 Complete-Test

@@ -63,6 +63,8 @@ function Write-OfNote {
 }
 # A short fingerprint of the planned changes, so a preview with different changes gets its own note.
 function Get-OfFingerprint { param([string]$s) $h = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($s)); return ([System.BitConverter]::ToString($h) -replace '-', '').Substring(0, 8).ToLowerInvariant() }
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-OfPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 function Complete-Of {
     param([string]$Status, [string]$Msg, [string]$Note, [switch]$PublicToo)
     $out.status = $Status; $out.message = $Msg; $out.chatReply = $Msg
@@ -73,6 +75,7 @@ function Complete-Of {
     Write-OfNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { 'Offboarding plan (preview)' } else { 'Offboarding report' }) $mk
     # The client sees only the opaque "Ref: xxxxxxxx" Add-PsaNote derives from this marker; the user is a fingerprint.
     if ($PublicToo) { Write-OfNote $out.public_note 'Offboarding' "offboarding public $Status $(Get-OfFingerprint $who0.ToLowerInvariant())" -Public }
+    Add-OfPsaWarnings
     $out.actions = @($actions); $out.warnings = @($warnings)
     Set-NodeOutput $out
     # The output is kept; the throw marks the run as failed in the run history.
@@ -231,6 +234,7 @@ else {
     Add-OfReport 'Not done by this workflow (for a technician):' @($followUp)
     Add-OfReport 'For your information (not changed):' @($reportOnly)
 }
+Add-OfPsaWarnings
 # Completion report in the company's Report Archive (admins only). Only for runs that changed something.
 if ($isRun) {
     $cid = [string](Get-OfProp $prep 'company_id')

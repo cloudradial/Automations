@@ -7,17 +7,21 @@
 $warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 $stopState = @{ done = $false }
+# Adds the shared PSA library's warnings (for example a redirected API address) after the step's own.
+function Add-DetectPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 function Stop-Detect {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
     $stopState.done = $true
+    Add-DetectPsaWarnings
     Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Status change update did not run: $Why"; ticket_id = $TicketId; actions = @($actions); warnings = @($warnings); facts_json = '{"skip":true}'; ctx_json = '' })
     throw $Why
 }
-trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = "Status change update failed: $m"; ticket_id = ''; actions = @($actions); warnings = @($warnings); facts_json = '{"skip":true}'; ctx_json = '' }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; Add-DetectPsaWarnings; Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = "Status change update failed: $m"; ticket_id = ''; actions = @($actions); warnings = @($warnings); facts_json = '{"skip":true}'; ctx_json = '' }) }; break }
 # Ends the run quietly: later steps see skip and post nothing.
 function Skip-Detect {
     param([string]$Why, [string]$TicketId)
     $stopState.done = $true
+    Add-DetectPsaWarnings
     $ctx = @{ skip = $true; ticket_id = $TicketId; result = [ordered]@{ status = 'success'; message = $Why; public_note = ''; internal_note = ''; ticket_id = $TicketId; posted = $false; written_by = ''; actions = @($actions); warnings = @($warnings) } }
     Set-NodeOutput ([ordered]@{ status = 'success'; message = $Why; ticket_id = $TicketId; facts_json = '{"skip":true}'; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
 }
@@ -70,6 +74,7 @@ $facts = [ordered]@{
     new_status = $newStatus
     recent_public_updates = $recent
 }
+Add-DetectPsaWarnings
 $ctx = @{
     skip = $false; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); old_status = $oldStatus; new_status = $newStatus
     summary = $facts.summary; contact = $contact; preview = $preview; templates = $templates; footer = $footer

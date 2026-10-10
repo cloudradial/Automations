@@ -184,6 +184,13 @@ Invoke-WithLib @('psa.ps1') {
     $null = New-PsaTicket -CompanyId 42 -Summary ('x' * 150) -Priority critical -Queue '12'
     $b = Read-Body (Get-LastCall)
     Check 'connectwise: summary trimmed to 100, critical -> Emergency, numeric board id' ($b.summary.Length -eq 100 -and $b.priority.id -eq 1 -and $b.board.id -eq 12) ((Get-LastCall).Body)
+    Check 'connectwise: critical also sends impact and urgency High/High for the priority matrix' ($b.impact -eq 'High' -and $b.severity -eq 'High') ((Get-LastCall).Body)
+    $null = New-PsaTicket -CompanyId 42 -Summary 'x' -Priority low
+    $b = Read-Body (Get-LastCall)
+    Check 'connectwise: low sends Low/Low' ($b.impact -eq 'Low' -and $b.severity -eq 'Low') ((Get-LastCall).Body)
+    $null = New-PsaTicket -CompanyId 42 -Summary 'x'
+    $b = Read-Body (Get-LastCall)
+    Check 'connectwise: no priority hint sends no priority, impact or urgency' (-not $b.PSObject.Properties['priority'] -and -not $b.PSObject.Properties['impact'] -and -not $b.PSObject.Properties['severity']) ((Get-LastCall).Body)
     $null = Set-PsaStatus '12345' -State open
     Check 'connectwise: reopen picks the default status' ((Read-Body (Get-LastCall))[0].value.id -eq 10) ((Get-LastCall).Body)
     Set-PsaAssignee '12345' 'jlee'
@@ -203,10 +210,10 @@ Reset-Mock $S['connectwise'].Clone() {
 }
 Invoke-WithLib @('psa.ps1') {
     $null = Connect-Psa 'cw'
-    $t = New-PsaTicket -CompanyId 42 -Summary 'Phishing report (suspicious): Invoice overdue' -Priority medium
+    $t = New-PsaTicket -CompanyId 42 -Summary '[Risky sign-in] admin@contoso.com: Microsoft flagged medium risk' -Priority critical
     $b = Read-Body (Get-LastCall)
-    Check 'connectwise: priorities 403 -> ticket still opened, no priority sent' ($t.id -eq '601' -and -not $b.PSObject.Properties['priority'] -and (Get-LastCall).Method -eq 'POST') ((Get-LastCall).Body)
-    Check 'connectwise: priorities 403 -> a warning names the default priority and the permission' (@($PsaState.Warnings | Where-Object { $_ -match "board's default priority instead of medium" -and $_ -match 'Service Desk priorities' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
+    Check 'connectwise: priorities 403 -> ticket still opened, no priority id, impact/urgency High/High sent' ($t.id -eq '601' -and -not $b.PSObject.Properties['priority'] -and $b.impact -eq 'High' -and $b.severity -eq 'High' -and (Get-LastCall).Method -eq 'POST') ((Get-LastCall).Body)
+    Check 'connectwise: priorities 403 -> a warning says the matrix sets it from High/High and names the permission' (@($PsaState.Warnings | Where-Object { $_ -match "^ConnectWise wouldn't list ticket priorities" -and $_ -match 'impact and urgency \(High/High\)' -and $_ -match 'instead of being set to critical' -and $_ -match 'Inquire access to priorities' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
 }
 
 # --- ConnectWise conditions: the exact query strings sent ---

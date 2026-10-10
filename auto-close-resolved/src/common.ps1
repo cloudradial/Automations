@@ -45,9 +45,17 @@ function Read-AcrState {
         warnings  = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
     }
 }
+# Every warning for the output: the step's own first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings
+# (a priority it couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-AcrWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Write-AcrState {
     param([hashtable]$State)
-    Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @($State.warnings) })
+    Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @(Get-AcrWarnings $State.warnings) })
 }
 
 function Get-AcrTicketLabel { param($p) $l = "#$($p.number)"; if ($p.companyName) { $l += " ($($p.companyName))" }; return $l }

@@ -1310,13 +1310,22 @@ definition:
         # <<< _shared/psa.ps1
         $ErrorActionPreference = 'Stop'
 
+        $warnings = New-Object System.Collections.ArrayList
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-AllWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         function Stop-Report {
             param([string]$Status, [string]$Why, [string]$TicketId = '')
             Set-NodeOutput ([ordered]@{
                     status = $Status; message = $Why
                     public_note = 'Thanks for reporting this email. We could not process the report automatically, so a technician will follow up.'
                     internal_note = "Phishing report triage stopped before any lookup: $Why"
-                    ticket_id = $TicketId; actions = @(); warnings = @()
+                    ticket_id = $TicketId; actions = @(); warnings = @(Get-AllWarnings $warnings)
                 })
             throw $Why
         }
@@ -1367,7 +1376,6 @@ definition:
         }
         $confirmRaw = (Get-Field @('confirm')).ToLowerInvariant()
         $f.confirm = @('true', 'yes', '1', 'y') -contains $confirmRaw
-        $warnings = New-Object System.Collections.ArrayList
         $actions = New-Object System.Collections.ArrayList
 
         # A sender typed as "Name <address>" keeps the address only.
@@ -1397,7 +1405,7 @@ definition:
         Set-NodeOutput ([ordered]@{
                 status = 'ok'; request = $f; request_json = ($f | ConvertTo-Json -Compress)
                 message = "Report read from $($f.reporter_upn)$(if (-not $f.confirm) { ' (preview only: confirm is false)' })."
-                actions = @($actions); warnings = @($warnings)
+                actions = @($actions); warnings = @(Get-AllWarnings $warnings)
             })
       timeoutSeconds: 300
       retryCount: 0
@@ -4287,6 +4295,15 @@ definition:
 
         function Read-Json { param($v) if ($null -eq $v) { return $null }; if ($v -is [string]) { if (-not $v.Trim()) { return $null }; try { return ($v | ConvertFrom-Json) } catch { return $null } }; return $v }
         $stopState = @{ done = $false }
+        $warnings = New-Object System.Collections.ArrayList
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-AllWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         function Stop-Ticket {
             param([string]$Status, [string]$Why, [string]$TicketId = '')
             $stopState.done = $true
@@ -4294,11 +4311,11 @@ definition:
                     status = $Status; message = $Why
                     public_note = 'Thanks for reporting this email. A technician will follow up.'
                     internal_note = "Phishing report triage did not write to the PSA: $Why"
-                    ticket_id = $TicketId; actions = @(); warnings = @()
+                    ticket_id = $TicketId; actions = @(); warnings = @(Get-AllWarnings $warnings)
                 })
             throw $Why
         }
-        trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = 'Thanks for reporting this email. A technician will follow up.'; internal_note = "Phishing report triage failed while writing to the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @() }) }; break }
+        trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = 'Thanks for reporting this email. A technician will follow up.'; internal_note = "Phishing report triage failed while writing to the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(Get-AllWarnings $warnings) }) }; break }
 
         # Inputs come through the step's parameters (bound to the enrich and classify outputs).
         $e = Read-Json (Get-NodeInput -Name 'enrichment')
@@ -4306,7 +4323,6 @@ definition:
         $rules = Read-Json (Get-NodeInput -Name 'rules')
         $aiRaw = Get-NodeInput -Name 'classification'
         if ($null -eq $e -or $null -eq $req) { Stop-Ticket 'error' 'The email facts from the lookup step are missing. Run the workflow from the start.' }
-        $warnings = New-Object System.Collections.ArrayList
         $actions = New-Object System.Collections.ArrayList
         foreach ($w in @(Read-Json (Get-NodeInput -Name 'warnings_json'))) { if ($w) { $null = $warnings.Add([string]$w) } }
 
@@ -4440,7 +4456,7 @@ definition:
         $noteMarker = "phishing-report-triage: $prKey"
         $reused = ''
         # The new ticket id is kept here so the note step can use it (a hashtable, changed in place).
-        $holder = @{ id = $ticketId }
+        $holder = @{ id = $ticketId; priorityFallback = $false }
         $plan = New-ChangePlan "Phishing report from $reporter"
         if ($ticketId) {
             $t = Get-PsaTicket -Id $ticketId
@@ -4477,7 +4493,7 @@ definition:
                 Add-PlannedChange $plan "Add the findings as an internal note on ticket $reused (opened by an earlier run of this report)" { param($id, $text, $mk) Add-PsaNote -Id $id -Text $text -Title 'Phishing report triage' -Marker $mk } -Arguments @($reused, $note, $noteMarker)
             }
             else {
-                Add-PlannedChange $plan "Open a $priority priority ticket: $summary" { param($cid, $s, $d, $p, $q) $r = New-PsaTicket -CompanyId $cid -Summary $s -Description $d -Priority $p -Queue $q; $holder.id = $r.id; return "ticket $($r.id)" } -Arguments @($companyId, $summary, $desc, $priority, $queue)
+                Add-PlannedChange $plan "Open a $priority priority ticket: $summary" { param($cid, $s, $d, $p, $q) $before = $PsaState.Warnings.Count; $r = New-PsaTicket -CompanyId $cid -Summary $s -Description $d -Priority $p -Queue $q; $holder.id = $r.id; $holder.priorityFallback = $PsaState.Warnings.Count -gt $before; return "ticket $($r.id)" } -Arguments @($companyId, $summary, $desc, $priority, $queue)
                 Add-PlannedChange $plan 'Add the findings as an internal note on the new ticket' { param($text, $mk) Add-PsaNote -Id $holder.id -Text $text -Title 'Phishing report triage' -Marker $mk } -Arguments @($note, $noteMarker)
             }
         }
@@ -4485,6 +4501,8 @@ definition:
         foreach ($a in @(Get-PsaProp $result 'ran')) {
             if (-not $a) { continue }
             $ranText = [string](Get-PsaProp $a 'description')
+            # The PSA warned while opening the ticket (for example it couldn't set the priority), so the priority was only requested.
+            if ($holder.priorityFallback) { $ranText = $ranText.Replace("Open a $priority priority ticket:", "Open a ticket (requested $priority priority):") }
             if ([string](Get-PsaProp $a 'output') -eq 'already-present') { $ranText += ': it was already there, so it was not added again' }
             $null = $actions.Add($ranText)
         }
@@ -4506,7 +4524,7 @@ definition:
             ticket_id = $outTicket; psa = $psa
             verdict = $verdict; confidence = $confidence; reasons = @($reasons); classified_by = $by
             rules_score = (Get-PsaProp $rules 'score'); purge_drafted = [bool]$purge
-            planned = @(Get-PsaProp $result 'planned'); actions = @($actions); warnings = @($warnings)
+            planned = @(Get-PsaProp $result 'planned'); actions = @($actions); warnings = @(Get-AllWarnings $warnings)
             chatReply = $msg
         }
         Set-NodeOutput $out

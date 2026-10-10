@@ -6,8 +6,9 @@
 # With preview=true it returns what it would do (status pending_confirmation) and writes nothing.
 # In mode "survey", or when step 1 skipped, it returns the result of the earlier steps.
 $stopState = @{ done = $false }
+$warnings = New-Object System.Collections.ArrayList
 $ctx = Read-StepContext (Get-NodeInput)
-trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The score for ticket $tid could not be recorded: $m"; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = $tid; mode = 'score'; survey_sent = $false; score = $null; low_score = $false; manager_emailed = $false; actions = @(); warnings = @() }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The score for ticket $tid could not be recorded: $m"; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = $tid; mode = 'score'; survey_sent = $false; score = $null; low_score = $false; manager_emailed = $false; actions = @(); warnings = @(Get-StepWarnings $warnings) }) }; break }
 if ($null -eq $ctx -or $null -eq $ctx.PSObject.Properties['skip']) { throw 'The request details from step 1 are missing. Run the workflow from the start.' }
 if ($ctx.skip -or $ctx.mode -ne 'score') {
     if ($null -eq $ctx.PSObject.Properties['result']) { throw 'The survey step left no result. Run the workflow from the start.' }
@@ -42,7 +43,7 @@ if ($ctx.preview) {
     Set-NodeOutput ([ordered]@{
             status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again without preview to record it$(if ($low) { ' and alert the service manager' })."
             public_note = ''; internal_note = $preview; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $false
-            email_text = $(if ($low) { $mailText } else { '' }); actions = @($actions); warnings = @($warnings)
+            email_text = $(if ($low) { $mailText } else { '' }); actions = @($actions); warnings = @(Get-StepWarnings $warnings)
         })
     return
 }
@@ -63,7 +64,7 @@ catch {
     if (-not $mail.sent) { throw }
     $stopState.done = $true
     $m = "The service manager was emailed about ticket $id, but the internal note could not be added: $($_.Exception.Message) Add an internal note that contains [csat-score] by hand; without it, a rerun would email again."
-    Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $true; actions = @($actions); warnings = @($warnings) })
+    Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $true; actions = @($actions); warnings = @(Get-StepWarnings $warnings) })
     throw $m
 }
 if ($noted -eq 'already-present') { $null = $warnings.Add("Ticket $id already had a score note (another run added it), so no second note was added.") }
@@ -95,5 +96,5 @@ else { "Ticket $id was rated $score out of $max. The score was noted on the tick
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true
         score = $score; low_score = $low; manager_emailed = [bool]$mail.sent; postmark_message_id = [string]$mail.messageId; cloudradial_recorded = $crRecorded
-        actions = @($actions); warnings = @($warnings)
+        actions = @($actions); warnings = @(Get-StepWarnings $warnings)
     })

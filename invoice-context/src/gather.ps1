@@ -14,17 +14,26 @@ $ErrorActionPreference = 'Stop'
 
 function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 $stopState = @{ done = $false }
+$warnings = New-Object System.Collections.ArrayList
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-AllWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Stop-Run {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
     $stopState.done = $true
     Set-NodeOutput ([ordered]@{
             status = $Status; message = $Why; public_note = ''
             internal_note = "Invoice context stopped before anything was written: $Why"
-            ticket_id = $TicketId; actions = @(); warnings = @(); chatReply = $Why
+            ticket_id = $TicketId; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = $Why
         })
     throw $Why
 }
-trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Invoice context failed while reading the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(); chatReply = "Invoice context failed: $($_.Exception.Message)" }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Invoice context failed while reading the PSA: $($_.Exception.Message)"; ticket_id = ''; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = "Invoice context failed: $($_.Exception.Message)" }) }; break }
 
 $raw = Get-NodeInput
 if ($null -eq $raw) { Stop-Run 'incomplete' 'No input was received. Send at least ticketId.' }
@@ -91,7 +100,6 @@ if ($f.period) {
     $f.periodSource = 'input'
 }
 
-$warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 
 # ---- the ticket and its company ----
@@ -155,7 +163,6 @@ $agreements = @($agreementsRead.agreements | Where-Object { $null -ne $_ })
 if (-not $agreementsAvailable) { $null = $warnings.Add("$psaName has no agreements or contracts, so none were read.") }
 $inEffect = @($agreements | Where-Object { (-not $_.startDate -or $_.startDate -lt $pEnd) -and (-not $_.endDate -or $_.endDate -ge $pStart) })
 if ($agreementsAvailable) { $null = $actions.Add("Read $($agreements.Count) agreement(s); $($inEffect.Count) were in effect during the period.") }
-foreach ($w in @($PsaState.Warnings)) { $null = $warnings.Add([string]$w) }
 
 # ---- the figures, added up without AI ----
 function Get-Sum { param($Rows, [string]$Key) $s = 0.0; foreach ($x in @($Rows)) { if ($null -ne $x) { $s += [double]$x[$Key] } }; return [Math]::Round($s, 2) }
@@ -191,6 +198,7 @@ $figures = [ordered]@{
     hoursOnAgreements = $onAgreement; ticketsWithTime = $groups.Count
     topTickets = @($top); agreementsAvailable = $agreementsAvailable; agreements = @($agreementRows)
 }
+$warnings = @(Get-AllWarnings $warnings)
 # What the AI sees: the figures without ids, links or anything from another company.
 $facts = [ordered]@{
     company = $f.companyName; period = $f.periodLabel; periodSource = $f.periodSource

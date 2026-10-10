@@ -135,5 +135,5 @@ Set-NodeOutput ([ordered]@{
         truncated = $truncated
         plan      = @($plan)
         skipped   = @($skipped)
-        warnings  = @($warnings)
+        warnings  = @(Get-AcrWarnings $warnings)
     })

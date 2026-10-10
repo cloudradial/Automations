@@ -20,6 +20,15 @@ function Read-PhState {
     return $st
 }
 
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-PhWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
+
 $ph = Read-PhState @('inputs', 'psa', 'counts')
 $opt = $ph['inputs']
 $confirm = [bool](Get-PhProp $opt 'confirm')
@@ -31,7 +40,7 @@ $missing = @($ph['issues'] | Where-Object { $null -ne $_ -and [string](Get-PhPro
 
 if ($wantContacts -and $missing.Count) {
     try { $null = Connect-Psa ([string]$ph['psa']) }
-    catch { $ph['status'] = 'error'; $ph['message'] = "Couldn't connect to the PSA: $($_.Exception.Message) Nothing was changed."; Set-NodeOutput $ph; throw $ph['message'] }
+    catch { $ph['status'] = 'error'; $ph['message'] = "Couldn't connect to the PSA: $($_.Exception.Message) Nothing was changed."; $ph['warnings'] = @(Get-PhWarnings $warn); Set-NodeOutput $ph; throw $ph['message'] }
     $plan = New-ChangePlan 'Set missing ticket contacts'
     $cache = @{}
     foreach ($i in $missing) {
@@ -60,6 +69,6 @@ if ($wantContacts -and $missing.Count) {
 }
 elseif ($wantContacts) { $fixInfo.result = @{ status = 'empty'; message = 'No tickets are missing a contact, so there was nothing to fix.'; planned = @(); ran = @(); notRun = @(); failed = $null } }
 $fixInfo.skipped = @($skipped)
-$ph['warnings'] = $warn
+$ph['warnings'] = @(Get-PhWarnings $warn)
 $ph['fix'] = $fixInfo
 Set-NodeOutput $ph

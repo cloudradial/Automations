@@ -16,9 +16,18 @@ function Read-NcoState {
     foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw 'This step expects the output of the step before it. Run the workflow from the start.' } }
     return $st
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-NcoWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Stop-NcoCheck {
     param([string]$Status, [string]$Msg)
     $nco['status'] = $Status; $nco['message'] = $Msg; $nco['internal_note'] = "New client onboarding stopped before changing anything: $Msg"
+    $nco['warnings'] = @(Get-NcoWarnings $warnings)
     Set-NodeOutput $nco
     throw $Msg
 }
@@ -114,7 +123,7 @@ $linked = @($companies | Where-Object {
 if ($null -ne $linked) { Stop-NcoCheck 'rejected' "$psaName company $($ncoPsa.company_id) is already linked to CloudRadial company $(Get-NcoProp $linked 'companyId') ($(Get-NcoProp $linked 'name')). Nothing was changed." }
 if ($ncoCr.existing -and $ncoCr.psa_key -ne '' -and $ncoCr.psa_key -ne $ncoPsa.company_id) { $warnings += "CloudRadial company $($ncoCr.company_id) is already linked to $psaName company $($ncoCr.psa_key), not $($ncoPsa.company_id). The link was left as it is." }
 
-$nco['warnings'] = @($warnings)
+$nco['warnings'] = @(Get-NcoWarnings $warnings)
 $nco['cloudradial'] = $ncoCr
 $nco['psa'] = $ncoPsa
 $nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id) and $psaName company $($ncoPsa.company_id)." } else { "$name is not in CloudRadial yet. Found $psaName company $($ncoPsa.company_id)." })

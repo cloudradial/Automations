@@ -33,10 +33,18 @@ $t = [ordered]@{
     categories = @(); categoryLabel = 'category'; categoriesFrom = 0; notes = @()
 }
 $notes = New-Object System.Collections.ArrayList
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-QbrWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Close-QbrStep {
     $t.notes = @($notes)
     $out.tickets = $t
-    $out.warnings = @($warnings)
+    $out.warnings = @(Get-QbrWarnings $warnings)
     Set-NodeOutput $out
 }
 

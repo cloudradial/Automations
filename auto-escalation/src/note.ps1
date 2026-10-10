@@ -15,9 +15,18 @@ function ConvertTo-EscHash {
     return $h
 }
 
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-EscWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
+
 $prev = ConvertTo-EscHash (Get-NodeInput)
 $st = [string](Get-PsaProp $prev 'status')
-if ($st -notin @('success', 'pending_confirmation')) { Set-NodeOutput $prev; throw "The previous step didn't finish: $(Get-PsaProp $prev 'message')" }
+if ($st -notin @('success', 'pending_confirmation')) { $prev.warnings = @(Get-EscWarnings (Get-PsaProp $prev 'warnings')); Set-NodeOutput $prev; throw "The previous step didn't finish: $(Get-PsaProp $prev 'message')" }
 $settings = Get-PsaProp $prev 'settings'
 $followMarker = '[Auto-Escalation: follow-up]'
 $escalations = @(@(Get-PsaProp $prev 'escalations') | Where-Object { $null -ne $_ } | ForEach-Object { ConvertTo-EscHash $_ })
@@ -74,5 +83,5 @@ $internal = (@("Auto-Escalation ran against $(Get-PsaProp $prev 'psaName'). $mes
 Set-NodeOutput ([ordered]@{
         status = $status; message = $message.Trim(); public_note = ''; internal_note = $internal; ticket_id = $(if ($escalations.Count -eq 1) { [string]$escalations[0].id } else { '' })
         preview = $preview; dispatcher_emailed = $emailed; counts = $counts; escalations = @($escalations)
-        actions = @($actions); warnings = @($warnings)
+        actions = @($actions); warnings = @(Get-EscWarnings $warnings)
     })

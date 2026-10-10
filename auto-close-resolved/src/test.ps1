@@ -154,4 +154,28 @@ $out = Invoke-Workflow ([pscustomobject]@{ preview = $true; resolved_days = 5; c
 Check 'inputs: resolved_days 5 leaves 201 (4 days) alone' ($null -eq (Get-Action $out 201) -and $null -ne (Get-Action $out 207)) ($out.actions | ConvertTo-Json -Compress)
 Check 'inputs: company filter sent as company/id' (@($MockWorld.calls | Where-Object { [uri]::UnescapeDataString($_) -like '*company/id=42*' }).Count -ge 1)
 
+# ---- 9. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise saves the final notice on 201, then answers the POST with an insecure redirect (what staging did).
+# Add-PsaNote reads the ticket back, finds the note, and records a warning in $PsaState.Warnings; the run's
+# warnings and its internal note must carry it, once.
+$MockIrm = ${function:Invoke-RestMethod}
+$MockRedirect = @{ on = $false }
+function Invoke-RestMethod {
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
+    if ($MockRedirect.on -and ([string]$Method).ToUpperInvariant() -eq 'POST' -and [string]$Uri -like '*/service/tickets/201/notes' -and ($Body | ConvertFrom-Json).detailDescriptionFlag) {
+        $null = & $MockIrm @PSBoundParameters
+        $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er
+    }
+    & $MockIrm @PSBoundParameters
+}
+New-StandardWorld 'connectwise'
+$MockRedirect.on = $true
+$out = Invoke-Workflow $null
+$MockRedirect.on = $false
+$want = 'ConnectWise answered the note on ticket 201 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected final notice is saved once and the run still succeeds' ($out.status -eq 'success' -and @(Get-Writes "POST $cw/service/tickets/201/notes" | Where-Object { $_.Body.detailDescriptionFlag }).Count -eq 1) "$($out.status) / $(Get-WriteList)"
+Check 'shared warning: $PsaState.Warnings reaches the output warnings, once' (@($out.warnings | Where-Object { $_ -eq $want }).Count -eq 1) ($out.warnings -join ' | ')
+Check 'shared warning: the internal-note summary lists it' ($out.internal_note.Contains("Warning: $want")) $out.internal_note
+${function:Invoke-RestMethod} = $MockIrm
+
 Complete-Test

@@ -40,6 +40,7 @@ foreach ($p in $todo) {
 }
 
 # ---- summary ----
+$state.warnings = @(Get-AcrWarnings $state.warnings)
 $closed = @($todo | Where-Object { $_.closeResult -in @('closed', 'would close') }).Count
 $failed = @($todo | Where-Object { $_.noticeResult -eq 'failed' -or $_.closeResult -eq 'failed' -or $_.noteResult -eq 'failed' }).Count
 $replied = @($state.skipped | Where-Object { $_.reason -eq 'client replied' }).Count

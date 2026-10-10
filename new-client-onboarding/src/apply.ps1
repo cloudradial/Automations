@@ -26,6 +26,14 @@ function Read-NcoState {
     foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw 'This step expects the output of the step before it. Run the workflow from the start.' } }
     return $st
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-NcoWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function ConvertTo-NcoHtml { param($v) return [System.Net.WebUtility]::HtmlEncode([string]$v) }
 
 $nco = Read-NcoState @('inputs', 'cloudradial', 'psa', 'm365')
@@ -202,7 +210,7 @@ $out = [ordered]@{
     internal_note = $internal
     ticket_id     = $run.ticket_id
     actions       = @($actions)
-    warnings      = @($warnings)
+    warnings      = @(Get-NcoWarnings $warnings)
     confirm       = $confirm
     company_id    = $run.company_id
     planned       = $planned

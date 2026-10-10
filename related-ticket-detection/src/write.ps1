@@ -16,13 +16,22 @@ $ErrorActionPreference = 'Stop'
 function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Read-Json { param($v) if ($null -eq $v) { return $null }; if ($v -isnot [string]) { return $v }; if (-not $v.Trim()) { return $null }; try { return ($v | ConvertFrom-Json -NoEnumerate) } catch { return $null } }
 $stopState = @{ done = $false; ticket = '' }
+$warnings = New-Object System.Collections.ArrayList
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-AllWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Stop-Write {
     param([string]$Status, [string]$Why)
     $stopState.done = $true
-    Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Related ticket check stopped: $Why"; ticket_id = $stopState.ticket; actions = @(); warnings = @(); chatReply = $Why })
+    Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Related ticket check stopped: $Why"; ticket_id = $stopState.ticket; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = $Why })
     throw $Why
 }
-trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Related ticket check failed while writing to the PSA: $($_.Exception.Message)"; ticket_id = $stopState.ticket; actions = @(); warnings = @(); chatReply = "The related ticket check failed: $($_.Exception.Message)" }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'error'; message = [string]$_.Exception.Message; public_note = ''; internal_note = "Related ticket check failed while writing to the PSA: $($_.Exception.Message)"; ticket_id = $stopState.ticket; actions = @(); warnings = @(Get-AllWarnings $warnings); chatReply = "The related ticket check failed: $($_.Exception.Message)" }) }; break }
 
 $req = Read-Json (Get-NodeInput -Name 'request')
 $src = Read-Json (Get-NodeInput -Name 'source')
@@ -31,7 +40,6 @@ $sugg = @(Read-Json (Get-NodeInput -Name 'suggested') | Where-Object { $null -ne
 $aiRaw = Get-NodeInput -Name 'judgment'
 if ($null -eq $req -or $null -eq $src) { Stop-Write 'error' 'The ticket details from the first step are missing. Run the workflow from the start.' }
 $stopState.ticket = [string](Get-Prop $src 'number')
-$warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 foreach ($w in @(Read-Json (Get-NodeInput -Name 'warnings_json'))) { if ($w) { $null = $warnings.Add([string]$w) } }
 foreach ($a in @(Read-Json (Get-NodeInput -Name 'actions_json'))) { if ($a) { $null = $actions.Add([string]$a) } }
@@ -128,6 +136,7 @@ switch ($result.status) {
     'failed' { $null = $lines.Add("Linking stopped: $($result.message)") }
 }
 if ($dups.Count) { $null = $lines.Add('If a duplicate is confirmed, a technician can merge or close one ticket. This check never merges or closes tickets.') }
+$warnings = @(Get-AllWarnings $warnings)
 foreach ($w in $warnings) { $null = $lines.Add("Note: $w") }
 $note = ($lines -join "`n").Trim()
 
@@ -159,5 +168,5 @@ Set-NodeOutput ([ordered]@{
         possible = @($possible | ForEach-Object { [ordered]@{ id = $_.id; number = $_.number; reason = $_.reason; url = $_.url } })
         classified_by = $by; planned = @($result.planned); linked = @($linked); note_written = $noteWritten
         counts = [ordered]@{ candidates = @($cands).Count; matches = $count; possible = $possible.Count; linked = $linked.Count }
-        actions = @($actions); warnings = @($warnings); chatReply = $chat
+        actions = @($actions); warnings = @(Get-AllWarnings $warnings); chatReply = $chat
     })

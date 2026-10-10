@@ -92,7 +92,7 @@ function Invoke-RestMethod {
         if ($u -like '*name contains*') { return , @() }
         return , @([pscustomobject]@{ id = 250; name = 'Contoso Ltd'; identifier = 'ContosoLtd' })
     }
-    if ($u -like "$CW/service/priorities*") { return , @([pscustomobject]@{ id = 8; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 6; name = 'Priority 1 - Emergency Response' }) }
+    if ($u -like "$CW/service/priorities*") { if ($Mock.Opt.Contains('PrioForbidden')) { New-HttpError 403 '{"code":"Forbidden","message":"You do not have access to Service Desk priorities."}' }; return , @([pscustomobject]@{ id = 8; name = 'Priority 3 - Normal Response' }, [pscustomobject]@{ id = 6; name = 'Priority 1 - Emergency Response' }) }
     if ($u -eq "$CW/service/tickets" -and $m -eq 'POST') { return [pscustomobject]@{ id = 5150 } }
     if ($u -like "$CW/service/tickets/*/notes" -and $m -eq 'POST') { $bo = $Body | ConvertFrom-Json; Add-MockNote ($u -split '/')[-2] $bo.text ([bool]$bo.detailDescriptionFlag); return [pscustomobject]@{ id = 1 } }
     if ($m -eq 'GET' -and $u -match '/service/tickets/(\d+)/notes') { $i = 0; return , @(Get-MockNotes $Matches[1] | ForEach-Object { $i++; [pscustomobject]@{ id = $i; text = $_.text; internalAnalysisFlag = (-not $_.public); detailDescriptionFlag = $_.public } }) }
@@ -338,6 +338,14 @@ $r = Invoke-Workflow @{ primary_domain = 'not a domain' }
 Check 'bad domain: incomplete' ($r.step -eq 'node-inputs' -and $r.error -match 'must be a domain name') $r.error
 $r = Invoke-Workflow @{} @{} @{} '{"company_name":"@company_name","primary_domain":"contoso.com"}'
 Check 'literal @token: treated as missing' ($r.step -eq 'node-inputs' -and $r.error -match 'company_name is required') $r.error
+
+# A warning from _shared/psa.ps1 reaches the output: ConnectWise refuses to list ticket priorities (403), so the
+# onboarding ticket opens at the board's default priority and New-PsaTicket records a warning in $PsaState.Warnings.
+$r = Invoke-Workflow @{ confirm = 'true' } @{} @{ PrioForbidden = $true }
+$o = $r.out
+$tk = @(Get-Calls POST "$CW/service/tickets")
+Check 'shared warning: the ticket still opens, with no priority set' ($r.error -eq '' -and $o.status -eq 'success' -and $tk.Count -eq 1 -and $null -eq ($tk[0].Body | ConvertFrom-Json).PSObject.Properties['priority']) "$($r.error) $($o.status)"
+Check 'shared warning: $PsaState.Warnings reaches the output warnings, once' (@($o.warnings | Where-Object { $_ -like "ConnectWise wouldn't list ticket priorities*" }).Count -eq 1) (@($o.warnings) -join ' | ')
 
 Write-Host "$($Tally.pass) passed, $($Tally.fail) failed"
 if ($Tally.fail) { exit 1 }

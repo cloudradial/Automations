@@ -339,6 +339,24 @@ Check 'notes unreadable: error psa-error, nothing removed, no note' ($f.r.out.st
 # No note this workflow writes is public, so no personal data or marker reaches the client.
 Check 'every ticket note is internal' (-not @(foreach ($TK in @($global:TNotes.Keys)) { Get-TNotes $TK | Where-Object { $_.public } }).Count)
 
+# ---- 12b. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise saves the internal note on 777, then answers the POST with an insecure redirect (what staging did).
+# Add-PsaNote reads the ticket back, finds the note and records a warning in $PsaState.Warnings; the reset step's
+# warnings must carry it, once.
+Reset-Mock (Get-TSecrets 'connectwise') { param($c, $n)
+    $TRes = & $Handler $c $n
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$TCW/service/tickets/777/notes") {
+        $TEr = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $TEr.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $TEr
+    }
+    if ($TRes -is [array]) { return , $TRes }; return $TRes
+}
+Reset-TScenario
+$f = Invoke-Flow (New-TBody @{})
+$o = $f.r.out
+$TWant = 'ConnectWise answered the note on ticket 777 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected note was saved once and the reset succeeds' ($o.status -eq 'success' -and $o.note_written -eq $true -and @(Get-Calls 'POST' "$TCW/service/tickets/777/notes").Count -eq 1 -and @(Get-TNotes '777').Count -eq 1) "$($o.status) $($f.r.error) $(Show-Calls)"
+Check 'shared warning: $PsaState.Warnings reaches the reset step warnings, once' (@($o.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) ($o.warnings -join ' | ')
+
 # ---- 13. Parse ----
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
 $p = Invoke-Step 'parse' $null

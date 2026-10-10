@@ -21,6 +21,14 @@ function ConvertTo-EscHash {
     elseif ($null -ne $o) { foreach ($p in @($o.PSObject.Properties)) { $h[$p.Name] = $p.Value } }
     return $h
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-EscWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 # A 403 on a write becomes a plain sentence about the API user's permissions.
 function Get-EscWriteError {
     param([string]$Message, [string]$Need = 'update service tickets')
@@ -30,7 +38,7 @@ function Get-EscWriteError {
 
 $prev = ConvertTo-EscHash (Get-NodeInput)
 $st = [string](Get-PsaProp $prev 'status')
-if ($st -notin @('success', 'pending_confirmation')) { Set-NodeOutput $prev; throw "The previous step didn't finish: $(Get-PsaProp $prev 'message')" }
+if ($st -notin @('success', 'pending_confirmation')) { $prev.warnings = @(Get-EscWarnings (Get-PsaProp $prev 'warnings')); Set-NodeOutput $prev; throw "The previous step didn't finish: $(Get-PsaProp $prev 'message')" }
 $settings = Get-PsaProp $prev 'settings'
 $marker = [string](Get-PsaProp $settings 'marker'); if (-not $marker) { $marker = '[Auto-Escalation]' }
 $escalations = @(@(Get-PsaProp $prev 'escalations') | Where-Object { $null -ne $_ } | ForEach-Object { ConvertTo-EscHash $_ })
@@ -106,5 +114,5 @@ if (-not $preview -and $escalations.Count) {
 $prev.escalations = @($escalations)
 $prev.email_planned = $emailPlanned
 $prev.actions = @($actions)
-$prev.warnings = @($warnings)
+$prev.warnings = @(Get-EscWarnings $warnings)
 Set-NodeOutput $prev

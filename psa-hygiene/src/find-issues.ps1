@@ -18,9 +18,18 @@ function Read-PhState {
     foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the previous step (no '$k')." } }
     return $st
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-PhWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 function Stop-PhRun {
     param($St, [string]$Msg)
     $St['status'] = 'error'; $St['message'] = $Msg; $St['internal_note'] = "PSA hygiene check stopped: $Msg"
+    $St['warnings'] = @(Get-PhWarnings $St['warnings'])
     Set-NodeOutput $St
     throw $Msg
 }
@@ -49,7 +58,6 @@ catch {
 # leaves a plain fallback such as "Company 5".
 Resolve-PsaTicketNames $open
 $warn = @($ph['warnings'])
-foreach ($w in @($PsaState.Warnings)) { if ($w -and $warn -notcontains $w) { $warn += $w } }
 if ($PsaState.FindTruncated) { $warn += "Stopped at $(Get-PhProp $opt 'max_tickets') open tickets (max_tickets), so later tickets were not checked." }
 $checkContacts = $psa -ne 'syncro'
 if (-not $checkContacts) { $warn += 'Syncro tickets without a contact are addressed to the customer record itself, so missing contacts were not checked.' }
@@ -94,7 +102,7 @@ foreach ($t in $open) {
     if ($hit) { $counts.tickets_with_issues++ }
 }
 
-$ph['warnings'] = $warn
+$ph['warnings'] = @(Get-PhWarnings $warn)
 $ph['psa'] = $psa
 $ph['psa_name'] = $psaName
 $ph['issues'] = @($issues)

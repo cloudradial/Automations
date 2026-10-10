@@ -333,4 +333,22 @@ Set-Scenario 'connectwise' @{} @{} @('CloudRadial-PrivateKey')
 $r = Invoke-Workflow ([pscustomobject]@{ company_id = 7 })
 Check 'CloudRadial secret missing: named' ($r.step -eq 'node-cloudradial' -and $r.error -match 'CloudRadial-PrivateKey') $r.error
 
+# ---- 8. A warning from _shared/psa.ps1 reaches the output and the card ----
+# ConnectWise answers the ticket count with a redirect to a sibling host (na.example-msp.test). The shared code
+# follows it, moves the rest of the run there and records a warning in $PsaState.Warnings; the PSA step's
+# warnings must carry it, once, and the card lists it as a note.
+Set-Scenario
+$QbrOrigHandler = $Mock.Handler
+$Mock.Handler = { param($c, $n)
+    if ($c.Uri -like 'https://cw.example-msp.test/*/service/tickets/count*') { New-HttpError 302 '' '' ($c.Uri.Replace('https://cw.example-msp.test/', 'https://na.example-msp.test/')) }
+    $c2 = $c.PSObject.Copy(); $c2.Uri = $c.Uri.Replace('https://na.example-msp.test/', 'https://cw.example-msp.test/')
+    $res = & $QbrOrigHandler $c2 $n; if ($res -is [array]) { return , $res }; return $res
+}
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7 })
+$want = 'ConnectWise redirected calls for cw.example-msp.test to na.example-msp.test, so the rest of this run used https://na.example-msp.test/v4_6_release/apis/3.0. Set the API URL secret to that address.'
+Check 'shared warning: the run follows the redirect and still counts tickets' ($r.out.status -eq 'success' -and $r.out.tickets.openedCurrent -eq 38 -and @($Mock.Calls | Where-Object { $_.Uri -like 'https://na.example-msp.test/*' }).Count -gt 0) ($r.error + ' ' + $r.step)
+Check 'shared warning: $PsaState.Warnings reaches the output warnings, once' (@($r.out.warnings | Where-Object { $_ -eq $want }).Count -eq 1) (@($r.out.warnings) -join ' | ')
+$w = @(Get-CrWrites)
+Check 'shared warning: the card lists it as a note' ($w.Count -eq 1 -and ([string]($w[0].Body | ConvertFrom-Json).body).Contains("Note: $want")) ''
+
 Complete-Test

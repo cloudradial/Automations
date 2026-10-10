@@ -1357,6 +1357,14 @@ definition:
             if ($null -eq $ctx) { $ctx = Read-StepJson (Get-StepProp $in 'ctx') }
             return $ctx
         }
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-StepWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         # ---------- end src/step.ps1 ----------
         # <<< src/step.ps1
         # Step 1: Read the request.
@@ -1372,14 +1380,14 @@ definition:
         function Stop-Parse {
             param([string]$Status, [string]$Why, [string]$TicketId = '', [string]$Mode = '')
             $stopState.done = $true
-            Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Post-close feedback did not run: $Why"; ticket_id = $TicketId; mode = $Mode; actions = @($actions); warnings = @($warnings); ctx_json = '' })
+            Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "Post-close feedback did not run: $Why"; ticket_id = $TicketId; mode = $Mode; actions = @($actions); warnings = @(Get-StepWarnings $warnings); ctx_json = '' })
             throw $Why
         }
-        trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = ''; mode = ''; actions = @($actions); warnings = @($warnings); ctx_json = '' }) }; break }
+        trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = ''; mode = ''; actions = @($actions); warnings = @(Get-StepWarnings $warnings); ctx_json = '' }) }; break }
         function Skip-Parse {
             param([string]$Why, [string]$TicketId, [string]$Mode)
             $stopState.done = $true
-            $ctx = @{ skip = $true; mode = $Mode; ticket_id = $TicketId; result = [ordered]@{ status = 'success'; message = $Why; public_note = ''; internal_note = ''; ticket_id = $TicketId; mode = $Mode; survey_sent = $false; score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @($warnings) } }
+            $ctx = @{ skip = $true; mode = $Mode; ticket_id = $TicketId; result = [ordered]@{ status = 'success'; message = $Why; public_note = ''; internal_note = ''; ticket_id = $TicketId; mode = $Mode; survey_sent = $false; score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @(Get-StepWarnings $warnings) } }
             Set-NodeOutput ([ordered]@{ status = 'success'; message = $Why; ticket_id = $TicketId; mode = $Mode; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
         }
         function Get-Int { param([string]$s, [int]$Default) $n = 0; if ($s -and [int]::TryParse($s, [ref]$n)) { return $n }; return $Default }
@@ -1442,7 +1450,7 @@ definition:
             if (-not $contact) { $null = $warnings.Add('No contactEmail was sent. The PSA sends the survey to the ticket''s own contact.') }
             $ctx.feedback_url = $feedbackUrl
             $ctx.status = $status
-            $ctx.warnings = @($warnings)
+            $ctx.warnings = @(Get-StepWarnings $warnings)
             Set-NodeOutput ([ordered]@{ status = 'success'; message = "Ticket $ticketId ($status) will get a survey."; ticket_id = $ticketId; mode = $mode; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
             return
         }
@@ -1463,6 +1471,7 @@ definition:
         $ctx.comment = $comment
         $ctx.managers = @($managers | Where-Object { Test-StepEmail $_ })
         $ctx.cr_company_id = Get-StepField $a @('cr_company_id', 'crCompanyId', 'Company.CompanyId')
+        $ctx.warnings = @(Get-StepWarnings $warnings)
         Set-NodeOutput ([ordered]@{ status = 'success'; message = "Ticket $ticketId was rated $score out of $scoreMax."; ticket_id = $ticketId; mode = $mode; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
       timeoutSeconds: 300
       retryCount: 0
@@ -2824,6 +2833,14 @@ definition:
             if ($null -eq $ctx) { $ctx = Read-StepJson (Get-StepProp $in 'ctx') }
             return $ctx
         }
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-StepWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         # ---------- end src/step.ps1 ----------
         # <<< src/step.ps1
         # Step 2: Send the survey (mode "survey" only).
@@ -2832,8 +2849,9 @@ definition:
         # With preview=true it returns the note (status pending_confirmation) and posts nothing.
         # In mode "score", or when step 1 skipped, it passes the context straight on.
         $stopState = @{ done = $false }
+        $warnings = New-Object System.Collections.ArrayList
         $ctx = Read-StepContext (Get-NodeInput)
-        trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The survey for ticket $tid could not be sent: $m"; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = $tid; mode = 'survey'; survey_sent = $false; actions = @(); warnings = @(); ctx_json = '' }) }; break }
+        trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The survey for ticket $tid could not be sent: $m"; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = $tid; mode = 'survey'; survey_sent = $false; actions = @(); warnings = @(Get-StepWarnings $warnings); ctx_json = '' }) }; break }
         if ($null -eq $ctx -or $null -eq $ctx.PSObject.Properties['skip']) { throw 'The request details from step 1 are missing. Run the workflow from the start.' }
         if ($ctx.skip -or $ctx.mode -ne 'survey') { $stopState.done = $true; Set-NodeOutput ([ordered]@{ status = 'success'; message = 'Nothing to send in this step.'; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) }); return }
 
@@ -2872,7 +2890,7 @@ definition:
             $ctx | Add-Member -NotePropertyName result -NotePropertyValue ([ordered]@{
                     status = 'pending_confirmation'; message = "Preview: this survey would be posted on ticket $id as a public note. Run again without preview to send it."
                     public_note = $note; internal_note = 'Post-close survey preview. Nothing was posted.'; ticket_id = $id; mode = 'survey'; survey_sent = $false
-                    score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @($warnings)
+                    score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @(Get-StepWarnings $warnings)
                 }) -Force
             Set-NodeOutput ([ordered]@{ status = 'pending_confirmation'; message = $ctx.result.message; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
             return
@@ -2885,7 +2903,7 @@ definition:
         $ctx | Add-Member -NotePropertyName result -NotePropertyValue ([ordered]@{
                 status = 'success'; message = "Sent the satisfaction survey for ticket $id."
                 public_note = $note; internal_note = "Posted a one-question satisfaction survey for the requester. Scores come back through this workflow in score mode."
-                ticket_id = $id; mode = 'survey'; survey_sent = $true; score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @($warnings)
+                ticket_id = $id; mode = 'survey'; survey_sent = $true; score = $null; low_score = $false; manager_emailed = $false; actions = @($actions); warnings = @(Get-StepWarnings $warnings)
             }) -Force
         Set-NodeOutput ([ordered]@{ status = 'success'; message = $ctx.result.message; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
       timeoutSeconds: 300
@@ -4501,6 +4519,14 @@ definition:
             if ($null -eq $ctx) { $ctx = Read-StepJson (Get-StepProp $in 'ctx') }
             return $ctx
         }
+        # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+        # couldn't set, a write answered with a redirect), each once and in its own words.
+        function Get-StepWarnings {
+            param($Own)
+            $all = New-Object System.Collections.ArrayList
+            foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+            return @($all)
+        }
         # ---------- end src/step.ps1 ----------
         # <<< src/step.ps1
         # Step 3: Route low scores (mode "score" only).
@@ -4511,8 +4537,9 @@ definition:
         # With preview=true it returns what it would do (status pending_confirmation) and writes nothing.
         # In mode "survey", or when step 1 skipped, it returns the result of the earlier steps.
         $stopState = @{ done = $false }
+        $warnings = New-Object System.Collections.ArrayList
         $ctx = Read-StepContext (Get-NodeInput)
-        trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The score for ticket $tid could not be recorded: $m"; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = $tid; mode = 'score'; survey_sent = $false; score = $null; low_score = $false; manager_emailed = $false; actions = @(); warnings = @() }) }; break }
+        trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The score for ticket $tid could not be recorded: $m"; public_note = ''; internal_note = "Post-close feedback failed: $m"; ticket_id = $tid; mode = 'score'; survey_sent = $false; score = $null; low_score = $false; manager_emailed = $false; actions = @(); warnings = @(Get-StepWarnings $warnings) }) }; break }
         if ($null -eq $ctx -or $null -eq $ctx.PSObject.Properties['skip']) { throw 'The request details from step 1 are missing. Run the workflow from the start.' }
         if ($ctx.skip -or $ctx.mode -ne 'score') {
             if ($null -eq $ctx.PSObject.Properties['result']) { throw 'The survey step left no result. Run the workflow from the start.' }
@@ -4547,7 +4574,7 @@ definition:
             Set-NodeOutput ([ordered]@{
                     status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again without preview to record it$(if ($low) { ' and alert the service manager' })."
                     public_note = ''; internal_note = $preview; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $false
-                    email_text = $(if ($low) { $mailText } else { '' }); actions = @($actions); warnings = @($warnings)
+                    email_text = $(if ($low) { $mailText } else { '' }); actions = @($actions); warnings = @(Get-StepWarnings $warnings)
                 })
             return
         }
@@ -4568,7 +4595,7 @@ definition:
             if (-not $mail.sent) { throw }
             $stopState.done = $true
             $m = "The service manager was emailed about ticket $id, but the internal note could not be added: $($_.Exception.Message) Add an internal note that contains [csat-score] by hand; without it, a rerun would email again."
-            Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $true; actions = @($actions); warnings = @($warnings) })
+            Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $true; actions = @($actions); warnings = @(Get-StepWarnings $warnings) })
             throw $m
         }
         if ($noted -eq 'already-present') { $null = $warnings.Add("Ticket $id already had a score note (another run added it), so no second note was added.") }
@@ -4600,7 +4627,7 @@ definition:
         Set-NodeOutput ([ordered]@{
                 status = 'success'; message = $msg; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true
                 score = $score; low_score = $low; manager_emailed = [bool]$mail.sent; postmark_message_id = [string]$mail.messageId; cloudradial_recorded = $crRecorded
-                actions = @($actions); warnings = @($warnings)
+                actions = @($actions); warnings = @(Get-StepWarnings $warnings)
             })
       timeoutSeconds: 300
       retryCount: 0

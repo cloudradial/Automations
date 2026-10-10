@@ -252,4 +252,21 @@ Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-TScenario
 $f = Invoke-Flow (New-TBody @{ approvedToBroadcast = 'true' }) -Manual
 Check 'input: manual unwrapped input works; approvedToBroadcast counts as confirm' ($f.r.out.status -eq 'success' -and $f.r.out.confirm -eq $true -and @(Get-Calls 'POST' "$TCR/v2/token").Count -eq 3) "$($f.r.out.status) $($f.r.out.message)"
 
+# ---- 12. A warning from _shared/psa.ps1 reaches the output ----
+# ConnectWise saves the note on problem ticket 4242, then answers the POST with an insecure redirect (what staging
+# did). Add-PsaNote reads the ticket back, finds the note and records a warning in $PsaState.Warnings; the
+# broadcast step's warnings must carry it, once.
+Reset-Mock (Get-TSecrets 'connectwise') { param($c, $n)
+    $TRes = & $Handler $c $n
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$TCW/service/tickets/4242/notes") {
+        $TEr = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $TEr.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $TEr
+    }
+    if ($TRes -is [array]) { return , $TRes }; return $TRes
+}
+Reset-TScenario
+$f = Invoke-Flow (New-TBody @{ confirm = $true; problemTicketId = '4242' })
+$TWant = 'ConnectWise answered the note on ticket 4242 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
+Check 'shared warning: the redirected note was saved once and the broadcast succeeds' ($f.r.out.status -eq 'success' -and $f.r.out.note_written -eq $true -and @(Get-Calls 'POST' "$TCW/service/tickets/4242/notes").Count -eq 1 -and $global:TS.notes.Count -eq 1) "$($f.r.out.status) $($f.r.error) $(Show-Calls)"
+Check 'shared warning: $PsaState.Warnings reaches the broadcast step warnings, once' (@($f.r.out.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) (@($f.r.out.warnings) -join ' | ')
+
 Complete-Test

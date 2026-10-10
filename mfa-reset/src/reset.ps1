@@ -22,6 +22,14 @@ function Get-MfaMasked {
     if ($Kind -eq 'email' -and $Value -match '^(.)[^@]*(@.+)$') { return "$($Matches[1])***$($Matches[2])" }
     return $Value
 }
+# The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
+# couldn't set, a write answered with a redirect), each once and in its own words.
+function Get-MfaWarnings {
+    param($Own)
+    $all = New-Object System.Collections.ArrayList
+    foreach ($w in @(@($Own) + @($PsaState.Warnings))) { $t = [string]$w; if ($t -and -not $all.Contains($t)) { $null = $all.Add($t) } }
+    return @($all)
+}
 # A plain description of one sign-in method for the internal note. Phone numbers and email addresses are masked.
 function Get-MfaLabel {
     param($M)
@@ -42,7 +50,7 @@ function Get-MfaLabel {
 
 $state = Read-MfaState
 $status = [string]$state['status']
-if (@('incomplete', 'error', 'success', 'pending_confirmation') -contains $status) { Set-NodeOutput $state; return }
+if (@('incomplete', 'error', 'success', 'pending_confirmation') -contains $status) { $state['warnings'] = @(Get-MfaWarnings (Get-MfaList $state 'warnings')); Set-NodeOutput $state; return }
 $dryRun = [bool]$state['dry_run']
 $ticketId = [string]$state['ticket_id']
 $upn = [string]$state['upn']; $userId = [string]$state['user_id']
@@ -65,7 +73,7 @@ trap {
         $m = [string]$_.Exception.Message
         $out.status = 'error'; $out.category = $stop.category; $out.message = $m
         $out.public_note = 'Something went wrong while resetting your sign-in methods. A technician will follow up shortly.'; $out.chatReply = $out.public_note
-        $out.internal_note = "MFA reset for $upn failed: $m"; $out.actions = $actions; $out.warnings = $warnings
+        $out.internal_note = "MFA reset for $upn failed: $m"; $out.actions = $actions; $out.warnings = @(Get-MfaWarnings $warnings)
         Set-NodeOutput $out
     }
     break
@@ -105,7 +113,7 @@ if ($status -ne 'rejected' -and -not $dryRun -and $ticketPsa.ok) {
         $out.public_note = 'Your MFA reset has already been done. If you still cannot sign in, contact the service desk.'; $out.chatReply = $out.public_note
         $out.internal_note = "MFA reset for ticket $ticketId was already recorded on the ticket. This rerun changed nothing."
         $actions += "The reset was already recorded on ticket $ticketId, so this run changed nothing"
-        $out.actions = $actions; $out.warnings = $warnings
+        $out.actions = $actions; $out.warnings = @(Get-MfaWarnings $warnings)
         Set-NodeOutput $out
         return
     }
@@ -210,6 +218,7 @@ else {
         $out.message = $(if ($out.status -eq 'success') { "MFA reset for $upn completed." } else { "MFA reset for $upn needs a technician: some methods were not removed or the user was not signed out. See the internal note." })
     }
 }
+$warnings = @(Get-MfaWarnings $warnings)
 if ($warnings.Count) { $noteLines.Add(''); $noteLines.Add('Warnings:'); foreach ($w in $warnings) { $noteLines.Add(" - $w") } }
 if ($actions.Count) { $noteLines.Add(''); $noteLines.Add('Checks and actions:'); foreach ($a in $actions) { $noteLines.Add(" - $a") } }
 $out.internal_note = $noteLines -join "`n"
@@ -226,5 +235,5 @@ elseif ($ticketPsa.ok) {
     }
     catch { $warnings += "The internal note could not be written to ticket $($ticketId): $($_.Exception.Message)" }
 }
-$out.actions = $actions; $out.warnings = $warnings
+$out.actions = $actions; $out.warnings = @(Get-MfaWarnings $warnings)
 Set-NodeOutput $out

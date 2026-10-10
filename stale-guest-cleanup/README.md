@@ -51,6 +51,13 @@ Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [requir
 | `CloudRadial-CompanyId` | The CloudRadial company the report belongs to. Needed for a Routine, which sends no input. A run's `company_id` input overrides it. |
 | `PSA-Type` plus that PSA's secrets (`CW-*`, `Autotask-*`, `Halo-*`, `KaseyaBMS-*`, `Syncro-*` or `Zendesk-*`) | Only when a run passes `ticket_id`. Same names as the PSA's catalog extension. |
 
+### Microsoft 365 secrets stored per company
+
+Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and `M365-ClientSecret`) are saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. In that case, open the workflow in the designer and set **Company** to that client on these steps: **Find inactive accounts** and **Disable confirmed accounts**. Then publish and deploy.
+
+- **Set it again after every import.** Importing a workflow clears the step Company setting, because the `.yml` doesn't carry it.
+- **Without it,** the steps use the runner's shared secrets, so they sign in to the wrong tenant or fail.
+
 ## Required Graph permissions
 
 Application permissions on the app registration, with admin consent in the client tenant:

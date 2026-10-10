@@ -101,6 +101,13 @@ Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [requir
 | `PSA-Type` plus that PSA's secrets (`CW-*`, `Autotask-*`, `Halo-*`, `KaseyaBMS-*`, `Syncro-*` or `Zendesk-*`) | Finding the PSA company, opening the ticket and adding the note. Same names as the PSA's catalog extension. Kaseya BMS also needs `KaseyaBMS-NoteTypeId` for the note, and may need its optional ticket ids (see [`_shared`](../_shared/)). |
 | `M365-ClientId`, `M365-ClientSecret` (the `Entra-*` and `Graph-*` names work too) | Optional. A **multi-tenant** app registration that each client consents to (for example through your GDAP or CSP onboarding). Without them the Microsoft 365 baseline is skipped. `M365-TenantId` is not used: the tenant comes from `tenant_id` or `primary_domain`. |
 
+### Microsoft 365 secrets stored per company
+
+Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and `M365-ClientSecret`) are saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. In that case, open the workflow in the designer and set **Company** to that client on the step: **Microsoft 365 baseline preview**. Then publish and deploy.
+
+- **Set it again after every import.** Importing a workflow clears the step Company setting, because the `.yml` doesn't carry it.
+- **Without it,** the step uses the runner's shared secrets, so they sign in to the wrong tenant or fail.
+
 ## Required Graph permissions
 
 Application permissions on the multi-tenant app, with admin consent in the client's tenant. All are read-only.

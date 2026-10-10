@@ -121,7 +121,7 @@ Connect once, then call the functions. `Connect-Psa` with no argument uses `Get-
 Each of these has a one-line `Unverified` comment in `psa.ps1`. Check it against a real tenant before the first live write, then update `reference/build-kit/PSA.md`.
 
 - **Every PSA:** `New-PsaTicket`, `Set-PsaStatus` and `Find-PsaCompany` aren't in PSA.md yet. The exception is Autotask create-ticket and company search, which follow the extension descriptors (`at_create_ticket`, `at_query_companies`).
-- **ConnectWise:** create body (`initialDescription`, `board`, priority from `/service/priorities`), closing through the board's `closedStatus` statuses, public notes on the Discussion tab.
+- **ConnectWise:** create body (`initialDescription`, `board`, priority from `/service/priorities`, plus `impact` and `severity` from `$PsaState.CwImpactUrgency` so a board's priority matrix sets the priority when the list can't be read; only critical High/High has been checked live, giving Priority 1), closing through the board's `closedStatus` statuses, public notes on the Discussion tab.
 - **Autotask:** which `publish` label makes a note client-visible; the `queryCount` field name.
 - **HaloPSA:** note `outcome_id` 7 and out-of-box ids (priority 1 to 4, status 9 Closed and 1 New); the `team` field on create; `/Client?search=` reply shape.
 - **Kaseya BMS:** the sign-in `GrantType` value `password`; required ids on create; the `/crm/accounts` filter name; status ids; how to list note types.

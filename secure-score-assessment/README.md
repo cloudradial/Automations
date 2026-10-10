@@ -35,6 +35,13 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
    - `M365-ClientID`, `M365-ClientSecret` — an **Entra app registration** with the **`SecurityEvents.Read.All`** *application* permission, **admin-consented in each client tenant** you run this against (a multi-tenant app).
 3. Run it from **Test** with the input below. No trigger webhook is needed.
 
+### Microsoft 365 secrets stored per company
+
+Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and `M365-ClientSecret`) are saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. In that case, open the workflow in the designer and set **Company** to that client on the step: **Import Secure Score**. Then publish and deploy.
+
+- **Set it again after every import.** Importing a workflow clears the step Company setting, because the `.yml` doesn't carry it.
+- **Without it,** the step uses the runner's shared secrets, so they sign in to the wrong tenant or fail.
+
 ## Input
 
 ```json

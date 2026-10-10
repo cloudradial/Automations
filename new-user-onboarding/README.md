@@ -61,6 +61,13 @@ Day One** playbook runs the same stages.
 7. To test without the form, run the workflow from **Test** with a request body as the Trigger input. The **Read the request** node has a sample.
 8. The ticket note is posted only when the request has `"confirm": "true"`. Without it, **Note the ticket** returns the note as `internal_note` and posts nothing. Add `"confirm": "true"` to the form's Content once you trust the runs.
 
+### Microsoft 365 secrets stored per company
+
+Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and `M365-ClientSecret`) are saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. In that case, open the workflow in the designer and set **Company** to that client on these steps: **Check and plan**, **Create Microsoft 365 user**, **Assign licence and groups** and **PSA ticket and manager**. Then publish and deploy.
+
+- **Set it again after every import.** Importing a workflow clears the step Company setting, because the `.yml` doesn't carry it.
+- **Without it,** the steps use the runner's shared secrets, so they sign in to the wrong tenant or fail.
+
 ## Stages
 
 | Node | Stage | What it does | Extensions allowed |

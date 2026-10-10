@@ -64,6 +64,13 @@ By name only. Use the same names as the catalog extensions, so one set serves bo
 | Syncro: `Syncro-ApiUrl`, `Syncro-ApiKey` | |
 | Zendesk: `Zendesk-BaseUrl`, `Zendesk-Email`, `Zendesk-ApiToken` | |
 
+### Microsoft 365 secrets stored per company
+
+Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and `M365-ClientSecret`) are saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. In that case, open the workflow in the designer and set **Company** to that client on these steps: **Check the requester and account** and **Clear MFA and record it**. Then publish and deploy.
+
+- **Set it again after every import.** Importing a workflow clears the step Company setting, because the `.yml` doesn't carry it.
+- **Without it,** the steps use the runner's shared secrets, so they sign in to the wrong tenant or fail.
+
 ## Required Graph permissions
 
 Application permissions on the `M365-*` app registration, with admin consent:

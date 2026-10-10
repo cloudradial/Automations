@@ -74,6 +74,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Turn One Request into a Service Ticket and a Quote | Workflow + Agent | — |
 | [`stale-guest-cleanup/`](stale-guest-cleanup/) | Find and Clean Up Unused Microsoft 365 Accounts and Guests | Workflow (run monthly by a Routine, or by hand) | — |
 | [`status-change-updates/`](status-change-updates/) | Tell Requesters in Plain Language When Their Ticket Changes Status | Workflow (PowerShell steps plus one AI Prompt step) | — |
+| [`ticket-routing/`](ticket-routing/) | Send Every Ticket to the Right Engineer | Agent + Workflow (ServiceAI Triage Action) | — |
 | [`time-entry-review/`](time-entry-review/) | Catch Missing and Low-Detail Time Before It Costs You a Bill | Workflow (run daily by a Routine, or by hand) | — |
 | [`troubleshooting-article-delivery/`](troubleshooting-article-delivery/) | Send the Right Fix-It Article the Moment a Ticket Arrives | Workflow (PowerShell steps, no AI) | — |
 | [`user-offboarding/`](user-offboarding/) | Offboard a Departing Employee in One Reviewed Run | Workflow | — |

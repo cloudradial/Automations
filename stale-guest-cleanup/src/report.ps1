@@ -16,6 +16,8 @@ function Read-SgState {
     return $st
 }
 function ConvertTo-SgHtml { param($v) return [System.Net.WebUtility]::HtmlEncode([string]$v) }
+# The step's warnings, then the shared PSA library's (for example a ConnectWise note redirect) not already there.
+function Get-SgWarnings { param($Have) $all = @($Have); foreach ($w in @($PsaState.Warnings)) { if ($w -and $all -notcontains $w) { $all += [string]$w } }; return $all }
 function Get-SgPlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1) { return "1 $one" }; return "$n $many" }
 
 $sg = Read-SgState
@@ -150,6 +152,7 @@ if ($tid) {
 
 $public = if ($confirm -and $disabled.Count) { "We turned off $(Get-SgPlural $disabled.Count 'unused Microsoft 365 account' 'unused Microsoft 365 accounts') that you approved." } elseif ($confirm) { 'No Microsoft 365 accounts were changed.' } else { 'We reviewed Microsoft 365 accounts that have not been used recently. No changes were made.' }
 
+$warnings = @(Get-SgWarnings $warnings)
 $out = [ordered]@{
     status        = $status
     message       = $message

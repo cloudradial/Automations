@@ -2483,12 +2483,15 @@ definition:
               }
               catch { $null = $warnings.Add("Couldn't add the note to ticket $($ticketId): $($_.Exception.Message)") }
           }
+          # Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+          function Add-RcPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
           function Complete-Rc {
               param([string]$Status, [string]$Msg, [string]$Note)
               $out.status = $Status; $out.message = $Msg; $out.chatReply = $Msg
               $out.internal_note = $(if ($Note) { $Note } else { $Msg })
               $out.public_note = $(if ($publicText.ContainsKey($Status)) { $publicText[$Status] } else { $publicText.other })
               Write-RcNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { 'Role change plan (preview)' } else { 'Role change result' }) $Status
+              Add-RcPsaWarnings
               $out.actions = @($actions); $out.warnings = @($warnings)
               Set-NodeOutput $out
               # The output is kept; the throw marks the run as failed in the run history.

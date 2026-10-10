@@ -48,8 +48,11 @@ function Read-NudgeState {
         warnings  = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
     }
 }
+# The step's warnings, then the shared PSA library's (for example a ConnectWise note redirect) not already there.
+function Get-NudgeWarnings { param($Have) $all = @($Have | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ }); foreach ($w in @($PsaState.Warnings)) { if ($w -and $all -notcontains $w) { $all += [string]$w } }; return $all }
 function Write-NudgeState {
     param([hashtable]$State)
+    $State.warnings = @(Get-NudgeWarnings $State.warnings)
     Set-NodeOutput ([ordered]@{ settings = $State.settings; found = $State.found; truncated = $State.truncated; plan = @($State.plan); skipped = @($State.skipped); warnings = @($State.warnings) })
 }
 

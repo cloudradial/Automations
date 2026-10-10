@@ -3,9 +3,12 @@
 # unusable, and posts it as a public note so the PSA emails the requester.
 # With preview=true it returns the update (status pending_confirmation) and posts nothing.
 $stopState = @{ done = $false }
+$warnings = New-Object System.Collections.ArrayList
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-PostPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 $in = Get-NodeInput
 $ctx = Read-StepJson (Get-StepProp $in 'ctx')
-trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The status update for ticket $tid could not be posted: $m"; public_note = ''; internal_note = "Status change update failed: $m"; ticket_id = $tid; posted = $false; written_by = ''; actions = @(); warnings = @() }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; $tid = ''; if ($null -ne $ctx -and $null -ne $ctx.PSObject.Properties['ticket_id']) { $tid = [string]$ctx.ticket_id }; Add-PostPsaWarnings; Set-NodeOutput ([ordered]@{ status = 'error'; message = "The status update for ticket $tid could not be posted: $m"; public_note = ''; internal_note = "Status change update failed: $m"; ticket_id = $tid; posted = $false; written_by = ''; actions = @(); warnings = @($warnings) }) }; break }
 if ($null -eq $ctx -or $null -eq $ctx.PSObject.Properties['skip']) { throw 'The status change details are missing. Run the workflow from the start.' }
 if ($ctx.skip) { $stopState.done = $true; Set-NodeOutput $ctx.result; return }
 
@@ -74,6 +77,7 @@ $conn = Connect-Psa $ctx.psa
 Add-PsaNote -Id $id -Text $note -Title "Status update: $new" -Public
 $null = $actions.Add("Posted a public status update on ticket $id.")
 $stopState.done = $true
+Add-PostPsaWarnings
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = "Posted a status update for $new on ticket $id."
         public_note = $note; internal_note = "Posted a public status update for $new (written by $(if ($writtenBy -eq 'ai') { 'the AI' } else { 'the template' }))."

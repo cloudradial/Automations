@@ -51,7 +51,10 @@ $TPostmark = @{ 'Postmark-ServerToken' = 'pm-token'; 'Postmark-FromEmail' = 'ale
 function Get-Secrets { param([string]$P, [hashtable]$Extra = @{}, [switch]$NoPostmark) $s = @{}; foreach ($k in $Psa[$P].Keys) { $s[$k] = $Psa[$P][$k] }; if (-not $NoPostmark) { foreach ($k in $TPostmark.Keys) { $s[$k] = $TPostmark[$k] } }; foreach ($k in $Extra.Keys) { $s[$k] = $Extra[$k] }; return $s }
 $TCW = 'https://api-na.example.com/v4_6_release/apis/3.0'; $TAT = 'https://webservices5.autotask.example/atservicesrest/v1.0'; $TZD = 'https://example.zendesk.com/api/v2'
 $TPM = 'https://api.postmarkapp.com/email'
-$TScenario = @{ cwNotes = @(); atNotes = @(); zdComments = @(); noteFail = 0; readFail = 0; postmarkFail = 0 }
+$TScenario = @{ cwNotes = @(); atNotes = @(); zdComments = @(); noteFail = 0; readFail = 0; postmarkFail = 0; noteRedirect = $false }
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 
 $Handler = {
     param($c, $n)
@@ -60,7 +63,9 @@ $Handler = {
         "POST $TPM" { if ($TScenario.postmarkFail) { New-HttpError $TScenario.postmarkFail '{"ErrorCode":300,"Message":"Invalid email request"}' }; return [pscustomobject]@{ MessageID = 'pm-0001'; ErrorCode = 0 } }
         "GET $TCW/service/tickets/1001/notes*" { return , @($TScenario.cwNotes) }
         "GET $TCW/service/tickets/1001" { if ($TScenario.readFail) { New-HttpError $TScenario.readFail '{"message":"You do not have access to this record."}' }; return [pscustomobject]@{ id = 1001; summary = 'Email is down for the whole office'; company = [pscustomobject]@{ id = 42 }; status = [pscustomobject]@{ name = 'New' }; owner = $null } }
-        "POST $TCW/service/tickets/1001/notes" { if ($TScenario.noteFail) { New-HttpError $TScenario.noteFail '{"message":"Insufficient security level"}' }; return [pscustomobject]@{ id = 9001 } }
+        "POST $TCW/service/tickets/1001/notes" { if ($TScenario.noteFail) { New-HttpError $TScenario.noteFail '{"message":"Insufficient security level"}' }
+            if ($TScenario.noteRedirect) { $TScenario.cwNotes = @([pscustomobject]@{ id = 9001; text = (Read-Body $c).text; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-08T09:00:00Z' }) + @($TScenario.cwNotes); Throw-InsecureRedirect }
+            return [pscustomobject]@{ id = 9001 } }
         "GET $TAT/TicketNotes/entityInformation/fields" { return [pscustomobject]@{ fields = @(
                     [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
                     [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
@@ -74,7 +79,7 @@ $Handler = {
     throw "Unexpected call in test: $k"
 }
 function Get-WriteCalls { return @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }) }
-function Reset-Scenario { $TScenario.cwNotes = @(); $TScenario.atNotes = @(); $TScenario.zdComments = @(); $TScenario.noteFail = 0; $TScenario.readFail = 0; $TScenario.postmarkFail = 0 }
+function Reset-Scenario { $TScenario.noteRedirect = $false; $TScenario.cwNotes = @(); $TScenario.atNotes = @(); $TScenario.zdComments = @(); $TScenario.noteFail = 0; $TScenario.readFail = 0; $TScenario.postmarkFail = 0 }
 $base = @{ ticketId = '1001'; companyName = 'Contoso'; contactEmail = 'megan.bowen@contoso.com'; summary = 'Email is down for the whole office'; priority = 'High'; triggerSource = 'serviceai-triage' }
 function New-Body { param([hashtable]$Over) $b = @{}; foreach ($k in $base.Keys) { $b[$k] = $base[$k] }; foreach ($k in $Over.Keys) { $b[$k] = $Over[$k] }; return $b }
 
@@ -192,5 +197,12 @@ $s = Invoke-Step 'send' $b.out
 Check 'skip passes through build and send unchanged' ($s.out.status -eq 'success' -and $s.out.message -like 'Fabrikam*' -and -not $s.error) $s.error
 $s = Invoke-Step 'send' $null
 Check 'send with no input: error' ($s.out.status -eq 'error') $s.error
+
+# ---- A warning from the shared PSA library reaches the output: the note POST is saved, then answered with a redirect ----
+Reset-Mock (Get-Secrets 'connectwise' @{ 'VIP-Companies' = 'Contoso=am@example.com' }) $Handler; Reset-Scenario; $TScenario.noteRedirect = $true
+$f = Invoke-Flow (New-Body @{ })
+$TSw = @(@($f.r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 1001 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the send step warnings once' ($f.r.out.status -eq 'success' -and @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes").Count -eq 1 -and $TSw.Count -eq 1) "$($f.r.out.status) $($f.r.error) / $(@($f.r.out.warnings) -join ' | ')"
+Reset-Scenario
 
 Complete-Test

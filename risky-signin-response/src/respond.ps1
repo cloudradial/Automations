@@ -29,9 +29,12 @@ function Read-RsState {
     if (-not $st.Contains('inputs') -or $null -eq $st['inputs'] -or ($Needs -and -not $st.Contains($Needs))) { throw "This step expects the output of the $From step." }
     return $st
 }
+# Adds the shared PSA library's warnings (for example a ConnectWise priority it couldn't set) after the step's own.
+function Add-RsPsaWarnings { param($St) $have = @($St['warnings']); foreach ($w in @($PsaState.Warnings)) { if ($w -and $have -notcontains $w) { $have += [string]$w } }; $St['warnings'] = @($have) }
 function Stop-RsRun {
     param($St, [string]$Msg, [string]$Status = 'error')
     $St['status'] = $Status; $St['message'] = $Msg; $St['internal_note'] = "Risky sign-in response stopped: $Msg"
+    Add-RsPsaWarnings $St
     Set-NodeOutput $St
     throw $Msg
 }
@@ -76,14 +79,42 @@ function Test-RsLogged {
     return (@($hit).Count -gt 0)
 }
 
-# The internal note: the only place the risk detail is written.
+# Opens the ticket and tells whether the PSA set the priority asked for directly. When ConnectWise won't list its
+# priorities, the shared library can't set one and adds a warning starting "ConnectWise wouldn't list ticket
+# priorities"; the text then only says which priority was requested. That warning is
+# de-duplicated by its text, so earlier copies are set aside for this call and put back after (in their original
+# order, then anything new): a copy present after the call was raised by this ticket.
+# Returns @{ ticket; fallback }; a failed create throws as New-PsaTicket does.
+function New-RsTicket {
+    param([string]$CompanyId, [string]$Summary, [string]$Description, [string]$Priority)
+    $pattern = '^ConnectWise wouldn''t list ticket priorities'
+    $before = @($PsaState.Warnings)
+    foreach ($w in @($before | Where-Object { [string]$_ -match $pattern })) { $PsaState.Warnings.Remove($w) }
+    $had = @($PsaState.Warnings | Where-Object { [string]$_ -match $pattern }).Count
+    $t = $null; $fallback = $false
+    try {
+        $t = New-PsaTicket -CompanyId $CompanyId -Summary $Summary -Description $Description -Priority $Priority
+        $fallback = (@($PsaState.Warnings | Where-Object { [string]$_ -match $pattern }).Count -gt $had)
+    }
+    finally {
+        $added = @($PsaState.Warnings | Where-Object { $before -notcontains $_ })
+        $PsaState.Warnings.Clear()
+        foreach ($w in @($before) + @($added)) { $null = $PsaState.Warnings.Add($w) }
+    }
+    return @{ ticket = $t; fallback = $fallback }
+}
+
+# The internal note: the only place the risk detail is written. With -Fallback, the PSA couldn't set the priority
+# directly, so the note says which priority was requested rather than claiming it was set.
 function Get-RsNote {
-    param($U, [string[]]$Done, [string]$Mode)
+    param($U, [string[]]$Done, [string]$Mode, [bool]$Fallback = $false)
     $L = New-Object System.Collections.ArrayList
     $null = $L.Add("Microsoft Entra ID Protection has $(Get-RsProp $U 'upn') at $(Get-RsProp $U 'risk_level') risk (state: $(Get-RsProp $U 'risk_state'); last updated $(Get-RsTime $U 'risk_updated'); reason: $(if (Get-RsProp $U 'risk_detail') { Get-RsProp $U 'risk_detail' } else { 'none given' })).")
     $roles = @(Get-RsProp $U 'admin_roles' | Where-Object { $_ })
-    if ($roles.Count) { $null = $L.Add("This account holds an admin role ($($roles -join ', ')), so the ticket is critical.") }
-    elseif (-not [bool](Get-RsProp $U 'admin_known')) { $null = $L.Add('Admin roles could not be checked on this run, so the ticket is high priority. Check whether this account is an admin.') }
+    $check = " $(Get-PsaName) wouldn't list its ticket priorities, so it couldn't set one directly. Check the priority on this ticket."
+    if ($roles.Count) { $null = $L.Add("This account holds an admin role ($($roles -join ', ')), so $(if ($Fallback) { "critical priority was requested for the ticket.$check" } else { 'the ticket is critical.' })") }
+    elseif (-not [bool](Get-RsProp $U 'admin_known')) { $null = $L.Add("Admin roles could not be checked on this run, so $(if ($Fallback) { "high priority was requested for the ticket.$check" } else { 'the ticket is high priority.' }) Check whether this account is an admin.") }
+    elseif ($Fallback) { $null = $L.Add("High priority was requested for the ticket.$check") }
     $dets = @(Get-RsProp $U 'detections' | Where-Object { $null -ne $_ })
     if ($dets.Count) {
         $null = $L.Add("Recent risk detections ($($dets.Count), newest first):")
@@ -162,7 +193,7 @@ if ($risky.Count) {
         $isAdmin = [bool](Get-RsProp $u 'is_admin')
         $synced = [bool](Get-RsProp $u 'synced')
         $prio = if ($isAdmin) { 'critical' } else { 'high' }
-        $r = [ordered]@{ upn = $upn; name = $name; risk_level = [string](Get-RsProp $u 'risk_level'); is_admin = $isAdmin; priority = $prio; outcome = ''; dedupe = ''; ticket_id = ''; revoked = ''; password = ''; manager_mail = ''; note = ''; planned = @(); errors = @() }
+        $r = [ordered]@{ upn = $upn; name = $name; risk_level = [string](Get-RsProp $u 'risk_level'); is_admin = $isAdmin; priority = $prio; priority_fallback = $false; outcome = ''; dedupe = ''; ticket_id = ''; revoked = ''; password = ''; manager_mail = ''; note = ''; planned = @(); errors = @() }
 
         # ---- 1. Already handled? ----
         $existing = ''; $known = $false; $mode = 'psa'
@@ -203,8 +234,12 @@ if ($risky.Count) {
         $done = @()
         $summary = "$(Get-RsMarker $upn): Microsoft flagged $($r.risk_level) risk"
         $desc = "Microsoft Entra ID Protection flagged $name ($upn) as $($r.risk_level) risk. This ticket was opened automatically. The user was signed out of all sessions and asked to set a new password at next sign-in where Microsoft 365 allows it. The risk details are in an internal note. Please review the activity with the user and decide whether the account should be blocked."
-        if ($isAdmin) { $desc += ' This account holds an admin role, so the ticket is critical.' }
-        try { $t = New-PsaTicket -CompanyId $psaCompany -Summary $summary -Description $desc -Priority $prio; $r.ticket_id = [string]$t.id; $done += "Opened $prio-priority ticket $($t.id)." }
+        if ($isAdmin) { $desc += ' This account holds an admin role, so the ticket was requested as critical.' }
+        try {
+            $nt = New-RsTicket -CompanyId $psaCompany -Summary $summary -Description $desc -Priority $prio
+            $t = $nt.ticket; $r.ticket_id = [string]$t.id; $r.priority_fallback = [bool]$nt.fallback
+            $done += $(if ($r.priority_fallback) { "Opened ticket $($t.id) (requested $prio priority). $(Get-PsaName) wouldn't list its ticket priorities, so check the priority it was given." } else { "Opened $prio-priority ticket $($t.id)." })
+        }
         catch { $r.errors = @(@($r.errors) + "Couldn't open a ticket: $($_.Exception.Message)") }
 
         # ---- 3. Sign out everywhere ----
@@ -231,7 +266,7 @@ if ($risky.Count) {
         }
 
         # ---- 5. Internal note with the risk detail ----
-        $note = Get-RsNote $u $done $mode
+        $note = Get-RsNote $u $done $mode ([bool]$r.priority_fallback)
         $r.note = $note
         if ($r.ticket_id) {
             try { $null = Add-PsaNote -Id $r.ticket_id -Text $note -Title 'Risky sign-in detail' -Marker "risky-signin: $($r.ticket_id)" }
@@ -265,4 +300,5 @@ if ($risky.Count) {
 }
 
 $rs['responses'] = @($responses)
+Add-RsPsaWarnings $rs
 Set-NodeOutput $rs

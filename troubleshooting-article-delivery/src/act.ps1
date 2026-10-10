@@ -25,6 +25,8 @@ $decision = [string]$st['decision']; $reason = [string]$st['reason']
 $dry = [bool]$st['dryRun']
 $warnings = New-Object System.Collections.ArrayList; foreach ($w in @(Get-TaList $st 'warnings')) { $null = $warnings.Add([string]$w) }
 $actions = New-Object System.Collections.ArrayList
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-TaPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 $when = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC'
 $art = $st['article']
 $aid = [string](Get-TaProp $art 'articleId')
@@ -120,6 +122,7 @@ switch ($decision) {
         else { $out.internal_note = "No change: $reason" }
     }
 }
+Add-TaPsaWarnings
 if ($warnings.Count -and $out.internal_note -and -not $out.note_written) { $out.internal_note += " Warnings: $(@($warnings) -join ' ')" }
 $out.actions = @($actions)
 $out.warnings = @($warnings)

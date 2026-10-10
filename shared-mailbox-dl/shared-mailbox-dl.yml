@@ -2360,10 +2360,13 @@ definition:
               if (-not (Connect-SmPsa)) { return $false }
               try { return (Test-PsaNoteMarker -Id $ticketId -Marker $doneMarker) } catch { return $false }
           }
+          # Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+          function Add-SmPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
           function Complete-Sm {
               param([string]$Status, [string]$Msg, [string]$Note, [string]$Public = '')
               $out.status = $Status; $out.message = $Msg; $out.chatReply = $Msg
               $text = $(if ($Note) { $Note } else { $Msg })
+              Add-SmPsaWarnings
               if ($warnings.Count) { $text += "`n`nWarnings:`n" + (@($warnings | ForEach-Object { "- $_" }) -join "`n") }
               $out.internal_note = $text
               $out.public_note = $Public
@@ -2371,6 +2374,7 @@ definition:
               Write-SmNote $out.internal_note $(if ($Status -eq 'pending_confirmation') { "New $kindLabel request (not created yet)" } else { "New $kindLabel" }) $mk
               # The client sees only the opaque "Ref: xxxxxxxx" Add-PsaNote derives from this marker; the address is a fingerprint.
               if ($Public) { Write-SmNote $Public "New $kindLabel" "smdl ready $(Get-SmFingerprint "$markerKind $($markerAddr.ToLowerInvariant())")" -Public }
+              Add-SmPsaWarnings
               $out.actions = @($actions); $out.warnings = @($warnings)
               Set-NodeOutput $out
               # The output is kept; the throw marks the run as failed in the run history.
@@ -2387,6 +2391,7 @@ definition:
                   $msg = "The $kindLabel $address was already created by an earlier run for ticket $ticketId. Nothing was changed."
                   $out.status = 'success'; $out.message = $msg; $out.chatReply = $msg; $out.internal_note = ''; $out.public_note = ''
                   $null = $actions.Add("Ticket $ticketId already notes that $address was created, so no note was added")
+                  Add-SmPsaWarnings
                   $out.actions = @($actions); $out.warnings = @($warnings)
                   Set-NodeOutput $out
                   return

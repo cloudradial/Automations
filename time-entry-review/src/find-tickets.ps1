@@ -14,9 +14,12 @@ function Read-TeState {
     foreach ($k in $Need) { if (-not $st.Contains($k) -or $null -eq $st[$k]) { throw "This step expects the output of the previous step (no '$k')." } }
     return $st
 }
+# Adds the shared PSA library's warnings (for example a redirected API address) after the step's own.
+function Add-TePsaWarnings { param($St) $have = @($St['warnings']); foreach ($w in @($PsaState.Warnings)) { if ($w -and $have -notcontains $w) { $have += [string]$w } }; $St['warnings'] = @($have) }
 function Stop-TeRun {
     param($St, [string]$Msg)
     $St['status'] = 'error'; $St['message'] = $Msg; $St['internal_note'] = "Time entry review stopped: $Msg"
+    Add-TePsaWarnings $St
     Set-NodeOutput $St
     throw $Msg
 }
@@ -42,11 +45,11 @@ Resolve-PsaTicketNames $found
 # Only the fields the next steps use, so the run output stays small (the rows also carry the raw PSA record).
 $tickets = @($found | ForEach-Object { [ordered]@{ id = $_.id; number = $_.number; summary = $_.summary; companyId = $_.companyId; companyName = $_.companyName; assigneeId = $_.assigneeId; assigneeName = $_.assigneeName; status = $_.status; closed = (Format-PsaDate $_.closed) } })
 $warn = @($te['warnings'])
-foreach ($w in @($PsaState.Warnings)) { if ($w -and $warn -notcontains $w) { $warn += $w } }
 if ($PsaState.FindTruncated) { $warn += "Stopped at $(Get-TeProp $opt 'max_tickets') closed tickets (max_tickets). Later tickets from that day were not reviewed." }
 $te['warnings'] = $warn
 $te['psa'] = $PsaState.Conn.Psa
 $te['psa_name'] = $psaName
 $te['tickets'] = @($tickets)
 $te['actions'] = @($te['actions']) + "Listed $($tickets.Count) ticket(s) closed in $psaName between $from and $to."
+Add-TePsaWarnings $te
 Set-NodeOutput $te

@@ -5,13 +5,16 @@
 $warnings = New-Object System.Collections.ArrayList
 $actions = New-Object System.Collections.ArrayList
 $stopState = @{ done = $false }
+# Adds the shared PSA library's warnings (for example a ConnectWise note redirect) after the step's own.
+function Add-CheckPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $warnings.Contains([string]$w)) { $null = $warnings.Add([string]$w) } } }
 function Stop-Check {
     param([string]$Status, [string]$Why, [string]$TicketId = '')
     $stopState.done = $true
+    Add-CheckPsaWarnings
     Set-NodeOutput ([ordered]@{ status = $Status; message = $Why; public_note = ''; internal_note = "VIP ticket alert did not run: $Why"; ticket_id = $TicketId; actions = @($actions); warnings = @($warnings); chatReply = $Why; ctx_json = '' })
     throw $Why
 }
-trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = "VIP ticket alert failed: $m"; ticket_id = ''; actions = @($actions); warnings = @($warnings); chatReply = 'The VIP ticket alert failed. See the run for details.'; ctx_json = '' }) }; break }
+trap { if (-not $stopState.done) { $stopState.done = $true; $m = [string]$_.Exception.Message; Add-CheckPsaWarnings; Set-NodeOutput ([ordered]@{ status = 'error'; message = $m; public_note = ''; internal_note = "VIP ticket alert failed: $m"; ticket_id = ''; actions = @($actions); warnings = @($warnings); chatReply = 'The VIP ticket alert failed. See the run for details.'; ctx_json = '' }) }; break }
 
 $in = Get-NodeInput
 $a = Read-StepTrigger $in
@@ -84,6 +87,7 @@ $notes = @(Get-PsaTicketNotes -Id $ticketId -Newest -TextOnly)
 $prior = Test-PsaNoteMarker -Id $ticketId -Marker 'vip-ticket-alert' -Notes @($notes | Where-Object { $_.internal })
 if ($prior) {
     $why = "A VIP alert for ticket $ticketId was already sent, so it wasn't sent again."
+    Add-CheckPsaWarnings
     $ctx = @{ skip = $true; ticket_id = $ticketId; result = [ordered]@{ status = 'success'; message = $why; public_note = ''; internal_note = ''; ticket_id = $ticketId; vip = $true; alerted = $false; recipients = @(); actions = @($actions); warnings = @($warnings); chatReply = $why } }
     Set-NodeOutput ([ordered]@{ status = 'success'; message = $why; vip = $true; ticket_id = $ticketId; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })
     return
@@ -94,6 +98,7 @@ $url = Get-StepField $a @('ticketUrl', 'ticket_url')
 if (-not $url) { $url = Get-PsaTicketUrl $ticketId $tplUrl }
 if (-not $url) { $null = $warnings.Add("A link to the ticket can't be built for $(Get-PsaName). Set the PSA-TicketUrlTemplate secret, for example https://psa.example.com/tickets/{id}.") }
 
+Add-CheckPsaWarnings
 $ctx = @{
     skip = $false; ticket_id = $ticketId; psa = $conn.Psa; psa_name = (Get-PsaName); company = $who; company_id = $companyId; contact = $contact
     summary = $summary; priority = $priority; source = $source; match = $match; list_from = $listFrom; recipients = $recipients; recipients_from = $rcpFrom

@@ -155,7 +155,7 @@ $Handler = {
     # Notes are kept in $Sc.notes and read back, so Add-PsaNote -Marker can find an earlier copy.
     if ($u -like 'https://cw.example/*') {
         if ($m -eq 'GET' -and $u -like '*/service/tickets/12345/notes*') { $i = 0; return , @($Sc.notes | ForEach-Object { $i++; J @{ id = $i; text = $_.text; internalAnalysisFlag = $_.internal; detailDescriptionFlag = (-not $_.internal); member = (J @{ identifier = 'api' }) } }) }
-        if ($m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.text; internal = [bool]$b.internalAnalysisFlag }); return J @{ id = $Sc.notes.Count } }
+        if ($m -eq 'POST' -and $u -like '*/service/tickets/12345/notes') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.notes.Add(@{ text = [string]$b.text; internal = [bool]$b.internalAnalysisFlag }); if ($Sc.ContainsKey('noteRedirect')) { Throw-InsecureRedirect }; return J @{ id = $Sc.notes.Count } }
     }
     if ($u -like 'https://at.example/*') {
         if ($m -eq 'GET' -and $u -like '*/TicketNotes/entityInformation/fields') { return J @{ fields = @((J @{ name = 'publish'; picklistValues = @((J @{ value = '1'; label = 'All Autotask Users'; isActive = $true }), (J @{ value = '2'; label = 'Internal Only'; isActive = $true })) }), (J @{ name = 'noteType'; picklistValues = @((J @{ value = '13'; label = 'System Workflow Note'; isActive = $true }), (J @{ value = '1'; label = 'Task Detail'; isActive = $true })) })) } }
@@ -178,6 +178,10 @@ function Get-Mailbox { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-Ma
 function Get-MailboxStatistics { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-MailboxStatistics' @{ Identity = $Identity } }
 # _shared/exchange.ps1 runs every non-Get cmdlet with -Confirm:$false in module mode, so Set-Mailbox takes -Confirm.
 function Set-Mailbox { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Type, $HiddenFromAddressListsEnabled, $ForwardingAddress, $DeliverToMailboxAndForward) $h = @{ Identity = $Identity }; foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Identity' -and $k -ne 'Confirm') { $h[$k] = $PSBoundParameters[$k] } }; Invoke-FakeExo 'Set-Mailbox' $h }
+
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
 
 # ---------- runner ----------
 $Node = @{ In = $null; Out = $null }
@@ -371,5 +375,11 @@ $pub = @($Sc.notes | Where-Object { -not $_.internal })
 Check 'public notes: only the message and an opaque Ref, no marker, address or internal status word' ($pub.Count -ge 1 -and @($pub | Where-Object { $_.text -match '\[|@|sam\.doe|success|pending|preview|error|incomplete|rejected' -or $_.text -notmatch '\nRef: [0-9a-f]{8}$' }).Count -eq 0) (@($pub | ForEach-Object { $_.text }) -join ' || ')
 $int = @($Sc.notes | Where-Object { $_.internal })
 Check 'internal notes keep the readable marker' (@($int | Where-Object { $_.text -match '\[offboarding success sam\.doe@contoso\.com\]$' }).Count -eq 1) (@($int | ForEach-Object { $_.text }) -join ' || ')
+
+# =================== a warning from the shared PSA library reaches the output ===================
+New-Scenario 'connectwise' 'rest' @{ noteRedirect = $true }
+$r = Invoke-Offboard (New-Body)
+$sw = @(@($r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 12345 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the output warnings once' ($r.out.status -eq 'pending_confirmation' -and $Sc.notes.Count -eq 1 -and $sw.Count -eq 1) "$($r.out.status) / $(@($r.out.warnings) -join ' | ')"
 
 Complete-Test

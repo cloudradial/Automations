@@ -9,8 +9,11 @@
 # <<< _shared/psa-tickets.ps1
 
 $run = @{ warnings = (New-Object System.Collections.ArrayList); actions = (New-Object System.Collections.ArrayList) }
+# Adds the shared PSA library's warnings (for example a redirected API address) after the step's own.
+function Add-SlaPsaWarnings { foreach ($w in @($PsaState.Warnings)) { if ($w -and -not $run.warnings.Contains([string]$w)) { $null = $run.warnings.Add([string]$w) } } }
 function Stop-SlaRun {
     param([string]$Status, [string]$Message, [string]$Detail = '')
+    Add-SlaPsaWarnings
     Set-NodeOutput ([ordered]@{ status = $Status; message = $Message; public_note = ''; internal_note = $(if ($Detail) { $Detail } else { $Message }); ticket_id = ''; actions = @($run.actions); warnings = @($run.warnings); counts = @{}; tickets = @(); settings = @{} })
     throw $Message
 }
@@ -133,6 +136,7 @@ $msg = if (-not $rows.Count) { "No open tickets$scope have breached their SLA or
 else { "$($counts.breached) open ticket$(if ($counts.breached -ne 1) { 's have' } else { ' has' }) breached SLA and $($counts.nearBreach) $(if ($counts.nearBreach -ne 1) { 'are' } else { 'is' }) close to it ($near% or more of the time used), out of $checked open tickets checked$scope." }
 if ($counts.skipped) { $msg += " $($counts.skipped) waiting or scheduled tickets were left out." }
 
+Add-SlaPsaWarnings
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $msg; ticket_id = ''
         psa = $conn.Psa; psaName = $psaName; companyId = $settings.companyId; companyName = $settings.companyName; generatedAt = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')

@@ -159,4 +159,26 @@ New-StandardWorld 'connectwise'
 $out = Invoke-Workflow ([pscustomobject]@{ preview = $true; max_tickets = 2 })
 Check 'max_tickets: only 2 checked, with a warning' ($out.counts.found -eq 2 -and @($out.warnings | Where-Object { $_ -like 'More than 2 tickets*' }).Count -eq 1) ($out | ConvertTo-Json -Depth 5 -Compress)
 
+# ---- 9. A warning from the shared PSA library reaches the output and the summary note ----
+# ConnectWise saves each note POST, then answers it with a redirect. The shared Add-PsaNote reads the ticket back,
+# finds the note and warns. The mock is wrapped here so mock-psa.ps1 (shared with auto-close-resolved) is unchanged.
+# PowerShell 7's own refusal of an https-to-http redirect (no status code, text in ErrorDetails), as ConnectWise
+# staging answers a note POST it has already saved. The shared Add-PsaNote reads the ticket back and warns.
+function Throw-InsecureRedirect { $er = [System.Management.Automation.ErrorRecord]::new([System.InvalidOperationException]::new(), 'InsecureRedirection,Microsoft.PowerShell.Commands.InvokeRestMethodCommand', 'InvalidOperation', $null); $er.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('Cannot follow an insecure redirection by default. Reissue the command specifying the -AllowInsecureRedirect switch.'); throw $er }
+$NudgeIrm = ${function:Invoke-RestMethod}
+$NudgeRedirect = @{ on = $false }
+function Invoke-RestMethod {
+    [CmdletBinding()] param($Method = 'GET', $Uri, $Headers, $Body, $ContentType, $Form, [int]$MaximumRedirection = -1)
+    $r = & $NudgeIrm @PSBoundParameters
+    if ($NudgeRedirect.on -and ([string]$Method).ToUpperInvariant() -eq 'POST' -and [string]$Uri -match '/service/tickets/\d+/notes$') { Throw-InsecureRedirect }
+    if ($r -is [array]) { return , $r }   # keep a JSON array reply as ONE object, as the mock and the real cmdlet do
+    return $r
+}
+New-StandardWorld 'connectwise'
+$NudgeRedirect.on = $true
+$out = Invoke-Workflow $null
+$NudgeRedirect.on = $false
+$sw = @(@($out.warnings) | Where-Object { $_ -match '^ConnectWise answered the note on ticket 101 with a redirect; reading the ticket back showed the note was saved' })
+Check 'shared warning: a redirected note POST that was saved is in the output warnings once and in the summary note' ($out.status -eq 'success' -and $sw.Count -eq 1 -and @(@($out.warnings) | Select-Object -Unique).Count -eq @($out.warnings).Count -and $out.internal_note -match 'Warning: ConnectWise answered the note on ticket 101 with a redirect') "$($out.status) / $(@($out.warnings) -join ' | ')"
+
 Complete-Test

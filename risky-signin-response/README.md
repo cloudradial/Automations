@@ -94,7 +94,7 @@ All inputs are optional. An hourly Routine sends none, so it responds to new hig
 
 ## Output
 
-`status` (`success`, `pending_confirmation` for a preview with work to do or a block waiting for confirm, `rejected`, `incomplete` or `error`), `message`, `public_note` (client-safe, no risk detail), `internal_note` (with the risk detail), `ticket_id` (the first ticket opened), `tickets`, `actions`, `warnings`, plus `counts`, `responses` (per user: outcome, ticket, priority, sign-out, password change, manager email) and `block` (requested, planned, blocked, skipped with reasons).
+`status` (`success`, `pending_confirmation` for a preview with work to do or a block waiting for confirm, `rejected`, `incomplete` or `error`), `message`, `public_note` (client-safe, no risk detail), `internal_note` (with the risk detail), `ticket_id` (the first ticket opened), `tickets`, `actions`, `warnings`, plus `counts`, `responses` (per user: outcome, ticket, priority, sign-out, password change, manager email) and `block` (requested, planned, blocked, skipped with reasons). `warnings` also carries what the shared PSA code reported, such as ConnectWise refusing to list ticket priorities. When that happens, `priority_fallback` is true on the user's response and the message and notes say which priority was requested instead of claiming it was set.
 
 ## Import & test
 

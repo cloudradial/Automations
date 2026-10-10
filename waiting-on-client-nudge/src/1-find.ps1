@@ -144,6 +144,7 @@ foreach ($t in $found) {
     $null = $plan.Add($item)
 }
 
+$warnings = @(Get-NudgeWarnings $warnings)
 Set-NodeOutput ([ordered]@{
         settings  = [ordered]@{ psa = $psa; psaName = $psaName; preview = $preview; waitingStatus = $waiting; reminderDays = @($reminderDays); closeDay = $closeDay; closeStatus = $closeStatus; maxTickets = $maxTickets; companyId = $companyId; companyName = $companyName; runAt = (Format-NudgeStamp $now) }
         found     = $found.Count

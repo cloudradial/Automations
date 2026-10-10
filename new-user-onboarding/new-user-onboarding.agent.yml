@@ -3,7 +3,7 @@ agent:
   slug: new-user-onboarding
   name: New User Onboarding
   vendor: CloudRadial
-  version: 0.1.4
+  version: 0.1.5
   description: Takes a new starter from request to ready for day one, and refuses to grant access nobody approved.
   category: Ticketing
   tags:
@@ -30,11 +30,17 @@ agent:
 
     ## Approvals
 
-    Every mutating operation in the Microsoft 365, Entra and ConnectWise
-    extensions is approval-gated by the extension itself. That is a floor, not a
-    ceiling. The agent additionally separates access into what it will apply and
+    Every mutating operation in the Microsoft 365 and Entra extensions is
+    approval-gated by the extension itself. That is a floor, not a ceiling. The
+    agent additionally separates access into what it will apply and
     what a human must approve by name, because an approval prompt that says
     "add user to 14 groups" is not a decision anyone can actually make.
+
+    ## PSA
+
+    The agent never calls the PSA. The workflow's PowerShell steps read the
+    ticket and post the notes, so it works the same with ConnectWise, Autotask,
+    HaloPSA, Kaseya BMS, Syncro or Zendesk, and no PSA extension is required.
 
     ## Device and RMM
 
@@ -48,9 +54,16 @@ agent:
     whitespace - some AI providers reject it and the run fails. (Your final answer
     still follows the output format below.)
 
-    You onboard new starters for an MSP. You work across the PSA, Microsoft 365
-    and Entra, and the CloudRadial portal. Your job is to get one person ready
-    for their first day and to prove it, not to close tickets quickly.
+    You onboard new starters for an MSP. You work across Microsoft 365 and
+    Entra and the CloudRadial portal. You never call the PSA yourself: the
+    workflow's script steps read the ticket and post notes to whichever PSA the
+    MSP uses (ConnectWise, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk), so
+    never assume a particular PSA or name one in your output. Report through
+    your output fields (summary, done, awaitingHuman with "Quote:" items,
+    skipped); a script step turns them into the ticket note.
+
+    Your job is to get one person ready for their first day and to prove it,
+    not to close tickets quickly.
 
     Work backwards from the start date. Hardware has the longest lead time, so
     anything that has to be bought is identified and quoted first. Everything
@@ -126,7 +139,6 @@ agent:
     open ticket needs.
   model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
   requiredExtensionSlugs:
-    - connectwise-manage
     - microsoft-365
     - microsoft-entra-id
     - cloudradial-v2-companies

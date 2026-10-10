@@ -1169,6 +1169,14 @@ definition:
               medium   = @('(?i)medium', '(?i)normal', '(?i)moderate', '(?i)\b(p|priority\s*)3\b')
               low      = @('(?i)low', '(?i)\b(p|priority\s*)4\b')
           }
+          # ConnectWise impact / urgency (severity) for each priority hint, read by the board's priority matrix.
+          # critical High/High gave Priority 1 on staging (2026-10-10); the others follow the usual matrix and are Unverified.
+          $PsaState.CwImpactUrgency = @{
+              critical = @('High', 'High')
+              high     = @('High', 'Medium')
+              medium   = @('Medium', 'Medium')
+              low      = @('Low', 'Low')
+          }
           # The first item whose label property matches one of the patterns, in pattern order.
           function Select-PsaByLabel {
               param($Items, [string]$LabelProp, [string[]]$Patterns)
@@ -1461,12 +1469,16 @@ definition:
                       # Unverified: not in PSA.md yet. Body and /service/priorities lookup from the CW swagger clients.
                       $b = [ordered]@{ summary = (Get-PsaText $Summary 100); company = @{ id = [int]$CompanyId }; initialDescription = $Description }
                       if ($Queue) { $b.board = $(if ($isNum) { @{ id = [int]$Queue } } else { @{ name = $Queue } }) }
-                      # An API member whose security role can't read priorities (403) still gets the ticket, at the board's
-                      # default priority, with a warning; a priority is a nice-to-have, a ticket that never opens is not.
+                      # Impact and urgency (severity) always go with a priority hint: a board's priority matrix turns them into
+                      # its priority (on staging, High/High gave Priority 1), and they need no list read. The exact priority is
+                      # also set when the list can be read; an API member whose role can't read it (403) still gets the ticket,
+                      # prioritized by the matrix, with a warning.
                       if ($hint) {
+                          $iu = $PsaState.CwImpactUrgency[$hint]
+                          $b.impact = $iu[0]; $b.severity = $iu[1]
                           $list = $null
                           try { $list = @(Invoke-Psa GET '/service/priorities?pageSize=100') }
-                          catch { Add-PsaWarning "ConnectWise wouldn't list ticket priorities, so the new ticket uses the board's default priority instead of $hint. Give the API member's security role Inquire access to Service Desk priorities to fix this. ($($_.Exception.Message))" }
+                          catch { Add-PsaWarning "ConnectWise wouldn't list ticket priorities, so the new ticket's priority comes from its impact and urgency ($($iu[0])/$($iu[1])) through the board's priority matrix instead of being set to $hint directly. Give the API member's security role Inquire access to priorities to set it exactly. ($($_.Exception.Message))" }
                           if ($null -ne $list) { $pr = Select-PsaByLabel $list 'name' $pats; if ($pr) { $b.priority = @{ id = [int](Get-PsaProp $pr 'id') } } }
                       }
                       foreach ($k in $Extra.Keys) { $b[$k] = $Extra[$k] }

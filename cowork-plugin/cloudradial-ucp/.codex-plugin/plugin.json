@@ -1,6 +1,6 @@
 {
   "name": "cloudradial-ucp",
-  "version": "2.5.1",
+  "version": "2.6.3",
   "description": "Connect Codex to a CloudRadial UCP Portal through a local MCP server and CloudRadial-specific skills.",
   "author": {
     "name": "Nick Westgate"

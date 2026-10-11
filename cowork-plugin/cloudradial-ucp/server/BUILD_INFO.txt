@@ -1,3 +1,5 @@
-Built 2026-10-07T20:31:48.386Z
-variant: pure-js (no native keyring binary)
-credentials: encrypted file store by default; OS keychain if @napi-rs/keyring resolves at runtime
+Version: 2.6.3
+Built: 2026-10-11T15:14:16.089Z
+variant: portable JavaScript; no bundled native binaries
+setup: pinned @napi-rs/keyring installed per OS/CPU/libc at first setup
+credentials: verified OS keychain; no credential-file fallback; local form only

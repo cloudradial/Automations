@@ -216,6 +216,46 @@ Invoke-WithLib @('psa.ps1') {
     Check 'connectwise: priorities 403 -> a warning says the matrix sets it from High/High and names the permission' (@($PsaState.Warnings | Where-Object { $_ -match "^ConnectWise wouldn't list ticket priorities" -and $_ -match 'impact and urgency \(High/High\)' -and $_ -match 'instead of being set to critical' -and $_ -match 'Inquire access to priorities' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
 }
 
+# --- ConnectWise: an API member that can't read board statuses still changes status, by name ---
+# The board has 'Waiting Customer' and 'Closed' (not 'Closed (resolved)'); a name the board lacks gets a 400.
+$CwStat = @{ now = 'New' }
+$CwBoardNames = @('New', 'Waiting Customer', 'Resolved', 'Closed')
+Reset-Mock $S['connectwise'].Clone() {
+    param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/boards/*/statuses*') { New-HttpError 403 '{"code":"Security","message":"You do not have security permission to perform this action."}' }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/tickets/12345') { return [pscustomobject]@{ id = 12345; board = [pscustomobject]@{ id = 1 }; status = [pscustomobject]@{ name = $CwStat.now } } }
+    if ($c.Method -eq 'PATCH' -and $c.Uri -like '*/service/tickets/12345') {
+        $want = [string](($c.Body | ConvertFrom-Json -NoEnumerate)[0].value.name)
+        if ($CwBoardNames -notcontains $want) { New-HttpError 400 '{"code":"InvalidObject","message":"status is invalid"}' }
+        $CwStat.now = $want; return [pscustomobject]@{ id = 12345 }
+    }
+    return [pscustomobject]@{ id = 1 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $r = Set-PsaStatus -Id '12345' -State open -StatusName 'Waiting Customer'
+    $p = @(Get-Calls 'PATCH' '*/service/tickets/12345')
+    Check 'connectwise: statuses 403 -> a named status is set by name, read back, one PATCH' ($r -eq 'Waiting Customer' -and $p.Count -eq 1 -and (Read-Body $p[0])[0].value.name -eq 'Waiting Customer') (Show-Calls)
+    Check 'connectwise: statuses 403 -> a warning names the permission' (@($PsaState.Warnings | Where-Object { $_ -match "wouldn't list the statuses of board 1" -and $_ -match 'Table Setup' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
+    $CwStat.now = 'Resolved'
+    $r = Close-PsaTicket -Id '12345' -NotStatus 'Resolved'
+    $names = @(Get-Calls 'PATCH' '*/service/tickets/12345' | ForEach-Object { (Read-Body $_)[0].value.name })
+    Check 'connectwise: statuses 403 -> close without a name tries the usual closed names, skips the current status, stops at the first the board has' ($r -eq 'Closed' -and ($names -join '|') -eq 'Waiting Customer|Closed (resolved)|Closed') ($names -join '|')
+    $m = Get-ThrowMessage { Set-PsaStatus -Id '12345' -State open -StatusName 'Waiting on Client' }
+    Check 'connectwise: statuses 403 -> an unknown name is a plain error naming what to fix, and the status is unchanged' ($m -match "Couldn't set a 'Waiting on Client' status on ConnectWise ticket 12345" -and $m -match 'Inquire access' -and $CwStat.now -eq 'Closed') $m
+}
+Reset-Mock $S['connectwise'].Clone() {
+    param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/boards/*/statuses*') { New-HttpError 500 '{"code":"ConnectWiseApi","message":"timeout"}' }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/service/tickets/12345') { return [pscustomobject]@{ id = 12345; board = [pscustomobject]@{ id = 1 }; status = [pscustomobject]@{ name = 'New' } } }
+    return [pscustomobject]@{ id = 1 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $m = Get-ThrowMessage { Set-PsaStatus -Id '12345' -StatusName 'Waiting Customer' }
+    Check 'connectwise: a statuses read that fails for another reason still stops, with no PATCH' ($m -match 'HTTP 500' -and @(Get-Calls 'PATCH' '*').Count -eq 0) $m
+}
+
 # --- ConnectWise conditions: the exact query strings sent ---
 Reset-Mock $S['connectwise'].Clone() {
     param($c, $n)

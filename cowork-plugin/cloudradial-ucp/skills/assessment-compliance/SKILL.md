@@ -1,16 +1,6 @@
 ---
 name: assessment-compliance
-description: >
-  Review and analyze CloudRadial security assessments, compliance status, and flexible assets, and
-  export completed assessment data across multiple customers into executive-level summaries.
-  Use when the user says "check assessments", "compliance status", "security assessment",
-  "flexible assets", "asset types", "how is [company] doing on compliance", "assessment results",
-  "audit compliance", or needs to list, review, or analyze assessments and flexible asset data
-  across CloudRadial portals. ALSO use for cross-customer reporting: "export assessments",
-  "assessment export", "pull assessment data", "assessment executive summary", "compliance summary
-  across customers", "roll up assessment scores", "how are all my clients doing on assessments",
-  "consolidate assessment results", "assessment gaps report", or "which customers have the most
-  gaps" — even if the user does not say the word "API".
+description: "Review and analyze CloudRadial security assessments, compliance status, and flexible assets, and export completed assessment data across multiple customers into executive-level summaries. Use when the user says \"check assessments\", \"compliance status\", \"security assessment\", \"flexible assets\", \"asset types\", \"how is [company] doing on compliance\", \"assessment results\", \"audit compliance\", or needs to list, review, or analyze assessments and flexible asset data across CloudRadial portals. ALSO use for cross-customer reporting: \"export assessments\", \"assessment export\", \"pull assessment data\", \"assessment executive summary\", \"compliance summary across customers\", \"roll up assessment scores\", \"how are all my clients doing on assessments\", \"consolidate assessment results\", \"assessment gaps report\", or \"which customers have the most gaps\" — even if the user does not say the word \"API\".\n"
 metadata:
   version: "1.1.0"
 ---
@@ -49,7 +39,7 @@ to the `setup` skill before doing CloudRadial work.
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
-| `assessment_import` | Create or refresh an assessment from a question list or a template-layout .xlsx, or copy a template's questions into an existing assessment | `company_id` + one source |
+| `assessment_import` | Create or refresh an assessment from a question list or a template-layout .xlsx (`template_id` copy currently adds nothing; use the portal) | `company_id` + one source |
 | `raw_api_call` | Direct API call for advanced cases | `path` |
 
 ### OData parameter conventions
@@ -89,6 +79,7 @@ Security and compliance assessments. Key fields: `assessmentId`, `companyId`, `t
 | 10 | Template (category "Template", no `dateConducted`) |
 | 20 | Assessment: the only type the portal's Assessments list shows. Its Date Run, Score and Status come from its latest run |
 | 30 | Run: a dated copy of an assessment, titled "<assessment> - M/d/yy" |
+| 0, 50 | Seen in live data, meaning unknown. Leave them out of reports and say so |
 
 Filter on `type eq 20` to match what the portal lists, or `type eq 30` for the history of runs.
 `status` is a plain integer in the API with undocumented codes, so don't filter on it server-side;
@@ -96,7 +87,7 @@ show it as-is or compare it client-side.
 
 **Notes:** `get_resource` works by `assessmentId`. There is no update or delete for assessments, and
 no question-level API: rows are summary-level only (one row per assessment/run, not per question).
-Don't pass `select` when listing assessments; it returns HTTP 500.
+`select` works with real field names (for example `assessmentId,companyId,title,type,status,dateConducted,totalScore,maxScore`), which keeps large lists readable. A misspelled field returns HTTP 400; filter on `assessmentId`, not `id`.
 
 ### flexible_asset
 Custom flexible assets used for tracking compliance data, configurations, or any structured data. Key
@@ -115,7 +106,8 @@ Field definitions within flexible asset types. Key fields: `id` (the field's ID)
 Upload, Percent, Header), `required`, `order`, `showInList`.
 
 **Note:** flexible_asset_field supports list, get-by-ID and create only. The API can't update or
-delete a field.
+delete a field. Deleting the flexible_asset_type removes its fields with it, so to fix a wrong field
+on a new, empty type, delete the type and recreate it. Never delete a type that has assets.
 
 ## Example Calls
 
@@ -176,23 +168,42 @@ Use `assessment_import`, which uploads the questions (as an assessment, `type` 2
    creating another (the tool finds the new ID by title, so duplicate titles are ambiguous).
 3. Call `assessment_import` with `company_id`, `title`, and exactly one question source:
    - `questions`: an array of objects keyed by template column. `Category` and `Question` are
-     required; useful extras are `Explanation`, `Remediation`, `Remediation Summary`, `Reference`,
-     `Order`, `Type`, `Responses`, `Answer`, `Update Key`, `Control Type`, `Risk`, `Likelihood`,
-     `Owner`. Unknown column names are rejected, so use the template names. Give each question a
-     stable `Update Key` if you'll refresh the answers later.
+     required. Every column, its values and the risk scales are in
+     `${CLAUDE_PLUGIN_ROOT}/skills/assessment-compliance/references/assessment-template-columns.md`;
+     unknown column names are rejected. **`Answer` takes the score as a string number** (`"2"`
+     Compliant, `"1"` Partially Compliant, `"0"` N/A, `"-1"` Missing, `"-2"` Not compliant); the
+     label goes in `Text Answer`. A label in `Answer` fails the whole upload. Give each question a
+     stable `Update Key` name (for example `mfa-all-users`) if you'll refresh the answers later; the
+     tool turns it into a fixed GUID. Keep the name when the question is reworded.
    - `file_path`: a local .xlsx the user already has in the CloudRadial assessment template layout.
-   - `template_id`: copy every question from an existing template assessment into an assessment
-     that already exists, so it also needs `assessment_id`. Add `apply_to` (`server`, `endpoint` or
-     `user`) to duplicate the questions for each matching device or user. To start from a template
-     for a new assessment, create the assessment first (from questions, a file, or in the portal).
+     Tested: a 3-question .xlsx created the assessment with the right scores, and uploading the
+     same file again into its `assessment_id` didn't duplicate the questions. The file must be on
+     the computer running the plugin.
+   - `template_id`: **doesn't work through the API at the moment.** The call returns success but
+     adds no questions, with or without `apply_to` (tested with two different templates on a live
+     portal). Don't use it. To start from a template, either apply the template in the portal, or
+     import the questions with `questions` or `file_path`. Tell the user plainly if they ask for
+     per-server or per-user copies; the portal is the only way today.
 4. To refresh an assessment that already exists, pass `assessment_id`. The upload updates it in
    place and matches questions by `Update Key`.
+   - **A failed create can still leave an empty assessment.** If the upload returns an error,
+     list the company's assessments by title before retrying: a row with the same title and
+     `maxScore` 0 is a leftover shell. The API can't delete it, so tell the user to delete it in the
+     portal, and pass its `assessmentId` on the retry instead of creating a third copy.
+   - The API has no way to read question-level data or update keys back. Keep the `Update Key`
+     names you used so later refreshes match.
+   - **Runs (type 30) can't be created through the v2 API.** The portal's Run button calls the
+     portal's internal API (`POST <portal>/api/assessments/run`, body `{id, name}`), which copies the
+     assessment, answers included, into a linked run. The AutomationAI Microsoft Security Assessment
+     workflow does this after a read-only check that the portal accepts the API key. Otherwise tell
+     the user to click Run in the portal.
 5. Report the `assessmentId` and how many questions went in. The client completes the assessment
    in the portal.
 
 **Examples the user might say:** "Create a CIS Controls assessment for Contoso with these 20
 questions", "Turn this spreadsheet into an assessment for company 42", "Copy our Baseline Security
-template into Contoso's new assessment, one set of questions per server".
+template into Contoso's new assessment, one set of questions per server" (the last one is portal-only
+today; see `template_id` above).
 
 For Microsoft Secure Score specifically, the AutomationAI workflow
 [Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment)
@@ -234,7 +245,18 @@ every company. Filter to completed runs and page through everything:
   rows without `dateConducted` client-side. Don't filter on `status`: its codes aren't documented.
 - `orderby`: `dateConducted desc`
 - `top`: `200`, then repeat with `skip: 200`, `skip: 400`, ... until a page returns fewer than 200 rows.
-- No `select`: it returns HTTP 500 on assessments.
+- `select: "assessmentId,companyId,title,type,status,dateConducted,totalScore,maxScore,compliantScore,partialScore"`
+  keeps rows small (a full row is about 1,800 characters). With `select`, `top: "200"` is fine.
+
+Then clean the rows before reporting:
+
+- **Keep only active companies.** Records from deleted companies stay in the API. Build the
+  company list first (Step 2) and drop rows whose `companyId` isn't in it, saying how many you
+  dropped.
+- **Treat unanswered runs as not started.** A row with `maxScore` > 0, `compliantScore` 0,
+  `partialScore` 0 and `totalScore` equal to minus half of `maxScore` has no answers at all. Report
+  it as "not started", never as a -50% score, or it becomes the worst client on the page.
+- Rows with `maxScore` 0 have no questions; leave them out.
 
 Keep `assessmentId`, `companyId`, `title`, `type`, `status`, `totalScore`, `maxScore`,
 `compliantScore`, `dateConducted` for every row. For pure counts (e.g. "how many completed this

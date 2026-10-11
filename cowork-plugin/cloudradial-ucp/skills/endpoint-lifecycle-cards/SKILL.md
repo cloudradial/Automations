@@ -1,14 +1,6 @@
 ---
 name: endpoint-lifecycle-cards
-description: >
-  Review a company's CloudRadial endpoints and maintain one Planner card per hardware-refresh
-  category (Replace, Plan replacement, Upgrade in place, Retain, Needs data, Human review,
-  Virtual machines), each carrying a triage priority and listing that category's out-of-spec
-  computers in plain language. Use when the user says "endpoint refresh cards", "hardware
-  refresh plan", "lifecycle cards", "which computers need replacing", "build refresh Planner
-  cards", "endpoint lifecycle review", "out-of-spec computers", or wants aging/out-of-warranty
-  devices grouped into prioritized Planner cards. CloudRadial-only: reads endpoints, writes
-  Planner cards, no external system.
+description: "Review a company's CloudRadial endpoints and maintain one Planner card per hardware-refresh category (Replace, Plan replacement, Upgrade in place, Retain, Needs data, Human review, Virtual machines), each carrying a triage priority and listing that category's out-of-spec computers in plain language. Use when the user says \"endpoint refresh cards\", \"hardware refresh plan\", \"lifecycle cards\", \"which computers need replacing\", \"build refresh Planner cards\", \"endpoint lifecycle review\", \"out-of-spec computers\", or wants aging/out-of-warranty devices grouped into prioritized Planner cards. CloudRadial-only: reads endpoints, writes Planner cards, no external system.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -49,7 +41,7 @@ with `filter: "companyEndpointId eq <id> or companyEndpointId eq <id> ..."` (it 
 | `expirationDate` | warranty end |
 | `os`, `osVersion` | operating system |
 | `windows11Readiness` | positive-only Win11 signal. `Windows11Status` enum (spec values 1, 2, -1, -2); OData returns the name, so match `Installed` / `Capable` |
-| `isSSD` | SSD (true) vs HDD (false) |
+| `isssd` | SSD (true) vs HDD (false). The field is all lower case; `isSSD` isn't recognized |
 | `memory` | RAM in bytes (÷ 1073741824 for GB; 0 = unknown) |
 | `isServer`, `isVirtual` | routing flags |
 | `serialNumber`, `manufacturer`, `model`, `userName` | display / identity |
@@ -69,8 +61,10 @@ Windows or macOS computers.
    Increase resources; RAM 4–8 GB or HDD-backed → Tune resources; otherwise → Retain.
 3. Physical (not server, not virtual): age ≥ 5, **or** OS unsupported (and not Win11-ready),
    **or** RAM < 4 GB → **Replace**; OS unsupported and Win11-ready → **Upgrade in place**;
-   age 3 to < 5 → **Plan replacement**; age < 3 → **Retain, extend or upgrade**; no age and
-   warranty unknown and OS unknown → **Needs data**; otherwise → **Retain, extend or upgrade**.
+   age 3 to < 5 → **Plan replacement**; age < 3 → **Retain, extend or upgrade**; no age (no
+   `manufacturedDate`, `biosDate` or `cpuDate`) and no warranty date → **Needs data**, even when the
+   OS is supported, because a supported OS alone can't justify keeping a device; otherwise →
+   **Retain, extend or upgrade**. Never put a device on Retain without an age or a warranty date.
 
 Age comes from `manufacturedDate` (fallback `biosDate`/`cpuDate`, marked estimated).
 Workstation refresh line: 5 years to replace, 3 years to plan.
@@ -137,6 +131,9 @@ All writes go through `create_resource` / `update_resource` on `resource_type: "
   Cards are created as Proposed and display as "Not scheduled" so the team schedules them
   later (AutomationAI's product tools reject date parameters; keep parity). `datePublished` is
   the only date field.
+- **Emptied cards:** when an update leaves a category with no computers, the card's status was
+  seen changing to Completed on its own, without the update sending a status. Report it as
+  "emptied (now Completed)" rather than as a status change you made.
 
 ## Report honestly
 

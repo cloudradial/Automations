@@ -11,9 +11,25 @@ OpenAPI: 3.0.1
 - **Errors:** every HTTP 4xx/5xx comes back as a tool error.
 - **Lists:** OData lists stop at 200 rows with no next-page link. Page with `top`/`skip` until a page is shorter than `top`.
 - **Enums:** OData returns enum fields as names (`enclosure: "Desktop"`), while writes take the integer codes listed under Enumerations.
-- **Assessments:** there is no `POST /v2/assessment` and no question-level API. Create or refresh with `assessment_import`. `type` is 10 template, 20 assessment (the only type the portal lists), 30 run. Don't `$select` on `/v2/odata/assessment`; it returns HTTP 500.
+- **Assessments:** there is no `POST /v2/assessment` and no question-level API. Create or refresh with `assessment_import`. `type` is 10 template, 20 assessment (the only type the portal lists), 30 run.
 - **Endpoint custom properties:** `EndpointCustomProperty` keys on `companyEndpointId` and has no `companyId`. Single-property calls go by serial number and property name.
 - **Tickets:** the API has no ticket endpoints.
+- **Deleted companies leave records behind.** Users, endpoints, feedback, assessments, certificates and archive items from deleted companies still appear in lists. For any cross-company report, list companies first and keep only rows whose `companyId` is in that list. Feedback rows keep the company name from when they were submitted, so group by `companyId`, not `companyName`. The stored `endpointCount` on a company can be stale; count endpoint rows instead.
+- **Duplicate serial numbers** (an endpoint copied under another company) make serial-based calls fail with HTTP 400 "Object reference not set to an instance of an object".
+- **Course PATCH paths** follow the GET-by-ID shape, not `CourseRequest`: `/shortDescripiton` (misspelled) works, and fields under `settings` (`passScore`, `externalCourseUrl`, `courseImageUrl`, `prerequisites`) aren't saved (UCP-1969).
+- **Assessment answers** in `assessment_import` are score numbers (`"2"` to `"-2"`); see `skills/assessment-compliance/references/assessment-template-columns.md`.
+- **The `service` resource is the agent's inventory of Windows services**, not a service catalog. Request forms are `catalog`.
+- **Menu PATCH returns HTTP 415.** Update a menu with `method: "PUT"` and the full body (including `groups`).
+- **Feedback** supports create, PATCH (including changing `companyId`) and delete. `feedbackRating` accepted the name `"Positive"` on write and saved it as 1.
+- **PATCH confirmed working (live test):** endpoint `expirationDate` and `manufacturedDate`, company group `group` (rename), catalog question `label` and `isRequired`, quickstart, certificate, course lesson.
+- **Catalog create defaults:** left out, `isSelfApproval`, `isAppendSubject` and `isSendToPsa` save as true and `selectText` as `"ORDER"`.
+- **Flexible asset types:** deleting a type removes its fields; fields themselves can't be updated or deleted.
+- **Planner timeline** placement comes from `estimatedStartDate`/`estimatedEndDate`; `scheduledQuarter` stays 0.
+- **`POST /v2/assessment/import-template` is a no-op** right now: it returns success but copies no questions (with or without `applyTo`). Use the portal or `assessment_import` with questions/xlsx.
+- **`$select` on `/v2/odata/assessment` works** with real field names; filter by `assessmentId`, not `id`.
+- **Archive items** are text/HTML only through the API; there is no attachment upload endpoint.
+- **Endpoint applications:** `version` is an integer; the readable version goes in `display`.
+- **Feedback moves:** changing `companyId` also updates `companyName` and `companyPsaId`. `feedbackRating` takes `Positive`, `Neutral`, `Negative`.
 
 ## Schemas
 

@@ -1,14 +1,6 @@
 ---
 name: portal-setup
-description: >
-  Guide a partner through setting up and configuring their CloudRadial portal for a
-  client company. Use when the user says "set up a portal", "onboard a new client",
-  "configure the portal for [company]", "implementation session", "portal onboarding",
-  "seed content for [company]", "prepare portal for [company]", "what does [company]
-  need next", "CSA pain points", "implementation checklist", or needs to walk through
-  portal configuration, content seeding, or implementation sessions for a specific
-  client company. This is about configuring the CloudRadial PORTAL — not the Cowork plugin.
-  For plugin/credential setup, use the "setup" skill instead.
+description: "Guide a partner through setting up and configuring their CloudRadial portal for a client company. Use when the user says \"set up a portal\", \"onboard a new client\", \"configure the portal for [company]\", \"implementation session\", \"portal onboarding\", \"seed content for [company]\", \"prepare portal for [company]\", \"what does [company] need next\", \"CSA pain points\", \"implementation checklist\", or needs to walk through portal configuration, content seeding, or implementation sessions for a specific client company. This is about configuring the CloudRadial PORTAL — not the Cowork plugin. For plugin/credential setup, use the \"setup\" skill instead.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -126,7 +118,7 @@ This is the standard onboarding track for new client companies. Each session has
 - Check user count: call `count_resources` with `resource_type: "user"`, `filter: "companyId eq <id>"`
 - Check endpoint count: call `count_resources` with `resource_type: "endpoint"`, `filter: "companyId eq <id>"`
 - Review company details: call `company_overview` with `company_id: "<id>"`
-- Branding (logo, colors) can't be read or set through the API: check it in the portal
+- Branding can be read but not set: `company_overview` returns `portalLogoUrl` and `portalThemeColor`, but a PATCH returns HTTP 400. Change branding in the portal
 
 ### Session 2: Ticketing & Service Desk
 
@@ -143,7 +135,6 @@ This is the standard onboarding track for new client companies. Each session has
 **API actions:**
 - List catalogs: call `list_resources` with `resource_type: "catalog"`, `filter: "companyId eq <id>"`
 - List catalog questions: call `list_resources` with `resource_type: "catalog_question"`, `filter: "companyId eq <id>"`
-- Check services: call `list_resources` with `resource_type: "service"`, `filter: "companyId eq <id>"`
 
 **Content to seed:**
 - Service catalog items for: password reset, new user request, hardware request, software request, general support
@@ -184,7 +175,7 @@ This is the standard onboarding track for new client companies. Each session has
 
 **Checklist:**
 - [ ] Endpoint reporting configured (warranty tracking, OS distribution)
-- [ ] User adoption metrics accessible (login frequency, ticket volume)
+- [ ] User adoption metrics accessible (login frequency and ticket volume are portal-only; the API has neither)
 - [ ] Feedback collection enabled (CSAT after ticket resolution)
 - [ ] Archive reports configured for automated delivery
 - [ ] QBR template prepared with key metrics
@@ -211,7 +202,7 @@ This is the standard onboarding track for new client companies. Each session has
 
 **API actions:**
 - Full content audit: List articles, catalogs, menus, courses, assessments
-- User adoption check: Count users, review login activity
+- User adoption check: count users through the API; login activity isn't in the API, so check it in the portal
 - Endpoint coverage: Count endpoints vs. known device count
 - Course enrollments: call `list_resources` with `resource_type: "course_enrollment"`, `filter: "companyId eq <id>"`
 
@@ -221,13 +212,13 @@ When you walk a session, do the API items for the user (after confirming each wr
 
 | Area | Through the plugin | How | Portal only |
 |---|---|---|---|
-| Company | Create, rename, territory, account manager, PSA ids | `create_resource` / `update_resource` `company` (create needs `name`) | Logo, colors, theme and messaging settings. The API neither returns nor sets branding. |
+| Company | Create, rename, territory, account manager, PSA ids | `create_resource` / `update_resource` `company` (create needs `name`) | Logo, colors, theme and messaging settings. The API returns `portalLogoUrl` and `portalThemeColor` but can't set them. |
 | Company groups | Create groups, add or remove companies | `company_group`, `company_group_company` | |
 | Users | Create, update, remove portal users | `user` (create needs `companyId`, `email`, `firstName`, `lastName`) | Security roles, invitations, SSO |
 | Integrations | Read what's synced | `company_overview`, `list_resources` | Connecting the PSA, Microsoft 365, RMM and other integrations |
 | Service catalog | Create request forms and their questions | `catalog`, `catalog_question` (see content-management) | Approval workflows and automations attached to a form; end-to-end ticket test |
 | Knowledge base | Create and update articles (create needs `companyId`, `subject`, `body`, `datePublished`) | `article` | |
-| Menus | Create and order menu tiles | `menu` | |
+| Menus | Create and order menu tiles | `menu` (always send `groups`, for example `["Everyone"]`, or the tile may not show) | |
 | Quickstarts | Create home-page quickstart guides | `quickstart` (see reporting-admin) | |
 | Media | Upload images and documents | `media` (base64 `data`) | Using an uploaded image as the portal logo |
 | Replacement tokens | Set partner-level or company tokens (`@SupportPhone`) | `manage_tokens` | |
@@ -369,16 +360,17 @@ These are the most common challenges that drive partners to CloudRadial. Each ma
    ```
    create_resource with resource_type: "catalog"
    Required: companyId, subject (the item's name), category
+   Always set: isSelfApproval, isAppendSubject, selectText
    Optional: description, shortDescription, thankYou, isNeedsApproval
    ```
-   Leave the PSA routing fields (`psaBoard`, `psaType`, `psaItem` and so on) empty unless the partner gives you the exact values.
+   Set `isSelfApproval`, `isAppendSubject`, `selectText` and `isSendToPsa` on purpose: left out, the API saves `true`, `true`, `"ORDER"` and `true`. Leave the PSA routing fields (`psaBoard`, `psaType`, `psaItem` and so on) empty unless the partner gives you the exact values.
 2. Add catalog questions for each item:
    ```
    create_resource with resource_type: "catalog_question"
    Required: companyCatalogId, companyId, label, order
    Optional: type, isRequired, jsonId, options, placeholder
    ```
-   Copy `type` from an existing question of the same kind; the API doesn't publish names for the codes (see content-management).
+   Send `type` as a name, for example `"TextField"`, `"MemoField"`, `"EmailField"` or `"MultiChoiceField"` (full list in content-management). The create response shows `type` as a number; read the question back with `list_resources` to confirm the name.
 
 ### Set Endpoint Custom Properties
 

@@ -1,13 +1,6 @@
 ---
 name: reporting-admin
-description: >
-  Access CloudRadial archives, certificates, company groups, media files, quickstarts,
-  replacement tokens, and raw API calls. Use when the user says "archived reports",
-  "certificates", "company groups", "media files", "tokens", "company tokens",
-  "replacement tokens", "set the @SupportPhone token", "manage tokens", "raw API call",
-  "quickstart guides", "bulk export", "cross-company report", or needs to access
-  archive items, certificates, company groupings, media management, token values,
-  or make advanced raw API calls not covered by other skills.
+description: "Access CloudRadial archives, certificates, company groups, media files, quickstarts, replacement tokens, and raw API calls. Use when the user says \"archived reports\", \"certificates\", \"company groups\", \"media files\", \"tokens\", \"company tokens\", \"replacement tokens\", \"set the @SupportPhone token\", \"manage tokens\", \"raw API call\", \"quickstart guides\", \"bulk export\", \"cross-company report\", or needs to access archive items, certificates, company groupings, media management, token values, or make advanced raw API calls not covered by other skills.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -71,17 +64,19 @@ Archived reports and documents. Key fields: `companyReportItemId`, `companyRepor
 
 **Note:** archive_item is a composite-key resource. Getting a specific item requires both `archive_id` (the folder) and `id` (the item).
 
+**Writing archive items:** create with `create_resource` and `data: { companyId, archiveId, subject, text, isHtml }` (`archiveId` is the folder, the `companyReportFolderId` of existing items). PATCH (`archive_id` + `id`) and delete work. The create response shows `companyId: 0`, but the list shows the right company. **The API can't attach a file**: there is no upload endpoint for archive items, so put the content in `text` as HTML, or tell the user to upload the file in the portal.
+
 ### certificate
-Certificates tracked in the portal. Key fields: `id` (the certificate's ID), `companyId`, `companyDomainId`, `name`, `url`, `expirationDate`, `issuer`, `isValid`, `thumbprint`. Creating one requires `companyId`, `name` and `url`.
+Certificates tracked in the portal. Key fields: `id` (the certificate's ID), `companyId`, `companyDomainId`, `name`, `url`, `expirationDate`, `issuer`, `isValid`, `thumbprint`. Creating one requires `companyId`, `name` and `url`. Send only those (plus `companyDomainId`): the API saves `issuer`, `expirationDate`, `thumbprint` and the other certificate details as empty, and CloudRadial fills them in itself. PATCH of a certificate works.
 
 ### company_group
 Logical groupings of companies. Key fields: `companyGroupId`, `group` (the group's name; there is no `name` or `description`), `partnerId`. Create with `data: { group: "Managed Plus" }`. Membership lives in `company_group_company` (`companyGroupId`, `companyId`).
 
 ### quickstart
-Quickstart guides on a company's portal home page. Key fields: `quickstartId`, `companyId`, `subject` (NOT `name`), `description`, `category`, `body` (HTML), `icon`, `iconColor`, `datePublished`, `isText`. Creating one requires `companyId`, `subject`, `description`, `category`, `icon`, `iconColor`, `datePublished` and `isText`.
+Quickstart guides on a company's portal home page. Key fields: `quickstartId`, `companyId`, `subject` (NOT `name`), `description`, `category`, `body` (HTML), `icon`, `iconColor`, `datePublished`, `isText`. Creating one requires `companyId`, `subject`, `description`, `category`, `icon`, `iconColor`, `datePublished` and `isText`. PATCH of quickstart fields works.
 
 ### media
-Media files (images, documents) stored in the portal. Key fields: `partnerMediaId` (the media file's ID), `originalName`, `contentType`, `description`, `length`, `width`, `height`, `viewToken`. Create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }`; `width` and `height` are required, so use 0 for non-images.
+Media files (images, documents) stored in the portal. Key fields: `partnerMediaId` (the media file's ID), `originalName`, `contentType`, `description`, `length`, `width`, `height`, `viewToken`. Create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }`; `width` and `height` are required, so use 0 for non-images. Media is partner-level (no `companyId`). Create, PATCH of `description`, and delete all work.
 
 ### token
 **Replacement tokens**, not API keys: the named values (like `@SupportPhone`) that portal forms, articles and automations fill in. A token lives at partner level (`companyId` 0) or on one company, and a company token overrides the partner token of the same name. Manage them with `manage_tokens`. Token names are case-sensitive.

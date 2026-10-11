@@ -1,17 +1,13 @@
 ---
 name: feedback-analysis
-description: >
-  Analyze CloudRadial portal feedback and user satisfaction data. Use when the user says
-  "check feedback", "CSAT", "satisfaction", "what feedback has [company] submitted",
-  "recent feedback", "feedback report", "are users happy", "NPS", "survey results",
-  or needs to list, review, or analyze feedback entries from CloudRadial portals.
+description: "Analyze, log, update, move and delete CloudRadial portal feedback and user satisfaction data. Use when the user says \"update feedback\", \"change the feedback rating\", \"fix a feedback entry\", \"move feedback to another company\", \"log feedback\", \"add a feedback entry\", \"delete feedback\", or \"check feedback\", \"CSAT\", \"satisfaction\", \"what feedback has [company] submitted\", \"recent feedback\", \"feedback report\", \"are users happy\", \"NPS\", \"survey results\", or needs to list, review, or analyze feedback entries from CloudRadial portals.\n"
 metadata:
   version: "1.0.0"
 ---
 
 # Feedback Analysis
 
-List and analyze user feedback and satisfaction data across CloudRadial portals.
+List, analyze, create, update, move and delete user feedback and satisfaction data across CloudRadial portals. Updating feedback is one of the most common requests, so handle it end to end.
 
 ## How to Call the API
 
@@ -80,6 +76,24 @@ User feedback and CSAT entries, usually one per rated ticket. Key fields: `feedb
 **Get a specific feedback entry:** Call `get_resource` with `resource_type: "feedback"`, `id: "567"`.
 
 **Feedback where the user asked for a follow-up:** Call `list_resources` with `resource_type: "feedback"`, `filter: "companyId eq 42 and feedbackWantsFollowUp eq true"`.
+
+## Writing Feedback
+
+Create, update (including moving to another company) and delete all work through the API. Tested on a live portal.
+
+**Find the entry first.** Users describe feedback by person, ticket or date, not by ID. Search with `list_resources`, for example `filter: "companyId eq 42 and ticketPsaId eq 123456"`, `filter: "userEmail eq 'sam@contoso.com'"`, or `orderby: "dateCreated desc"`. Show the matching rows (date, user, ticket, rating, comment) and confirm which `feedbackId` to change before writing. If more than one row matches, ask.
+
+**Update an entry:** Call `update_resource` with `resource_type: "feedback"`, `id: "<feedbackId>"` and only the fields that change, for example `data: { feedbackRating: "Positive", feedbackRatingNumber: 5, feedbackComment: "..." }`. PATCH keeps the fields you leave out. Read the entry back with `get_resource` and show the before and after.
+- `feedbackRating` accepts the names `Positive`, `Neutral` and `Negative` (`Positive` is saved as 1). Any other value fails with HTTP 400 "Invalid patch data".
+- Keep `feedbackRating`, `feedbackRatingNumber` and `sentiment` consistent so CSAT reports don't contradict themselves. On rows with a star score, `sentiment` equals `feedbackRatingNumber` (1 to 5); thumbs-only rows have 0 in both. Copy the pattern from existing rows on the same portal.
+
+**Move an entry to another company:** Update `companyId` to the target company. CloudRadial updates `companyName` and `companyPsaId` to match on its own, so don't send them. Read the entry back to confirm. (Rows left behind by deleted companies keep their old name; that's a different case.)
+
+**Create an entry:** Call `create_resource` with `resource_type: "feedback"`. `companyId` and `sentiment` are required; add `userEmail`, `userFirstName`, `userLastName`, `ticketPsaId`, `ticketSubject`, `feedbackRating`, `feedbackRatingNumber`, `feedbackComment` and `feedbackWantsFollowUp` as the user gives them. `companyName` and `companyPsaId` are filled in from the company. Use it for feedback collected outside the portal (phone, email, a migrated survey tool).
+
+**Delete an entry:** Call `delete_resource` with `resource_type: "feedback"`, `id`. Always confirm with the user first and name the entry (date, user, ticket). Deleting removes it from CSAT history.
+
+**Bulk changes:** For more than a few entries, list the rows that will change in a table, get one approval for the batch, then update one at a time and report each result (updated / failed with the error).
 
 ## API Reference
 

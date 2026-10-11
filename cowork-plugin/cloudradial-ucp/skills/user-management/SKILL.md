@@ -1,10 +1,6 @@
 ---
 name: user-management
-description: >
-  Manage and analyze CloudRadial portal users. Use when the user says "look up a user",
-  "find user by email", "list users for [company]", "check user adoption",
-  "how many users does [company] have", "user roles", "who has access to [company] portal",
-  or needs to find, list, count, or analyze users across CloudRadial portals.
+description: "Manage and analyze CloudRadial portal users. Use when the user says \"look up a user\", \"find user by email\", \"list users for [company]\", \"check user adoption\", \"how many users does [company] have\", \"user roles\", \"who has access to [company] portal\", or needs to find, list, count, or analyze users across CloudRadial portals.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -96,6 +92,6 @@ The `user` entity has `userId` (a string), `email`, `firstName`, `lastName`, `di
 
 ### Create, update and delete
 
-- **Create:** `create_resource` with `resource_type: "user"` and `data: { companyId, email, firstName, lastName }` (all four required). Confirm with the user first.
+- **Create:** `create_resource` with `resource_type: "user"` and `data: { companyId, email, firstName, lastName }` (all four required). Confirm with the user first. `title` (and other profile fields) sent on create aren't saved; set them with an update straight after, then read the user back.
 - **Update:** `update_resource` with `resource_type: "user"`, `id: "<userId>"`, `company_id: "<companyId>"` and only the fields to change (PATCH is the default). The API needs `company_id` for user updates and deletes; the tool looks it up if you leave it out.
-- **Delete:** `delete_resource` with `resource_type: "user"`, `id`, `company_id`. Always confirm first.
+- **Delete:** `delete_resource` with `resource_type: "user"`, `id`, `company_id`. Always confirm first, and tell the user the person's course enrollments stay behind (the API can't delete enrollments), so training reports will still count them.

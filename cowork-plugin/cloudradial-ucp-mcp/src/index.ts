@@ -8,7 +8,7 @@ import {
 import { tools } from "./tools.js";
 
 const server = new Server(
-  { name: "cloudradial-ucp", version: "0.1.0" },
+  { name: "cloudradial-ucp", version: "2.6.3" },
   { capabilities: { tools: {} } }
 );
 

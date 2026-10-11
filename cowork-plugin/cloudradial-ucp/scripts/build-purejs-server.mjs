@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 // Build the pure-JS MCP server bundle into ./server/index.mjs.
 //
-// Unlike build-server.mjs (which packs a per-OS native keyring binary), this
-// produces ONE platform-agnostic JavaScript file. Credential storage uses the
-// pure-JS wrapper (cloudradial-ucp-mcp/src/keyring-safe.ts): an encrypted file
-// store by default, with the OS keychain used only if @napi-rs/keyring resolves
-// at runtime. That makes server/ committable and the plugin resolvable from a
-// single git commit — the requirement for the claude-community marketplace.
+// Produces platform-agnostic JavaScript only: index.mjs (the MCP server) and
+// setup-local.mjs (the local key form). No native binary is bundled; setup
+// installs the pinned @napi-rs/keyring for the user's OS/CPU into a per-user
+// runtime cache and stores keys only in the OS keychain (no file fallback).
+// server/ stays committable, so the plugin resolves from a single git commit.
 //
 // Run from the plugin root: node scripts/build-purejs-server.mjs
 import { execSync } from "node:child_process";
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,13 +29,18 @@ sh("npm run bundle", MCP_PKG);
 
 rmSync(SERVER_OUT, { recursive: true, force: true });
 mkdirSync(SERVER_OUT, { recursive: true });
-cpSync(join(MCP_PKG, "dist-bundle", "index.mjs"), join(SERVER_OUT, "index.mjs"));
+// index.mjs is the MCP server; setup-local.mjs is the local key form it launches.
+for (const file of ["index.mjs", "setup-local.mjs"]) {
+  cpSync(join(MCP_PKG, "dist-bundle", file), join(SERVER_OUT, file));
+}
 rmSync(join(MCP_PKG, "dist-bundle"), { recursive: true, force: true });
 
+const { version } = JSON.parse(readFileSync(join(PLUGIN_ROOT, ".claude-plugin", "plugin.json"), "utf8"));
 writeFileSync(
   join(SERVER_OUT, "BUILD_INFO.txt"),
-  `Built ${new Date().toISOString()}\nvariant: pure-js (no native keyring binary)\n` +
-    `credentials: encrypted file store by default; OS keychain if @napi-rs/keyring resolves at runtime\n`,
+  `Version: ${version}\nBuilt: ${new Date().toISOString()}\nvariant: portable JavaScript; no bundled native binaries\n` +
+    `setup: pinned @napi-rs/keyring installed per OS/CPU/libc at first setup\n` +
+    `credentials: verified OS keychain; no credential-file fallback; local form only\n`,
 );
 
 console.log(`\nBuilt pure-JS server: ${join(SERVER_OUT, "index.mjs")}`);

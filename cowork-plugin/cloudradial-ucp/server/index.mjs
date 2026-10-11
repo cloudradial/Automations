@@ -10545,42 +10545,42 @@ function extractDefs(ctx, schema) {
   if (!root)
     throw new Error("Unprocessed schema. This is a bug in Zod.");
   const idToSchema = /* @__PURE__ */ new Map();
-  for (const entry2 of ctx.seen.entries()) {
-    const id = ctx.metadataRegistry.get(entry2[0])?.id;
+  for (const entry of ctx.seen.entries()) {
+    const id = ctx.metadataRegistry.get(entry[0])?.id;
     if (id) {
       const existing = idToSchema.get(id);
-      if (existing && existing !== entry2[0]) {
+      if (existing && existing !== entry[0]) {
         throw new Error(`Duplicate schema id "${id}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
       }
-      idToSchema.set(id, entry2[0]);
+      idToSchema.set(id, entry[0]);
     }
   }
-  const makeURI = (entry2) => {
+  const makeURI = (entry) => {
     const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
     if (ctx.external) {
-      const externalId = ctx.external.registry.get(entry2[0])?.id;
+      const externalId = ctx.external.registry.get(entry[0])?.id;
       const uriGenerator = ctx.external.uri ?? ((id2) => id2);
       if (externalId) {
         return { ref: uriGenerator(externalId) };
       }
-      const id = entry2[1].defId ?? entry2[1].schema.id ?? `schema${ctx.counter++}`;
-      entry2[1].defId = id;
+      const id = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
+      entry[1].defId = id;
       return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${id}` };
     }
-    if (entry2[1] === root) {
+    if (entry[1] === root) {
       return { ref: "#" };
     }
     const uriPrefix = `#`;
     const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
-    const defId = entry2[1].schema.id ?? `__schema${ctx.counter++}`;
+    const defId = entry[1].schema.id ?? `__schema${ctx.counter++}`;
     return { defId, ref: defUriPrefix + defId };
   };
-  const extractToDef = (entry2) => {
-    if (entry2[1].schema.$ref) {
+  const extractToDef = (entry) => {
+    if (entry[1].schema.$ref) {
       return;
     }
-    const seen = entry2[1];
-    const { ref, defId } = makeURI(entry2);
+    const seen = entry[1];
+    const { ref, defId } = makeURI(entry);
     seen.def = { ...seen.schema };
     if (defId)
       seen.defId = defId;
@@ -10591,8 +10591,8 @@ function extractDefs(ctx, schema) {
     schema2.$ref = ref;
   };
   if (ctx.cycles === "throw") {
-    for (const entry2 of ctx.seen.entries()) {
-      const seen = entry2[1];
+    for (const entry of ctx.seen.entries()) {
+      const seen = entry[1];
       if (seen.cycle) {
         throw new Error(`Cycle detected: #/${seen.cycle?.join("/")}/<root>
 
@@ -10600,31 +10600,31 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       }
     }
   }
-  for (const entry2 of ctx.seen.entries()) {
-    const seen = entry2[1];
-    if (schema === entry2[0]) {
-      extractToDef(entry2);
+  for (const entry of ctx.seen.entries()) {
+    const seen = entry[1];
+    if (schema === entry[0]) {
+      extractToDef(entry);
       continue;
     }
     if (ctx.external) {
-      const ext = ctx.external.registry.get(entry2[0])?.id;
-      if (schema !== entry2[0] && ext) {
-        extractToDef(entry2);
+      const ext = ctx.external.registry.get(entry[0])?.id;
+      if (schema !== entry[0] && ext) {
+        extractToDef(entry);
         continue;
       }
     }
-    const id = ctx.metadataRegistry.get(entry2[0])?.id;
+    const id = ctx.metadataRegistry.get(entry[0])?.id;
     if (id) {
-      extractToDef(entry2);
+      extractToDef(entry);
       continue;
     }
     if (seen.cycle) {
-      extractToDef(entry2);
+      extractToDef(entry);
       continue;
     }
     if (seen.count > 1) {
       if (ctx.reused === "ref") {
-        extractToDef(entry2);
+        extractToDef(entry);
         continue;
       }
     }
@@ -10696,8 +10696,8 @@ function finalize(ctx, schema) {
       path: seen.path ?? []
     });
   };
-  for (const entry2 of [...ctx.seen.entries()].reverse()) {
-    flattenRef(entry2[0]);
+  for (const entry of [...ctx.seen.entries()].reverse()) {
+    flattenRef(entry[0]);
   }
   const result = {};
   if (ctx.target === "draft-2020-12") {
@@ -10720,8 +10720,8 @@ function finalize(ctx, schema) {
   if (rootMetaId !== void 0 && result.id === rootMetaId)
     delete result.id;
   const defs = ctx.external?.defs ?? {};
-  for (const entry2 of ctx.seen.entries()) {
-    const seen = entry2[1];
+  for (const entry of ctx.seen.entries()) {
+    const seen = entry[1];
     if (seen.def && seen.defId) {
       if (seen.def.id === seen.defId)
         delete seen.def.id;
@@ -15452,229 +15452,174 @@ var StdioServerTransport = class {
 };
 
 // src/tools.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync } from "node:fs";
 
-// src/keyring-safe.ts
+// src/secure-storage.ts
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  chmodSync
-} from "node:fs";
-import { homedir, hostname, userInfo } from "node:os";
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  scryptSync
-} from "node:crypto";
-var require2 = createRequire(import.meta.url);
-var backend = null;
-var NativeEntry = null;
-var PROBE_SERVICE = "cloudradial-ucp-mcp__probe";
-var PROBE_ACCOUNT = "probe";
-function selectBackend() {
-  if (backend) return backend;
-  try {
-    const native = require2("@napi-rs/keyring");
-    if (native && typeof native.Entry === "function") {
-      const probe = new native.Entry(PROBE_SERVICE, PROBE_ACCOUNT);
-      probe.getPassword();
-      NativeEntry = native.Entry;
-      backend = "native";
-      return backend;
-    }
-  } catch {
-  }
-  backend = "file";
-  return backend;
-}
-var APP_DIR_NAME = "cloudradial-ucp-mcp";
-var STATIC_SALT = "cloudradial-ucp-mcp:v1:keyring-fallback";
-function configFilePath() {
-  if (process.env.CLOUDRADIAL_CRED_FILE) return process.env.CLOUDRADIAL_CRED_FILE;
-  let base;
-  if (process.platform === "win32") {
-    base = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
-  } else if (process.platform === "darwin") {
-    base = join(homedir(), "Library", "Application Support");
-  } else {
-    base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  }
-  return join(base, APP_DIR_NAME, "credentials.json");
-}
-function safeUsername() {
-  try {
-    return userInfo().username || "unknown";
-  } catch {
-    return "unknown";
-  }
-}
-function machineKey() {
-  const material = process.env.CLOUDRADIAL_CRED_SECRET || `${hostname()}::${safeUsername()}::${STATIC_SALT}`;
-  return scryptSync(material, STATIC_SALT, 32);
-}
-function encrypt(plaintext) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", machineKey(), iv);
-  const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `${iv.toString("base64")}:${tag.toString("base64")}:${enc.toString("base64")}`;
-}
-function decrypt(blob) {
-  const [ivB64, tagB64, dataB64] = String(blob).split(":");
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    machineKey(),
-    Buffer.from(ivB64, "base64")
-  );
-  decipher.setAuthTag(Buffer.from(tagB64, "base64"));
-  const dec = Buffer.concat([
-    decipher.update(Buffer.from(dataB64, "base64")),
-    decipher.final()
-  ]);
-  return dec.toString("utf8");
-}
-function readStore() {
-  const path = configFilePath();
-  if (!existsSync(path)) return {};
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) || {};
-  } catch {
-    return {};
-  }
-}
-function writeStore(store) {
-  const path = configFilePath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(store, null, 2), "utf8");
-  try {
-    chmodSync(path, 384);
-  } catch {
-  }
-}
-var keyOf = (service, account) => `${service} ${account}`;
-var Entry = class {
-  service;
-  account;
-  constructor(service, account) {
-    this.service = service;
-    this.account = account;
-  }
-  getPassword() {
-    if (selectBackend() === "native") {
-      return new NativeEntry(this.service, this.account).getPassword();
-    }
-    const store = readStore();
-    const blob = store[keyOf(this.service, this.account)];
-    if (!blob) return null;
-    try {
-      return decrypt(blob);
-    } catch {
-      return null;
-    }
-  }
-  setPassword(password) {
-    if (selectBackend() === "native") {
-      new NativeEntry(this.service, this.account).setPassword(password);
-      return;
-    }
-    const store = readStore();
-    store[keyOf(this.service, this.account)] = encrypt(String(password));
-    writeStore(store);
-  }
-  deletePassword() {
-    if (selectBackend() === "native") {
-      return new NativeEntry(this.service, this.account).deletePassword();
-    }
-    const store = readStore();
-    const k = keyOf(this.service, this.account);
-    if (!(k in store)) return false;
-    delete store[k];
-    writeStore(store);
-    return true;
-  }
-};
-function credentialBackend() {
-  return selectBackend();
-}
-
-// src/credentials.ts
+import { dirname, join, delimiter } from "node:path";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
+var KEYRING_VERSION = "2.1.0";
 var SERVICE = "cloudradial-ucp-mcp";
-var KEY_PUBLIC = "public_key";
-var KEY_PRIVATE = "private_key";
-var KEY_BASE_URL = "base_url";
-var DEFAULT_BASE_URL = "https://api.us.cloudradial.com";
-function storedSource() {
-  return credentialBackend() === "native" ? "keychain" : "file";
+var ACCOUNT = "credentials-v2";
+var API_URLS = ["https://api.us.cloudradial.com", "https://api.eu.cloudradial.com"];
+function dataDirectory(env = process.env, platform = process.platform) {
+  if (platform === "win32") return join(env.APPDATA || join(homedir(), "AppData", "Roaming"), SERVICE);
+  if (platform === "darwin") return join(homedir(), "Library", "Application Support", SERVICE);
+  return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), SERVICE);
 }
-function entry(account) {
-  return new Entry(SERVICE, account);
+var runtimeDirectory = join(dataDirectory(), "runtime", `keyring-${KEYRING_VERSION}`);
+var runtimeRequire = createRequire(join(runtimeDirectory, "package.json"));
+function platformSupported(platform = process.platform, arch = process.arch) {
+  return { win32: ["x64", "arm64", "ia32"], darwin: ["x64", "arm64"], linux: ["x64", "arm64", "arm", "riscv64"], freebsd: ["x64"] }[platform]?.includes(arch) === true;
 }
-function readKeychain() {
+function entryConstructor() {
+  const installed = runtimeRequire("@napi-rs/keyring/package.json");
+  if (installed.version !== KEYRING_VERSION) throw new Error("Unexpected keyring dependency version. Run secure-storage setup again.");
+  const { Entry } = runtimeRequire("@napi-rs/keyring");
+  if (typeof Entry !== "function") throw new Error("Keyring dependency did not expose Entry.");
+  return Entry;
+}
+function nativeEntry(service, account) {
+  const Entry = entryConstructor();
+  return new Entry(service, account, { linux: { store: "secret-service" } });
+}
+function storageStatus() {
+  const status = {
+    platform: process.platform,
+    arch: process.arch,
+    keyringVersion: KEYRING_VERSION,
+    keychainReady: false,
+    legacyCredentialsDetected: existsSync(process.env.CLOUDRADIAL_CRED_FILE || join(dataDirectory(), "credentials.json"))
+  };
+  if (!platformSupported()) return { ...status, storageError: "This OS/architecture is not supported by the pinned keyring dependency." };
   try {
-    const pub = entry(KEY_PUBLIC).getPassword();
-    const priv = entry(KEY_PRIVATE).getPassword();
-    if (!pub || !priv) return null;
-    const baseUrl = entry(KEY_BASE_URL).getPassword() || DEFAULT_BASE_URL;
-    return { publicKey: pub, privateKey: priv, baseUrl };
+    nativeEntry(`${SERVICE}__probe`, "availability").getPassword();
+    return { ...status, keychainReady: true };
+  } catch {
+    return { ...status, storageError: "OS keychain is unavailable or its native dependency is missing. Run setup_secure_storage before entering keys." };
+  }
+}
+function createCredentialStore(makeEntry = nativeEntry) {
+  const getEntry = () => makeEntry(SERVICE, ACCOUNT);
+  return {
+    read() {
+      const payload = getEntry().getPassword();
+      if (payload) {
+        const data = JSON.parse(payload);
+        if (!data.publicKey || !data.privateKey || !API_URLS.includes(data.baseUrl)) throw new Error("Stored credentials are invalid. Re-run local setup.");
+        return data;
+      }
+      const publicKey = makeEntry(SERVICE, "public_key").getPassword();
+      const privateKey = makeEntry(SERVICE, "private_key").getPassword();
+      if (!publicKey || !privateKey) return null;
+      const baseUrl = makeEntry(SERVICE, "base_url").getPassword() || API_URLS[0];
+      return { publicKey, privateKey, baseUrl };
+    },
+    write(creds) {
+      const item = getEntry();
+      const previous = item.getPassword();
+      const payload = JSON.stringify(creds);
+      try {
+        item.setPassword(payload);
+        if (item.getPassword() !== payload) throw new Error("Keychain readback failed.");
+      } catch {
+        try {
+          previous === null ? item.deletePassword() : item.setPassword(previous);
+        } catch {
+        }
+        throw new Error("Could not save and verify credentials in the OS keychain. No file fallback was used.");
+      }
+    },
+    clear() {
+      for (const account of [ACCOUNT, "public_key", "private_key", "base_url"]) makeEntry(SERVICE, account).deletePassword();
+    }
+  };
+}
+var credentialStore = createCredentialStore();
+function verifyKeychain(makeEntry = nativeEntry) {
+  const item = makeEntry(`${SERVICE}__probe`, randomBytes(16).toString("hex"));
+  const value = randomBytes(32).toString("hex");
+  try {
+    item.setPassword(value);
+    if (item.getPassword() !== value) throw new Error("Keychain verification failed.");
+  } finally {
+    item.deletePassword();
+  }
+  if (item.getPassword() !== null) throw new Error("Keychain probe could not be deleted.");
+}
+function npmCliPath() {
+  const roots = [dirname(process.execPath), ...(process.env.PATH || "").split(delimiter)];
+  for (const root of roots) {
+    if (!root) continue;
+    for (const path of [join(root, "node_modules", "npm", "bin", "npm-cli.js"), join(root, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(root, "npm")]) {
+      try {
+        const resolved = realpathSync(path);
+        if (resolved.endsWith("npm-cli.js")) return resolved;
+      } catch {
+      }
+    }
+  }
+  throw new Error("npm is required for first-time keychain setup. Install Node.js with npm, then retry.");
+}
+var installation;
+async function installAndVerifyStorage() {
+  if (installation) return installation;
+  installation = (async () => {
+    if (!platformSupported()) throw new Error("Unsupported OS/architecture for the pinned keyring dependency. No keys were requested.");
+    try {
+      verifyKeychain();
+      return { ...storageStatus(), keychainVerified: true };
+    } catch {
+    }
+    const npmCli = npmCliPath();
+    mkdirSync(runtimeDirectory, { recursive: true, mode: 448 });
+    writeFileSync(join(runtimeDirectory, "package.json"), JSON.stringify({ name: "cloudradial-keyring-runtime", private: true, version: "1.0.0", dependencies: { "@napi-rs/keyring": KEYRING_VERSION } }, null, 2));
+    await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [npmCli, "install", "--prefix", runtimeDirectory, "--registry=https://registry.npmjs.org", "--ignore-scripts", "--include=optional", "--omit=dev", "--no-audit", "--no-fund", "--fetch-retries=0", "--fetch-timeout=30000"], { stdio: "ignore", windowsHide: true });
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error("Keyring installation timed out. No keys were requested."));
+      }, 12e4);
+      child.once("error", () => {
+        clearTimeout(timer);
+        reject(new Error("Could not start npm for keyring setup."));
+      });
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        code === 0 ? resolve() : reject(new Error("Keyring dependency installation failed. Check npm/network access and retry."));
+      });
+    });
+    try {
+      verifyKeychain();
+    } catch {
+      throw new Error("Native keyring installed, but OS keychain write/read/delete verification failed. Unlock your keychain; Linux requires a running Secret Service and D-Bus session. No keys were requested or saved.");
+    }
+    return { ...storageStatus(), keychainVerified: true };
+  })();
+  try {
+    return await installation;
+  } finally {
+    installation = void 0;
+  }
+}
+function loadCredentials(env = process.env) {
+  if (env.CLOUDRADIAL_PUBLIC_KEY && env.CLOUDRADIAL_PRIVATE_KEY) return { source: "env", creds: { publicKey: env.CLOUDRADIAL_PUBLIC_KEY, privateKey: env.CLOUDRADIAL_PRIVATE_KEY, baseUrl: env.CLOUDRADIAL_BASE_URL || API_URLS[0] } };
+  try {
+    const creds = credentialStore.read();
+    return creds ? { source: "keychain", creds } : null;
   } catch {
     return null;
   }
 }
-function readEnv() {
-  const pub = process.env.CLOUDRADIAL_PUBLIC_KEY;
-  const priv = process.env.CLOUDRADIAL_PRIVATE_KEY;
-  if (!pub || !priv) return null;
-  return {
-    publicKey: pub,
-    privateKey: priv,
-    baseUrl: process.env.CLOUDRADIAL_BASE_URL || DEFAULT_BASE_URL
-  };
-}
-function loadCredentials() {
-  const env = readEnv();
-  if (env) return { creds: env, source: "env" };
-  const kc = readKeychain();
-  if (kc) return { creds: kc, source: storedSource() };
-  return null;
-}
 function getStatus() {
-  const env = readEnv();
-  if (env) {
-    return {
-      configured: true,
-      source: "env",
-      baseUrl: env.baseUrl,
-      publicKeyHint: env.publicKey.slice(-4)
-    };
-  }
-  const kc = readKeychain();
-  if (kc) {
-    return {
-      configured: true,
-      source: storedSource(),
-      baseUrl: kc.baseUrl,
-      publicKeyHint: kc.publicKey.slice(-4)
-    };
-  }
-  return { configured: false, source: null, baseUrl: null, publicKeyHint: null };
-}
-function saveToKeychain(creds) {
-  entry(KEY_PUBLIC).setPassword(creds.publicKey);
-  entry(KEY_PRIVATE).setPassword(creds.privateKey);
-  entry(KEY_BASE_URL).setPassword(creds.baseUrl || DEFAULT_BASE_URL);
+  const loaded = loadCredentials();
+  return { configured: !!loaded, source: loaded?.source || null, baseUrl: loaded?.creds.baseUrl || null, publicKeyHint: loaded ? loaded.creds.publicKey.slice(-4) : null, ...storageStatus() };
 }
 function clearKeychain() {
-  for (const k of [KEY_PUBLIC, KEY_PRIVATE, KEY_BASE_URL]) {
-    try {
-      entry(k).deletePassword();
-    } catch {
-    }
-  }
+  credentialStore.clear();
 }
 
 // src/cloudradial-client.ts
@@ -15682,7 +15627,7 @@ function getAuthContext() {
   const loaded = loadCredentials();
   if (!loaded) {
     throw new Error(
-      "CloudRadial credentials not configured. Run the `configure_credentials` tool or use the setup wizard."
+      "CloudRadial credentials not configured. Ask to set up CloudRadial: run `setup_secure_storage`, then `configure_credentials` to open the local form."
     );
   }
   const { creds } = loaded;
@@ -16015,6 +15960,44 @@ function buildAssessmentXlsx(questions) {
   ]);
 }
 
+// src/setup-tools.ts
+import { spawn as spawn2 } from "node:child_process";
+import { existsSync as existsSync2 } from "node:fs";
+import { fileURLToPath } from "node:url";
+var active;
+function setupScript() {
+  const bundled = fileURLToPath(new URL("./setup-local.mjs", import.meta.url));
+  return existsSync2(bundled) ? bundled : fileURLToPath(new URL("./setup-local.js", import.meta.url));
+}
+async function openLocalCredentialSetup(args = {}) {
+  if ("public_key" in args || "private_key" in args) throw new Error("Do not send API keys through chat or MCP arguments. Use the local credential form.");
+  if (active?.exitCode === null) return { status: "already_open", message: "Finish or close the existing local credential form." };
+  if (getStatus().source === "env") throw new Error("Your client supplies environment-variable credentials. Those override the keychain; remove the override before local setup.");
+  await installAndVerifyStorage();
+  const child = spawn2(process.execPath, [setupScript()], { stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true });
+  active = child;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("Local setup launch timed out. No API keys were requested in chat."));
+    }, 25e3);
+    child.once("message", (message) => {
+      clearTimeout(timer);
+      child.unref();
+      resolve({ status: message.status, message: message.message });
+    });
+    child.once("error", () => {
+      clearTimeout(timer);
+      reject(new Error("Could not launch the local setup process."));
+    });
+    child.once("exit", () => {
+      active = void 0;
+      clearTimeout(timer);
+      reject(new Error("Local setup closed before launch completed."));
+    });
+  });
+}
+
 // src/tools.ts
 var RESOURCE_TYPES = Object.keys(RESOURCE_MAP);
 function str(args, key) {
@@ -16118,7 +16101,7 @@ var tools = [
   // -------------------------------------------------------------------------
   {
     name: "setup_status",
-    description: "Check whether CloudRadial credentials are configured. Returns {configured, source ('env'|'keychain'|'file'), baseUrl, publicKeyHint (last 4 chars of public key)}. Never returns the full keys. Call this BEFORE any other CloudRadial tool \u2014 if configured is false, run the setup wizard before doing CloudRadial work.",
+    description: "Check whether CloudRadial is configured. Returns configured, source (env or keychain), region, public-key suffix, platform, architecture, keychainReady, and legacyCredentialsDetected. Never returns API keys. If secure storage is missing, run setup_secure_storage, then configure_credentials to open the LOCAL form. Never collect keys through chat.",
     inputSchema: {
       type: "object",
       properties: {}
@@ -16126,54 +16109,20 @@ var tools = [
     handler: async () => getStatus()
   },
   {
+    name: "setup_secure_storage",
+    description: "Detect OS/CPU, install the pinned native keyring dependency for this machine, and verify a temporary OS-keychain write/read/delete. Run before requesting any credentials. Downloads from npm; never uses a credential-file fallback.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: async () => installAndVerifyStorage()
+  },
+  {
     name: "configure_credentials",
-    description: "Store CloudRadial API credentials securely on this computer \u2014 in the OS keychain if the native module is available (Windows Credential Manager / macOS Keychain / Linux libsecret), otherwise an AES-256-encrypted local file. Validates the keys with a live `/v2/odata/company/$count` call before saving \u2014 if validation fails, nothing is written. Existing credentials are overwritten. The keys are NEVER logged or returned by this tool.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        public_key: { type: "string", description: "CloudRadial API public key (from CloudRadial admin portal \u2192 Settings \u2192 API)" },
-        private_key: { type: "string", description: "CloudRadial API private key" },
-        base_url: { type: "string", description: "API base URL. Defaults to https://api.us.cloudradial.com (US). EU partners: https://api.eu.cloudradial.com" }
-      },
-      required: ["public_key", "private_key"]
-    },
-    handler: async (args) => {
-      const publicKey = requireStr(args, "public_key");
-      const privateKey = requireStr(args, "private_key");
-      const baseUrl = str(args, "base_url") || "https://api.us.cloudradial.com";
-      const authHeader = "Basic " + Buffer.from(`${publicKey}:${privateKey}`).toString("base64");
-      const testUrl = new URL("/v2/odata/company/$count", baseUrl).toString();
-      let resp;
-      try {
-        resp = await fetch(testUrl, {
-          method: "GET",
-          headers: { Authorization: authHeader, Accept: "application/json" }
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Network error reaching ${baseUrl}: ${msg}`);
-      }
-      if (resp.status === 401 || resp.status === 403) {
-        throw new Error(
-          `CloudRadial rejected those credentials (HTTP ${resp.status}). Double-check the public and private keys from your CloudRadial admin portal \u2192 Settings \u2192 API.`
-        );
-      }
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(`Validation call failed (HTTP ${resp.status}): ${body.slice(0, 200)}`);
-      }
-      saveToKeychain({ publicKey, privateKey, baseUrl });
-      const status = getStatus();
-      return {
-        success: true,
-        message: `Credentials validated and stored securely on this computer (${status.source === "keychain" ? "OS keychain" : "encrypted local file"}).`,
-        ...status
-      };
-    }
+    description: "Open a local browser form after OS-keychain verification. The user enters API keys locally; they are validated directly with CloudRadial and saved in the OS keychain. Takes NO API keys as arguments. Never ask the user to paste keys into chat. Check setup_status after the user finishes.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: async (args) => openLocalCredentialSetup(args)
   },
   {
     name: "clear_credentials",
-    description: "Delete stored CloudRadial credentials from this computer (OS keychain or encrypted local file). Does NOT affect environment variables \u2014 if creds were loaded from env vars, this is a no-op. Use to rotate keys or remove the configuration.",
+    description: "Delete CloudRadial credentials from the OS keychain. Environment-variable overrides and legacy encrypted files are unaffected.",
     inputSchema: {
       type: "object",
       properties: {}
@@ -16685,7 +16634,7 @@ var tools = [
   },
   {
     name: "assessment_import",
-    description: "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`). Without `assessment_id`, the upload creates a new assessment (the API has no other create) and the tool finds its id by title. With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
+    description: "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`; the API currently accepts this call but copies no questions, so prefer the portal). Without `assessment_id`, the upload creates a new assessment (the API has no other create) and the tool finds its id by title. With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16716,7 +16665,13 @@ var tools = [
         const body = { assessmentId: existingId, templateId };
         if (str(args, "apply_to")) body.applyTo = str(args, "apply_to");
         const r2 = await callApi("POST", "/v2/assessment/import-template", void 0, body);
-        return { assessmentId: existingId, created: false, source: `template ${templateId}`, result: r2.data };
+        return {
+          assessmentId: existingId,
+          created: false,
+          source: `template ${templateId}`,
+          result: r2.data,
+          warning: "CloudRadial accepted the template import, but in testing this endpoint copied no questions. Ask the user to confirm in the portal, or apply the template there."
+        };
       }
       let title = str(args, "title");
       if (existingId === void 0 && !title) throw new Error("title is required when creating a new assessment.");
@@ -16734,7 +16689,7 @@ var tools = [
         count = questions.length;
       } else {
         if (!/\.xlsx$/i.test(filePath)) throw new Error("file_path must be an .xlsx file.");
-        bytes = new Uint8Array(readFileSync2(filePath));
+        bytes = new Uint8Array(readFileSync(filePath));
       }
       const data = JSON.stringify({ name: title, assessmentId: existingId ?? 0, type, companyId });
       const r = await callApiMultipart("/v2/assessment/upload", data, {
@@ -16797,7 +16752,7 @@ var tools = [
 
 // src/index.ts
 var server = new Server(
-  { name: "cloudradial-ucp", version: "0.1.0" },
+  { name: "cloudradial-ucp", version: "2.6.3" },
   { capabilities: { tools: {} } }
 );
 var toolByName = new Map(tools.map((t) => [t.name, t]));

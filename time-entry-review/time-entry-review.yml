@@ -266,6 +266,9 @@ definition:
             medium   = @('Medium', 'Medium')
             low      = @('Low', 'Low')
         }
+        # ConnectWise status names tried, in order, when the board's statuses can't be read (Set-PsaCwStatusByName).
+        $PsaState.CwClosedNames = @('Closed (resolved)', 'Closed', 'Completed', 'Resolved')
+        $PsaState.CwOpenNames = @('New', 'New (not responded)', 'Open', 'In Progress')
         # The first item whose label property matches one of the patterns, in pattern order.
         function Select-PsaByLabel {
             param($Items, [string]$LabelProp, [string[]]$Patterns)
@@ -801,6 +804,33 @@ definition:
             }
         }
 
+        # A ConnectWise board's active statuses, or $null when the API member's role can't read them (401 or 403).
+        # Other errors still throw.
+        function Get-PsaCwBoardStatuses {
+            param([string]$BoardId)
+            try { return @(Invoke-Psa GET "/service/boards/$BoardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true }) }
+            catch {
+                if ([string]$_.Exception.Message -notmatch '\(HTTP 40[13]\)') { throw }
+                Add-PsaWarning "ConnectWise wouldn't list the statuses of board $BoardId, so ticket statuses were set by name. Give the API member's security role Inquire access to service board statuses (System > Table Setup) to pick them exactly."
+                return $null
+            }
+        }
+        # Sets a ConnectWise ticket's status by name, trying -Names in order, and confirms it by reading the ticket back.
+        # A name the board doesn't have is refused by ConnectWise and changes nothing, so the next one is tried.
+        function Set-PsaCwStatusByName {
+            param([string]$Id, [string]$BoardId, [string[]]$Names, [string]$Want)
+            $tried = New-Object System.Collections.ArrayList
+            foreach ($n in @($Names | Where-Object { $_ })) {
+                $null = $tried.Add($n)
+                try { $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'status'; value = @{ name = $n } }) }
+                catch { if ([string]$_.Exception.Message -match '\(HTTP 400\)') { continue }; throw }
+                $now = [string](Get-PsaPath (Invoke-Psa GET "/service/tickets/$Id") 'status.name')
+                if ($now.Trim() -ieq $n.Trim()) { return $now }
+                throw "ConnectWise accepted the status '$n' for ticket $Id, but the ticket now shows '$now'."
+            }
+            throw "Couldn't set a $Want status on ConnectWise ticket ${Id}: the statuses of board ${BoardId} can't be read (no permission), and the board has none of: $(@($tried) -join ', '). Set the status name, or give the API member's security role Inquire access to service board statuses."
+        }
+
         # Closes or reopens a ticket. -StatusName picks an exact status (a name, or an id for HaloPSA and Kaseya BMS).
         # Returns the status that was set.
         function Set-PsaStatus {
@@ -813,7 +843,12 @@ definition:
                     $t = Invoke-Psa GET "/service/tickets/$Id"
                     $boardId = Get-PsaPath $t 'board.id'
                     if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
-                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })
+                    $all = Get-PsaCwBoardStatuses $boardId
+                    if ($null -eq $all) {
+                        # The API member can't read the board's statuses: set the status by name instead.
+                        $names = if ($StatusName) { @($StatusName) } elseif ($closed) { $PsaState.CwClosedNames } else { $PsaState.CwOpenNames }
+                        return (Set-PsaCwStatusByName -Id $Id -BoardId $boardId -Names $names -Want $(if ($StatusName) { "'$StatusName'" } else { $State }))
+                    }
                     $st = $null
                     if ($StatusName) { $st = @($all | Where-Object { [string](Get-PsaProp $_ 'name') -eq $StatusName }) | Select-Object -First 1 }
                     elseif ($closed) { $cl = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true }); $st = Select-PsaByLabel $cl 'name' @('(?i)resolved', '(?i)closed', '(?i)complete', '.') }
@@ -1290,7 +1325,12 @@ definition:
                     $t = Invoke-Psa GET "/service/tickets/$Id"
                     $boardId = Get-PsaPath $t 'board.id'
                     if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
-                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true -and (Get-PsaProp $_ 'closedStatus') -eq $true -and ([string](Get-PsaProp $_ 'name')).Trim() -ine $NotStatus })
+                    $board = Get-PsaCwBoardStatuses $boardId
+                    if ($null -eq $board) {
+                        $names = @($PsaState.CwClosedNames | Where-Object { $_ -ine $NotStatus })
+                        return (Set-PsaCwStatusByName -Id $Id -BoardId $boardId -Names $names -Want 'closed')
+                    }
+                    $all = @($board | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true -and ([string](Get-PsaProp $_ 'name')).Trim() -ine $NotStatus })
                     $st = Select-PsaByLabel $all 'name' @('(?i)^\W*closed\W*$', '(?i)closed', '(?i)complete', '(?i)resolved', '.')
                     if (-not $st) { throw "ConnectWise board $boardId has no closed status other than '$NotStatus'. Set the closing status name." }
                     return (Set-PsaStatus -Id $Id -StatusName ([string](Get-PsaProp $st 'name')))
@@ -2559,6 +2599,9 @@ definition:
             medium   = @('Medium', 'Medium')
             low      = @('Low', 'Low')
         }
+        # ConnectWise status names tried, in order, when the board's statuses can't be read (Set-PsaCwStatusByName).
+        $PsaState.CwClosedNames = @('Closed (resolved)', 'Closed', 'Completed', 'Resolved')
+        $PsaState.CwOpenNames = @('New', 'New (not responded)', 'Open', 'In Progress')
         # The first item whose label property matches one of the patterns, in pattern order.
         function Select-PsaByLabel {
             param($Items, [string]$LabelProp, [string[]]$Patterns)
@@ -3094,6 +3137,33 @@ definition:
             }
         }
 
+        # A ConnectWise board's active statuses, or $null when the API member's role can't read them (401 or 403).
+        # Other errors still throw.
+        function Get-PsaCwBoardStatuses {
+            param([string]$BoardId)
+            try { return @(Invoke-Psa GET "/service/boards/$BoardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true }) }
+            catch {
+                if ([string]$_.Exception.Message -notmatch '\(HTTP 40[13]\)') { throw }
+                Add-PsaWarning "ConnectWise wouldn't list the statuses of board $BoardId, so ticket statuses were set by name. Give the API member's security role Inquire access to service board statuses (System > Table Setup) to pick them exactly."
+                return $null
+            }
+        }
+        # Sets a ConnectWise ticket's status by name, trying -Names in order, and confirms it by reading the ticket back.
+        # A name the board doesn't have is refused by ConnectWise and changes nothing, so the next one is tried.
+        function Set-PsaCwStatusByName {
+            param([string]$Id, [string]$BoardId, [string[]]$Names, [string]$Want)
+            $tried = New-Object System.Collections.ArrayList
+            foreach ($n in @($Names | Where-Object { $_ })) {
+                $null = $tried.Add($n)
+                try { $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'status'; value = @{ name = $n } }) }
+                catch { if ([string]$_.Exception.Message -match '\(HTTP 400\)') { continue }; throw }
+                $now = [string](Get-PsaPath (Invoke-Psa GET "/service/tickets/$Id") 'status.name')
+                if ($now.Trim() -ieq $n.Trim()) { return $now }
+                throw "ConnectWise accepted the status '$n' for ticket $Id, but the ticket now shows '$now'."
+            }
+            throw "Couldn't set a $Want status on ConnectWise ticket ${Id}: the statuses of board ${BoardId} can't be read (no permission), and the board has none of: $(@($tried) -join ', '). Set the status name, or give the API member's security role Inquire access to service board statuses."
+        }
+
         # Closes or reopens a ticket. -StatusName picks an exact status (a name, or an id for HaloPSA and Kaseya BMS).
         # Returns the status that was set.
         function Set-PsaStatus {
@@ -3106,7 +3176,12 @@ definition:
                     $t = Invoke-Psa GET "/service/tickets/$Id"
                     $boardId = Get-PsaPath $t 'board.id'
                     if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
-                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true })
+                    $all = Get-PsaCwBoardStatuses $boardId
+                    if ($null -eq $all) {
+                        # The API member can't read the board's statuses: set the status by name instead.
+                        $names = if ($StatusName) { @($StatusName) } elseif ($closed) { $PsaState.CwClosedNames } else { $PsaState.CwOpenNames }
+                        return (Set-PsaCwStatusByName -Id $Id -BoardId $boardId -Names $names -Want $(if ($StatusName) { "'$StatusName'" } else { $State }))
+                    }
                     $st = $null
                     if ($StatusName) { $st = @($all | Where-Object { [string](Get-PsaProp $_ 'name') -eq $StatusName }) | Select-Object -First 1 }
                     elseif ($closed) { $cl = @($all | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true }); $st = Select-PsaByLabel $cl 'name' @('(?i)resolved', '(?i)closed', '(?i)complete', '.') }
@@ -3583,7 +3658,12 @@ definition:
                     $t = Invoke-Psa GET "/service/tickets/$Id"
                     $boardId = Get-PsaPath $t 'board.id'
                     if (Test-PsaBlank $boardId) { throw "ConnectWise ticket $Id has no board, so its statuses can't be read." }
-                    $all = @(Invoke-Psa GET "/service/boards/$boardId/statuses?pageSize=200" | Where-Object { $null -ne $_ -and (Get-PsaProp $_ 'inactive') -ne $true -and (Get-PsaProp $_ 'closedStatus') -eq $true -and ([string](Get-PsaProp $_ 'name')).Trim() -ine $NotStatus })
+                    $board = Get-PsaCwBoardStatuses $boardId
+                    if ($null -eq $board) {
+                        $names = @($PsaState.CwClosedNames | Where-Object { $_ -ine $NotStatus })
+                        return (Set-PsaCwStatusByName -Id $Id -BoardId $boardId -Names $names -Want 'closed')
+                    }
+                    $all = @($board | Where-Object { (Get-PsaProp $_ 'closedStatus') -eq $true -and ([string](Get-PsaProp $_ 'name')).Trim() -ine $NotStatus })
                     $st = Select-PsaByLabel $all 'name' @('(?i)^\W*closed\W*$', '(?i)closed', '(?i)complete', '(?i)resolved', '.')
                     if (-not $st) { throw "ConnectWise board $boardId has no closed status other than '$NotStatus'. Set the closing status name." }
                     return (Set-PsaStatus -Id $Id -StatusName ([string](Get-PsaProp $st 'name')))

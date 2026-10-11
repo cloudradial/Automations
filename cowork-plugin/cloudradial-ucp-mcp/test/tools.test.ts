@@ -178,5 +178,13 @@ route = (c) => c.url.pathname.endsWith("$count") ? { status: 200, text: "4" }
 r = await run("company_overview", { company_id: "9" });
 check("company_overview lists are arrays", r.ok && Array.isArray((r.value as any).recentArticles) && (r.value as any).counts.userCount === 4, JSON.stringify(r.value));
 
+// --- template import returns a warning -----------------------------------------
+route = () => ({ status: 200, text: "" });
+{
+  const tr = await run("assessment_import", { company_id: 1, assessment_id: 5, template_id: 9, apply_to: "server" });
+  check("template import posts to import-template", tr.ok && last().url.pathname === "/v2/assessment/import-template", tr.error);
+  check("template import warns that nothing may be copied", tr.ok && typeof (tr.value as any).warning === "string");
+}
+
 console.log(failed ? `${failed} FAILED` : "ALL PASSED");
 process.exit(failed ? 1 : 0);

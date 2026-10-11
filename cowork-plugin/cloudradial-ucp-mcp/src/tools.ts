@@ -805,7 +805,7 @@ export const tools: ToolDefinition[] = [
     description:
       "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. " +
       "Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), " +
-      "`file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`). " +
+      "`file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`; the API currently accepts this call but copies no questions, so prefer the portal). " +
       "Without `assessment_id`, the upload creates a new assessment (the API has no other create) and the tool finds its id by title. " +
       "With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. " +
       "Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
@@ -842,7 +842,13 @@ export const tools: ToolDefinition[] = [
         const body: Record<string, unknown> = { assessmentId: existingId, templateId };
         if (str(args, "apply_to")) body.applyTo = str(args, "apply_to");
         const r = await callApi("POST", "/v2/assessment/import-template", undefined, body);
-        return { assessmentId: existingId, created: false, source: `template ${templateId}`, result: r.data };
+        return {
+          assessmentId: existingId,
+          created: false,
+          source: `template ${templateId}`,
+          result: r.data,
+          warning: "CloudRadial accepted the template import, but in testing this endpoint copied no questions. Ask the user to confirm in the portal, or apply the template there.",
+        };
       }
 
       // The upload sets the assessment's title from `name`, so keep the current title on a refresh.

@@ -1,6 +1,6 @@
 # CloudRadial Codex Plugin
 
-Connect Codex to your CloudRadial UCP Portal and work in plain English: look up clients, set up portals, build content and training, create assessments, and report across every client. It's the same plugin as the [Claude plugin](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp), with the same 15 skills and 18 tools, packaged so Codex can load it too.
+Connect Codex to your CloudRadial UCP Portal and work in plain English: look up clients, set up portals, build content and training, create assessments, and report across every client. It's the same plugin as the [Claude plugin](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp), with the same 15 skills and 19 tools, packaged so Codex can load it too.
 
 ## Install
 
@@ -21,7 +21,7 @@ Start a new conversation and type:
 
 > **Setup the CloudRadial Plugin**
 
-You'll be asked for your CloudRadial **public key** and **private key** (in your CloudRadial admin portal under **Settings → API**). They're checked with a live call, then stored encrypted on your computer.
+Setup checks your computer's keychain first, then opens a local browser form for your CloudRadial **public key** and **private key** (in your CloudRadial admin portal under **Settings → API**) and your region. The keys are checked with a live call and saved in your OS keychain. **Don't paste API keys into chat.**
 
 ### Step 4: Try something
 
@@ -142,25 +142,27 @@ You in Codex
      |
      |  MCP tool calls (stdio)
      v
-server/index.mjs  (bundled in the plugin, pure JavaScript, no install step)
+server/index.mjs  (bundled in the plugin, pure JavaScript)
      |
-     |  HTTPS with HTTP Basic auth (keys from the local encrypted store or environment variables)
+     |  HTTPS with HTTP Basic auth (keys from the OS keychain or environment variables)
      v
 CloudRadial API V2
 ```
 
-The plugin is built from the same source as the Claude plugin. The tool reference is in the [Claude plugin README](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp#mcp-tools-18).
+The plugin is built from the same source as the Claude plugin. The tool reference is in the [Claude plugin README](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp#mcp-tools-19).
 
 ## Credentials and security
 
-- **Stored encrypted on your computer**, never in plain text. If the OS keychain module is available, the keychain is used instead.
-- **Checked before saving.** Setup makes a live API call first, so bad keys are never stored.
-- **Privacy:** keys pasted in chat appear briefly in the conversation. To keep them out of the conversation, set `CLOUDRADIAL_PUBLIC_KEY` and `CLOUDRADIAL_PRIVATE_KEY` as environment variables instead.
-- **EU partners:** use `https://api.eu.cloudradial.com` during setup.
+- **Stored in your OS keychain only:** Windows Credential Manager, macOS Keychain, or Linux Secret Service. There's no encrypted-file fallback.
+- **Keys stay out of chat.** You enter them in a local form on 127.0.0.1, protected by a one-time token and a ten-minute expiry.
+- **Checked before saving.** The keys go straight to CloudRadial for a live check, so bad keys are never stored.
+- **First-time setup needs npm** to install the keychain helper for your OS and CPU.
+- **Environment variables** `CLOUDRADIAL_PUBLIC_KEY` and `CLOUDRADIAL_PRIVATE_KEY` still work and take precedence.
+- **EU partners:** pick Europe as the region in the setup form.
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 18 or newer, with npm for first-time setup
 - CloudRadial API public and private keys
 
 ## Documentation

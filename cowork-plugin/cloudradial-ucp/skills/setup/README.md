@@ -1,16 +1,20 @@
-# Setup
+# Set up CloudRadial
 
-> First-run plugin setup: validate API keys, store them securely, and tour what's possible.
+Ask **Set up CloudRadial** after installing the plugin. Setup installs the native
+keyring dependency for your machine, verifies your OS keychain, and opens a local
+browser form. Enter your CloudRadial API keys there, select US or EU, and click
+**Connect**. Keys never need to enter chat.
 
-**Say this:**
+The same plugin file works across supported Windows, macOS, and Linux machines.
+Node.js 18+ is required; first-time dependency setup also needs npm and internet
+access. Linux requires a persistent Secret Service and D-Bus desktop session.
 
-```
-Setup the CloudRadial Plugin
-```
+If secure storage is unavailable, setup stops before collecting keys. There is
+no encrypted-file fallback. See [deployment guidance](../../DEPLOYMENT.md) for
+storage locations, local-terminal setup, and troubleshooting.
 
-<img src="images/skill-result.png" alt="Setup confirmation" width="100%">
-
----
+Try **Is the CloudRadial plugin configured?** to check status, or **Clear my
+CloudRadial credentials** to remove saved OS-keychain entries.
 
 ## Example prompts
 
@@ -22,12 +26,14 @@ Copy a prompt, swap in your own company names or IDs, and paste it into Claude o
 `Plugin` · `Local only` · **Tested**
 
 ```
-Setup the CloudRadial Plugin. Check whether keys are already saved, ask me for
-my API keys and region, validate them against CloudRadial before saving, and
-confirm the connection works before we do anything else.
+Set up the CloudRadial plugin. Check that my computer's keychain works, open the
+local form so I can enter my API keys outside this chat, and confirm the
+connection works before we do anything else.
 ```
 
-**What you get:** Keys validated and stored in your OS keychain, region set, and a live connection check.
+**What you get:** Keys saved in your OS keychain, region set, and a live connection check.
+
+**Good to know:** Keys never go into chat. If the keychain isn't available, setup stops before asking for keys.
 
 ### Check the connection
 `Plugin` · `Local only` · **Tested**
@@ -37,7 +43,7 @@ Is the CloudRadial plugin configured? Tell me which region it's pointed at and
 whether the keys work, without showing the keys.
 ```
 
-**What you get:** Configured or not, region, and the last four characters of the public key.
+**What you get:** Configured or not, region, and whether CloudRadial accepted the keys.
 
 ### Take a tour
 `Plugin` · `Read-only` · **Tested**
@@ -53,22 +59,10 @@ I could ask it today, and what still has to be done in the portal.
 `Plugin` · `Local only` · **Not yet tested**
 
 ```
-I need to rotate my CloudRadial API keys. Clear the saved credentials, then
-set up the new ones and check the connection again.
+I need to rotate my CloudRadial API keys. Clear the saved credentials, then open
+the local form so I can enter the new ones, and check the connection again.
 ```
 
-**What you get:** Old keys removed, new keys validated and saved.
+**What you get:** Old keys removed from the keychain, new keys saved and checked.
 
 **Good to know:** Run this last in a session: the plugin can't reach CloudRadial until the new keys are in.
-
-## Good to know
-
-- **One setup per machine:** keys are stored in the OS keychain and shared across Claude Desktop, Claude Code, and Cowork.
-- **EU partners** should pick `https://api.eu.cloudradial.com` as the base URL during setup.
-- **Keys briefly appear in chat.** For more privacy, set environment variables instead.
-- **All other skills depend on this one.** If anything errors with 401/403, run setup again.
-
-## Related skills
-
-- Every other skill requires setup first.
-- See [DEPLOYMENT.md](../../DEPLOYMENT.md) for install instructions across Claude Desktop, Claude Code, and Cowork.

@@ -6,7 +6,7 @@ Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Cla
 
 You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer** — they're stored securely on your computer and shared automatically with every Claude app on that machine.
 
-> **Requirement:** Node.js must be installed and on your PATH. The plugin runs its MCP server locally by launching `node` — there's nothing to host and no service to deploy.
+> **Requirement:** Node.js 18+ must be installed and on your PATH. First-time secure-storage setup also requires npm and network access to npm. The plugin runs its MCP server locally by launching `node` — there's nothing to host and no service to deploy.
 
 ### Step 1 — Install the plugin
 
@@ -31,7 +31,7 @@ Start a new conversation and type:
 
 > **Setup the CloudRadial Plugin**
 
-Claude will ask for your CloudRadial **public key** and **private key** (find them in your CloudRadial admin portal under **Settings → API**), check that they work, and store them securely on your computer (encrypted at rest). You only do this once per computer.
+Setup first detects your OS/CPU, installs the matching native keyring dependency, and verifies OS-keychain storage. It then opens a local browser form where you enter your CloudRadial public/private keys from **Settings → API** and select US or EU. Keys are validated directly with CloudRadial and saved in your OS keychain. **Do not paste API keys into chat.**
 
 ### Step 3 — Try something
 
@@ -134,12 +134,12 @@ You in Claude
      v
 Bundled MCP server  (server/index.mjs, inside the plugin, spawned by your Claude app)
      |
-     |  HTTPS with HTTP Basic auth (keys from local encrypted store or env vars)
+     |  HTTPS with HTTP Basic auth (keys from OS keychain or existing env vars)
      v
 CloudRadial API V2
 ```
 
-There is **no Azure Function**, no Chrome extension, no separate server to deploy, no npm install at runtime. The plugin contains the MCP server itself — an esbuild-bundled JavaScript file (**pure JS, no native binaries — one build runs on every OS**). The plugin's `.mcp.json` tells your Claude app how to launch it with `node`; installing the plugin auto-registers the server. Credentials are stored **encrypted on your computer** (or supplied via environment variables — see below).
+The MCP server ships as portable JavaScript in one plugin file. First-time setup installs the pinned `@napi-rs/keyring@2.1.0` native dependency matching the current OS/CPU/libc into a per-user runtime cache. Native binaries are not bundled in the plugin. Credentials are stored in the OS keychain; there is no encrypted-file fallback. Existing environment-variable configurations remain supported.
 
 ## Skills (15)
 
@@ -147,7 +147,7 @@ Each skill below has a partner-facing **README** with full example prompts, what
 
 | Skill | What it does |
 |-------|--------------|
-| **[setup](skills/setup/README.md)** | First-run plugin setup + branded welcome tour — validates and stores credentials encrypted on your computer |
+| **[setup](skills/setup/README.md)** | Native keyring setup and verification, local credential form, and connection validation |
 | **[portal-setup](skills/portal-setup/README.md)** | Walk a client through their 5-session CloudRadial implementation; 8 CSA pain-point playbooks; content seeding |
 | **[portal-lookup](skills/portal-lookup/README.md)** | Look up companies, check portal status, assess LOMG lifecycle stage, prepare for meetings |
 | **[content-management](skills/content-management/README.md)** | Create and manage articles, catalogs, menus, courses, lessons, and assessments |
@@ -163,14 +163,15 @@ Each skill below has a partner-facing **README** with full example prompts, what
 | **[service-management](skills/service-management/README.md)** | Services, service installs, domains, products, coverage analysis |
 | **[reporting-admin](skills/reporting-admin/README.md)** | Archives, certificates, company groups, quickstarts, media, replacement tokens, raw API access |
 
-## MCP tools (18)
+## MCP tools (19)
 
-The MCP server exposes 18 tools to Claude:
+The MCP server exposes 19 tools:
 
 | Tool | Purpose |
 |------|---------|
 | `setup_status` | Check whether credentials are configured (returns hint only, never the keys) |
-| `configure_credentials` | Validate and store credentials (encrypted, on your computer) |
+| `setup_secure_storage` | Install the matching native keyring dependency and verify OS-keychain write/read/delete |
+| `configure_credentials` | Open the local credential form; takes no API keys as arguments |
 | `clear_credentials` | Wipe stored credentials |
 | `search_companies` | Search companies by partial name |
 | `company_overview` | Full snapshot: details, counts, recent articles + feedback |
@@ -196,10 +197,13 @@ Composite-key resources (need extra args on get/update/delete): `archive_item`, 
 
 ## Credentials & security
 
-- **Stored encrypted on your computer.** Credentials are written to a local file encrypted with AES-256-GCM, using a key derived from your machine and user account — never in plain text, and usable only on the same computer under the same user. (If the optional OS-keychain module `@napi-rs/keyring` is present in the server, the plugin uses the OS keychain instead — Windows Credential Manager / macOS Keychain / Linux libsecret.)
-- **Validated before storage.** The setup wizard makes a live `GET /v2/odata/company/$count` call before writing anything — bad keys never get saved.
-- **Privacy note for setup.** Because setup happens in chat, your keys appear briefly in the conversation transcript when you paste them. If you prefer the keys never enter the LLM context, set `CLOUDRADIAL_PUBLIC_KEY` and `CLOUDRADIAL_PRIVATE_KEY` environment variables in your MCP client config instead — the server picks those up first and skips the local store entirely. For shared or CI hosts you can also set `CLOUDRADIAL_CRED_SECRET` (adds key-derivation entropy) or `CLOUDRADIAL_CRED_FILE` (relocates the encrypted store).
-- **To rotate:** re-run the setup wizard (it overwrites the stored entry). To remove: ask Claude to run `clear_credentials`.
+- **OS keychain required for local setup.** Windows Credential Manager, macOS Keychain, or persistent Linux Secret Service. Setup verifies a temporary write/read/delete before requesting API keys. Linux kernel-keyutils fallback is disabled.
+- **Keys stay outside chat.** Enter them in the browser form bound to 127.0.0.1. A random token, origin/host checks, no-store responses, and a ten-minute expiry protect the local session. No keys or session URL are returned through MCP.
+- **Validated before storage.** The helper sends keys directly to the selected US/EU CloudRadial API over HTTPS. Failed validation leaves existing stored credentials unchanged.
+- **No encrypted-file fallback.** Older encrypted files are detected but are not read, migrated, or deleted automatically. Re-enter keys locally to move to OS-keychain storage.
+- **Dependency setup.** The exact keyring version is pinned; npm selects the matching native package. Installation disables lifecycle scripts and requires network access only when the dependency is missing or needs repair.
+- **Existing environment overrides.** CLOUDRADIAL_PUBLIC_KEY / CLOUDRADIAL_PRIVATE_KEY remain supported and take precedence. Local setup asks you to remove that client override before replacing it; never paste values into chat.
+- **Rotate or remove.** Re-open local setup to rotate. clear_credentials removes OS-keychain entries only, leaving environment overrides and legacy files untouched.
 
 ## Things to know
 

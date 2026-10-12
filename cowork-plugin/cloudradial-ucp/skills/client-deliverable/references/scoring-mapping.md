@@ -4,7 +4,7 @@ How to answer "what's our DMI?" without inventing a number.
 
 ## The competitor scores
 
-### ScalePad Lifecycle Manager X — Digital Maturity Index
+### ScalePad Lifecycle Manager X: Digital Maturity Index
 
 An opaque proprietary **300 to 850 "credit rating"** scale, higher is better,
 deliberately not a transparent percentage. Scorecards add partner-defined health-scored
@@ -38,7 +38,7 @@ peer benchmarking.
 There is **no single maturity index**. There are two scores, running in opposite
 directions, and the roll-up that would unify them is not built.
 
-### Assessment score — the honest analog
+### Assessment score: the honest analog
 
 Answers map to fixed weights via `AssessmentValueType`:
 
@@ -79,7 +79,7 @@ partners to calendar it.
 Runs compare across the last four and export to XLSX. That comparison is the
 quarter-over-quarter trend a DMI is actually used for.
 
-### Policy risk score — opposite polarity
+### Policy risk score: opposite polarity
 
 Computed on read, not written by the scan:
 

@@ -1,6 +1,6 @@
 ---
 name: assessment-compliance
-description: "Review and analyze CloudRadial security assessments, compliance status, and flexible assets, and export completed assessment data across multiple customers into executive-level summaries. Use when the user says \"check assessments\", \"compliance status\", \"security assessment\", \"flexible assets\", \"asset types\", \"how is [company] doing on compliance\", \"assessment results\", \"audit compliance\", or needs to list, review, or analyze assessments and flexible asset data across CloudRadial portals. ALSO use for cross-customer reporting: \"export assessments\", \"assessment export\", \"pull assessment data\", \"assessment executive summary\", \"compliance summary across customers\", \"roll up assessment scores\", \"how are all my clients doing on assessments\", \"consolidate assessment results\", \"assessment gaps report\", or \"which customers have the most gaps\" — even if the user does not say the word \"API\".\n"
+description: "Review and analyze CloudRadial security assessments, compliance status, and flexible assets, and export completed assessment data across multiple customers into executive-level summaries. Use when the user says \"check assessments\", \"compliance status\", \"security assessment\", \"flexible assets\", \"asset types\", \"how is [company] doing on compliance\", \"assessment results\", \"audit compliance\", or needs to list, review, or analyze assessments and flexible asset data across CloudRadial portals. ALSO use for cross-customer reporting: \"export assessments\", \"assessment export\", \"pull assessment data\", \"assessment executive summary\", \"compliance summary across customers\", \"roll up assessment scores\", \"how are all my clients doing on assessments\", \"consolidate assessment results\", \"assessment gaps report\", or \"which customers have the most gaps\": even if the user does not say the word \"API\".\n"
 metadata:
   version: "1.1.0"
 ---
@@ -13,7 +13,7 @@ and export completed assessment results across all customers into an executive s
 ## How to Call the API
 
 All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin
-auto-registers the server via `.mcp.json` — no Azure Function, no Chrome extension, no local config
+auto-registers the server via `.mcp.json`: no Azure Function, no Chrome extension, no local config
 file.
 
 ### Before any tool call
@@ -25,7 +25,7 @@ to the `setup` skill before doing CloudRadial work.
 
 | Tool | Purpose | Required args |
 |------|---------|---------------|
-| `setup_status` | Check credential state (never returns the keys) | — |
+| `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
@@ -53,9 +53,9 @@ Max page is 200 and the API returns no next-page link, so keep incrementing `ski
 
 - Articles use `subject` (not `title`).
 - Courses use `name` (not `title`). Assessments use `title` (not `name`).
-- `archive_item` composite key — pass `archive_id` and `id`.
-- `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
-- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- `archive_item` composite key: pass `archive_id` and `id`.
+- `service_install` composite key: pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property`: get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
 - OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
@@ -151,7 +151,7 @@ For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references
    schema (`name`, `kind`, `required`)
 3. List flexible assets filtered by `flexibleAssetTypeId` and/or `companyId`; the values are in
    `traitsJson`
-4. Summarize the data — useful for understanding what custom tracking is in place
+4. Summarize the data: useful for understanding what custom tracking is in place
 
 For a cross-company compliance roll-up, use the export workflow below.
 
@@ -235,7 +235,7 @@ higher-risk customers. True per-question gap counts require question-level detai
 
 ## Workflow
 
-### Step 1 — Pull completed assessments across all companies
+### Step 1: Pull completed assessments across all companies
 
 Call `list_resources` with `resource_type: "assessment"` and **no** `companyId` filter so it spans
 every company. Filter to completed runs and page through everything:
@@ -262,14 +262,14 @@ Keep `assessmentId`, `companyId`, `title`, `type`, `status`, `totalScore`, `maxS
 `compliantScore`, `dateConducted` for every row. For pure counts (e.g. "how many completed this
 quarter"), use `count_resources` with the same filter instead.
 
-### Step 2 — Resolve company names
+### Step 2: Resolve company names
 
 `assessment` rows carry `companyId`, not the customer name. Build a lookup with `list_resources`,
 `resource_type: "company"`, `select: "companyId,name"` (page as needed), and map `companyId -> name`.
 For a single known customer, `search_companies` is fine. Join the map so every row has a readable
 **Customer name**.
 
-### Step 3 — Question-level detail (individual responses, failed answers, tickets)
+### Step 3: Question-level detail (individual responses, failed answers, tickets)
 
 The `assessment` list resource does not expose per-question responses, failed/"Not Compliant"
 answers, or linked PSA tickets. Two paths:
@@ -278,9 +278,9 @@ answers, or linked PSA tickets. Two paths:
    v2 API, so don't probe `raw_api_call` for one.
 2. **Portal export.** The reliable source is the per-run **Excel export** (Compliance > Assessments > run > three-dot menu > Export)
    or the **Word report** (run > Recommendations > Report). Tell the user rather than inventing
-   question-level figures from the summary score — see the honesty note below.
+   question-level figures from the summary score: see the honesty note below.
 
-### Step 4 — Build the outputs
+### Step 4: Build the outputs
 
 **A. Cross-customer roll-up spreadsheet** (use the `xlsx` skill). One row per completed assessment:
 Customer, Assessment name, Completion date, Status, Score, Gaps (from Step 3 if available, else blank
@@ -291,7 +291,7 @@ average/median score, lowest-scoring customers, and total gaps if obtained.
 text). Structure:
 
 ```
-# Assessment Executive Summary — [period]
+# Assessment Executive Summary: [period]
 ## Overview            (totals, customers assessed, overall score posture)
 ## Gaps Identified      (count + severity; lowest-scoring areas/customers)
 ## Most Common Issues   (recurring themes; requires question-level detail)

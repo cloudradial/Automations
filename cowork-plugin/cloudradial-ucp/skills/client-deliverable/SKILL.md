@@ -15,8 +15,8 @@ Partners migrating from ScalePad Lifecycle Manager X (formerly Lifecycle Insight
 myITprocess, or vCIOToolbox arrive with a PDF and ask "can CloudRadial do this."
 Three quarters of it ships today. Be precise about which quarter does not.
 
-For a **ScalePad Lifecycle Manager** PDF specifically — including how to read the PDF and
-how to write its asset/EOL data back onto the real endpoints — follow
+For a **ScalePad Lifecycle Manager** PDF specifically: including how to read the PDF and
+how to write its asset/EOL data back onto the real endpoints: follow
 `${CLAUDE_PLUGIN_ROOT}/skills/client-deliverable/references/scalepad-lifecycle-mapping.md`
 alongside the sequence below.
 
@@ -24,7 +24,7 @@ alongside the sequence below.
 AutomationAI workflow, **ScalePad → CloudRadial Lifecycle Sync**, in the AutomationAI
 Workflows marketplace. It reads the ScalePad Lifecycle Manager *API* and writes straight
 into CloudRadial (endpoints enriched by serial; initiatives and contracts as Planner
-items) — no PDF, on a schedule, with a `plan`/`apply` safety gate. Use **this skill** for a
+items): no PDF, on a schedule, with a `plan`/`apply` safety gate. Use **this skill** for a
 guided, human-in-the-loop one-off build; use **that workflow** for recurring, unattended
 sync across a portfolio.
 
@@ -63,9 +63,9 @@ mixes deliverable items into the template library.
 
 Never write blind.
 
-- `list_resources` `product` filtered `companyId eq {id}` — existing Planner items and
+- `list_resources` `product` filtered `companyId eq {id}`: existing Planner items and
   the category names in use
-- `list_resources` `endpoint` filtered `companyId eq {id}` — the asset inventory
+- `list_resources` `endpoint` filtered `companyId eq {id}`: the asset inventory
 - `count_resources` on both for scale
 
 Report what is already there and ask before touching it. Adding alongside is the safe
@@ -95,22 +95,22 @@ Fields that justify a refresh recommendation, all verified present on the live e
 | `isEncrypted`, `antiVirus`, `tpmVersion` | Security posture, feeds Policies |
 
 Note the field names differ from some older docs: the entity uses
-`companyEndpointId`, `expirationDate`, `os` and `lastCheckIn` — not `endpointId`,
+`companyEndpointId`, `expirationDate`, `os` and `lastCheckIn`: not `endpointId`,
 `warrantyExpirationDate`, `operatingSystem` or `lastSeen`. OData returns enum fields
 (`enclosure`, `windows11Readiness`, `platformType`) as names, not numbers.
 
 ### 3b. Sync ScalePad asset/EOL data into the endpoints (Lifecycle Manager imports)
 
 When the source is a ScalePad Lifecycle Manager PDF, do not stop at a table in the report
-body. ScalePad holds EOL dates, serials, and models the portal often lacks — write them
+body. ScalePad holds EOL dates, serials, and models the portal often lacks: write them
 onto the real endpoints so they drive `WarrantyExpirationPolicy` and future reports.
 
 Match each asset to an endpoint by `serialNumber`; enrich the match (write the missing
 `expirationDate`, never clobber RMM-supplied fields) or, with the operator's confirmation,
 create a tagged placeholder endpoint for assets not yet in the portal. `expirationDate` is
-directly writable — use `update_resource` (PATCH, the default) / `create_resource`, **not**
+directly writable: use `update_resource` (PATCH, the default) / `create_resource`, **not**
 `endpoint_update_warranty` (that does an async manufacturer lookup and ignores the ScalePad
-date). Rows with no serial cannot be safely matched or created — skip them. Values with no
+date). Rows with no serial cannot be safely matched or created: skip them. Values with no
 endpoint field (a purchase date, a source tag) go on as custom properties:
 `create_resource` with `resource_type: "endpoint_custom_property"`, `serial_number`, and
 `data: { name, value, dataType }`. If the serial is on more than one endpoint (a copy under a deleted company is common), these calls fail with HTTP 400; check with `filter: "serialNumber eq '<serial>'"` first.
@@ -148,7 +148,7 @@ The essentials:
 - `productType: 2` plus `estimatedStartDate` and `estimatedEndDate` puts the item on the Timeline.
   The dates decide where it shows; `scheduledQuarter` stays 0 even on scheduled items, so never
   read the schedule from `scheduledQuarter`
-- `productType: 0` means Not Scheduled — the right home for an overdue backlog that has
+- `productType: 0` means Not Scheduled: the right home for an overdue backlog that has
   recognised budget but no agreed date
 - `projectUnits` x `projectUnitPrice` is one-time investment; `monthlyUnits` x
   `monthlyUnitPrice` is recurring
@@ -173,7 +173,7 @@ was used in the item `body` so the number is defensible in the meeting.
 `monthlyUnitCost` and `projectUnitCost` are partner-internal and never shown to clients.
 Populate them if the partner wants margin visible in their own exports.
 
-### 7. Build the Report Layout — UI only
+### 7. Build the Report Layout: UI only
 
 `/api/partner/layout` is not exposed on the public v2 API. Confirm this rather than
 guessing, then hand the user exact clicks:

@@ -1,13 +1,13 @@
 # ScalePad Lifecycle Manager → CloudRadial
 
 How to turn a **ScalePad Lifecycle Manager X** (formerly Lifecycle Insights) client
-deliverable PDF into CloudRadial data: Planner roadmap, priced budget, and — the part
-ScalePad hides from the portal — the **asset/EOL data written onto the actual
+deliverable PDF into CloudRadial data: Planner roadmap, priced budget, and, the part
+ScalePad hides from the portal, the **asset/EOL data written onto the actual
 endpoints** via the API.
 
 This reference was written against a real export (a UK client's deliverable, shown here as `Deliverable-Contoso Ltd`, 213
 users, 45 assets, GBP). Field names and section shapes below are from that document.
-Not every ScalePad export carries every section — this one had **no DMI/maturity page
+Not every ScalePad export carries every section: this one had **no DMI/maturity page
 and no Microsoft-licenses page**, it is a hardware-lifecycle + budget deliverable. For
 the maturity-score question see `scoring-mapping.md`; for the Planner write mechanics
 see `planner-item-schema.md`. This file does not repeat those.
@@ -30,16 +30,16 @@ budget lines. Two known extraction artifacts, both harmless if you know them:
   (linked assets)** section, which lists the same asset cleanly. When the two disagree,
   trust the Appendix.
 
-If a row still can't be resolved from text, render that one page to an image to read it
-— do not guess a serial. A wrong serial writes EOL data onto the wrong device.
+If a row still can't be resolved from text, render that one page to an image to read it.
+Do not guess a serial. A wrong serial writes EOL data onto the wrong device.
 
 ## Section map
 
 | ScalePad section | Contains | CloudRadial home |
 |---|---|---|
-| Overview | User count, asset count, open-initiative count, account team | Context only — read with `count_resources` |
-| Goals | Named goals with a target period (e.g. "Cyber Essentials Certification", H1 2026) | Planner **Category**, or an **Assessment**. No Goal object — see `client-deliverable` SKILL |
-| Roadmap | Initiatives per quarter, each with a narrative, asset count, investment, status | Planner **items** (`product`) — `planner-item-schema.md` |
+| Overview | User count, asset count, open-initiative count, account team | Context only: read with `count_resources` |
+| Goals | Named goals with a target period (e.g. "Cyber Essentials Certification", H1 2026) | Planner **Category**, or an **Assessment**. No Goal object: see `client-deliverable` SKILL |
+| Roadmap | Initiatives per quarter, each with a narrative, asset count, investment, status | Planner **items** (`product`): `planner-item-schema.md` |
 | Appendix (linked assets) | Per initiative: asset Name, Model, Serial, Purchased date | `body` asset table **and** endpoint sync (below) |
 | Budget | Per quarter, split **Hardware / Initiatives / Contracts**, plus an **Overdue** bucket | Planner items priced per line; **no native chart** |
 
@@ -64,7 +64,7 @@ needs `companyId`, `productCategoryId`, `category`, `summary`, `datePublished` a
 - **Hardware** lines (one asset each, e.g. `CON-LT46 … £1,000.00`) → Planner items in a
   `Hardware Refresh` category, one-time `projectUnitPrice`. In the example every workstation is
   budgeted at £1,000.
-- **Initiatives** lines repeat the roadmap initiatives — map them once, do not
+- **Initiatives** lines repeat the roadmap initiatives: map them once, do not
   double-count.
 - **Contracts** lines (`CON001 Elevate Support … Active … £11,375.04`, M365, Exchange
   Online, etc.) → Planner items with `monthlyUnitPrice`, `status: 40` (Completed) and
@@ -73,20 +73,20 @@ needs `companyId`, `productCategoryId`, `category`, `summary`, `datePublished` a
   renewal quarter, and state which convention you used in `body`.
 - The **Overdue** bucket (example: 13 workstations, £13,000) → `productType: 0` (Not
   Scheduled): recognised budget, no agreed date.
-- The stacked budget **chart** does not reproduce — CloudRadial has no multi-year budget
+- The stacked budget **chart** does not reproduce: CloudRadial has no multi-year budget
   chart. Say so; report the quarter totals instead (example: Q1 £27,670 · Q2 £27,709 ·
   Q3 £24,709 · Q4 £18,649 · Q1'27 £17,498 · Overdue £13,000).
 
-## Endpoint sync — the part ScalePad keeps in the PDF
+## Endpoint sync: the part ScalePad keeps in the PDF
 
 ScalePad computes an **EOL date** and holds serial/model/manufacturer/purchase data that
 is frequently **absent from the CloudRadial endpoint** (Signal-only and discovered rows
 carry little; even RMM rows often lack a warranty/EOL date). The value here is writing
 that data back onto the real endpoints so it drives `WarrantyExpirationPolicy`, refresh
-cohorts, and future reports — not just a static table in a report body.
+cohorts, and future reports: not just a static table in a report body.
 
 `expirationDate` **is a writable field on the `Endpoint` body**, so ScalePad's EOL date
-can be written directly. Do **not** use `endpoint_update_warranty` for this — that tool
+can be written directly. Do **not** use `endpoint_update_warranty` for this: that tool
 triggers an async *manufacturer* lookup and will ignore (and can overwrite) the ScalePad
 date. Write `expirationDate` yourself.
 
@@ -99,8 +99,8 @@ date. Write `expirationDate` yourself.
 | Manufacturer (`Lenovo`) | `manufacturer` | |
 | Model (`E15 Gen 4 … Type 21ED`) | `model` | |
 | EOL (`2024-03-02`) | `expirationDate` | The high-value write |
-| Purchased (`29/07/2021`) | — no native purchase field | Store as a custom property (`create_resource` `endpoint_custom_property`, `serial_number`, `data: { name: "ScalePad Purchase Date", value: "2021-07-29", dataType: "Date" }`) or leave; do **not** shoehorn into `manufacturedDate` |
-| Age (`3.5`) | — derived, do not write | CloudRadial derives age from `cpuDate`/`biosDate` |
+| Purchased (`29/07/2021`) | No native purchase field | Store as a custom property (`create_resource` `endpoint_custom_property`, `serial_number`, `data: { name: "ScalePad Purchase Date", value: "2021-07-29", dataType: "Date" }`) or leave; do **not** shoehorn into `manufacturedDate` |
+| Age (`3.5`) | Derived, do not write | CloudRadial derives age from `cpuDate`/`biosDate` |
 
 ### Match, then update or create
 
@@ -110,7 +110,7 @@ For each asset row **that has a serial**:
    `companyId eq {id} and serialNumber eq '{serial}'`. Serials are case-sensitive in the
    data; match exactly.
 2. **If found → enrich, don't clobber.** Read the row first. Only write fields the portal
-   is missing (almost always `expirationDate`; add `manufacturer`/`model` only if blank —
+   is missing (almost always `expirationDate`; add `manufacturer`/`model` only if blank;
    never overwrite RMM-supplied values with ScalePad's). Use the shipped tool:
    `update_resource` `endpoint` (PATCH is the default), `id: {companyEndpointId}`,
    `data: { "expirationDate": "2024-03-02" }`. (`update_resource` addresses endpoints by
@@ -122,7 +122,7 @@ For each asset row **that has a serial**:
    but the `Endpoint` body **requires** fields ScalePad does not provide: `companyId`,
    `name`, `platformType` (`EndpointPlatformType`), `enclosure` (`EnclosureType`),
    `isWindowsDefenderRunning`, `lastOSUpdate`, `lastCheckIn`. You must synthesize those.
-   Recommended: only the operator's call — confirm before bulk-creating, tag created rows
+   Recommended: only the operator's call. Confirm before bulk-creating, tag created rows
    (`tagNumber`, or a custom property `Source = ScalePad` written with `create_resource`
    `endpoint_custom_property` and the new row's `serial_number`) so they are distinguishable from
    RMM-managed endpoints, and set `lastCheckIn`/`lastOSUpdate` to the extract date, not a
@@ -131,7 +131,7 @@ For each asset row **that has a serial**:
    `${CLAUDE_PLUGIN_ROOT}/references/api-reference.md`). OData returns these enums as names
    (`enclosure: "Laptop"`), so you can't read the integer off an existing endpoint. Ask the
    operator to confirm the codes, or create one test endpoint and check which name it reads
-   back as, before bulk-creating — this file does not hard-code those codes.
+   back as, before bulk-creating: this file does not hard-code those codes.
 
 Rows **without a serial** (the example had several: `CON-LT52`, `CON-LT48`, `CON-LT50`,
 `CON-LT43/44/45`) cannot be safely matched or created. Leave them out of the sync and
@@ -148,7 +148,7 @@ show going forward.
 
 This reference is for a guided, human-in-the-loop build from a PDF. To run the same
 mapping unattended, use the **ScalePad → CloudRadial Lifecycle Sync** AutomationAI
-workflow (AutomationAI Workflows marketplace). It skips the PDF entirely — reading the
+workflow (AutomationAI Workflows marketplace). It skips the PDF entirely: reading the
 ScalePad Lifecycle Manager *API* (`hardware-lifecycles`, `initiatives`, `contracts`) and
 writing into CloudRadial via the `cloudradial-v2-endpoints` / `-services` extensions, with
 a `plan`/`apply` safety gate and platform approval on every write. Same field map as here;

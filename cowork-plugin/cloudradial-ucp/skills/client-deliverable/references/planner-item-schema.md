@@ -5,7 +5,7 @@ portal via `create_resource` / `list_resources` on `resource_type: "product"`.
 
 ## Required on create
 
-`create_resource` rejects the call without these. `category` is the trap — it is the
+`create_resource` rejects the call without these. `category` is the trap: it is the
 category **name string**, and it is required *in addition to* the numeric
 `productCategoryId`. Omitting it returns:
 

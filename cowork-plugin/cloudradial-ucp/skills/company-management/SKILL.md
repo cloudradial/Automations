@@ -1,6 +1,6 @@
 ---
 name: company-management
-description: "Manage CloudRadial companies — create, update, delete, and organize them into groups. Use when the user says \"list all companies\", \"create a new company\", \"add a company\", \"update company settings\", \"change account manager\", \"set portal branding\", \"company groups\", \"add company to group\", \"remove company from group\", \"audit company settings\", \"which companies have no logo\", \"compare companies\", \"cross-company report\", \"how many companies do I have\", or needs to create, modify, organize, or audit companies across their CloudRadial portal. Also use when the user wants to manage company-level settings like messaging, branding, territory, or delegated admin status.\n"
+description: "Manage CloudRadial companies: create, update, delete, and organize them into groups. Use when the user says \"list all companies\", \"create a new company\", \"add a company\", \"update company settings\", \"change account manager\", \"set portal branding\", \"company groups\", \"add company to group\", \"remove company from group\", \"audit company settings\", \"which companies have no logo\", \"compare companies\", \"cross-company report\", \"how many companies do I have\", or needs to create, modify, organize, or audit companies across their CloudRadial portal. Also use when the user wants to manage company-level settings like messaging, branding, territory, or delegated admin status.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -69,7 +69,7 @@ Fields available via `list_resources` (OData, more limited):
 | `psaKey` | int | PSA numeric key |
 | `endpointCount` | int | Number of managed endpoints |
 
-For more detail (territory, account manager), use `get_resource` with the company ID — the OData listing only returns the limited field set.
+For more detail (territory, account manager), use `get_resource` with the company ID: the OData listing only returns the limited field set.
 
 ### company_group
 
@@ -77,7 +77,7 @@ Groups for organizing companies. Fields: `companyGroupId`, `group` (the group na
 
 ### company_group_company
 
-Membership records linking companies to groups. This is a **composite-key resource** — use `company_group_id` + `company_id` for get/delete operations.
+Membership records linking companies to groups. This is a **composite-key resource**: use `company_group_id` + `company_id` for get/delete operations.
 
 Fields: `companyGroupId`, `companyId`, `partnerId`.
 
@@ -92,7 +92,7 @@ Fields: `companyGroupId`, `companyId`, `partnerId`.
 
 1. Call `create_resource` with `resource_type: "company"` and `data` containing at minimum `name`.
 2. Optional fields: `territory`, `accountManager`, `psaKey`, `psaIdentifier`, `partnerId`. Branding and messaging are set in the portal afterwards.
-3. After creation, the company will need users added and content seeded — suggest the user follow up with the portal-setup skill.
+3. After creation, the company will need users added and content seeded: suggest the user follow up with the portal-setup skill.
 
 ### Update company settings
 

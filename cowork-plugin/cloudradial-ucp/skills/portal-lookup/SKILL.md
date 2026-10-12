@@ -11,7 +11,7 @@ Retrieve and summarize a client's CloudRadial portal status using the CloudRadia
 
 ## How to Call the API
 
-All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json` — no Azure Function, no Chrome extension, no local config file.
+All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json`: no Azure Function, no Chrome extension, no local config file.
 
 ### Before any tool call
 
@@ -21,7 +21,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 | Tool | Purpose | Required args |
 |------|---------|---------------|
-| `setup_status` | Check credential state (never returns the keys) | — |
+| `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
@@ -45,9 +45,9 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 
 - Articles use `subject` (not `title`).
 - Courses use `name` (not `title`).
-- `archive_item` composite key — pass `archive_id` and `id`.
-- `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
-- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- `archive_item` composite key: pass `archive_id` and `id`.
+- `service_install` composite key: pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property`: get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
 - OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
@@ -68,10 +68,10 @@ If you need to check exact field names, required parameters, or available filter
 2. **Pull the overview.** Call `company_overview` with `company_id: "<id>"`. This returns company details, user count, endpoint count, recent articles, and recent feedback in a single batch.
 
 3. **Enrich with counts.** Call `count_resources` for these resource types filtered by companyId:
-   - `article` — total KB articles
-   - `course` — total training courses
-   - `assessment` — total assessments (add `and type eq 20` to the filter: type 20 rows are what the portal lists; 10 are templates and 30 are runs)
-   - `feedback` — total feedback entries
+   - `article`: total KB articles
+   - `course`: total training courses
+   - `assessment`: total assessments (add `and type eq 20` to the filter; type 20 rows are what the portal lists; 10 are templates and 30 are runs)
+   - `feedback`: total feedback entries
 
 4. **Pull recent feedback.** Call `list_resources` with `resource_type: "feedback"`, `filter: "companyId eq <id>"`, `orderby: "dateCreated desc"`, `top: "5"`, `select: "feedbackId,feedbackRating,feedbackRatingNumber,feedbackComment,userEmail,userFirstName,ticketSubject,dateCreated"`. `feedbackRating` comes back as an enum name, not a number.
 
@@ -100,7 +100,7 @@ When presenting a company overview or meeting prep, ALWAYS render a visual widge
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
     <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#D4A574,#C4956A);display:flex;align-items:center;justify-content:center;font-weight:500;font-size:16px;color:#fff;flex-shrink:0">C</div>
     <div>
-      <h1 style="font-size:20px;font-weight:500;margin:0;color:var(--color-text-primary)">Meeting prep — {COMPANY_NAME}</h1>
+      <h1 style="font-size:20px;font-weight:500;margin:0;color:var(--color-text-primary)">Meeting prep: {COMPANY_NAME}</h1>
       <p style="font-size:13px;color:var(--color-text-secondary);margin:0">Account Manager: {ACCOUNT_MANAGER}</p>
     </div>
     <span style="margin-left:auto;background:var(--color-background-success);color:var(--color-text-success);font-size:12px;font-weight:500;padding:4px 12px;border-radius:var(--border-radius-md)">{LOMG_STAGE}</span>
@@ -169,22 +169,22 @@ When presenting a company overview or meeting prep, ALWAYS render a visual widge
 - **Land**: `var(--color-background-warning)` / `var(--color-text-warning)`
 - **Onboard**: `var(--color-background-info)` / `var(--color-text-info)`
 - **Manage**: `var(--color-background-success)` / `var(--color-text-success)`
-- **Grow**: Use purple — `background:#EEEDFE;color:#534AB7`
+- **Grow**: Use purple: `background:#EEEDFE;color:#534AB7`
 
 ### Widget title
 Use `company_meeting_prep` as the widget title (snake_case, specific to this company).
 
 ### Important
 - Always call `show_widget` with `read_me` first if this is the first widget in the conversation.
-- Populate every section with real data — never use placeholder values.
+- Populate every section with real data: never use placeholder values.
 - If a section has no data (e.g., no feedback), show "No feedback submitted yet" instead of hiding the section.
-- Keep talking points specific and actionable based on the actual data — don't use generic advice.
+- Keep talking points specific and actionable based on the actual data: don't use generic advice.
 
 ## Context: CloudRadial LOMG Framework
 
 This lookup supports the Land, Onboard, Manage, Grow (LOMG) lifecycle. When presenting results, frame them in terms of where the client is in their journey:
 
-- **Land**: Company exists but minimal setup — few users, no articles, no endpoints
-- **Onboard**: Active implementation — articles being created, users being added, catalogs being configured
-- **Manage**: Operational portal — consistent endpoint count, regular feedback, published articles
-- **Grow**: Mature usage — courses deployed, assessments running, high user engagement
+- **Land**: Company exists but minimal setup (few users, no articles, no endpoints)
+- **Onboard**: Active implementation (articles being created, users being added, catalogs being configured)
+- **Manage**: Operational portal (consistent endpoint count, regular feedback, published articles)
+- **Grow**: Mature usage (courses deployed, assessments running, high user engagement)

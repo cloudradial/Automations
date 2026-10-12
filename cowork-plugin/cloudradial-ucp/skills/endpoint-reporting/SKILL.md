@@ -11,7 +11,7 @@ List, count, and analyze managed endpoints (devices) across CloudRadial portals 
 
 ## How to Call the API
 
-All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json` — no Azure Function, no Chrome extension, no local config file.
+All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json`: no Azure Function, no Chrome extension, no local config file.
 
 ### Before any tool call
 
@@ -21,7 +21,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 | Tool | Purpose | Required args |
 |------|---------|---------------|
-| `setup_status` | Check credential state (never returns the keys) | — |
+| `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
@@ -45,9 +45,9 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 
 - Articles use `subject` (not `title`).
 - Courses use `name` (not `title`).
-- `archive_item` composite key — pass `archive_id` and `id`.
-- `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
-- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- `archive_item` composite key: pass `archive_id` and `id`.
+- `service_install` composite key: pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property`: get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
 - OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
@@ -94,24 +94,24 @@ For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references
 ### Endpoint Inventory for a Company
 
 1. Count endpoints filtered by companyId with `count_resources`
-2. List endpoints with key fields — `list_resources` with `resource_type: "endpoint"`, `filter: "companyId eq 42"`, `select: "companyEndpointId,name,os,manufacturer,model,lastCheckIn"`
+2. List endpoints with key fields: `list_resources` with `resource_type: "endpoint"`, `filter: "companyId eq 42"`, `select: "companyEndpointId,name,os,manufacturer,model,lastCheckIn"`
 3. Paginate with `top: "200"` and `skip` until a page returns fewer than 200 rows
 4. Summarize: total count, OS distribution, manufacturer breakdown, and devices whose `lastCheckIn` is old (their data may be stale)
 
 ### Warranty Expiration Report
 
-1. List endpoints for a company with warranty fields — `select: "companyEndpointId,name,serialNumber,expirationDate,manufacturer,model"`
+1. List endpoints for a company with warranty fields: `select: "companyEndpointId,name,serialNumber,expirationDate,manufacturer,model"`
 2. Group by warranty status: expired, expiring within 30/60/90 days, current, unknown (blank `expirationDate`)
 3. Flag critical items (expired or expiring soon)
 4. Present as a prioritized list with counts per category
-5. To refresh warranty data for a specific endpoint, call `endpoint_update_warranty` with its `serial_number` (async — CloudRadial fetches in the background)
+5. To refresh warranty data for a specific endpoint, call `endpoint_update_warranty` with its `serial_number` (async: CloudRadial fetches in the background)
 
 A filter such as `expirationDate lt 2026-06-01T00:00:00Z` narrows the list server-side; if the API rejects it, pull the rows and compare dates client-side. Blank `expirationDate` means unknown, not expired.
 
 ### Application Audit
 
 1. Identify the target endpoint(s) and their `companyEndpointId`
-2. List `endpoint_application` records filtered by endpointId — `list_resources` with `resource_type: "endpoint_application"`, `filter: "endpointId eq 789"`
+2. List `endpoint_application` records filtered by endpointId: `list_resources` with `resource_type: "endpoint_application"`, `filter: "endpointId eq 789"`
 3. Group by publisher or application name
 4. Flag outdated versions or unauthorized software if criteria are provided
 

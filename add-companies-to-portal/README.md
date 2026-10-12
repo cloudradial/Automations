@@ -45,5 +45,5 @@ Each company needs a `name`; `accountManager`, `city`, `territory`, `psaIdentifi
 
 ## Notes
 
-- Every create is **approval-gated** (`autoApprove: false`) — each company waits in the Inbox until you approve it. Set the Agent node to `autoApprove: true` only for a trusted unattended run.
+- Every create is **approval-gated** (`autoApprove: false`); each company waits in the Inbox until you approve it. Set the Agent node to `autoApprove: true` only for a trusted unattended run.
 - **Requires:** AutomationAI + the CloudRadial UCP Assistant agent + the `cloudradial-v2-companies` extension.

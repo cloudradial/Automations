@@ -1,14 +1,14 @@
 # CloudRadial UCP Plugin for Claude
 
-Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Claude in plain English — look up companies, build training courses, create assessments, refresh device warranty info, and manage 30+ other CloudRadial resource types. No scripts, no separate server to deploy, no copy-pasting API keys around.
+Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Claude in plain English: look up companies, build training courses, create assessments, refresh device warranty info, and manage 30+ other CloudRadial resource types. No scripts, no separate server to deploy, no copy-pasting API keys around.
 
-## Install — start here
+## Install: start here
 
-You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer** — they're stored securely on your computer and shared automatically with every Claude app on that machine.
+You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer**; they're stored securely on your computer and shared automatically with every Claude app on that machine.
 
-> **Requirement:** Node.js 18+ must be installed and on your PATH. First-time secure-storage setup also requires npm and network access to npm. The plugin runs its MCP server locally by launching `node` — there's nothing to host and no service to deploy.
+> **Requirement:** Node.js 18+ must be installed and on your PATH. First-time secure-storage setup also requires npm and network access to npm. The plugin runs its MCP server locally by launching `node`, so there's nothing to host and no service to deploy.
 
-### Step 1 — Install the plugin
+### Step 1: Install the plugin
 
 **From the community marketplace (recommended):**
 
@@ -17,7 +17,7 @@ You install this once **for each Claude app you use** (Cowork, Claude Code, or C
 /plugin install cloudradial-ucp@claude-community
 ```
 
-**Or install the single plugin file directly.** Download `cloudradial-ucp.plugin` from the [**releases page**](https://github.com/cloudradial/Automations/releases). It's one file that works on macOS, Windows, and Linux — then add it to your Claude app:
+**Or install the single plugin file directly.** Download `cloudradial-ucp.plugin` from the [**releases page**](https://github.com/cloudradial/Automations/releases). It's one file that works on macOS, Windows, and Linux; then add it to your Claude app:
 
 - **Cowork:** drag the file into the Cowork window, and approve it when asked.
 - **Claude Desktop:** drag the file into the app (or add it from the plugin gallery), then **quit and reopen** Claude Desktop.
@@ -25,7 +25,7 @@ You install this once **for each Claude app you use** (Cowork, Claude Code, or C
 
 > Using more than one of these apps? Install it into each one.
 
-### Step 2 — Turn it on
+### Step 2: Turn it on
 
 Start a new conversation and type:
 
@@ -33,7 +33,7 @@ Start a new conversation and type:
 
 Setup first detects your OS/CPU, installs the matching native keyring dependency, and verifies OS-keychain storage. It then opens a local browser form where you enter your CloudRadial public/private keys from **Settings → API** and select US or EU. Keys are validated directly with CloudRadial and saved in your OS keychain. **Do not paste API keys into chat.**
 
-### Step 3 — Try something
+### Step 3: Try something
 
 Pick anything from **What you can do** below, or just ask Claude in your own words.
 
@@ -193,7 +193,7 @@ The MCP server exposes 19 tools:
 
 `company`, `user`, `application_user`, `article`, `endpoint`, `catalog`, `catalog_question`, `assessment`, `feedback`, `service`, `service_install`, `domain`, `course`, `course_enrollment`, `course_lesson`, `course_lesson_history`, `menu`, `product`, `archive_item`, `certificate`, `company_group`, `company_group_company`, `quickstart`, `flexible_asset`, `flexible_asset_type`, `flexible_asset_field`, `endpoint_application`, `endpoint_custom_property`, `media`, `token`.
 
-Composite-key resources (need extra args on get/update/delete): `archive_item`, `service_install`, `company_group_company`, `course_lesson_history`. `application_user` has no OData listing — get by id only.
+Composite-key resources (need extra args on get/update/delete): `archive_item`, `service_install`, `company_group_company`, `course_lesson_history`. `application_user` has no OData listing; get by id only.
 
 ## Credentials & security
 
@@ -213,9 +213,9 @@ Composite-key resources (need extra args on get/update/delete): `archive_item`, 
 
 ## Documentation
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** — Install steps for Claude Desktop, Claude Code, and Cowork, plus troubleshooting.
-- **[references/api-reference.md](references/api-reference.md)** — CloudRadial API V2 field-level schema reference.
-- **MCP server source:** [`../cloudradial-ucp-mcp/`](../cloudradial-ucp-mcp) — the Node project that powers the tools.
+- **[DEPLOYMENT.md](DEPLOYMENT.md)**: Install steps for Claude Desktop, Claude Code, and Cowork, plus troubleshooting.
+- **[references/api-reference.md](references/api-reference.md)**: CloudRadial API V2 field-level schema reference.
+- **MCP server source:** [`../cloudradial-ucp-mcp/`](../cloudradial-ucp-mcp): the Node project that powers the tools.
 
 ## License
 

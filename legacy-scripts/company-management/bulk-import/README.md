@@ -1,17 +1,17 @@
-# Bulk Company Import — Import Companies from CSV
+# Bulk Company Import: Import Companies from CSV
 
 ## Why This Matters
 
-When a Partner manages hundreds or thousands of client companies, adding them one at a time through the CloudRadial portal isn't practical. If the Partner doesn't use a supported PSA integration that auto-syncs companies, there was no bulk option — until now.
+When a Partner manages hundreds or thousands of client companies, adding them one at a time through the CloudRadial portal isn't practical. If the Partner doesn't use a supported PSA integration that auto-syncs companies, there was no bulk option until now.
 
 This script lets any Partner import dozens, hundreds, or thousands of companies from a simple CSV file. No PSA integration required, no manual data entry. It's the same pattern as the [Bulk User Upload](../../user-management/bulk-upload/) script, adapted for the company endpoint.
 
 ## Who This Is For
 
-- **Partners with large client lists** — Importing 50, 500, or 5,000+ companies in one run instead of clicking through the portal.
-- **Partners without a supported PSA** — No ConnectWise, Datto, or HaloPSA? You can still bulk-provision companies.
-- **New Partner onboarding** — When a Partner signs up and needs their entire client roster loaded into CloudRadial on day one.
-- **Migration scenarios** — Moving from another platform and need to seed CloudRadial with your existing company list.
+- **Partners with large client lists**: Importing 50, 500, or 5,000+ companies in one run instead of clicking through the portal.
+- **Partners without a supported PSA**: No ConnectWise, Datto, or HaloPSA? You can still bulk-provision companies.
+- **New Partner onboarding**: When a Partner signs up and needs their entire client roster loaded into CloudRadial on day one.
+- **Migration scenarios**: Moving from another platform and need to seed CloudRadial with your existing company list.
 
 ## What You'll Need
 
@@ -23,14 +23,14 @@ This script lets any Partner import dozens, hundreds, or thousands of companies 
 
 Your CSV file must contain one required column:
 
-- **name** — Company name (checked for duplicates; case-insensitive)
+- **name**: Company name (checked for duplicates; case-insensitive)
 
 Optional columns (include them only if needed):
 
-- **psaKey** — PSA key for the company (integer, e.g. ConnectWise company rec ID)
-- **psaIdentifier** — PSA identifier string (e.g. the company slug in your PSA)
-- **territory** — Territory assigned to the company
-- **accountManager** — Account manager name for the company
+- **psaKey**: PSA key for the company (integer, e.g. ConnectWise company rec ID)
+- **psaIdentifier**: PSA identifier string (e.g. the company slug in your PSA)
+- **territory**: Territory assigned to the company
+- **accountManager**: Account manager name for the company
 
 Use the provided `companies-template.csv` as a starting point. Export your company list from your PSA, a spreadsheet, or another source and map it to these columns.
 
@@ -59,13 +59,13 @@ Before importing for real, test the script in dry-run mode with the `-WhatIf` fl
 .\Import-CloudRadialCompanies.ps1 -CsvPath ".\companies.csv" -WhatIf
 ```
 
-This shows you exactly what would happen — which companies would be created, which would be skipped (because they already exist), and which would fail — without actually making any changes.
+This shows you exactly what would happen: which companies would be created, which would be skipped (because they already exist), and which would fail, without actually making any changes.
 
 Look for:
 
-- **Green "Created:" messages** — companies that will be added
-- **Yellow "Skipped:" messages** — companies already in the system or duplicates in CSV
-- **Red "Failed:" messages** — companies with errors (check your CSV)
+- **Green "Created:" messages**: companies that will be added
+- **Yellow "Skipped:" messages**: companies already in the system or duplicates in CSV
+- **Red "Failed:" messages**: companies with errors (check your CSV)
 
 ## Step 4: Run the Import
 
@@ -170,7 +170,7 @@ The API rate limit was exceeded. The script automatically backs off and retries,
 Run with `-Resume` to pick up where it left off.
 
 **"WARNING: Could not fetch all existing companies"**
-The script couldn't retrieve the full list of existing companies. This is usually a temporary network issue. Try again — the script will fetch the list again on the next run. Note: if this happens, some duplicates may slip through (they can be cleaned up in the portal).
+The script couldn't retrieve the full list of existing companies. This is usually a temporary network issue. Try again; the script will fetch the list again on the next run. Note: if this happens, some duplicates may slip through (they can be cleaned up in the portal).
 
 ## Next Steps
 

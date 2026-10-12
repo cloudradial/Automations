@@ -1,6 +1,6 @@
 # CloudRadial UCP MCP Server
 
-An MCP (Model Context Protocol) server that exposes the CloudRadial API V2 as tools for Claude Desktop, Claude Code, and other MCP clients. Distributable to CloudRadial Partners — no Azure deployment required. The partner runs the server locally; their CloudRadial API keys never leave their machine.
+An MCP (Model Context Protocol) server that exposes the CloudRadial API V2 as tools for Claude Desktop, Claude Code, and other MCP clients. Distributable to CloudRadial Partners; no Azure deployment required. The partner runs the server locally; their CloudRadial API keys never leave their machine.
 
 ## Available Tools
 
@@ -34,11 +34,11 @@ Composite-key resources need extra args on `get_resource` / `update_resource` / 
 |----------|---------------|
 | `archive_item` | `archive_id` + `id` |
 | `service_install` | `endpoint_id` + `service_id` (or `id`=serviceId on update/delete) |
-| `company_group_company` | `company_group_id` + `company_id` (create/delete only — no update) |
+| `company_group_company` | `company_group_id` + `company_id` (create/delete only, no update) |
 | `course_lesson_history` | `course_id` + `application_user_id` + `course_lesson_id` |
 | `endpoint_custom_property` | `serial_number` + `property_name` (create: `serial_number`, data `{name, value, dataType}`) |
 
-`application_user` has no OData endpoint — use `get_resource` / `create_resource` / `update_resource` / `delete_resource` by id only.
+`application_user` has no OData endpoint; use `get_resource` / `create_resource` / `update_resource` / `delete_resource` by id only.
 
 Some single-item endpoints are scoped by company: `catalog_question`, `course_lesson`, `course_lesson_history`, `domain`, `user`, `application_user` and `token`. Pass `company_id`, or let the tool look it up (all but `course_lesson_history` and `token`).
 
@@ -69,11 +69,11 @@ It stops unless the company's name matches `LIVE_COMPANY_NAME`. It reads and wri
 - Node.js 18+
 - CloudRadial API V2 keys (public + private). Generate them under **Account Setup → API Tokens** in your CloudRadial portal.
 
-### Option A — Run from npm (recommended for partners)
+### Option A: Run from npm (recommended for partners)
 
 Once published, partners add the server to their MCP client config with a single block. No clone, no build.
 
-**Claude Desktop** — edit `claude_desktop_config.json` (Settings → Developer → Edit Config):
+**Claude Desktop**: edit `claude_desktop_config.json` (Settings → Developer → Edit Config):
 
 ```json
 {
@@ -91,9 +91,9 @@ Once published, partners add the server to their MCP client config with a single
 }
 ```
 
-**Claude Code** — `claude mcp add cloudradial-ucp -- npx -y @cloudradial/ucp-mcp` (and set the three env vars in your shell or `.env`).
+**Claude Code**: `claude mcp add cloudradial-ucp -- npx -y @cloudradial/ucp-mcp` (and set the three env vars in your shell or `.env`).
 
-### Option B — Run from source
+### Option B: Run from source
 
 ```bash
 git clone https://github.com/cloudradial/helpers
@@ -123,11 +123,11 @@ Then point your MCP client at the built entry:
 
 | Variable | Required | Default |
 |----------|----------|---------|
-| `CLOUDRADIAL_PUBLIC_KEY`  | yes | — |
-| `CLOUDRADIAL_PRIVATE_KEY` | yes | — |
+| `CLOUDRADIAL_PUBLIC_KEY`  | yes | (none) |
+| `CLOUDRADIAL_PRIVATE_KEY` | yes | (none) |
 | `CLOUDRADIAL_BASE_URL`    | no  | `https://api.us.cloudradial.com` |
 
-The server authenticates to CloudRadial with HTTP Basic auth (`public:private`, base64). Keys live in your MCP client config or local environment — they are never transmitted anywhere except CloudRadial's API.
+The server authenticates to CloudRadial with HTTP Basic auth (`public:private`, base64). Keys live in your MCP client config or local environment; they are never transmitted anywhere except CloudRadial's API.
 
 ## Example Prompts
 
@@ -141,7 +141,7 @@ The server authenticates to CloudRadial with HTTP Basic auth (`public:private`, 
 ## Notes
 
 - **OData pagination caps at 200.** The CloudRadial API returns at most 200 results per page. Use `top` and `skip` to paginate.
-- **Field-name quirks.** Articles use `subject` (not `title`); courses use `name` (not `title`). The tool descriptions are loose — pass exactly what the API expects.
+- **Field-name quirks.** Articles use `subject` (not `title`); courses use `name` (not `title`). The tool descriptions are loose, so pass exactly what the API expects.
 - **Composite-key resources.** `archive_item` needs both `archive_id` and `id`; `service_install` needs both `endpoint_id` and `service_id` (or `id` = serviceId on update/delete).
 
 ## Relationship to the Cowork Plugin

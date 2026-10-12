@@ -14,7 +14,7 @@ that group its out-of-spec devices by refresh **category**, each carrying a tria
 
 All decision rules are below and are self-contained. Use **native endpoint fields**; do not
 invent values. If a company doesn't already hold ScalePad-sourced warranty/EOL data on its
-endpoints, that's an upstream (AutomationAI) concern — this skill works with whatever the
+endpoints, that's an upstream (AutomationAI) concern: this skill works with whatever the
 endpoints carry, and files data-poor devices as **Needs data**.
 
 ## Before any tool call
@@ -37,7 +37,7 @@ with `filter: "companyEndpointId eq <id> or companyEndpointId eq <id> ..."` (it 
 
 | Field | Use |
 |---|---|
-| `manufacturedDate` | age basis (fallback `biosDate`, then `cpuDate` — mark estimated) |
+| `manufacturedDate` | age basis (fallback `biosDate`, then `cpuDate`: mark estimated) |
 | `expirationDate` | warranty end |
 | `os`, `osVersion` | operating system |
 | `windows11Readiness` | positive-only Win11 signal. `Windows11Status` enum (spec values 1, 2, -1, -2); OData returns the name, so match `Installed` / `Capable` |
@@ -45,7 +45,7 @@ with `filter: "companyEndpointId eq <id> or companyEndpointId eq <id> ..."` (it 
 | `memory` | RAM in bytes (÷ 1073741824 for GB; 0 = unknown) |
 | `isServer`, `isVirtual` | routing flags |
 | `serialNumber`, `manufacturer`, `model`, `userName` | display / identity |
-| `lastCheckIn` | display only — NOT a decision input |
+| `lastCheckIn` | display only: NOT a decision input |
 
 ## Exclusions
 
@@ -123,7 +123,7 @@ All writes go through `create_resource` / `update_resource` on `resource_type: "
   `7` in a stock portal), `datePublished`, `body`, `summary`,
   `isRequired` (false), `isShowPrice` (false), `isClientVisible` (false), `priority` (int).
   Subject = `Endpoint Hardware Refresh - <Category>`.
-- **`datePublished` must be a quoted ISO 8601 string**, e.g. `"2026-08-14T00:00:00Z"` — never a
+- **`datePublished` must be a quoted ISO 8601 string**, e.g. `"2026-08-14T00:00:00Z"`: never a
   bare date, number, or null.
 - **`priority` integers:** Low = `-1`, Medium = `0`, High = `1`. There is **no** Critical code:
   use High (`1`) for Critical and write "Critical" in the body.
@@ -139,5 +139,5 @@ All writes go through `create_resource` / `update_resource` on `resource_type: "
 
 Confirm the scope before writing, then report per company: evaluated, excluded (non-computer),
 flagged, cards created / updated / skipped, and per-device errors. Return counts, not
-adjectives. These cards are client-facing in the portal — a silently wrong recommendation
+adjectives. These cards are client-facing in the portal: a silently wrong recommendation
 surfaces in the partner's next QBR.

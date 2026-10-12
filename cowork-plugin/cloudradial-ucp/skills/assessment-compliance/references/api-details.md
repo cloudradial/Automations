@@ -1,4 +1,4 @@
-# Assessment Export — API Details
+# Assessment Export: API Details
 
 Concrete query patterns for the `cloudradial-ucp` MCP server. All OData params are passed **without**
 the leading `$` (the server adds it). Default page `top=100`, max `200`. The API returns no next-page
@@ -37,7 +37,7 @@ list_resources
 
 Page 2, 3, ...: repeat with `skip: 200`, `skip: 400`, ... until a page returns < 200 rows.
 
-Do **not** add a `companyId` filter — omitting it is what makes the result span all customers.
+Do **not** add a `companyId` filter: omitting it is what makes the result span all customers.
 
 ## 3. Scope to a date range (e.g. this quarter)
 

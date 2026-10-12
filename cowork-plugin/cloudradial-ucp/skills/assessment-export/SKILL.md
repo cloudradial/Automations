@@ -77,7 +77,7 @@ higher-risk customers. For true per-question gap counts you need question-level 
 
 ## Workflow
 
-### Step 1 — Pull completed assessments across all companies
+### Step 1: Pull completed assessments across all companies
 
 Call `list_resources` with `resource_type: "assessment"` and **no** `companyId` filter so it spans
 every company. Filter to completed runs and page through everything:
@@ -106,7 +106,7 @@ Then clean the rows before reporting:
 - Rows with `maxScore` 0 have no questions; leave them out. `type` 0 and 50 also appear in live
   data with unknown meaning; leave them out and say so.
 
-### Step 2 — Resolve company names
+### Step 2: Resolve company names
 
 `assessment` rows carry `companyId`, not the customer name. Build a lookup:
 
@@ -115,7 +115,7 @@ Then clean the rows before reporting:
 
 Join the map onto your assessment rows so every row has a readable **Customer name**.
 
-### Step 3 — Getting question-level detail (individual responses, failed answers, tickets)
+### Step 3: Getting question-level detail (individual responses, failed answers, tickets)
 
 The `assessment` list resource does not expose per-question responses, failed/"Not Compliant"
 answers, or linked PSA tickets. Two paths:
@@ -124,9 +124,9 @@ answers, or linked PSA tickets. Two paths:
    v2 API, so don't probe `raw_api_call` for one.
 2. **Portal export.** The reliable source is the per-run **Excel export** (Compliance > Assessments > run > three-dot menu >
    Export) or the **Word report** (run > Recommendations > Report). State this to the user rather
-   than inventing question-level figures from the summary data — see the honesty note below.
+   than inventing question-level figures from the summary data: see the honesty note below.
 
-### Step 4 — Build the outputs
+### Step 4: Build the outputs
 
 Produce two deliverables.
 
@@ -144,11 +144,11 @@ Produce two deliverables.
 Add a summary tab: total assessments completed, count of customers assessed, average/median score,
 lowest-scoring customers, and (if question-level data was obtained) total gaps.
 
-**B. Executive summary** (short written document — use the `docx` skill for a client/leadership
+**B. Executive summary** (short written document: use the `docx` skill for a client/leadership
 deliverable, or markdown if the user just wants text). Use this structure:
 
 ```
-# Assessment Executive Summary — [period]
+# Assessment Executive Summary: [period]
 ## Overview
 Total assessments completed, customers assessed, overall score posture.
 ## Gaps Identified

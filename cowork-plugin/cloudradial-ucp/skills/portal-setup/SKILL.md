@@ -1,19 +1,19 @@
 ---
 name: portal-setup
-description: "Guide a partner through setting up and configuring their CloudRadial portal for a client company. Use when the user says \"set up a portal\", \"onboard a new client\", \"configure the portal for [company]\", \"implementation session\", \"portal onboarding\", \"seed content for [company]\", \"prepare portal for [company]\", \"what does [company] need next\", \"CSA pain points\", \"implementation checklist\", or needs to walk through portal configuration, content seeding, or implementation sessions for a specific client company. This is about configuring the CloudRadial PORTAL — not the Cowork plugin. For plugin/credential setup, use the \"setup\" skill instead.\n"
+description: "Guide a partner through setting up and configuring their CloudRadial portal for a client company. Use when the user says \"set up a portal\", \"onboard a new client\", \"configure the portal for [company]\", \"implementation session\", \"portal onboarding\", \"seed content for [company]\", \"prepare portal for [company]\", \"what does [company] need next\", \"CSA pain points\", \"implementation checklist\", or needs to walk through portal configuration, content seeding, or implementation sessions for a specific client company. This is about configuring the CloudRadial PORTAL: not the Cowork plugin. For plugin/credential setup, use the \"setup\" skill instead.\n"
 metadata:
   version: "1.0.0"
 ---
 
 # Portal Setup & Implementation Guide
 
-Guide partners through setting up and configuring CloudRadial portals for their client companies. This covers the full implementation lifecycle — from initial portal provisioning to account management handoff.
+Guide partners through setting up and configuring CloudRadial portals for their client companies. This covers the full implementation lifecycle: from initial portal provisioning to account management handoff.
 
 **Important:** This skill is about configuring the CloudRadial PORTAL for a client company. For setting up the Cowork plugin and storing API credentials, use the **setup** skill instead.
 
 ## How to Call the API
 
-All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json` — no Azure Function, no Chrome extension, no local config file.
+All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json`: no Azure Function, no Chrome extension, no local config file.
 
 ### Before any tool call
 
@@ -23,7 +23,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 | Tool | Purpose | Required args |
 |------|---------|---------------|
-| `setup_status` | Check credential state (never returns the keys) | — |
+| `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
@@ -47,9 +47,9 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 
 - Articles use `subject` (not `title`).
 - Courses use `name` (not `title`).
-- `archive_item` composite key — pass `archive_id` and `id`.
-- `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
-- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- `archive_item` composite key: pass `archive_id` and `id`.
+- `service_install` composite key: pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property`: get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
 - OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
@@ -352,7 +352,7 @@ These are the most common challenges that drive partners to CloudRadial. Each ma
    Required: companyId, courseId, title, overview, category, text (HTML body)
    Optional: order
    ```
-3. Final Exam lesson is a stub — quiz mechanics handled by the platform
+3. Final Exam lesson is a stub: quiz mechanics handled by the platform
 
 ### Seed a Service Catalog
 

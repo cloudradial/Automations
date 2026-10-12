@@ -11,7 +11,7 @@ Review and manage services, service installations, domains, and products across 
 
 ## How to Call the API
 
-All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json` — no Azure Function, no Chrome extension, no local config file.
+All CloudRadial work goes through MCP tools served by the `cloudradial-ucp` server. The plugin auto-registers the server via `.mcp.json`: no Azure Function, no Chrome extension, no local config file.
 
 ### Before any tool call
 
@@ -21,7 +21,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 
 | Tool | Purpose | Required args |
 |------|---------|---------------|
-| `setup_status` | Check credential state (never returns the keys) | — |
+| `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
 | `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
@@ -45,9 +45,9 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 
 - Articles use `subject` (not `title`).
 - Courses use `name` (not `title`).
-- `archive_item` composite key — pass `archive_id` and `id`.
-- `service_install` composite key — pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
-- `endpoint_custom_property` — get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
+- `archive_item` composite key: pass `archive_id` and `id`.
+- `service_install` composite key: pass `endpoint_id` and `service_id` (or `id = serviceId` on update/delete).
+- `endpoint_custom_property`: get/create/update/delete take `serial_number` and `property_name`; list with `filter: "companyEndpointId eq <id>"`.
 - OData returns enum fields as names (for example `enclosure: "Desktop"`), not numbers.
 
 ### Errors
@@ -98,7 +98,7 @@ For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references
 
 ### Domain Expiration Report
 
-1. List domains filtered by companyId (or all domains) — `list_resources` with `resource_type: "domain"`
+1. List domains filtered by companyId (or all domains): `list_resources` with `resource_type: "domain"`
 2. Check `dateExpires` against the current date
 3. Flag domains expiring within 30/60/90 days
 4. Present as a prioritized list

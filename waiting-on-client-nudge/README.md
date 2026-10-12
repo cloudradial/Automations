@@ -52,10 +52,10 @@ All inputs are optional. A Routine sends no input, so every one has a default.
 | Field | Default | What it does |
 |---|---|---|
 | `preview` | `false` | `true` lists what would happen and changes nothing. Use it for the first run. |
-| `waiting_status_name` | per PSA: ConnectWise and Autotask `Waiting Customer`, HaloPSA `Waiting on User`, Kaseya BMS and Syncro `Waiting on Customer`, Zendesk `pending` | The exact status name your team uses for "waiting on the client". |
+| `waiting_status_name` | per PSA: ConnectWise and Autotask `Waiting Customer`, HaloPSA `Waiting on User`, Kaseya BMS and Syncro `Waiting on Customer`, Zendesk `pending` | The exact status name your team uses for "waiting on the client". In Autotask, HaloPSA and Kaseya BMS the status number works too, and is needed when the API user can't list ticket statuses. |
 | `reminder_days` | `2,4` | Days of waiting on which a reminder goes out. A comma list or a JSON list. |
 | `close_day` | `7` | Day on which the closing notice goes out and the ticket closes. Must be after the last reminder day. |
-| `close_status_name` | the PSA's usual closed status | The status to close to. Kaseya BMS needs this or the `KaseyaBMS-ClosedStatusId` secret. |
+| `close_status_name` | the PSA's usual closed status | The status to close to. Kaseya BMS needs this or the `KaseyaBMS-ClosedStatusId` secret. In Autotask, HaloPSA and Kaseya BMS the status number works too, and is needed when the API user can't list ticket statuses. |
 | `company` | all companies | A PSA company name (exact) or PSA company id, to run for one client only. |
 | `max_tickets` | `200` | Most tickets checked in one run (1 to 1000). The run warns when there were more. |
 | `psa` | the `PSA-Type` secret | Overrides which PSA to use. |

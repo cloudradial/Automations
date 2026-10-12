@@ -45,7 +45,7 @@ Turns one intake, a CloudRadial form submission or a ticket being triaged in Ser
 | [`knowledge/service-ticket-standards.md`](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/knowledge/service-ticket-standards.md) | Knowledge | Summary patterns, description layout, priority, type and subtype. |
 | [`knowledge/quote-request-standards.md`](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/knowledge/quote-request-standards.md) | Knowledge | What counts as a purchase, quote summary and layout, required information. |
 | [`knowledge/standard-catalog.md`](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/knowledge/standard-catalog.md) | Knowledge | Standard hardware, peripherals, phones and licences; role defaults; items that need approval. |
-| [`split-request-two-tickets.yml`](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/split-request-two-tickets.yml) | `automationsWorkflow` | *Legacy:* Split Request — Support + Quote (new user + new PC only). Superseded by the Service + Quote workflow; see the end of this page. |
+| [`split-request-two-tickets.yml`](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/split-request-two-tickets.yml) | `automationsWorkflow` | *Legacy:* Split Request - Support + Quote (new user + new PC only). Superseded by the Service + Quote workflow; see the end of this page. |
 
 ## How the pieces share the work
 
@@ -61,7 +61,7 @@ If the classifier's output is missing, below the confidence threshold (0.6 by de
 ## Install / run
 
 1. **Classifier agent.** Upload `split-request-classifier.agent.yml` on **Agents → Custom** (keyed on the slug, so it replaces an earlier version).
-2. **Knowledge.** Edit the three files in `knowledge/` to your own standards (keep the headings — the agent searches by them), then upload them to a Knowledge folder such as **Ticket Standards**.
+2. **Knowledge.** Edit the three files in `knowledge/` to your own standards (keep the headings, because the agent searches by them), then upload them to a Knowledge folder such as **Ticket Standards**.
 3. **Workflow.** **Workflows → Import** `split-request-service-quote.yml`, then publish and deploy to the runner that holds the `CW-*` secrets.
 4. **Turn on grounding.** Open the **Classify the request** node → **Ground on knowledge** → attach the three documents (or the folder). Set **topK to about 12**, so all the relevant sections come back in one recall. Use **Preview recall** to check that the summary-format, priority and catalog sections appear. Grounding can't be exported (it points at your tenant's document IDs), so every install does this step.
 5. **Key Vault secrets:** `CW-ApiUrl`, `CW-CompanyID`, `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId`, `CW-ServiceBoard`, `CW-SalesBoard`; optional `PSA-SplitStatus` (ServiceAI path) and `CloudRadial-BaseUrl` / `-PublicKey` / `-PrivateKey` (only to resolve a CloudRadial `companyId`).

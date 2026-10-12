@@ -2,7 +2,7 @@
 
 When a client questions an invoice, the account manager finds an internal note on the ticket that already shows what was billed, how much time was logged and how much of it was billable, the tickets with the most time, and which agreements covered the period.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00055 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
 
 ## Files (always the latest version)
 

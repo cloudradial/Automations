@@ -2,7 +2,7 @@
 
 Workstation RMM alerts get a safe fix, a re-check and are resolved after you approve, and anything that can't be fixed safely becomes a PSA ticket.
 
-**Formerly:** RMM Auto-Remediation | **Marketplace ID:** Not yet listed | **Type:** Workflow
+**Formerly:** RMM Auto-Remediation | **Marketplace ID:** AAI-00036 | **Type:** Workflow
 
 ## Files (always the latest version)
 

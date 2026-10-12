@@ -2,7 +2,7 @@
 
 Every time a ticket moves to a status the client should know about, the requester gets a short, specific update in plain words, posted to the ticket so the PSA emails it, and internal-only statuses stay quiet.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00054 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
 
 ## Files (always the latest version)
 

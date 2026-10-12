@@ -2,7 +2,7 @@
 
 One portal form or triaged ticket becomes a service ticket written to your standards and, when something has to be bought, a linked quote request.
 
-**Formerly:** Split Request, Service + Quote | **Marketplace ID:** Not yet listed | **Type:** Workflow + Agent
+**Formerly:** Split Request, Service + Quote | **Marketplace ID:** AAI-00034 | **Type:** Workflow + Agent
 
 ## Files (always the latest version)
 

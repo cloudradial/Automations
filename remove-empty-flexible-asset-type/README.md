@@ -2,7 +2,7 @@
 
 Deletes one empty flexible asset type, such as the old "ScalePad Assets" list, which the CloudRadial portal has no button for. It checks first that no company has anything in it.
 
-**Formerly:** Remove Empty Flexible Asset Type | **Marketplace ID:** Not yet listed | **Type:** Workflow
+**Formerly:** Remove Empty Flexible Asset Type | **Marketplace ID:** AAI-00041 | **Type:** Workflow
 
 ## Files (always the latest version)
 

@@ -2,7 +2,7 @@
 
 Lets any automation finish by opening a ticket in your PSA, sending an email or handing the result back to ServiceAI, without rebuilding that step each time.
 
-**Formerly:** Deliver Result | **Marketplace ID:** Not yet listed | **Type:** Agent
+**Formerly:** Deliver Result | **Marketplace ID:** AAI-00039 | **Type:** Agent
 
 ## Files (always the latest version)
 

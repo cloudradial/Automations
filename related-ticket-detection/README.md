@@ -2,7 +2,7 @@
 
 When a new ticket comes in, the technician sees an internal note listing the same company's open tickets that describe the same issue, with links and a one-line reason for each, so duplicates get worked once and outages get spotted early.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00052 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
 
 ## Files (always the latest version)
 

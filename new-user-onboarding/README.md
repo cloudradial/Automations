@@ -2,7 +2,7 @@
 
 Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
 
-**Formerly:** New User Onboarding (agent) | **Marketplace ID:** Not yet listed | **Type:** Agent + Workflow
+**Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow
 
 This folder has two ways to onboard. The agent workflow below plans and verifies each stage with AI. The [direct workflow](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#direct-workflow-create-a-new-hires-accounts-straight-from-the-form) does the same core account setup with PowerShell only and no AI.
 

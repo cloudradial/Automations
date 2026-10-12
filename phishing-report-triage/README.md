@@ -2,7 +2,7 @@
 
 When a user reports a suspicious email, the technician gets a categorized ticket that already shows who really sent it, whether it passed SPF, DKIM and DMARC, where its links go and what is attached, with a risk verdict and, for malicious mail, a ready-to-review purge script.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00044 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
 
 ## Files (always the latest version)
 

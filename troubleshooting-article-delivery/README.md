@@ -2,7 +2,7 @@
 
 When ServiceAI triage matches a new ticket to a knowledge base article, the client gets the article straight away with a "Reply 'fixed' and we'll close this" line, and a clear "fixed" reply closes the ticket without a technician touching it.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00053 | **Type:** Workflow (PowerShell steps, no AI)
 
 ## Files (always the latest version)
 

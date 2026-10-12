@@ -2,7 +2,7 @@
 
 A user who lost their phone or authenticator resets their own multi-factor authentication from the portal in seconds, and built-in checks stop anyone resetting another person's, an admin's, a disabled or an at-risk account.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00045 | **Type:** Workflow (PowerShell steps, no AI)
 
 ## Files (always the latest version)
 

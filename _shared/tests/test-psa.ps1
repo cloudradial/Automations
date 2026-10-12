@@ -326,4 +326,74 @@ Invoke-WithLib @('psa.ps1') {
     Check 'Kaseya BMS: open count and last assigned return $null (not supported)' ($null -eq (Get-PsaOpenCount '5') -and $null -eq (Get-PsaLastAssigned '5')) ''
 }
 
+# --- Status names vs numbers: statuses are customized per partner, and some API roles can't list them ---
+$Forbidden = '{"message":"You do not have permission to read this."}'
+# Autotask: the status picklist can't be read.
+Reset-Mock $S['autotask'].Clone() {
+    param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/Tickets/entityInformation/fields') { New-HttpError 403 $Forbidden }
+    return [pscustomobject]@{ itemId = 12345 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'autotask'
+    $r = Set-PsaStatus -Id '12345' -StatusName '8'
+    $p = @(Get-Calls 'PATCH' '*/Tickets')
+    Check 'autotask: a status number is sent as given, with no picklist read' ($r -eq '8' -and $p.Count -eq 1 -and (Read-Body $p[0]).status -eq 8 -and @(Get-Calls 'GET' '*entityInformation*').Count -eq 0) (Show-Calls)
+    $m = Get-ThrowMessage { Set-PsaStatus -Id '12345' -StatusName 'Waiting Customer' }
+    Check 'autotask: picklist 403 -> a status name stops with a plain sentence asking for the number, and nothing is changed' ($m -match "Autotask didn't list its ticket statuses" -and $m -match "'Waiting Customer'" -and $m -match 'Enter the status number' -and @(Get-Calls 'PATCH' '*').Count -eq 1) $m
+    $r = Set-PsaStatus -Id '12345' -State closed
+    Check 'autotask: picklist 403 -> closing with no name still uses Complete (5)' ($r -eq '5' -and (Read-Body @(Get-Calls 'PATCH' '*/Tickets')[-1]).status -eq 5) (Show-Calls)
+    $m = Get-ThrowMessage { $null = Get-PsaStatusId 'Waiting Customer' }
+    Check 'autotask: Get-PsaStatusId with no picklist asks for the number' ($m -match 'Enter the status number') $m
+    Check 'autotask: Get-PsaStatusId passes a number through' ((Get-PsaStatusId ' 12 ') -eq '12') ''
+}
+Reset-Mock $S['autotask'].Clone() $Handler
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'autotask'
+    $m = Get-ThrowMessage { Set-PsaStatus -Id '12345' -StatusName 'Waiting Customer' }
+    Check 'autotask: an unknown name says a number works too' ($m -match "no ticket status named 'Waiting Customer'" -and $m -match 'or the status number') $m
+    $m = Get-ThrowMessage { $null = Get-PsaStatusId 'Waiting Customer' }
+    Check 'autotask: Get-PsaStatusId lists the statuses and says a number works too' ($m -match 'Its statuses are: Complete, In Progress, New' -and $m -match 'or the status number') $m
+}
+# HaloPSA: /Status can be read, then can't.
+Reset-Mock $S['halopsa'].Clone() {
+    param($c, $n)
+    if ($c.Uri -eq 'https://halo.example.com/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
+    if ($c.Method -eq 'GET' -and $c.Uri -eq "$HALO/Status") { return , @([pscustomobject]@{ id = 21; name = 'Waiting on User' }, [pscustomobject]@{ id = 9; name = 'Closed' }) }
+    return [pscustomobject]@{ id = 12345 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'halopsa'
+    $r = Set-PsaStatus -Id '12345' -State open -StatusName 'waiting on user'
+    $p = @(Get-Calls 'POST' "$HALO/Tickets")
+    Check 'halopsa: a status name is matched to its id (it used to be refused)' ($r -eq '21' -and $p.Count -eq 1 -and (Read-Body $p[0])[0].status_id -eq 21) (Show-Calls)
+}
+Reset-Mock $S['halopsa'].Clone() {
+    param($c, $n)
+    if ($c.Uri -eq 'https://halo.example.com/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
+    if ($c.Method -eq 'GET' -and $c.Uri -eq "$HALO/Status") { New-HttpError 403 $Forbidden }
+    return [pscustomobject]@{ id = 12345 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'halopsa'
+    $m = Get-ThrowMessage { Set-PsaStatus -Id '12345' -State open -StatusName 'Waiting on User' }
+    Check 'halopsa: /Status 403 -> a status name stops with a plain sentence asking for the number, no POST' ($m -match "HaloPSA didn't list its ticket statuses" -and $m -match 'Enter the status number' -and @(Get-Calls 'POST' "$HALO/Tickets").Count -eq 0) $m
+    $r = Set-PsaStatus -Id '12345' -State open -StatusName '21'
+    Check 'halopsa: /Status 403 -> a status number still works' ($r -eq '21' -and (Read-Body @(Get-Calls 'POST' "$HALO/Tickets")[-1])[0].status_id -eq 21) (Show-Calls)
+}
+# Kaseya BMS: the status lookup comes back empty.
+Reset-Mock $S['kaseyabms'].Clone() {
+    param($c, $n)
+    if ($c.Uri -eq 'https://bms.example.com/v2/security/authenticate') { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }
+    if ($c.Method -eq 'GET' -and $c.Uri -eq "$BMS/system/statuses/lookup") { return [pscustomobject]@{ Result = @() } }
+    return [pscustomobject]@{ Result = [pscustomobject]@{ Id = 12345 } }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'kaseyabms'
+    $m = Get-ThrowMessage { Set-PsaStatus -Id '12345' -State open -StatusName 'Waiting on Customer' }
+    Check 'kaseyabms: an empty status list -> a status name asks for the number, no PATCH' ($m -match "Kaseya BMS didn't list its ticket statuses" -and $m -match 'Enter the status number' -and @(Get-Calls 'PATCH' '*').Count -eq 0) $m
+    $r = Set-PsaStatus -Id '12345' -State open -StatusName '14'
+    Check 'kaseyabms: a status number is sent as given' ($r -eq '14' -and (Read-Body @(Get-Calls 'PATCH' "$BMS/servicedesk/tickets/12345")[-1])[0].value -eq 14) (Show-Calls)
+}
+
 Complete-Test

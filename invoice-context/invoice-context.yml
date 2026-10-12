@@ -731,17 +731,24 @@ definition:
                 }
                 'autotask' {
                     # Unverified: not in PSA.md yet. Uses the status picklist (Complete = 5 and New = 1 by default) and at_update_ticket's PATCH.
-                    $vals = Get-PsaAtPicklist 'Tickets' 'status'
+                    # A status number is sent as given, so a role that can't read the picklist can still set a status.
+                    if ($StatusName -match '^\d+$') {
+                        $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$StatusName })
+                        return $StatusName
+                    }
+                    $vals = @()
+                    try { $vals = @(Get-PsaAtPicklist 'Tickets' 'status') } catch { if ($StatusName) { throw (Get-PsaStatusNumberHelp $StatusName ([string]$_.Exception.Message)) } }
                     $pats = if ($StatusName) { @("^$([regex]::Escape($StatusName))$") } elseif ($closed) { @('(?i)^complete$', '(?i)complete') } else { @('(?i)^new$', '(?i)in progress') }
                     $hit = Select-PsaByLabel $vals 'label' $pats
                     $sv = if ($hit) { Get-PsaProp $hit 'value' } elseif ($StatusName) { $null } elseif ($closed) { 5 } else { 1 }
-                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'." }
+                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'. Enter one of its status names, or the status number." }
                     $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$sv })
                     return $(if ($hit) { [string](Get-PsaProp $hit 'label') } else { [string]$sv })
                 }
                 'halopsa' {
                     # Unverified: not in PSA.md yet. 9 (Closed) and 1 (New) are Halo's out-of-box ids; Halo-ClosedStatusId and Halo-OpenStatusId override them.
-                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
+                    # A status name is matched to its id from the status list (Get-PsaStatusId); a number is used as given.
+                    $sv = if ($StatusName) { Get-PsaStatusId $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
                     if (-not $sv) { $sv = $(if ($closed) { 9 } else { 1 }) }
                     if ([string]$sv -notmatch '^\d+$') { throw 'HaloPSA needs a numeric status id.' }
                     $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; status_id = [int]$sv })
@@ -749,7 +756,8 @@ definition:
                 }
                 'kaseyabms' {
                     # Unverified: not in PSA.md yet. Status ids are per tenant: KaseyaBMS-ClosedStatusId and KaseyaBMS-OpenStatusId.
-                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
+                    # A status name is matched to its id from the status list (Get-PsaStatusId); a number is used as given.
+                    $sv = if ($StatusName) { Get-PsaStatusId $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
                     if (-not $sv -or [string]$sv -notmatch '^\d+$') { throw "Kaseya BMS needs a status id. Set the KaseyaBMS-$(if ($closed) { 'Closed' } else { 'Open' })StatusId secret." }
                     $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/StatusId'; value = [int]$sv })
                     return [string]$sv
@@ -987,17 +995,26 @@ definition:
             $PsaState.Statuses = @($list)
             return @($list)
         }
-        # The id for a status name (Autotask, HaloPSA, Kaseya BMS). A number is returned as given; the PSAs that
-        # use names (ConnectWise, Syncro, Zendesk) get the name back. Throws a plain sentence listing the statuses.
+        # Ticket statuses are customized per partner, and some API roles can't list them. This sentence tells the
+        # partner how to get past that: give the status number, which needs no list.
+        function Get-PsaStatusNumberHelp {
+            param([string]$Name, [string]$Why = '')
+            return "$(Get-PsaName) didn't list its ticket statuses$(if ($Why) { " ($Why)" }), so the status '$Name' can't be matched to its number. Enter the status number (its id in $(Get-PsaName)'s ticket status settings) instead of its name."
+        }
+        # The id for a status name (Autotask, HaloPSA, Kaseya BMS). A number is returned as given, with no API call;
+        # the PSAs that use names (ConnectWise, Syncro, Zendesk) get the name back. Throws a plain sentence: the
+        # statuses it found, or (when the list can't be read or is empty) how to give the number instead.
         function Get-PsaStatusId {
             param([string]$Name)
             $n = ([string]$Name).Trim()
             if ($n -match '^\d+$') { return $n }
             $c = Get-PsaConn
             if ($c.Psa -notin @('autotask', 'halopsa', 'kaseyabms')) { return $n }
-            $list = @(Get-PsaStatusList)
+            $list = @(); $why = ''
+            try { $list = @(Get-PsaStatusList | Where-Object { $null -ne $_ }) } catch { $why = [string]$_.Exception.Message }
+            if (-not $list.Count) { throw (Get-PsaStatusNumberHelp $n $why) }
             $hit = @($list | Where-Object { $_.name.Trim() -ieq $n }) | Select-Object -First 1
-            if (-not $hit) { throw "$(Get-PsaName) has no ticket status named '$n'. Its statuses are: $((@($list | ForEach-Object { $_.name }) | Sort-Object -Unique) -join ', ')." }
+            if (-not $hit) { throw "$(Get-PsaName) has no ticket status named '$n'. Its statuses are: $((@($list | ForEach-Object { $_.name }) | Sort-Object -Unique) -join ', '). Enter one of those names, or the status number." }
             return $hit.id
         }
         # A readable status name. Autotask, HaloPSA and Kaseya BMS hand out ids; the others already use names.
@@ -3260,17 +3277,24 @@ definition:
                 }
                 'autotask' {
                     # Unverified: not in PSA.md yet. Uses the status picklist (Complete = 5 and New = 1 by default) and at_update_ticket's PATCH.
-                    $vals = Get-PsaAtPicklist 'Tickets' 'status'
+                    # A status number is sent as given, so a role that can't read the picklist can still set a status.
+                    if ($StatusName -match '^\d+$') {
+                        $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$StatusName })
+                        return $StatusName
+                    }
+                    $vals = @()
+                    try { $vals = @(Get-PsaAtPicklist 'Tickets' 'status') } catch { if ($StatusName) { throw (Get-PsaStatusNumberHelp $StatusName ([string]$_.Exception.Message)) } }
                     $pats = if ($StatusName) { @("^$([regex]::Escape($StatusName))$") } elseif ($closed) { @('(?i)^complete$', '(?i)complete') } else { @('(?i)^new$', '(?i)in progress') }
                     $hit = Select-PsaByLabel $vals 'label' $pats
                     $sv = if ($hit) { Get-PsaProp $hit 'value' } elseif ($StatusName) { $null } elseif ($closed) { 5 } else { 1 }
-                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'." }
+                    if ($null -eq $sv) { throw "Autotask has no ticket status named '$StatusName'. Enter one of its status names, or the status number." }
                     $null = Invoke-Psa PATCH '/Tickets' ([ordered]@{ id = [long]$Id; status = [int]$sv })
                     return $(if ($hit) { [string](Get-PsaProp $hit 'label') } else { [string]$sv })
                 }
                 'halopsa' {
                     # Unverified: not in PSA.md yet. 9 (Closed) and 1 (New) are Halo's out-of-box ids; Halo-ClosedStatusId and Halo-OpenStatusId override them.
-                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
+                    # A status name is matched to its id from the status list (Get-PsaStatusId); a number is used as given.
+                    $sv = if ($StatusName) { Get-PsaStatusId $StatusName } elseif ($closed) { Get-PsaSecret 'Halo-ClosedStatusId' } else { Get-PsaSecret 'Halo-OpenStatusId' }
                     if (-not $sv) { $sv = $(if ($closed) { 9 } else { 1 }) }
                     if ([string]$sv -notmatch '^\d+$') { throw 'HaloPSA needs a numeric status id.' }
                     $null = Invoke-Psa POST '/Tickets' @([ordered]@{ id = [long]$Id; status_id = [int]$sv })
@@ -3278,7 +3302,8 @@ definition:
                 }
                 'kaseyabms' {
                     # Unverified: not in PSA.md yet. Status ids are per tenant: KaseyaBMS-ClosedStatusId and KaseyaBMS-OpenStatusId.
-                    $sv = if ($StatusName) { $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
+                    # A status name is matched to its id from the status list (Get-PsaStatusId); a number is used as given.
+                    $sv = if ($StatusName) { Get-PsaStatusId $StatusName } elseif ($closed) { Get-PsaSecret 'KaseyaBMS-ClosedStatusId' } else { Get-PsaSecret 'KaseyaBMS-OpenStatusId' }
                     if (-not $sv -or [string]$sv -notmatch '^\d+$') { throw "Kaseya BMS needs a status id. Set the KaseyaBMS-$(if ($closed) { 'Closed' } else { 'Open' })StatusId secret." }
                     $null = Invoke-Psa PATCH "/servicedesk/tickets/$Id" @([ordered]@{ op = 'replace'; path = '/StatusId'; value = [int]$sv })
                     return [string]$sv
@@ -3516,17 +3541,26 @@ definition:
             $PsaState.Statuses = @($list)
             return @($list)
         }
-        # The id for a status name (Autotask, HaloPSA, Kaseya BMS). A number is returned as given; the PSAs that
-        # use names (ConnectWise, Syncro, Zendesk) get the name back. Throws a plain sentence listing the statuses.
+        # Ticket statuses are customized per partner, and some API roles can't list them. This sentence tells the
+        # partner how to get past that: give the status number, which needs no list.
+        function Get-PsaStatusNumberHelp {
+            param([string]$Name, [string]$Why = '')
+            return "$(Get-PsaName) didn't list its ticket statuses$(if ($Why) { " ($Why)" }), so the status '$Name' can't be matched to its number. Enter the status number (its id in $(Get-PsaName)'s ticket status settings) instead of its name."
+        }
+        # The id for a status name (Autotask, HaloPSA, Kaseya BMS). A number is returned as given, with no API call;
+        # the PSAs that use names (ConnectWise, Syncro, Zendesk) get the name back. Throws a plain sentence: the
+        # statuses it found, or (when the list can't be read or is empty) how to give the number instead.
         function Get-PsaStatusId {
             param([string]$Name)
             $n = ([string]$Name).Trim()
             if ($n -match '^\d+$') { return $n }
             $c = Get-PsaConn
             if ($c.Psa -notin @('autotask', 'halopsa', 'kaseyabms')) { return $n }
-            $list = @(Get-PsaStatusList)
+            $list = @(); $why = ''
+            try { $list = @(Get-PsaStatusList | Where-Object { $null -ne $_ }) } catch { $why = [string]$_.Exception.Message }
+            if (-not $list.Count) { throw (Get-PsaStatusNumberHelp $n $why) }
             $hit = @($list | Where-Object { $_.name.Trim() -ieq $n }) | Select-Object -First 1
-            if (-not $hit) { throw "$(Get-PsaName) has no ticket status named '$n'. Its statuses are: $((@($list | ForEach-Object { $_.name }) | Sort-Object -Unique) -join ', ')." }
+            if (-not $hit) { throw "$(Get-PsaName) has no ticket status named '$n'. Its statuses are: $((@($list | ForEach-Object { $_.name }) | Sort-Object -Unique) -join ', '). Enter one of those names, or the status number." }
             return $hit.id
         }
         # A readable status name. Autotask, HaloPSA and Kaseya BMS hand out ids; the others already use names.

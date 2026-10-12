@@ -49,10 +49,10 @@ All inputs are optional. A Routine sends no input, so every one has a default.
 | Field | Default | What it does |
 |---|---|---|
 | `preview` | `false` | `true` lists what would happen and changes nothing. Use it for the first run. |
-| `resolved_status_name` | `Resolved` (Zendesk `solved`) | The exact status name your team uses for "fixed, waiting to close". |
+| `resolved_status_name` | `Resolved` (Zendesk `solved`) | The exact status name your team uses for "fixed, waiting to close". In Autotask, HaloPSA and Kaseya BMS the status number works too, and is needed when the API user can't list ticket statuses. |
 | `resolved_days` | `3` | Days a ticket must sit untouched in that status before it closes. |
 | `max_resolved_days` | `30` | Tickets untouched for longer than this are left alone. Must be more than `resolved_days`. |
-| `close_status_name` | the PSA's usual closed status | The status to close to: ConnectWise picks the board's closed status that isn't the resolved one, Autotask `Complete`, HaloPSA `Halo-ClosedStatusId` or 9, Kaseya BMS `KaseyaBMS-ClosedStatusId`, Zendesk `closed`. |
+| `close_status_name` | the PSA's usual closed status | The status to close to: ConnectWise picks the board's closed status that isn't the resolved one, Autotask `Complete`, HaloPSA `Halo-ClosedStatusId` or 9, Kaseya BMS `KaseyaBMS-ClosedStatusId`, Zendesk `closed`. In Autotask, HaloPSA and Kaseya BMS the status number works too, and is needed when the API user can't list ticket statuses. |
 | `company` | all companies | A PSA company name (exact) or PSA company id, to run for one client only. |
 | `max_tickets` | `200` | Most tickets checked in one run (1 to 1000). The run warns when there were more. |
 | `psa` | the `PSA-Type` secret | Overrides which PSA to use. |

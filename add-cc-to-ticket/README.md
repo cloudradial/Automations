@@ -2,7 +2,7 @@
 
 Requesters add a coworker to a ticket's email updates from the portal, with no technician needed.
 
-**Formerly:** Add CC to Ticket | **Marketplace ID:** Not yet listed | **Type:** Workflow
+**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow
 
 ## Files (always the latest version)
 

@@ -2,7 +2,7 @@
 
 Each client gets a current patch compliance score and a list of problem devices in their Planner, ready for review meetings.
 
-**Formerly:** Patch Compliance | **Marketplace ID:** Not yet listed | **Type:** Workflow
+**Formerly:** Patch Compliance | **Marketplace ID:** AAI-00035 | **Type:** Workflow
 
 ## Files (always the latest version)
 

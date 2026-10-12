@@ -2,7 +2,7 @@
 
 When a ticket closes, the requester gets a one-click satisfaction survey from the ticket itself, and any low score lands in the service manager's inbox with the comment and a link, while every score is noted on the ticket.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00056 | **Type:** Workflow (PowerShell steps, no AI)
 
 ## Files (always the latest version)
 

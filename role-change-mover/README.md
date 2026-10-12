@@ -2,7 +2,7 @@
 
 When someone changes department, their Microsoft 365 groups, department, title and manager are brought in line with your department map in one run, and you see every add and remove before anything changes.
 
-**Formerly:** Role change (mover) | **Marketplace ID:** TBD | **Type:** Workflow
+**Formerly:** Role change (mover) | **Marketplace ID:** AAI-00043 | **Type:** Workflow
 
 ## Files (always the latest version)
 

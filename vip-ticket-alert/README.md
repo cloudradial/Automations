@@ -2,7 +2,7 @@
 
 The moment a VIP client's ticket lands, their account manager gets a short email with the summary and a link, and the ticket records that they were told, once per ticket.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00047 | **Type:** Workflow (PowerShell steps, no AI)
 
 ## Files (always the latest version)
 

@@ -2,7 +2,7 @@
 
 Every month, each client's CloudRadial Planner board gets one card listing the paid Microsoft 365 licences nobody has used in 60 days, with an estimated monthly saving, so you can raise it at the next review. Nothing is removed automatically.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365)
+**Marketplace ID:** AAI-00048 | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365)
 
 ## Files (always the latest version)
 

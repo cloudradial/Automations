@@ -2,7 +2,7 @@
 
 Every hour, find the users Microsoft flags as high risk, open a priority ticket, sign them out, require a new password and tell their manager. Accounts are blocked only when you confirm it.
 
-**Marketplace ID:** TBD | **Type:** Workflow (run hourly by a Routine, or by hand)
+**Marketplace ID:** AAI-00046 | **Type:** Workflow (run hourly by a Routine, or by hand)
 
 ## Files (always the latest version)
 

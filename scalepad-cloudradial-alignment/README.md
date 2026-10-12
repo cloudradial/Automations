@@ -2,7 +2,7 @@
 
 Optional. When ScalePad data is messy, it matches clients and plans the move so you can approve a reviewed plan before the migration runs.
 
-**Formerly:** ScalePad → CloudRadial Alignment | **Marketplace ID:** Not yet listed | **Type:** Agent + Workflow
+**Formerly:** ScalePad → CloudRadial Alignment | **Marketplace ID:** AAI-00033 | **Type:** Agent + Workflow
 
 ## Files (always the latest version)
 

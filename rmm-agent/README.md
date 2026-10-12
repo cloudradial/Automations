@@ -2,7 +2,7 @@
 
 The shared engine behind the device fix and patch compliance automations. It works through Datto RMM, matches sites to clients, and never acts without approval.
 
-**Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** Not yet listed | **Type:** Agent
+**Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** AAI-00037 | **Type:** Agent
 
 ## Files (always the latest version)
 

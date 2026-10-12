@@ -2,20 +2,20 @@
 
 ## Business Problem
 
-You're an MSP using IT Glue for documentation and CloudRadial for your client portal. You've built out Flexible Asset Types in IT Glue (e.g., Network Devices, Backup Systems, ISP Information) and want your clients to see that same data in their CloudRadial portal under the Infrastructure tab — without manually recreating every schema and record.
+You're an MSP using IT Glue for documentation and CloudRadial for your client portal. You've built out Flexible Asset Types in IT Glue (e.g., Network Devices, Backup Systems, ISP Information) and want your clients to see that same data in their CloudRadial portal under the Infrastructure tab, without manually recreating every schema and record.
 
 This script automates the full migration: it reads your IT Glue Flexible Asset Type definitions and their data, then creates matching types and bulk-inserts all asset records into CloudRadial via the IT Glue-compatible V2 API. A CSV mapping file lets you control which IT Glue organizations map to which CloudRadial companies.
 
 ## Prerequisites
 
 - **PowerShell 5.1** or later
-- **IT Glue API key** — generate one at IT Glue > Account > Settings > API Keys
-- **CloudRadial API keys** (Public + Private) — generate at Partner > Settings > Integrations > API > +Add API Key
-- **Organization mapping CSV** — a file pairing IT Glue Org IDs to CloudRadial Company IDs (template included)
+- **IT Glue API key**: generate one at IT Glue > Account > Settings > API Keys
+- **CloudRadial API keys** (Public + Private): generate at Partner > Settings > Integrations > API > +Add API Key
+- **Organization mapping CSV**: a file pairing IT Glue Org IDs to CloudRadial Company IDs (template included)
 
 ### Finding Your IDs
 
-**IT Glue Organization IDs:** Navigate to any organization in IT Glue — the ID is in the URL:
+**IT Glue Organization IDs:** Navigate to any organization in IT Glue; the ID is in the URL:
 ```
 https://yourcompany.itglue.com/12345/...
                                 ^^^^^
@@ -48,7 +48,7 @@ ITGlueOrgId,CloudRadialCompanyId,OrgName
 12347,1003,Northwind Traders
 ```
 
-The `OrgName` column is optional — it's used for logging readability only.
+The `OrgName` column is optional; it's used for logging readability only.
 
 ### 2. Set your credentials
 
@@ -133,7 +133,7 @@ Once the script completes:
 ### Controlling Visibility
 
 - **Feature Sets:** Enable/disable Flexible Assets per feature set to control which clients see them
-- **Security Roles:** A new "Flexible Assets" permission section appears — configure Read, Write, Delete, and Full permissions per role
+- **Security Roles:** A new "Flexible Assets" permission section appears; configure Read, Write, Delete, and Full permissions per role
 
 ## Troubleshooting
 
@@ -144,7 +144,7 @@ Once the script completes:
 | `Asset type name already exists` | You've already created this type in CloudRadial | The script skips duplicate types. Delete the existing type in CloudRadial first if you want to re-create it |
 | `429 Too Many Requests` (IT Glue) | Rate limit exceeded (3000 requests per 5 min) | Reduce `-PageSize` or wait and re-run |
 | Assets don't appear in portal | Feature set doesn't have Flexible Assets enabled | Enable at Partner > Feature Sets > edit the relevant set |
-| Fields appear out of order | Field `order` values weren't preserved | Re-run — the script maps the `order` attribute from IT Glue |
+| Fields appear out of order | Field `order` values weren't preserved | Re-run; the script maps the `order` attribute from IT Glue |
 | Tag fields show raw IDs | IT Glue tag references don't carry over | Tag fields will display the text values; cross-references to other IT Glue assets won't be linked |
 
 ## How It Works (Technical Details)
@@ -152,13 +152,13 @@ Once the script completes:
 The script uses two APIs:
 
 **IT Glue API** (`api.itglue.com`)
-- `GET /flexible_asset_types?include=flexible_asset_fields` — pulls all type schemas
-- `GET /flexible_asset_types/{id}/relationships/flexible_asset_fields` — pulls fields for a type
-- `GET /flexible_assets?filter[organization-id]=X&filter[flexible-asset-type-id]=Y` — pulls asset records
+- `GET /flexible_asset_types?include=flexible_asset_fields`: pulls all type schemas
+- `GET /flexible_asset_types/{id}/relationships/flexible_asset_fields`: pulls fields for a type
+- `GET /flexible_assets?filter[organization-id]=X&filter[flexible-asset-type-id]=Y`: pulls asset records
 
 **CloudRadial V2 Compatibility API** (`api.us.cloudradial.com`)
-- `POST /compatibility/flexible_asset_types` — creates a type with fields
-- `POST /compatibility/organizations/{orgId}/relationships/flexible_assets` — bulk inserts assets
+- `POST /compatibility/flexible_asset_types`: creates a type with fields
+- `POST /compatibility/organizations/{orgId}/relationships/flexible_assets`: bulk inserts assets
 
 The compatibility API uses the same JSON:API-style structure as IT Glue, so trait keys and field kinds transfer directly with minimal transformation.
 

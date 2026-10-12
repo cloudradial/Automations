@@ -6,7 +6,7 @@ Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Cla
 
 You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer**; they're stored securely on your computer and shared automatically with every Claude app on that machine.
 
-> **Requirement:** Node.js 18+ must be installed and on your PATH. First-time secure-storage setup also requires npm and network access to npm. The plugin runs its MCP server locally by launching `node`: there's nothing to host and no service to deploy.
+> **Requirement:** Node.js 18+ must be installed and on your PATH. First-time secure-storage setup also requires npm and network access to npm. The plugin runs its MCP server locally by launching `node`, so there's nothing to host and no service to deploy.
 
 ### Step 1: Install the plugin
 
@@ -17,7 +17,7 @@ You install this once **for each Claude app you use** (Cowork, Claude Code, or C
 /plugin install cloudradial-ucp@claude-community
 ```
 
-**Or install the single plugin file directly.** Download `cloudradial-ucp.plugin` from the [**releases page**](https://github.com/cloudradial/Automations/releases). It's one file that works on macOS, Windows, and Linux: then add it to your Claude app:
+**Or install the single plugin file directly.** Download `cloudradial-ucp.plugin` from the [**releases page**](https://github.com/cloudradial/Automations/releases). It's one file that works on macOS, Windows, and Linux; then add it to your Claude app:
 
 - **Cowork:** drag the file into the Cowork window, and approve it when asked.
 - **Claude Desktop:** drag the file into the app (or add it from the plugin gallery), then **quit and reopen** Claude Desktop.
@@ -193,7 +193,7 @@ The MCP server exposes 19 tools:
 
 `company`, `user`, `application_user`, `article`, `endpoint`, `catalog`, `catalog_question`, `assessment`, `feedback`, `service`, `service_install`, `domain`, `course`, `course_enrollment`, `course_lesson`, `course_lesson_history`, `menu`, `product`, `archive_item`, `certificate`, `company_group`, `company_group_company`, `quickstart`, `flexible_asset`, `flexible_asset_type`, `flexible_asset_field`, `endpoint_application`, `endpoint_custom_property`, `media`, `token`.
 
-Composite-key resources (need extra args on get/update/delete): `archive_item`, `service_install`, `company_group_company`, `course_lesson_history`. `application_user` has no OData listing: get by id only.
+Composite-key resources (need extra args on get/update/delete): `archive_item`, `service_install`, `company_group_company`, `course_lesson_history`. `application_user` has no OData listing; get by id only.
 
 ## Credentials & security
 

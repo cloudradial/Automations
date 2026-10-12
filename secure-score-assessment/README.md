@@ -18,7 +18,7 @@ These links point at the `main` branch, so they always open the current version.
 
 ## How it works
 
-Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control to a CloudRadial assessment question, and **creates + uploads** the assessment — the automated replacement for the old `Import-SecureScoreAssessment.ps1` / manual-import flow. This is a **deterministic PowerShell workflow** (not an agent): the spreadsheet is built in memory and uploaded, nothing is written to disk.
+Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control to a CloudRadial assessment question, and **creates + uploads** the assessment, the automated replacement for the old `Import-SecureScoreAssessment.ps1` / manual-import flow. This is a **deterministic PowerShell workflow** (not an agent): the spreadsheet is built in memory and uploaded, nothing is written to disk.
 
 `Start → Import Secure Score (single PowerShell node) → End`:
 
@@ -32,7 +32,7 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 1. On **Workflows → Import**, upload `secure-score-assessment.yml`, then **Publish** and **deploy** it to your runner.
 2. Add the **runner Key Vault secrets**:
    - `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`
-   - `M365-ClientID`, `M365-ClientSecret` — an **Entra app registration** with the **`SecurityEvents.Read.All`** *application* permission, **admin-consented in each client tenant** you run this against (a multi-tenant app).
+   - `M365-ClientID`, `M365-ClientSecret`: an **Entra app registration** with the **`SecurityEvents.Read.All`** *application* permission, **admin-consented in each client tenant** you run this against (a multi-tenant app).
 3. Run it from **Test** with the input below. No trigger webhook is needed.
 
 ### Microsoft 365 secrets stored per company
@@ -48,13 +48,13 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 {"companyId":123,"tenantId":"<client Entra tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
 ```
 
-- `companyId` — the CloudRadial company the assessment is created under (required).
-- `tenantId` — the **client's** Entra tenant id to pull Secure Score from (required).
-- `assessmentTitle` — optional; the date is appended, and that title is the idempotency key.
-- `mode` — `apply` (default) writes; `plan` previews the counts without creating anything.
+- `companyId`: the CloudRadial company the assessment is created under (required).
+- `tenantId`: the **client's** Entra tenant id to pull Secure Score from (required).
+- `assessmentTitle`: optional; the date is appended, and that title is the idempotency key.
+- `mode`: `apply` (default) writes; `plan` previews the counts without creating anything.
 
 ## Notes
 
 - **Idempotent by title:** a same-titled assessment for the company is skipped, so re-runs don't duplicate. (Change `assessmentTitle` for a fresh snapshot.)
-- The `POST /v2/assessment` create endpoint is undocumented-but-functional; `POST /v2/assessment/upload` is the multipart xlsx import. Both are exercised here directly — the agent-style `cloudradial-v2-compliance` extension (0.2.2) wraps the create for other uses, but the upload is file-based so this workflow does it in PowerShell.
+- The `POST /v2/assessment` create endpoint is undocumented-but-functional; `POST /v2/assessment/upload` is the multipart xlsx import. Both are exercised here directly; the agent-style `cloudradial-v2-compliance` extension (0.2.2) wraps the create for other uses, but the upload is file-based so this workflow does it in PowerShell.
 - **Requires:** AutomationAI + the CloudRadial API secrets + an Entra app with `SecurityEvents.Read.All`. No custom extension needed.

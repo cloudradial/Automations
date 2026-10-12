@@ -1,17 +1,17 @@
-# Question Template Sync — Export and Import Service Catalog Templates
+# Question Template Sync: Export and Import Service Catalog Templates
 
 ## Why This Matters
 
-Question Templates are not part of CloudRadial's Content system, which means there is no built-in way to export them. If you want to share a template with another Partner, migrate templates when moving a client to a different portal, or simply back up your templates before making changes — there's no export button and no import option. The only path is manually rebuilding each template from scratch, question by question, conditional rule by conditional rule.
+Question Templates are not part of CloudRadial's Content system, which means there is no built-in way to export them. If you want to share a template with another Partner, migrate templates when moving a client to a different portal, or simply back up your templates before making changes, but there's no export button and no import option. The only path is manually rebuilding each template from scratch, question by question, conditional rule by conditional rule.
 
-This script solves that. It gives you full export and import capability for Question Templates through the v2 API. Export specific templates or all of them at once to JSON files, then import them into any other portal. Both functions are built into a single script — the `-Action` flag determines whether you're listing, exporting, or importing. The script handles everything, including automatically remapping the internal question IDs so that conditional logic (show/hide rules, parent-child relationships) works correctly in the destination portal without any manual fixup.
+This script solves that. It gives you full export and import capability for Question Templates through the v2 API. Export specific templates or all of them at once to JSON files, then import them into any other portal. Both functions are built into a single script; the `-Action` flag determines whether you're listing, exporting, or importing. The script handles everything, including automatically remapping the internal question IDs so that conditional logic (show/hide rules, parent-child relationships) works correctly in the destination portal without any manual fixup.
 
 ## Who This Is For
 
-- **Partners migrating clients between portals** — Moving a client to a new environment? Export their Question Templates and import them to the new portal instead of rebuilding.
-- **Partners sharing templates with other Partners** — Built a great onboarding form or change request workflow? Export it to a JSON file and share it directly.
-- **Partners onboarding new clients** — Export your proven templates once, import them to every new client company. Same consistent forms from day one.
-- **Partners who want a safety net** — Export your templates before editing them. If a change breaks something, re-import the backup in seconds instead of trying to undo it manually.
+- **Partners migrating clients between portals**: Moving a client to a new environment? Export their Question Templates and import them to the new portal instead of rebuilding.
+- **Partners sharing templates with other Partners**: Built a great onboarding form or change request workflow? Export it to a JSON file and share it directly.
+- **Partners onboarding new clients**: Export your proven templates once, import them to every new client company. Same consistent forms from day one.
+- **Partners who want a safety net**: Export your templates before editing them. If a change breaks something, re-import the backup in seconds instead of trying to undo it manually.
 
 ## What You'll Need
 

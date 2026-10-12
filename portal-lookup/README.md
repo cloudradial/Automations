@@ -47,8 +47,8 @@ All optional.
 
 | Field | Default | What it does |
 |---|---|---|
-| `companyName` | — | Brief on one company by name. |
-| `cloudradialCompanyId` | — | Brief on one company by CloudRadial companyId. |
+| `companyName` | (none) | Brief on one company by name. |
+| `cloudradialCompanyId` | (none) | Brief on one company by CloudRadial companyId. |
 | `warrantyWindowDays` | `90` | Days ahead that count a warranty as "expiring soon". |
 
 Example: `{"companyName": "Contoso Ltd"}`

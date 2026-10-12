@@ -1,11 +1,6 @@
 ---
 name: service-management
-description: >
-  Manage CloudRadial services, service installations, domains, and products. Use when the
-  user says "list services", "check service installs", "what services does [company] have",
-  "domain list", "managed domains", "products", "service catalog details",
-  "what's installed for [company]", or needs to review, create, or manage services,
-  service installations, domains, or products in CloudRadial portals.
+description: "Manage CloudRadial services, service installations, domains, and products. Use when the user says \"list services\", \"check service installs\", \"what services does [company] have\", \"domain list\", \"managed domains\", \"products\", \"service catalog details\", \"what's installed for [company]\", or needs to review, create, or manage services, service installations, domains, or products in CloudRadial portals.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -65,7 +60,7 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 ## Resource Types
 
 ### service
-Services tracked for a company. Key fields: `serviceId`, `companyId`, `name`, `description`, `category`. Creating one requires `companyId` and `name`.
+Windows services reported by the CloudRadial agent (for example "Adobe Acrobat Update Service"), not a service catalog. When the user asks about their service catalog or request forms, use `catalog` (see content-management). Key fields: `serviceId`, `companyId`, `name`, `description`, `category`. Creating one requires `companyId` and `name`.
 
 ### service_install
 Links a service to an endpoint: which endpoints have the service, and in what state. Key fields: `endpointId` (the endpoint's `companyEndpointId`), `serviceId`, `status`, `startupType`, `fullVersion`, `version`, `major`, `minor`. There is no install ID and no `companyId`: the key is `endpointId` + `serviceId`. To scope installs to a company, list the company's endpoints first and filter installs on their IDs.

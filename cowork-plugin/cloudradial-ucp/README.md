@@ -6,7 +6,7 @@ Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Cla
 
 You install this once **for each Claude app you use** (Cowork, Claude Code, or Claude Desktop). The good news: you enter your CloudRadial keys only **once per computer** — they're stored securely on your computer and shared automatically with every Claude app on that machine.
 
-> **Requirement:** Node.js must be installed and on your PATH. The plugin runs its MCP server locally by launching `node` — there's nothing to host and no service to deploy.
+> **Requirement:** Node.js 18+ must be installed and on your PATH. First-time secure-storage setup also requires npm and network access to npm. The plugin runs its MCP server locally by launching `node` — there's nothing to host and no service to deploy.
 
 ### Step 1 — Install the plugin
 
@@ -31,7 +31,7 @@ Start a new conversation and type:
 
 > **Setup the CloudRadial Plugin**
 
-Claude will ask for your CloudRadial **public key** and **private key** (find them in your CloudRadial admin portal under **Settings → API**), check that they work, and store them securely on your computer (encrypted at rest). You only do this once per computer.
+Setup first detects your OS/CPU, installs the matching native keyring dependency, and verifies OS-keychain storage. It then opens a local browser form where you enter your CloudRadial public/private keys from **Settings → API** and select US or EU. Keys are validated directly with CloudRadial and saved in your OS keychain. **Do not paste API keys into chat.**
 
 ### Step 3 — Try something
 
@@ -42,116 +42,84 @@ Pick anything from **What you can do** below, or just ask Claude in your own wor
 
 ## What you can do
 
-Copy any prompt into Claude and swap in your own company names or IDs. Claude confirms the company and the change before it writes anything to your portal. Every prompt below works through the CloudRadial API, in both the Claude (Cowork, Claude Desktop, Claude Code) and Codex versions of the plugin.
+Copy a prompt into Claude or Codex and swap in your own company names or IDs. Each one links to the full prompt in that skill's guide, which shows what to ask for, what you get, and what to watch for. The plugin confirms the company and shows you any change before it writes to your portal. Every prompt works through the CloudRadial API, in both the Claude (Cowork, Claude Desktop, Claude Code) and Codex versions of the plugin.
 
 ### Get started
 
-| Say this | What happens | Skill |
+| Say this | Skill | Full prompt |
 |---|---|---|
-| `Setup the CloudRadial Plugin` | Guided key entry, a live check, and encrypted storage on your computer | setup |
-| `Tour the plugin` | Every skill and what it does | setup |
-| `Is the CloudRadial plugin configured?` | Status check that never shows the keys | setup |
-| `Clear my CloudRadial credentials` | Removes the stored keys | setup |
+| `Set up the CloudRadial plugin` | setup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/setup/README.md#set-up-the-plugin) |
+| `Is the CloudRadial plugin configured?` | setup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/setup/README.md#check-the-connection) |
+| `Give me a tour of the CloudRadial plugin` | setup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/setup/README.md#take-a-tour) |
 
 ### Look up a client and prepare for a meeting
 
-| Say this | What happens | Skill |
+| Say this | Skill | Full prompt |
 |---|---|---|
-| `Look up Acme Corp in CloudRadial` | Company details with user and endpoint counts | portal-lookup |
-| `Prepare me for my meeting with Contoso` | Meeting prep: lifecycle stage, flags and talking points | portal-lookup |
-| `How is Acme Corp doing in their portal?` | Adoption snapshot | portal-lookup |
-| `Show me overviews for Acme, Contoso and Globex` | Side-by-side comparison | portal-lookup |
-| `Prep a QBR for Acme Corp` | Endpoints, assessments and feedback pulled into one view | portal-setup |
-| `Build a client deliverable for Contoso: roadmap, budget, machine audit and licenses` | A vCIO deliverable built in the portal | client-deliverable |
-| `Recreate this ScalePad deliverable in CloudRadial` *(attach the PDF)* | The roadmap, goals and budget rebuilt as Planner items | client-deliverable |
+| `Look up Acme Corp in CloudRadial` | portal-lookup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/portal-lookup/README.md#find-a-client) |
+| `Prepare me for my meeting with Contoso` | portal-lookup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/portal-lookup/README.md#prepare-for-a-meeting) |
+| `How is Acme Corp doing in their portal?` | portal-lookup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/portal-lookup/README.md#check-portal-adoption) |
+| `Prep a QBR for Acme Corp` | portal-setup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/portal-setup/README.md#prep-a-qbr) |
 
 ### Set up a client portal
 
-Walk a new client through implementation, or set up one area at a time. The plugin does every step the API supports and gives you a short list of the steps that stay in the portal (branding, integrations, security roles, agent deployment).
+Walk a new client through implementation, or set up one area at a time. The plugin does every step the API supports and gives you a short list of the steps that stay in the portal.
 
-| Portal area | Say this | What happens | Skill |
-|---|---|---|---|
-| Whole portal | `Onboard a new client called Acme Corp` | Starts the five-session implementation: creates what the API can, lists the rest | portal-setup |
-| Whole portal | `What does Contoso need next?` | Lifecycle stage and the next checklist | portal-setup |
-| Whole portal | `Walk me through Session 2 for company 42` | The service desk session: checks, creates and to-dos | portal-setup |
-| Whole portal | `What can you set up for Contoso through the API, and what do I do in the portal?` | The API-versus-portal split for every area | portal-setup |
-| Company | `Create a new company called Acme Corp` | New company | company-management |
-| Company | `Change the account manager for Contoso to Jane Smith` | Company updated | company-management |
-| Company groups | `Add Acme Corp to the "Office 365 Only" group` | Group membership updated | company-management |
-| Users | `Add jane@contoso.com, Jane Doe, to Contoso's portal` | New portal user | user-management |
-| Users | `Who has access to Contoso's portal?` | Users with names, emails and roles | user-management |
-| Service catalog | `Build a service catalog for Acme Corp` | Request forms for password reset, new user, hardware and software | content-management |
-| Service catalog | `Add a required "Start date" question to Contoso's New User form, with JSON field ID startDate` | New question on the form | content-management |
-| Knowledge base | `Seed Contoso with 10 starter KB articles` | Ten articles on common IT topics | content-management |
-| Knowledge base | `Write a KB article for Contoso about resetting MFA` | One article, step by step | content-management |
-| Menus | `Add a "Get Help" menu tile to Contoso's portal that opens the service catalog` | New menu tile | content-management |
-| Quickstarts | `Add a quickstart to Contoso's home page on connecting to the VPN` | New quickstart guide | reporting-admin |
-| Media | `Upload this image to Contoso's media library` *(attach it)* | Image stored in the portal | reporting-admin |
-| Replacement tokens | `Set Contoso's SupportPhone token to 555-0100` | Every form, article and automation using `@SupportPhone` for Contoso shows the new value | reporting-admin |
-| Replacement tokens | `List Contoso's replacement tokens` | Company tokens and the partner-level ones it inherits | reporting-admin |
-| Training | `Build a phishing-awareness training course for Contoso` | Course with lessons and a quiz | course-management |
-| Training | `Build a course for Contoso from this YouTube video: <link>` | Lessons from the video | course-management |
-| Training | `Build a course from this document` *(attach it)* | Lessons from the document | course-management |
-| Assessments | `Create a CIS Controls assessment for Contoso with these 20 questions` | New assessment with the questions loaded | assessment-compliance |
-| Assessments | `Turn this spreadsheet into an assessment for company 42` | The .xlsx imported as an assessment | assessment-compliance |
-| Assessments | `Copy our Baseline Security template into a new assessment for Acme, one set per server` | Template questions duplicated per server | assessment-compliance |
-| Flexible assets | `Set up flexible-asset tracking for Contoso's network devices` | Asset type, fields and records | assessment-compliance |
-| Services | `Mark the Backup service as installed on Contoso's DC01` | Service install recorded | service-management |
-| Domains | `Add contoso.com as a managed domain for Contoso` | Domain added | service-management |
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `What does Contoso need next?` | portal-setup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/portal-setup/README.md#plan-the-next-step) |
+| `Walk me through Session 2 for company 42` | portal-setup | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/portal-setup/README.md#run-an-implementation-session) |
+| `Create a new company called Acme Corp` | company-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/company-management/README.md#create-a-company) |
+| `Add jane@contoso.com, Jane Doe, to Contoso's portal` | user-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/user-management/README.md#add-a-user) |
+| `Build a New User request form for Acme Corp` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#build-a-request-form) |
+| `Seed Contoso with 10 starter KB articles` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#seed-a-knowledge-base) |
+| `Add a "Get Help" menu tile to Contoso's portal` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#add-a-menu-tile) |
+| `Add a quickstart to Contoso's home page` | reporting-admin | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/reporting-admin/README.md#add-a-quickstart) |
+| `Set Contoso's SupportPhone token to 555-0100` | reporting-admin | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/reporting-admin/README.md#set-a-replacement-token) |
+| `Build a phishing-awareness course for Contoso` | course-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/course-management/README.md#build-a-training-course) |
+| `Create a CIS Controls assessment for Contoso` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#create-an-assessment-from-questions) |
+| `Add contoso.com as a managed domain` | service-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/service-management/README.md#add-a-domain) |
 
 ### Run the service day to day
 
-| Say this | What happens | Skill |
+| Say this | Skill | Full prompt |
 |---|---|---|
-| `Show me all unpublished articles for Contoso` | Draft content waiting for review | content-management |
-| `Audit Contoso's portal content` | Articles, catalog items and menus by status, with gaps | content-management |
-| `Who's completed the security training at Acme Corp?` | Enrollments with completion dates | course-management |
-| `Who at Contoso hasn't finished their required training?` | Users with incomplete enrollments | course-management |
-| `Which lesson did Sam stop at in the phishing course?` | Lesson-by-lesson progress | course-management |
-| `How many users does Acme Corp have?` | Count by company | user-management |
-| `Which of Contoso's users haven't completed security training?` | Users cross-checked with enrollments | user-management |
-| `List all my companies` | Companies with endpoint counts | company-management |
-| `Which companies have no portal logo?` | Branding audit across clients | company-management |
+| `Who has completed the security training at Acme Corp?` | course-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/course-management/README.md#check-who-finished) |
+| `Audit Contoso's portal content` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#audit-portal-content) |
+| `List all my companies` | company-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/company-management/README.md#list-and-audit-companies) |
+| `Rename the "Office 365 Only" company group` | company-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/company-management/README.md#rename-a-company-group) |
 
 ### Devices and lifecycle
 
-| Say this | What happens | Skill |
+| Say this | Skill | Full prompt |
 |---|---|---|
-| `How many endpoints does Acme Corp have?` | Device count | endpoint-reporting |
-| `Which of Contoso's devices are out of warranty?` | Devices with expiration dates | endpoint-reporting |
-| `Refresh warranty for all of Acme Corp's devices` | Warranty lookups queued by serial number | endpoint-reporting |
-| `Show all software installed on endpoint 789` | Installed applications | endpoint-reporting |
-| `Build a warranty expiration report for the next 6 months` | Devices expiring soon | endpoint-reporting |
-| `Build hardware refresh cards for Contoso` | One Planner card per refresh category, each with a priority | endpoint-lifecycle-cards |
-| `Which of Acme Corp's computers need replacing?` | The Replace list with reasons | endpoint-lifecycle-cards |
+| `Which of Contoso's devices are out of warranty?` | endpoint-reporting | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/endpoint-reporting/README.md#warranty-report) |
+| `Set the warranty end date on Contoso's laptop` | endpoint-reporting | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/endpoint-reporting/README.md#write-a-warranty-date-by-hand) |
+| `Build hardware refresh cards for Contoso` | endpoint-lifecycle-cards | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/endpoint-lifecycle-cards/README.md#build-refresh-cards) |
+| `Build a hardware refresh roadmap for Contoso` | client-deliverable | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-deliverable/README.md#build-a-refresh-roadmap) |
 
-### Security, compliance and satisfaction
+### Compliance and satisfaction
 
-| Say this | What happens | Skill |
+| Say this | Skill | Full prompt |
 |---|---|---|
-| `Show me Contoso's assessment scores` | Assessments with status, score and date | assessment-compliance |
-| `How is Acme Corp doing on compliance?` | Passing, failing and in progress | assessment-compliance |
-| `Which company has the lowest assessment score?` | Cross-company comparison | assessment-compliance |
-| `Roll up assessment scores across all my clients` | Executive summary: totals, gaps, common issues, trends | assessment-export |
-| `Which customers have the most assessment gaps?` | Clients ranked by gaps | assessment-export |
-| `What feedback has Contoso submitted lately?` | Recent feedback | feedback-analysis |
-| `Which of my clients have the lowest CSAT this quarter?` | Clients ranked by satisfaction | feedback-analysis |
-| `Summarize themes in Contoso's recent feedback` | Grouped comment themes | feedback-analysis |
+| `How is Contoso doing on compliance?` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#check-compliance) |
+| `Turn this spreadsheet into an assessment` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#import-a-spreadsheet) |
+| `Roll up assessment scores across all my clients` | assessment-export | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-export/README.md#roll-up-every-client) |
+| `What feedback has Contoso submitted in the last 30 days?` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#review-recent-feedback) |
+| `Fix a feedback entry for ticket 123456` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#fix-a-feedback-entry) |
+| `Move feedback to another company` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#move-feedback-to-another-company) |
+| `Which of my clients have the lowest CSAT this quarter?` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#compare-satisfaction) |
 
-### Services, domains, certificates and reports
+### Domains, certificates and reports
 
-| Say this | What happens | Skill |
+| Say this | Skill | Full prompt |
 |---|---|---|
-| `What services are installed for Acme Corp?` | Service installations | service-management |
-| `Service coverage summary for Acme Corp` | Installed versus available | service-management |
-| `Which of my managed domains expire in the next 90 days?` | Domain expiration sweep | service-management |
-| `Which of Contoso's certificates expire in 30 days?` | Certificates with expiration dates | reporting-admin |
-| `Show me Acme Corp's archived reports` | Archive items by date | reporting-admin |
-| `Hit /v2/odata/company/$count via the API directly` | Raw API response, for anything not covered above | reporting-admin |
+| `Which of my managed domains expire in the next 90 days?` | service-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/service-management/README.md#domain-expirations) |
+| `Which of Contoso's certificates expire in the next 30 days?` | reporting-admin | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/reporting-admin/README.md#certificate-expirations) |
 
 ### What stays in the portal
 
-The CloudRadial API doesn't cover these, so the plugin lists them for you instead of doing them: portal branding (logo, colors, theme), security roles and SSO, connecting integrations (PSA, Microsoft 365, RMM), deploying the endpoint agent, approval workflows and automations on a request form, the feedback widget and CSAT surveys, and scheduled report delivery.
+The CloudRadial API doesn't cover these, so the plugin lists them for you instead of doing them: portal branding (logo, colors, theme), security roles and SSO, connecting integrations (PSA, Microsoft 365, RMM), deploying the endpoint agent, approval workflows and automations on a request form, the feedback widget and CSAT surveys, scheduled report delivery, a course's exam passing score, copying an assessment template, deleting assessments, and attaching files to archived reports.
 
 For work that should run on its own (on a schedule, from a form, or from ServiceAI), use the matching [AutomationAI automations](https://github.com/cloudradial/Automations/tree/main).
 
@@ -166,20 +134,20 @@ You in Claude
      v
 Bundled MCP server  (server/index.mjs, inside the plugin, spawned by your Claude app)
      |
-     |  HTTPS with HTTP Basic auth (keys from local encrypted store or env vars)
+     |  HTTPS with HTTP Basic auth (keys from OS keychain or existing env vars)
      v
 CloudRadial API V2
 ```
 
-There is **no Azure Function**, no Chrome extension, no separate server to deploy, no npm install at runtime. The plugin contains the MCP server itself — an esbuild-bundled JavaScript file (**pure JS, no native binaries — one build runs on every OS**). The plugin's `.mcp.json` tells your Claude app how to launch it with `node`; installing the plugin auto-registers the server. Credentials are stored **encrypted on your computer** (or supplied via environment variables — see below).
+The MCP server ships as portable JavaScript in one plugin file. First-time setup installs the pinned `@napi-rs/keyring@2.1.0` native dependency matching the current OS/CPU/libc into a per-user runtime cache. Native binaries are not bundled in the plugin. Credentials are stored in the OS keychain; there is no encrypted-file fallback. Existing environment-variable configurations remain supported.
 
 ## Skills (15)
 
-Each skill below has a partner-facing **README** with example prompts to try. Click the skill name for its guide.
+Each skill below has a partner-facing **README** with full example prompts, what you get, and what to watch for. Click the skill name for its guide.
 
 | Skill | What it does |
 |-------|--------------|
-| **[setup](skills/setup/README.md)** | First-run plugin setup + branded welcome tour — validates and stores credentials encrypted on your computer |
+| **[setup](skills/setup/README.md)** | Native keyring setup and verification, local credential form, and connection validation |
 | **[portal-setup](skills/portal-setup/README.md)** | Walk a client through their 5-session CloudRadial implementation; 8 CSA pain-point playbooks; content seeding |
 | **[portal-lookup](skills/portal-lookup/README.md)** | Look up companies, check portal status, assess LOMG lifecycle stage, prepare for meetings |
 | **[content-management](skills/content-management/README.md)** | Create and manage articles, catalogs, menus, courses, lessons, and assessments |
@@ -188,21 +156,22 @@ Each skill below has a partner-facing **README** with example prompts to try. Cl
 | **[endpoint-reporting](skills/endpoint-reporting/README.md)** | List endpoints, warranty reports, device inventory, application audits |
 | **[endpoint-lifecycle-cards](skills/endpoint-lifecycle-cards/README.md)** | Maintain one Planner card per hardware-refresh category (Replace, Plan, Upgrade, Retain…) with triage priority |
 | **[course-management](skills/course-management/README.md)** | Create training courses and lessons (from a topic, document, or YouTube link); check enrollments |
-| **[assessment-compliance](skills/assessment-compliance/README.md)** | Review assessments, create an assessment from questions, a spreadsheet or a template, flexible assets |
+| **[assessment-compliance](skills/assessment-compliance/README.md)** | Review assessments, create or refresh an assessment from questions or a spreadsheet, flexible assets |
 | **[assessment-export](skills/assessment-export/README.md)** | Roll up assessment results across every client into an executive summary |
 | **[client-deliverable](skills/client-deliverable/README.md)** | Build a vCIO-style deliverable: IT roadmap, goals, budget, machine audit, Microsoft licenses |
 | **[feedback-analysis](skills/feedback-analysis/README.md)** | Analyze user feedback, CSAT trends, satisfaction reporting |
 | **[service-management](skills/service-management/README.md)** | Services, service installs, domains, products, coverage analysis |
 | **[reporting-admin](skills/reporting-admin/README.md)** | Archives, certificates, company groups, quickstarts, media, replacement tokens, raw API access |
 
-## MCP tools (18)
+## MCP tools (19)
 
-The MCP server exposes 18 tools to Claude:
+The MCP server exposes 19 tools:
 
 | Tool | Purpose |
 |------|---------|
 | `setup_status` | Check whether credentials are configured (returns hint only, never the keys) |
-| `configure_credentials` | Validate and store credentials (encrypted, on your computer) |
+| `setup_secure_storage` | Install the matching native keyring dependency and verify OS-keychain write/read/delete |
+| `configure_credentials` | Open the local credential form; takes no API keys as arguments |
 | `clear_credentials` | Wipe stored credentials |
 | `search_companies` | Search companies by partial name |
 | `company_overview` | Full snapshot: details, counts, recent articles + feedback |
@@ -228,10 +197,13 @@ Composite-key resources (need extra args on get/update/delete): `archive_item`, 
 
 ## Credentials & security
 
-- **Stored encrypted on your computer.** Credentials are written to a local file encrypted with AES-256-GCM, using a key derived from your machine and user account — never in plain text, and usable only on the same computer under the same user. (If the optional OS-keychain module `@napi-rs/keyring` is present in the server, the plugin uses the OS keychain instead — Windows Credential Manager / macOS Keychain / Linux libsecret.)
-- **Validated before storage.** The setup wizard makes a live `GET /v2/odata/company/$count` call before writing anything — bad keys never get saved.
-- **Privacy note for setup.** Because setup happens in chat, your keys appear briefly in the conversation transcript when you paste them. If you prefer the keys never enter the LLM context, set `CLOUDRADIAL_PUBLIC_KEY` and `CLOUDRADIAL_PRIVATE_KEY` environment variables in your MCP client config instead — the server picks those up first and skips the local store entirely. For shared or CI hosts you can also set `CLOUDRADIAL_CRED_SECRET` (adds key-derivation entropy) or `CLOUDRADIAL_CRED_FILE` (relocates the encrypted store).
-- **To rotate:** re-run the setup wizard (it overwrites the stored entry). To remove: ask Claude to run `clear_credentials`.
+- **OS keychain required for local setup.** Windows Credential Manager, macOS Keychain, or persistent Linux Secret Service. Setup verifies a temporary write/read/delete before requesting API keys. Linux kernel-keyutils fallback is disabled.
+- **Keys stay outside chat.** Enter them in the browser form bound to 127.0.0.1. A random token, origin/host checks, no-store responses, and a ten-minute expiry protect the local session. No keys or session URL are returned through MCP.
+- **Validated before storage.** The helper sends keys directly to the selected US/EU CloudRadial API over HTTPS. Failed validation leaves existing stored credentials unchanged.
+- **No encrypted-file fallback.** Older encrypted files are detected but are not read, migrated, or deleted automatically. Re-enter keys locally to move to OS-keychain storage.
+- **Dependency setup.** The exact keyring version is pinned; npm selects the matching native package. Installation disables lifecycle scripts and requires network access only when the dependency is missing or needs repair.
+- **Existing environment overrides.** CLOUDRADIAL_PUBLIC_KEY / CLOUDRADIAL_PRIVATE_KEY remain supported and take precedence. Local setup asks you to remove that client override before replacing it; never paste values into chat.
+- **Rotate or remove.** Re-open local setup to rotate. clear_credentials removes OS-keychain entries only, leaving environment overrides and legacy files untouched.
 
 ## Things to know
 

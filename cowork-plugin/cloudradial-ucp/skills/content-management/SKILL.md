@@ -1,11 +1,6 @@
 ---
 name: content-management
-description: >
-  Manage CloudRadial portal content - articles, catalogs, menus, courses, and assessments.
-  Use when the user says "create an article in CloudRadial", "update portal content",
-  "add a KB article to the portal", "set up a service catalog", "manage portal menus",
-  "create a course", "check article status", "publish content", or needs to create,
-  update, or review content within a partner's CloudRadial portal.
+description: "Manage CloudRadial portal content - articles, catalogs, menus, courses, and assessments. Use when the user says \"create an article in CloudRadial\", \"update portal content\", \"add a KB article to the portal\", \"set up a service catalog\", \"manage portal menus\", \"create a course\", \"check article status\", \"publish content\", or needs to create, update, or review content within a partner's CloudRadial portal.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -78,14 +73,16 @@ Portal knowledge base articles. Key fields: `articleId`, `subject` (NOT `title`)
 Service request forms shown to end users. Key fields: `companyCatalogId`, `companyId`, `subject` (NOT `name`), `category`, `description`, `shortDescription`, `thankYou`, `isNeedsApproval`, `isSendToPsa`, and the PSA routing fields (`psaBoard`, `psaType`, `psaSubType`, `psaItem`, `psaPriority`, `psaStatus`). Creating one requires `companyId`, `subject` and `category`.
 
 - **List catalog items:** Call `list_resources` with `resource_type: "catalog"`, `filter: "companyId eq 42"`.
-- **Create a catalog item:** Call `create_resource` with `resource_type: "catalog"`, `data: { companyId, subject, category, description, shortDescription }`. Leave the PSA routing fields empty unless the user gives them; wrong board names break ticket creation.
+- **Create a catalog item:** Call `create_resource` with `resource_type: "catalog"`, `data: { companyId, subject, category, description, shortDescription, isSelfApproval, isAppendSubject, selectText }`. Leave the PSA routing fields empty unless the user gives them; wrong board names break ticket creation.
+- **Always set `isSelfApproval`, `isAppendSubject`, `selectText` and `isSendToPsa` on create.** When they're left out, the API saves `isSelfApproval: true`, `isAppendSubject: true`, `selectText: "ORDER"` and `isSendToPsa: true`. Ask the user what the form needs (or copy the values from a similar existing item) and send them explicitly.
 
 ### Catalog questions (the fields on a request form)
 Key fields: `companyCatalogQuestionId`, `companyCatalogId`, `companyId`, `label`, `type`, `order`, `isRequired`, `isSubject`, `isDescription`, `options`, `placeholder`, `defaultValue`, `info`, `jsonId` (the Script / JSON Field ID automations read as `@<jsonId>`), `isIncludeInTicket`, `isUserLookup`, `hideConditions`. Creating one requires `companyCatalogId`, `companyId`, `label` and `order`.
 
 - **List a form's questions:** Call `list_resources` with `resource_type: "catalog_question"`, `filter: "companyCatalogId eq 77"`, `orderby: "order asc"`.
 - **Add a question:** Call `create_resource` with `resource_type: "catalog_question"`, `data: { companyCatalogId, companyId, label, order, type, isRequired, jsonId }`.
-- **`type` is a numeric code** (0 to 230, and 999) and the API doesn't publish names for the codes. Copy the `type` from an existing question of the same kind (text, dropdown, date, user lookup) on any catalog item, and say so. Never guess a code.
+- **Edit a question:** Call `update_resource` with `resource_type: "catalog_question"`, `id`, `company_id` and only the changed fields (for example `label`, `isRequired`, `order`). PATCH works.
+- **`type` takes a name.** Send the type name on create, for example `type: "TextField"`. Names seen in the API: `TextField`, `MemoField`, `EmailField`, `NumberField`, `DateField`, `MultiChoiceField`, `MultiChoiceDropdown`, `MultiSelectField`, `Comment`, `PageBreak` and `Template`. The create response returns `type` as a number (`TextField` comes back as `0`), but `list_resources` returns the name, so read the question back to confirm its type. The spec defines more codes than these names (0 to 230, and 999); for a kind not in this list, copy `type` from an existing question of that kind on any catalog item, and say so. Never guess.
 - **Set `jsonId`** on every question an automation needs to read. Don't use a predefined token name such as `UserEmail` or `CompanyName`; the predefined value wins and the answer is lost.
 - **Subscribed forms:** if the catalog item came from a content package, editing it may detach it from the package. Ask before changing a subscribed item.
 
@@ -94,6 +91,8 @@ Portal navigation tiles. Key fields: `companyMenuId` (the ID to pass to `get_res
 
 - **List menus:** Call `list_resources` with `resource_type: "menu"`, `filter: "companyId eq 42"`.
 - **Add a menu tile:** Call `create_resource` with `resource_type: "menu"`. Copy `editRights` and `category` from an existing menu on the same company, since their allowed values aren't published.
+- **Always send `groups`** as an array of group names, for example `groups: ["Everyone"]`. A tile created without it saves with no groups, which existing tiles never have, so it may not show for anyone. Copy the groups from a similar existing tile when the user doesn't say.
+- **Edit a menu tile with PUT, not PATCH.** PATCH on a menu returns HTTP 415. Read the tile with `get_resource`, change the fields, and call `update_resource` with `method: "PUT"` and the full body (`companyId`, `name`, `url`, `category`, `order`, `editRights`, `groups` and the rest), since PUT replaces the whole record.
 
 ### Courses & Lessons
 Training content for end users. Course uses `name` (NOT `title`); creating one requires `companyId`, `name`, `description`, `shortDescription`, `category` and `estimatedTime` (an integer number of minutes). CourseLesson uses `title`, `overview`, `category`, `text` (HTML body), and `order`; creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`.

@@ -1,17 +1,6 @@
 ---
 name: client-deliverable
-description: >
-  Build a vCIO-style client deliverable in a CloudRadial portal: IT roadmap, goals,
-  budget, machine audit, and Microsoft licenses in one place. Use when the user says
-  "build a client deliverable", "recreate this in CloudRadial", "IT roadmap for [company]",
-  "budget report", "quarterly business review", "QBR deck", "asset lifecycle plan",
-  "hardware refresh plan", "how do I do what Lifecycle Insights does", "ScalePad",
-  "Lifecycle Manager", "myITprocess", "vCIOToolbox", "DMI score", "maturity score",
-  "how does our scoring compare", "map a ScalePad PDF to CloudRadial", "import a ScalePad
-  Lifecycle Manager deliverable", "sync ScalePad asset/EOL data to endpoints", "write
-  warranty/EOL dates onto endpoints", or is migrating a partner off a third-party vCIO/QBR
-  tool onto CloudRadial. Also use when asked to turn endpoint EOL or warranty data into
-  a priced, quarter-scheduled plan.
+description: "Build a vCIO-style client deliverable in a CloudRadial portal: IT roadmap, goals, budget, machine audit, and Microsoft licenses in one place. Use when the user says \"build a client deliverable\", \"recreate this in CloudRadial\", \"IT roadmap for [company]\", \"budget report\", \"quarterly business review\", \"QBR deck\", \"asset lifecycle plan\", \"hardware refresh plan\", \"how do I do what Lifecycle Insights does\", \"ScalePad\", \"Lifecycle Manager\", \"myITprocess\", \"vCIOToolbox\", \"DMI score\", \"maturity score\", \"how does our scoring compare\", \"map a ScalePad PDF to CloudRadial\", \"import a ScalePad Lifecycle Manager deliverable\", \"sync ScalePad asset/EOL data to endpoints\", \"write warranty/EOL dates onto endpoints\", or is migrating a partner off a third-party vCIO/QBR tool onto CloudRadial. Also use when asked to turn endpoint EOL or warranty data into a priced, quarter-scheduled plan.\n"
 metadata:
   version: "1.1.0"
 ---
@@ -124,7 +113,7 @@ directly writable — use `update_resource` (PATCH, the default) / `create_resou
 date). Rows with no serial cannot be safely matched or created — skip them. Values with no
 endpoint field (a purchase date, a source tag) go on as custom properties:
 `create_resource` with `resource_type: "endpoint_custom_property"`, `serial_number`, and
-`data: { name, value, dataType }`.
+`data: { name, value, dataType }`. If the serial is on more than one endpoint (a copy under a deleted company is common), these calls fail with HTTP 400; check with `filter: "serialNumber eq '<serial>'"` first.
 
 Full field map, match/update/create mechanics, required-field caveats, and the
 `pdftotext` extraction recipe:
@@ -143,7 +132,7 @@ Categories have no standalone endpoint and no OData listing, but `create_resourc
 { "categoryData": { "name": "Hardware Refresh", "order": 10, "color": "#1F6FEB" } }
 ```
 
-Omit `productCategoryId` to create; supply it to update. Create the category on the
+Omit `productCategoryId` to create; supply it to update. The API has no way to list or delete categories (`/v2/productcategory` returns 404), so a category created by mistake must be deleted in the portal: confirm the name with the user before creating one. Always send `category` and `productCategoryId` together and make them match; the API accepts a name that disagrees with the ID. Create the category on the
 first item that needs it, then reuse the returned `productCategoryId` on the rest.
 
 ### 5. Create the roadmap initiatives
@@ -156,7 +145,9 @@ The essentials:
 
 - `companyId`, `subject`, `body`, `summary`, `category`, `productCategoryId`, `datePublished`,
   `isRequired` and `isShowPrice` are all required on create
-- `productType: 2` plus `estimatedStartDate` and `estimatedEndDate` puts the item on the Timeline
+- `productType: 2` plus `estimatedStartDate` and `estimatedEndDate` puts the item on the Timeline.
+  The dates decide where it shows; `scheduledQuarter` stays 0 even on scheduled items, so never
+  read the schedule from `scheduledQuarter`
 - `productType: 0` means Not Scheduled — the right home for an overdue backlog that has
   recognised budget but no agreed date
 - `projectUnits` x `projectUnitPrice` is one-time investment; `monthlyUnits` x

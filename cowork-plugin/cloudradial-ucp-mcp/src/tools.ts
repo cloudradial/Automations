@@ -1,11 +1,8 @@
 import { readFileSync } from "node:fs";
 import { callApi, callApiMultipart, CloudRadialApiError, RESOURCE_MAP, escapeODataString } from "./cloudradial-client.js";
 import { buildAssessmentXlsx } from "./xlsx.js";
-import {
-  clearKeychain,
-  getStatus,
-  saveToKeychain,
-} from "./credentials.js";
+import { clearKeychain, getStatus, installAndVerifyStorage } from "./secure-storage.js";
+import { openLocalCredentialSetup } from "./setup-tools.js";
 
 const RESOURCE_TYPES = Object.keys(RESOURCE_MAP);
 
@@ -164,7 +161,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "setup_status",
     description:
-      "Check whether CloudRadial credentials are configured. Returns {configured, source ('env'|'keychain'|'file'), baseUrl, publicKeyHint (last 4 chars of public key)}. Never returns the full keys. Call this BEFORE any other CloudRadial tool — if configured is false, run the setup wizard before doing CloudRadial work.",
+      "Check whether CloudRadial is configured. Returns configured, source (env or keychain), region, public-key suffix, platform, architecture, keychainReady, and legacyCredentialsDetected. Never returns API keys. If secure storage is missing, run setup_secure_storage, then configure_credentials to open the LOCAL form. Never collect keys through chat.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -173,63 +170,25 @@ export const tools: ToolDefinition[] = [
   },
 
   {
+    name: "setup_secure_storage",
+    description:
+      "Detect OS/CPU, install the pinned native keyring dependency for this machine, and verify a temporary OS-keychain write/read/delete. Run before requesting any credentials. Downloads from npm; never uses a credential-file fallback.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: async () => installAndVerifyStorage(),
+  },
+
+  {
     name: "configure_credentials",
     description:
-      "Store CloudRadial API credentials securely on this computer — in the OS keychain if the native module is available (Windows Credential Manager / macOS Keychain / Linux libsecret), otherwise an AES-256-encrypted local file. Validates the keys with a live `/v2/odata/company/$count` call before saving — if validation fails, nothing is written. Existing credentials are overwritten. The keys are NEVER logged or returned by this tool.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        public_key:  { type: "string", description: "CloudRadial API public key (from CloudRadial admin portal → Settings → API)" },
-        private_key: { type: "string", description: "CloudRadial API private key" },
-        base_url:    { type: "string", description: "API base URL. Defaults to https://api.us.cloudradial.com (US). EU partners: https://api.eu.cloudradial.com" },
-      },
-      required: ["public_key", "private_key"],
-    },
-    handler: async (args) => {
-      const publicKey = requireStr(args, "public_key");
-      const privateKey = requireStr(args, "private_key");
-      const baseUrl = str(args, "base_url") || "https://api.us.cloudradial.com";
-
-      // Validate by attempting a live call with these credentials.
-      // Build the auth header inline so we don't write anything until validation succeeds.
-      const authHeader = "Basic " + Buffer.from(`${publicKey}:${privateKey}`).toString("base64");
-      const testUrl = new URL("/v2/odata/company/$count", baseUrl).toString();
-      let resp: Response;
-      try {
-        resp = await fetch(testUrl, {
-          method: "GET",
-          headers: { Authorization: authHeader, Accept: "application/json" },
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Network error reaching ${baseUrl}: ${msg}`);
-      }
-
-      if (resp.status === 401 || resp.status === 403) {
-        throw new Error(
-          `CloudRadial rejected those credentials (HTTP ${resp.status}). Double-check the public and private keys from your CloudRadial admin portal → Settings → API.`
-        );
-      }
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(`Validation call failed (HTTP ${resp.status}): ${body.slice(0, 200)}`);
-      }
-
-      saveToKeychain({ publicKey, privateKey, baseUrl });
-
-      const status = getStatus();
-      return {
-        success: true,
-        message: `Credentials validated and stored securely on this computer (${status.source === "keychain" ? "OS keychain" : "encrypted local file"}).`,
-        ...status,
-      };
-    },
+      "Open a local browser form after OS-keychain verification. The user enters API keys locally; they are validated directly with CloudRadial and saved in the OS keychain. Takes NO API keys as arguments. Never ask the user to paste keys into chat. Check setup_status after the user finishes.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: async (args) => openLocalCredentialSetup(args),
   },
 
   {
     name: "clear_credentials",
     description:
-      "Delete stored CloudRadial credentials from this computer (OS keychain or encrypted local file). Does NOT affect environment variables — if creds were loaded from env vars, this is a no-op. Use to rotate keys or remove the configuration.",
+      "Delete CloudRadial credentials from the OS keychain. Environment-variable overrides and legacy encrypted files are unaffected.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -805,7 +764,7 @@ export const tools: ToolDefinition[] = [
     description:
       "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. " +
       "Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), " +
-      "`file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`). " +
+      "`file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`; the API currently accepts this call but copies no questions, so prefer the portal). " +
       "Without `assessment_id`, the upload creates a new assessment (the API has no other create) and the tool finds its id by title. " +
       "With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. " +
       "Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
@@ -842,7 +801,13 @@ export const tools: ToolDefinition[] = [
         const body: Record<string, unknown> = { assessmentId: existingId, templateId };
         if (str(args, "apply_to")) body.applyTo = str(args, "apply_to");
         const r = await callApi("POST", "/v2/assessment/import-template", undefined, body);
-        return { assessmentId: existingId, created: false, source: `template ${templateId}`, result: r.data };
+        return {
+          assessmentId: existingId,
+          created: false,
+          source: `template ${templateId}`,
+          result: r.data,
+          warning: "CloudRadial accepted the template import, but in testing this endpoint copied no questions. Ask the user to confirm in the portal, or apply the template there.",
+        };
       }
 
       // The upload sets the assessment's title from `name`, so keep the current title on a refresh.

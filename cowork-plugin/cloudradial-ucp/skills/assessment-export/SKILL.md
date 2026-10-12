@@ -1,15 +1,6 @@
 ---
 name: assessment-export
-description: >
-  Export completed CloudRadial assessment data across multiple customers via the API and build
-  executive-level summaries. Use when the user says "export assessments", "assessment export",
-  "pull assessment data", "assessment executive summary", "compliance summary across customers",
-  "roll up assessment scores", "how are all my clients doing on assessments", "consolidate
-  assessment results", "assessment gaps report", "which customers have the most gaps", or needs to
-  extract completed assessment results (name, customer, score, completion date, status) across all
-  companies from one place rather than opening each client individually. Reach for this skill
-  whenever assessment reporting, cross-customer compliance roll-ups, or executive assessment
-  summaries come up, even if the user does not say the word "API".
+description: "Export completed CloudRadial assessment data across multiple customers via the API and build executive-level summaries. Use when the user says \"export assessments\", \"assessment export\", \"pull assessment data\", \"assessment executive summary\", \"compliance summary across customers\", \"roll up assessment scores\", \"how are all my clients doing on assessments\", \"consolidate assessment results\", \"assessment gaps report\", \"which customers have the most gaps\", or needs to extract completed assessment results (name, customer, score, completion date, status) across all companies from one place rather than opening each client individually. Reach for this skill whenever assessment reporting, cross-customer compliance roll-ups, or executive assessment summaries come up, even if the user does not say the word \"API\".\n"
 metadata:
   version: "1.0.0"
 ---
@@ -46,7 +37,8 @@ as a tool error, not as data.
 For `list_resources` / `count_resources`, pass OData params **without** the leading `$`: `filter`,
 `select`, `orderby`, `top`, `skip`. The server adds the `$`. Default page is `top=100`, max `200`.
 The API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than
-`top`. Don't pass `select` for `assessment`: it returns HTTP 500.
+`top`. For `assessment`, `select` works with real field names and keeps rows small (a full row is
+about 1,800 characters).
 
 ## The `assessment` resource
 
@@ -101,7 +93,18 @@ Keep `assessmentId`, `companyId`, `title`, `type`, `status`, `totalScore`, `maxS
 `compliantScore`, `dateConducted` for every row.
 
 If you only need counts (e.g. "how many completed this quarter"), use `count_resources` with the
-same filter instead of paging.
+same filter instead of paging. Assessment rows are large (about 1,800 characters each), so on a big
+tenant page with `top: "25"`.
+
+Then clean the rows before reporting:
+
+- **Keep only active companies.** Records from deleted companies stay in the API. Build the
+  company map first (Step 2) and drop rows whose `companyId` isn't in it, saying how many you dropped.
+- **Treat unanswered runs as not started.** A row with `maxScore` > 0, `compliantScore` 0,
+  `partialScore` 0 and `totalScore` equal to minus half of `maxScore` has no answers. Report it as
+  "not started", never as a -50% score.
+- Rows with `maxScore` 0 have no questions; leave them out. `type` 0 and 50 also appear in live
+  data with unknown meaning; leave them out and say so.
 
 ### Step 2 — Resolve company names
 

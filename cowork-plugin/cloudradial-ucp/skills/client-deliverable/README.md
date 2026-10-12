@@ -1,4 +1,4 @@
-# Client Deliverable — Partner Guide
+# Client Deliverable: Partner Guide
 
 > Build the roadmap, budget, machine audit, and Microsoft licenses into one client-facing report.
 
@@ -7,17 +7,69 @@ Use this skill when a partner shows you a deliverable from ScalePad Lifecycle Ma
 can do the same thing. It maps each section of that PDF onto a real CloudRadial surface,
 builds the Planner items for you, and tells you plainly which parts do not reproduce.
 
-## Try saying
+## Example prompts
 
-| What you want | Say this | What you'll get |
-|---|---|---|
-| Recreate a competitor deliverable | `Recreate this Lifecycle Insights PDF in Acme Corp` | Planner items for every roadmap and budget line, plus the Report Layout steps |
-| Build a refresh roadmap | `Build a hardware refresh roadmap for Contoso from their endpoint data` | Quarterly initiatives sourced from real warranty and EOL dates |
-| Price the overdue backlog | `Which of Acme's devices are past EOL and what would replacing them cost?` | Exception list turned into a priced, unscheduled Planner item |
-| Set up a budget view | `Add Contoso's contract lines to the Planner so the budget renders` | Recurring monthly items that total by quarter |
-| Answer the DMI question | `What's our equivalent of the ScalePad DMI score?` | The honest mapping, including what CloudRadial does not have |
-| Compare scoring models | `How does our assessment scoring compare to myITprocess?` | Both formulas side by side |
-| Plan a QBR | `Set up a QBR deliverable for Acme Corp` | Full build plus the layout module list to tick |
+Copy a prompt, swap in your own company names or IDs, and paste it into Claude or Codex. Each prompt says what to check and when to stop for your confirmation, which is what keeps the assistant on track. Prompts that change your portal always show you the change first.
+
+**Labels:** `Per-company` works on one client, `All clients` across your whole partner portal. `Read-only` changes nothing; `Writes to the portal` changes data after you confirm. Status is from live testing in October 2026 (v2.6.3): **Tested**, **Partly works** (see Good to know), **Portal only** (the API can't do it yet), or **Not yet tested**.
+
+### Build a refresh roadmap
+`Per-company` · `Writes to the portal` · **Tested**
+
+```
+Build a hardware refresh roadmap for Contoso from their endpoint data. Count
+how many devices have usable warranty or age data first, then show me the
+quarterly plan with prices and only create the Planner items when I confirm.
+```
+
+**What you get:** Priced Planner items placed on the timeline by start and end date.
+
+**Good to know:** Timeline placement comes from the start and end dates, not the quarter field.
+
+### Price the overdue backlog
+`Per-company` · `Writes to the portal` · **Tested**
+
+```
+Which of Acme's devices are past end of life, and what would replacing them
+cost at $1,200 each? Show me the list and only add it as an unscheduled
+Planner item when I confirm.
+```
+
+**What you get:** An exception list turned into one priced, unscheduled Planner item.
+
+### Set up a budget view
+`Per-company` · `Writes to the portal` · **Tested**
+
+```
+Add Contoso's contract lines to the Planner as monthly items so the budget
+renders by quarter. Show me the lines first and only create them when I
+confirm.
+```
+
+**What you get:** Recurring items that total by quarter.
+
+**Good to know:** CloudRadial has no budget chart. You get the numbers by quarter, not the graph.
+
+### Recreate a ScalePad deliverable
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+Recreate the attached Lifecycle Manager PDF in Acme Corp. Map each section to
+CloudRadial, tell me plainly what won't carry over, and only create the
+Planner items when I confirm.
+```
+
+**What you get:** Planner items for the roadmap and budget, plus the Report Layout steps.
+
+### Answer the scoring question
+`Per-company` · `Read-only` · **Not yet tested**
+
+```
+What's our equivalent of the ScalePad DMI score, and how does our assessment
+scoring compare to myITprocess?
+```
+
+**What you get:** An honest side-by-side, including what CloudRadial doesn't have.
 
 ## What actually reproduces
 
@@ -56,7 +108,7 @@ table. You get the numbers, not the graph. Say so before the partner finds out l
 
 ## Related
 
-- [endpoint-reporting](../endpoint-reporting/README.md) — source the machine audit and warranty data.
-- [assessment-compliance](../assessment-compliance/README.md) — the scored assessment behind the maturity number.
-- [service-management](../service-management/README.md) — Planner items are `product` records; that skill covers the resource type generally.
-- [portal-setup](../portal-setup/README.md) — Session 4 (Reporting & QBR Prep) is where this normally comes up.
+- [endpoint-reporting](../endpoint-reporting/README.md): source the machine audit and warranty data.
+- [assessment-compliance](../assessment-compliance/README.md): the scored assessment behind the maturity number.
+- [service-management](../service-management/README.md): Planner items are `product` records; that skill covers the resource type generally.
+- [portal-setup](../portal-setup/README.md): Session 4 (Reporting & QBR Prep) is where this normally comes up.

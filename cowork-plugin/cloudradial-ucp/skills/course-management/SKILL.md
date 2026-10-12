@@ -1,11 +1,6 @@
 ---
 name: course-management
-description: >
-  Manage CloudRadial training courses, lessons, and enrollments. Use when the user says
-  "create a course", "build a training", "list courses", "check enrollments",
-  "course completion", "add a lesson", "training status for [company]",
-  "who completed the course", "build out a course on [topic]", or needs to create,
-  review, or analyze training content and enrollment data in CloudRadial portals.
+description: "Manage CloudRadial training courses, lessons, and enrollments. Use when the user says \"create a course\", \"build a training\", \"list courses\", \"check enrollments\", \"course completion\", \"add a lesson\", \"training status for [company]\", \"who completed the course\", \"build out a course on [topic]\", or needs to create, review, or analyze training content and enrollment data in CloudRadial portals.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -65,13 +60,13 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 ## Resource Types
 
 ### course
-Training course containers. Key fields: `courseId`, `companyId`, `name` (NOT `title`), `description` (HTML), `shortDescription`, `category`, `estimatedTime` (integer, minutes), `isRequired`, `passScore` (percentage), `validMonths` (0 = never expires), `enrollmentCount`, `completionCount`. Creating one requires `companyId`, `name`, `description`, `shortDescription`, `category` and `estimatedTime`.
+Training course containers. Key fields: `courseId`, `companyId`, `name` (NOT `title`), `description` (HTML), `shortDescription`, `category`, `estimatedTime` (integer, minutes), `isRequired`, `passScore` (percentage), `validMonths` (0 = never expires), `enrollmentCount`, `completionCount`. **`passScore` can't be written through the API** (bug UCP-1969): POST saves 70, PUT ignores it, PATCH `/passScore` returns 400. Set the Exam Passing Score in the portal, and never write a percentage into lesson text. `isFrontPage` defaults to true when left out, so send it. To PATCH the short description use the path `/shortDescripiton` (the API's misspelling); `/shortDescription` returns 400. `enrollmentCount` and `completionCount` can disagree (0 enrolled with 1 completed was seen), so count enrollment rows yourself for reports. Creating one requires `companyId`, `name`, `description`, `shortDescription`, `category` and `estimatedTime`.
 
 ### course_lesson
-Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `companyId`, `title`, `overview`, `text` (HTML body content), `category`, `order`. Creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`. Pass `company_id` to `get_resource`, `update_resource` and `delete_resource` for a lesson (the tool looks it up if you leave it out).
+Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `companyId`, `title`, `overview`, `text` (HTML body content), `category`, `order`. Creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`. Pass `company_id` to `get_resource`, `update_resource` and `delete_resource` for a lesson (the tool looks it up if you leave it out). PATCH of lesson fields (`title`, `overview`, `text`, `order`) works.
 
 ### course_enrollment
-Enrollment records tracking user progress. Key fields: `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `currentLessonId`, `dateEnrolled`, `dateLastAccess`, `isCompleted`, `dateCompleted`, `isExpired`, `daysSinceEnrollment`. There is no status or score field: use `isCompleted` and `dateCompleted`. Create with `courseId` and `userId`. `get_resource` works by `courseEnrollmentId`; the API can't delete an enrollment.
+Enrollment records tracking user progress. List rows (`list_resources`) have `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `currentLessonId`, `dateEnrolled`, `dateLastAccess`, `dateCompleted`, `isExpired`, `courseName`. **There is no `isCompleted` on list rows**: filtering or selecting it returns HTTP 400, so treat `dateCompleted ne null` as completed. `courseenrollment_for_user` returns a different shape with `isCompleted` and `applicationUserId` instead of `userId`. There is no score field: a score passed to `courseenrollment_complete` isn't stored on the enrollment (per-lesson scores live in `course_lesson_history`). Deleting a user leaves their enrollments behind, still pointing at the deleted user, and the API can't delete enrollments. Create with `courseId` and `userId`. `get_resource` works by `courseEnrollmentId`; the API can't delete an enrollment.
 
 ### course_lesson_history
 Per-lesson progress for one user: which lessons they finished and their score. Composite key: `courseId`, `applicationUserId` (a string), `courseLessonId`. Create body requires `companyId`, `courseId`, `applicationUserId`, `courseLessonId`, `completedScore`. List with `list_resources` and `filter: "courseId eq 372"` (add `and applicationUserId eq '<id>'` for one user). Use it to answer "which lesson did Sam stop at" or to record lesson completions migrated from another training tool.
@@ -107,7 +102,7 @@ For exact field names and schema details, read `${CLAUDE_PLUGIN_ROOT}/references
 
 Building a course is a two-step process: create the course container, then create each lesson inside it.
 
-1. **Create the course.** Call `create_resource` with `resource_type: "course"` and `data: { companyId: 42, name: "Course Name Here", shortDescription: "One-line summary shown on the course card", description: "<p>HTML course overview shown to learners</p>", category: "Security", estimatedTime: 30, isRequired: false, passScore: 80 }`. `estimatedTime` is a whole number of minutes. The response includes the new `courseId`.
+1. **Create the course.** Call `create_resource` with `resource_type: "course"` and `data: { companyId: 42, name: "Course Name Here", shortDescription: "One-line summary shown on the course card", description: "<p>HTML course overview shown to learners</p>", category: "Security", estimatedTime: 30, isRequired: false, isFrontPage: false }`. Don't send `passScore`; it isn't saved (see above). `estimatedTime` is a whole number of minutes. The response includes the new `courseId`.
 
 2. **Create each lesson** in order. Call `create_resource` with `resource_type: "course_lesson"` and `data: { courseId: 999, companyId: 42, title: "Lesson 1: Introduction", overview: "Brief summary of this lesson", category: "Security", text: "<p>Full HTML lesson content goes here.</p>", order: 1 }`.
 
@@ -128,7 +123,7 @@ Building a course is a two-step process: create the course container, then creat
 ### Enrollment Analysis
 
 1. List enrollments for a company or specific course
-2. Group by progress: completed (`isCompleted` true), in progress (not completed but has a `dateLastAccess`), not started, and expired (`isExpired` true)
+2. Group by progress: completed (`dateCompleted` set), in progress (not completed but has a `dateLastAccess`), not started, and expired (`isExpired` true)
 3. Calculate completion rates
 4. Identify users who haven't started required courses
 5. Present as an actionable summary

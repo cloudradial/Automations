@@ -10,14 +10,54 @@ Build hardware refresh cards for Contoso
 
 ---
 
-## Try it
+## Example prompts
 
-| Say this | What you get |
-|---|---|
-| `Build hardware refresh cards for Contoso` | Planner cards for Replace, Plan replacement, Upgrade in place, Retain, Needs data, Human review and Virtual machines, each with a triage priority |
-| `Which of Acme Corp's computers need replacing?` | The Replace list, with the reason for each computer |
-| `Refresh the lifecycle cards for company 42` | Existing cards updated in place, not duplicated |
-| `Show me Contoso's out-of-spec computers without changing anything` | The review as a report, with no cards written |
+Copy a prompt, swap in your own company names or IDs, and paste it into Claude or Codex. Each prompt says what to check and when to stop for your confirmation, which is what keeps the assistant on track. Prompts that change your portal always show you the change first.
+
+**Labels:** `Per-company` works on one client, `All clients` across your whole partner portal. `Read-only` changes nothing; `Writes to the portal` changes data after you confirm. Status is from live testing in October 2026 (v2.6.3): **Tested**, **Partly works** (see Good to know), **Portal only** (the API can't do it yet), or **Not yet tested**.
+
+### Build refresh cards
+`Per-company` · `Writes to the portal` · **Tested**
+
+```
+Build hardware refresh cards for Contoso. Show me which computers go in each
+category and why, and only write the Planner cards when I confirm.
+```
+
+**What you get:** One Planner card per category, each with a priority.
+
+**Good to know:** Computers with no age and no warranty date go to Needs data, never Retain.
+
+### Preview without writing
+`Per-company` · `Read-only` · **Tested**
+
+```
+Show me Contoso's out-of-spec computers by refresh category without changing
+anything.
+```
+
+**What you get:** The review as a report, with no cards written.
+
+### Update existing cards
+`Per-company` · `Writes to the portal` · **Tested**
+
+```
+Refresh the lifecycle cards for company 42. Update the existing cards in
+place, don't create copies, and tell me which computers moved category.
+```
+
+**What you get:** Cards updated, with what changed.
+
+**Good to know:** A card left with no computers changes to Completed on its own.
+
+### Find what needs replacing
+`Per-company` · `Read-only` · **Tested**
+
+```
+Which of Acme Corp's computers need replacing now, and why?
+```
+
+**What you get:** The Replace list with the reason for each computer.
 
 ## Good to know
 

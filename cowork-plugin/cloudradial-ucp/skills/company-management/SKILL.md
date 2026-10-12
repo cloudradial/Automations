@@ -1,15 +1,6 @@
 ---
 name: company-management
-description: >
-  Manage CloudRadial companies — create, update, delete, and organize them into groups.
-  Use when the user says "list all companies", "create a new company", "add a company",
-  "update company settings", "change account manager", "set portal branding",
-  "company groups", "add company to group", "remove company from group",
-  "audit company settings", "which companies have no logo", "compare companies",
-  "cross-company report", "how many companies do I have", or needs to create, modify,
-  organize, or audit companies across their CloudRadial portal. Also use when the user
-  wants to manage company-level settings like messaging, branding, territory, or
-  delegated admin status.
+description: "Manage CloudRadial companies — create, update, delete, and organize them into groups. Use when the user says \"list all companies\", \"create a new company\", \"add a company\", \"update company settings\", \"change account manager\", \"set portal branding\", \"company groups\", \"add company to group\", \"remove company from group\", \"audit company settings\", \"which companies have no logo\", \"compare companies\", \"cross-company report\", \"how many companies do I have\", or needs to create, modify, organize, or audit companies across their CloudRadial portal. Also use when the user wants to manage company-level settings like messaging, branding, territory, or delegated admin status.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -114,6 +105,8 @@ Fields: `companyGroupId`, `companyId`, `partnerId`.
 **List groups:** `list_resources` with `resource_type: "company_group"`.
 
 **Create a group:** `create_resource` with `resource_type: "company_group"` and `data: {"group": "Group Name"}`.
+
+**Rename a group:** `update_resource` with `resource_type: "company_group"`, `id: "<companyGroupId>"`, `data: {"group": "New Name"}`. Memberships stay attached.
 
 **Add a company to a group:** `create_resource` with `resource_type: "company_group_company"` and `data: {"companyGroupId": <id>, "companyId": <id>}`.
 

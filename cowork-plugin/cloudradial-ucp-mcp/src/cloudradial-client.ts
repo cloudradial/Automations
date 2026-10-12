@@ -1,10 +1,10 @@
-import { loadCredentials } from "./credentials.js";
+import { loadCredentials } from "./secure-storage.js";
 
 function getAuthContext(): { authHeader: string; baseUrl: string } {
   const loaded = loadCredentials();
   if (!loaded) {
     throw new Error(
-      "CloudRadial credentials not configured. Run the `configure_credentials` tool or use the setup wizard."
+      "CloudRadial credentials not configured. Ask to set up CloudRadial: run `setup_secure_storage`, then `configure_credentials` to open the local form."
     );
   }
   const { creds } = loaded;

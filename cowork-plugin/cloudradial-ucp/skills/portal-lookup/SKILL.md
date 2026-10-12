@@ -1,12 +1,6 @@
 ---
 name: portal-lookup
-description: >
-  Look up a CloudRadial partner or client portal to review their setup status.
-  Use when the user says "look up a partner", "check portal status", "find a company
-  in CloudRadial", "how is [company] doing in their portal", "prepare for a meeting
-  with [company]", "partner overview", "company overview", or needs to find information
-  about a specific company, its users, endpoints, articles, or portal configuration
-  before a call or implementation session.
+description: "Look up a CloudRadial partner or client portal to review their setup status. Use when the user says \"look up a partner\", \"check portal status\", \"find a company in CloudRadial\", \"how is [company] doing in their portal\", \"prepare for a meeting with [company]\", \"partner overview\", \"company overview\", or needs to find information about a specific company, its users, endpoints, articles, or portal configuration before a call or implementation session.\n"
 metadata:
   version: "1.1.0"
 ---

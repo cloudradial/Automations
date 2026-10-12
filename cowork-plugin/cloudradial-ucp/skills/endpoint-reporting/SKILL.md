@@ -1,11 +1,6 @@
 ---
 name: endpoint-reporting
-description: >
-  Report on and analyze CloudRadial endpoints (managed devices). Use when the user says
-  "list endpoints", "endpoint report", "warranty report", "how many devices",
-  "check endpoints for [company]", "device inventory", "which endpoints are out of warranty",
-  "endpoint applications", "endpoint custom properties", or needs to review, count, or
-  analyze managed devices and their properties across CloudRadial portals.
+description: "Report on and analyze CloudRadial endpoints (managed devices). Use when the user says \"list endpoints\", \"endpoint report\", \"warranty report\", \"how many devices\", \"check endpoints for [company]\", \"device inventory\", \"which endpoints are out of warranty\", \"endpoint applications\", \"endpoint custom properties\", or needs to review, count, or analyze managed devices and their properties across CloudRadial portals.\n"
 metadata:
   version: "1.0.0"
 ---
@@ -66,12 +61,15 @@ For `list_resources` and `count_resources`, pass OData parameters **without** th
 
 ### endpoint
 Managed devices/endpoints. Key fields: `companyEndpointId` (the endpoint's ID), `companyId`, `name`, `os`, `osVersion`, `expirationDate` (warranty end, nullable), `lastCheckIn`, `manufacturer`, `model`, `serialNumber`, `isServer`, `isVirtual`, `enclosure`. OData returns `enclosure` and `windows11Readiness` as names (for example `"Desktop"`), not numbers.
+- **Writing dates:** `update_resource` PATCH of `expirationDate` (warranty end) and `manufacturedDate` saves and reads back correctly. Send ISO 8601 strings such as `"2027-03-31T00:00:00Z"`. Use this to record warranty or age data the agent didn't find, then rerun the lifecycle review.
+- **Creating an endpoint** works (`create_resource`, `resource_type: "endpoint"`) for devices the agent doesn't report. Check the serial isn't already on another endpoint first, since duplicate serials break custom property calls.
+- To count or filter one endpoint by ID, use `companyEndpointId`; `id eq ...` in an endpoint filter returns HTTP 500.
 
 ### endpoint_application
-Applications installed on endpoints. Key fields: `endpointApplicationId`, `endpointId` (the endpoint's `companyEndpointId`), `companyId`, `name`, `publisher`, `display`, `major`, `minor`, `version`, `installDate`.
+Applications installed on endpoints. Key fields: `endpointApplicationId`, `endpointId` (the endpoint's `companyEndpointId`), `companyId`, `name`, `publisher`, `display`, `major`, `minor`, `version`, `installDate`. Writing: create needs a live `endpointId`, `companyId` and `name`. `version` is an integer (a packed build number, 0 is fine), so put the readable version such as `"1.0.0"` in `display`; a string in `version` returns HTTP 400. PATCH and delete work.
 
 ### endpoint_custom_property
-Custom properties attached to endpoints. Key fields: `endpointCustomPropertyId`, `companyEndpointId`, `serialNumber`, `name`, `value`, `dataType`. There is no `companyId` on this entity: filter on `companyEndpointId` (OR several IDs together in one filter for a batch). Endpoints with no custom properties never appear here, so start from the endpoint list, not this one. Get, create, update and delete one property with `serial_number` and `property_name` (create: `data: { name, value, dataType }`).
+Custom properties attached to endpoints. Key fields: `endpointCustomPropertyId`, `companyEndpointId`, `serialNumber`, `name`, `value`, `dataType`. There is no `companyId` on this entity: filter on `companyEndpointId` (OR several IDs together in one filter for a batch). Endpoints with no custom properties never appear here, so start from the endpoint list, not this one. Get, create, update and delete one property with `serial_number` and `property_name` (create: `data: { name, value, dataType }`; use `dataType: "String"` when there's no existing property to copy from). **Serial numbers must be unique.** If the same serial is on two endpoints (often a copy left under a deleted company), custom property calls fail with HTTP 400 "Object reference not set to an instance of an object". Check first with `list_resources` `endpoint`, `filter: "serialNumber eq '<serial>'"`, and if it returns more than one row, explain the duplicate instead of retrying. `endpoint_update_warranty` matches by serial too, so a duplicate serial makes its result uncertain.
 
 ## Example Calls
 

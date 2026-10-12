@@ -31,7 +31,7 @@ Copy an IT Glue **flexible-asset type** and its records into a CloudRadial compa
 1. Resolves the CloudRadial company and the IT Glue organization by name.
 2. Reads the IT Glue flexible-asset type's trait field names (never guesses them).
 3. Ensures a matching CloudRadial flexible-asset type exists (creates it with a field per trait if missing).
-4. Lists the IT Glue records for that type, and for each **matches on a de-dup trait** — updating a changed record or creating a new one.
+4. Lists the IT Glue records for that type, and for each **matches on a de-dup trait**, updating a changed record or creating a new one.
 
 ## Install / run
 
@@ -50,6 +50,6 @@ Pass the CloudRadial company (`companyName` **or** `companyId`), the `itglueOrgN
 
 ## Notes
 
-- Every create/update is **approval-gated** (`autoApprove: false`). IT Glue **password values are never surfaced** — only metadata.
-- One flexible-asset type per run. For a **very large estate**, a deterministic PowerShell version (like `scalepad-cloudradial-sync`) scales better than an agent — build that if volumes are high.
+- Every create/update is **approval-gated** (`autoApprove: false`). IT Glue **password values are never surfaced**, only metadata.
+- One flexible-asset type per run. For a **very large estate**, a deterministic PowerShell version (like `scalepad-cloudradial-sync`) scales better than an agent; build that if volumes are high.
 - **Requires:** AutomationAI + the CloudRadial UCP Assistant agent + the `it-glue` and `cloudradial-v2-compliance` extensions.

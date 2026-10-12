@@ -1,4 +1,4 @@
-# Secure Score to Assessment — Import Microsoft Secure Scores as CloudRadial Assessments
+# Secure Score to Assessment: Import Microsoft Secure Scores as CloudRadial Assessments
 
 This folder contains two scripts that solve the same problem in different ways:
 
@@ -7,17 +7,17 @@ This folder contains two scripts that solve the same problem in different ways:
 | `Convert-SecureScoreToAssessment.ps1` | Reads an exported .xlsx file from CloudRadial's Secure Score page | Quick one-off imports, no Azure AD setup required |
 | `Import-SecureScoreAssessment.ps1` | Pulls Secure Score directly from Microsoft Graph API | Automation, scheduled runs, multi-tenant environments |
 
-Both produce the same CloudRadial Assessment import file — pick whichever fits your workflow.
+Both produce the same CloudRadial Assessment import file; pick whichever fits your workflow.
 
 ---
 
 ## Why This Matters
 
-Microsoft Secure Score gives you a detailed breakdown of a tenant's security posture — what's enabled, what's missing, and how much each gap affects the overall score. But there's no built-in way to get that data into CloudRadial as an Assessment that you can present to clients, track over time, or use to drive remediation conversations.
+Microsoft Secure Score gives you a detailed breakdown of a tenant's security posture: what's enabled, what's missing, and how much each gap affects the overall score. But there's no built-in way to get that data into CloudRadial as an Assessment that you can present to clients, track over time, or use to drive remediation conversations.
 
-Without this script, you'd need to manually create each assessment question, copy over each improvement action, set the compliance status, and calculate risk — for potentially hundreds of items. That's hours of copy-paste work per tenant.
+Without this script, you'd need to manually create each assessment question, copy over each improvement action, set the compliance status, and calculate risk, for potentially hundreds of items. That's hours of copy-paste work per tenant.
 
-This script automates the entire conversion. Export Secure Scores from the CloudRadial portal, run the script, and import the result as an Assessment. Every improvement action becomes an assessment question with the correct compliance status, risk level, and pre-written notes — ready for your next client review.
+This script automates the entire conversion. Export Secure Scores from the CloudRadial portal, run the script, and import the result as an Assessment. Every improvement action becomes an assessment question with the correct compliance status, risk level, and pre-written notes, ready for your next client review.
 
 ---
 
@@ -25,13 +25,13 @@ This script automates the entire conversion. Export Secure Scores from the Cloud
 
 ## Who This Is For
 
-**Partners running security assessments** — Turn Microsoft's Secure Score data into a professional CloudRadial Assessment without any manual data entry.
+**Partners running security assessments**: Turn Microsoft's Secure Score data into a professional CloudRadial Assessment without any manual data entry.
 
-**Partners preparing for QBRs** — Generate a current-state security assessment in minutes. Walk clients through what's compliant, what's not, and what the impact is.
+**Partners preparing for QBRs**: Generate a current-state security assessment in minutes. Walk clients through what's compliant, what's not, and what the impact is.
 
-**Partners onboarding new clients** — Run a Secure Score export on day one and immediately have a baseline security assessment in CloudRadial to track improvements against.
+**Partners onboarding new clients**: Run a Secure Score export on day one and immediately have a baseline security assessment in CloudRadial to track improvements against.
 
-**Partners standardizing assessments across tenants** — Use the same script for every tenant. Consistent format, consistent categories, consistent scoring.
+**Partners standardizing assessments across tenants**: Use the same script for every tenant. Consistent format, consistent categories, consistent scoring.
 
 ## What You'll Need
 
@@ -88,7 +88,7 @@ To specify a custom output path or assessment name:
 2. Navigate to **Content** > **Assessments**
 3. Click **Import**
 4. Upload the generated .xlsx file
-5. Review the imported assessment — all questions, categories, and compliance statuses should be populated
+5. Review the imported assessment; all questions, categories, and compliance statuses should be populated
 
 ## What Gets Mapped
 
@@ -103,9 +103,9 @@ To specify a custom output path or assessment name:
 
 ### Risk Calculation
 
-- **High** — Not Compliant and Score Impact ≥ 0.5%
-- **Medium** — Not Compliant and Score Impact < 0.5%
-- **Low** — Compliant
+- **High**: Not Compliant and Score Impact ≥ 0.5%
+- **Medium**: Not Compliant and Score Impact < 0.5%
+- **Low**: Compliant
 
 ### Pre-Written Notes
 
@@ -197,11 +197,11 @@ This is a one-time setup. Once done, you can run the script against any tenant w
    - Supported account types: **Accounts in any organizational directory** (for multi-tenant)
    - Redirect URI: leave blank
 3. Click **Register**
-4. Copy the **Application (client) ID** — this is your `-ClientId`
+4. Copy the **Application (client) ID**: this is your `-ClientId`
 5. Go to **Certificates & secrets** > **New client secret**
    - Description: `Secure Score Script`
    - Expiry: choose your preference
-   - Copy the **Value** immediately — this is your client secret
+   - Copy the **Value** immediately; this is your client secret
 6. Go to **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
    - Search for and add: `SecurityEvents.Read.All`
 7. Click **Grant admin consent** for your organization
@@ -252,7 +252,7 @@ To customize:
 
 ## Step 4: Import into CloudRadial
 
-Same as Option A — upload the generated .xlsx via **Content** > **Assessments** > **Import**.
+Same as Option A: upload the generated .xlsx via **Content** > **Assessments** > **Import**.
 
 ## Multi-Tenant Usage
 
@@ -271,15 +271,15 @@ $clientId = "12345678-abcd-1234-abcd-123456789012"
 .\Import-SecureScoreAssessment.ps1 -TenantId "woodgrove.onmicrosoft.com" -ClientId $clientId
 ```
 
-Each generates its own import file. The app registration only needs to exist once — it works across any tenant that has granted consent.
+Each generates its own import file. The app registration only needs to exist once; it works across any tenant that has granted consent.
 
 ## What's Different from the Export Version
 
 The Graph version pulls a few extra fields that the export doesn't include:
 
-- **Remediation** and **Remediation Summary** — Microsoft's recommended fix description, auto-populated from the API
-- **Deprecated controls** — automatically filtered out (the export may still include them)
-- **Infrastructure** category — the API includes this as a fifth category alongside Identity, Device, Apps, and Data
+- **Remediation** and **Remediation Summary**: Microsoft's recommended fix description, auto-populated from the API
+- **Deprecated controls**: automatically filtered out (the export may still include them)
+- **Infrastructure** category: the API includes this as a fifth category alongside Identity, Device, Apps, and Data
 
 The assessment format and field mappings are otherwise identical.
 

@@ -2,16 +2,16 @@
 
 A user who lost their phone or authenticator resets their own multi-factor authentication from the portal in seconds, and built-in checks stop anyone resetting another person's, an admin's, a disabled or an at-risk account.
 
-**Marketplace ID:** AAI-00045 | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00045 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `mfa-reset.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true).
 
 | What | Link |
 |---|---|
-| View `mfa-reset.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/mfa-reset/mfa-reset.yml) |
-| Download `mfa-reset.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/mfa-reset/mfa-reset.yml) |
+| Download `mfa-reset.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true) |
+| View the current source | [`mfa-reset.yml`](https://github.com/cloudradial/Automations/blob/main/mfa-reset/mfa-reset.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/mfa-reset/src) |
 | All files in this automation | [mfa-reset](https://github.com/cloudradial/Automations/tree/main/mfa-reset) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/mfa-reset) |
@@ -43,7 +43,7 @@ Most write automations take `confirm` and preview by default. This one doesn't, 
 
 ## Download & import
 
-**Download the workflow:** [`mfa-reset.yml`](https://github.com/cloudradial/Automations/blob/main/mfa-reset/mfa-reset.yml)
+**Download the workflow** from the [releases page](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true) — the versioned `mfa-reset.yml` is attached to each release.
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner of the company it serves, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

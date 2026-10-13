@@ -1,0 +1,61 @@
+name: Release Automation
+
+# Publishes a GitHub release for a single automation folder when a tag of the
+# form "<folder>/v<version>" is pushed (e.g. "mfa-reset/v1.0.0"). The release
+# attaches that folder's versioned .yml file(s) as downloadable assets, so each
+# automation shows its own version history on the releases page.
+#
+# The plugin keeps its own workflow (cowork-plugin-release.yml, tags "v*"); the
+# "<folder>/v*" tag shape here never matches that, so the two don't collide.
+
+on:
+  push:
+    tags:
+      - '*/v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse tag and locate the automation's .yml files
+        id: tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          folder="${tag%/*}"
+          version="${tag##*/}"
+          echo "folder=$folder" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ ! -d "$folder" ]; then
+            echo "::error::Folder '$folder' not found for tag '$tag'."
+            exit 1
+          fi
+          shopt -s nullglob
+          ymls=("$folder"/*.yml)
+          if [ ${#ymls[@]} -eq 0 ]; then
+            echo "::error::No .yml files in '$folder' to release."
+            exit 1
+          fi
+          echo "Releasing ${#ymls[@]} file(s):"
+          printf '  %s\n' "${ymls[@]}"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.tag.outputs.folder }} ${{ steps.tag.outputs.version }}
+          files: ${{ steps.tag.outputs.folder }}/*.yml
+          generate_release_notes: false
+          body: |
+            Versioned `.yml` for **${{ steps.tag.outputs.folder }}** ${{ steps.tag.outputs.version }}.
+
+            Import the attached file in AutomationAI → **Workflows → Import**.
+
+            All versions of this automation: https://github.com/cloudradial/Automations/releases?q=${{ steps.tag.outputs.folder }}
+          # A version containing '-' (e.g. v1.1.0-rc.1) is a pre-release and does
+          # not get the "Latest" badge. Folder names may contain '-', so this
+          # checks the version part only, never the whole tag.
+          prerelease: ${{ contains(steps.tag.outputs.version, '-') }}

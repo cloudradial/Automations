@@ -1645,7 +1645,7 @@ definition:
             $c = Get-PsaConn
             $t = Get-PsaTicket $Id
             $raw = $t.raw
-            $info = @{ id = $Id; companyId = ([string]$t.companyId).Trim(); companyKeys = @(); contactEmail = ''; cc = @(); ccEnabled = $true; raw = $raw; extra = @{} }
+            $info = @{ id = $Id; summary = ([string]$t.summary).Trim(); companyId = ([string]$t.companyId).Trim(); companyKeys = @(); contactEmail = ''; cc = @(); ccEnabled = $true; raw = $raw; extra = @{} }
             switch ($c.Psa) {
                 'connectwise' {
                     # Unverified: contactEmailAddress, automaticEmailCc and automaticEmailCcFlag on GET /service/tickets/{id} (CW swagger Ticket model).
@@ -1797,13 +1797,13 @@ definition:
         function Add-CcWarning { param([string]$Text) if ($Text -and -not $ccWarnings.Contains($Text)) { $null = $ccWarnings.Add($Text) } }
         # The step's output. Messages are plain sentences; any dash a PSA's error text carries is made a plain hyphen.
         function New-CcResult {
-            param([string]$Status, [string]$Message, [bool]$Added = $false, $CcList = @(), [string]$Note = '')
+            param([string]$Status, [string]$Message, [bool]$Added = $false, $CcList = @(), [string]$Note = '', [string]$PublicNote = '')
             foreach ($w in @($PsaState.Warnings)) { Add-CcWarning ([string]$w) }
             $clean = { param([string]$s) return (([string]$s) -replace "[$([char]0x2013)$([char]0x2014)]", '-') }
             return [ordered]@{
                 status = $Status; message = (& $clean $Message); ticket_id = $ccRun.ticketId; cc_email = $ccRun.ccEmail; added = $Added
                 cc_list = @($CcList); actions = @($ccActions | ForEach-Object { & $clean $_ }); warnings = @($ccWarnings | ForEach-Object { & $clean $_ })
-                internal_note = (& $clean $Note); public_note = ''
+                internal_note = (& $clean $Note); public_note = (& $clean $PublicNote)
             }
         }
 
@@ -1824,6 +1824,9 @@ definition:
             $colleagues = Test-StepTrue (Get-StepField $f @('allow_company_colleagues', 'allowCompanyColleagues'))
             $domainsIn = Get-StepField $f @('allowed_domains', 'allowedDomains')
             $preview = Test-StepTrue (Get-StepField $f @('preview', 'dryRun', 'dry_run'))
+            # A public note tells the new CC (and the contact) what the ticket is about. On unless notify_cc is false.
+            $notifyIn = Get-StepField $f @('notify_cc', 'notifyCc')
+            $notify = if ($notifyIn) { Test-StepTrue $notifyIn } else { $true }
             $psaIn = Get-StepField $f @('psa')
 
             # ---- the request itself ----
@@ -1888,9 +1891,15 @@ definition:
             if (-not $plan.ok) { return (New-CcResult 'rejected' $plan.why -CcList $info.cc) }
             $note = "Added $cc to the email CC list at the request of $who (self-service form)."
             if (Test-CcIn $cc $info.cc) { $note = "Turned on the email CC list, which already had $cc on it, at the request of $who (self-service form)." }
+            # The public note names the ticket so the new CC knows what it is about. Never anything internal.
+            $about = if ($info.summary) { "ticket $id, `"$($info.summary)`"" } else { "ticket $id" }
+            $asker = if ($requester) { $requester } else { 'our service desk' }
+            $publicNote = ''
+            if ($notify) { $publicNote = "$cc has been copied on $about at the request of $asker, and will now receive email updates on it. To add information, reply to any update email." }
             if ($preview) {
-                $null = $ccActions.Add("Would $($plan.detail) on ticket $id, then add an internal note.")
-                return (New-CcResult 'pending_confirmation' "Preview: $cc would be added to the CC list on ticket $id; run again without preview to add it." -CcList $plan.list -Note $note)
+                $then = if ($notify) { 'add an internal note and a public note telling them what the ticket is about' } else { 'add an internal note' }
+                $null = $ccActions.Add("Would $($plan.detail) on ticket $id, then $then.")
+                return (New-CcResult 'pending_confirmation' "Preview: $cc would be added to the CC list on ticket $id; run again without preview to add it." -CcList $plan.list -Note $note -PublicNote $publicNote)
             }
             $PsaState.LastWriteRedirect = $null
             $saved = $null
@@ -1915,7 +1924,18 @@ definition:
                 catch { Add-CcWarning "The internal note on ticket $id was sent, but the ticket's notes couldn't be read back to check it: $($_.Exception.Message)" }
             }
             catch { Add-CcWarning "$cc was added, but the internal note on ticket $id couldn't be added: $($_.Exception.Message)" }
-            return (New-CcResult 'success' "Added $cc to the CC list on ticket $id." -Added $true -CcList $saved.info.cc -Note $note)
+
+            # ---- the public note to the new CC (a failure is a warning) ----
+            $sentPublic = ''
+            if ($notify) {
+                try {
+                    Add-PsaNote -Id $id -Text $publicNote -Title 'You have been copied on this ticket' -Public
+                    $null = $ccActions.Add("Added a public note to ticket $id telling $cc what the ticket is about.")
+                    $sentPublic = $publicNote
+                }
+                catch { Add-CcWarning "$cc was added, but the public note on ticket $id couldn't be added, so they weren't told what the ticket is about: $($_.Exception.Message)" }
+            }
+            return (New-CcResult 'success' "Added $cc to the CC list on ticket $id." -Added $true -CcList $saved.info.cc -Note $note -PublicNote $sentPublic)
         }
 
         try {

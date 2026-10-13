@@ -25,8 +25,9 @@ A CloudRadial service-request form asks for a ticket number and an email address
 3. **Checks the ticket belongs to the requester** (see [The ownership rule](#the-ownership-rule)). If it doesn't, the run ends with `status: rejected` and nothing changes.
 4. **Adds the address** to the ticket's CC list, then reads the ticket again to confirm the address is there. If it was already on the list (or is the ticket's contact), the run ends with `success`, "nothing changed", and no note.
 5. **Leaves an internal note**, for example "Added alex.wilber@contoso.com to the email CC list at the request of megan.bowen@contoso.com (self-service form).", and reads the notes back to confirm it saved. A note that fails becomes a warning; the CC is already added.
+6. **Tells the new CC what the ticket is about** with one public note, for example "alex.wilber@contoso.com has been copied on ticket 1001, "Printer offline" at the request of megan.bowen@contoso.com, and will now receive email updates on it. To add information, reply to any update email." The PSA emails it to the ticket's contact and CC list, so the person just added learns why they are getting updates. It never includes internal notes. Send `"notify_cc": false` to skip it. A public note that fails becomes a warning.
 
-It never changes the ticket's status, owner, contact or anything else, and never writes a client-visible note. `"preview": true` returns what it would do (`status: pending_confirmation`) and changes nothing.
+It never changes the ticket's status, owner, contact or anything else, and the only client-visible note it writes is the one telling the new CC what the ticket is about. `"preview": true` returns what it would do (`status: pending_confirmation`) and changes nothing.
 
 ### What each PSA supports
 
@@ -98,6 +99,7 @@ The PSA API user needs to read tickets, contacts (users in HaloPSA and Zendesk) 
 | `allow_company_colleagues` | No (default `false`) | `true` lets anyone at the ticket's company add a CC, not only its contact and CCs. |
 | `allowed_domains` | No | Comma-separated domains the new address must be in, for example `contoso.com, contoso.co.uk`. |
 | `technician_run` | No (default `false`) | For a technician running it by hand: allows a run without `requester_email` or `company_psa_id`. |
+| `notify_cc` | No (default `true`) | Adds the public note that tells the new CC what the ticket is about. `false` adds the CC with the internal note only. |
 | `preview` | No (default `false`) | `true` returns what would happen and changes nothing. `dryRun` works too. |
 | `psa` | No | Overrides the `PSA-Type` secret. |
 
@@ -105,7 +107,7 @@ The ticket number and address are read from the body first, then from the form's
 
 ## Output
 
-`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (always empty). An `error` also fails the step, so it shows in the run history.
+`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (the public note written to the new CC; empty when none was). An `error` also fails the step, so it shows in the run history.
 
 ## Form setup
 
@@ -131,7 +133,7 @@ Don't use `@TicketId` for the target ticket: it's the **new** ticket the form it
 1. Import `add-cc-to-ticket.yml`, add the secrets above to the runner vault, then **Publish** and **Deploy** to that runner.
 2. **Preview first.** In **Run**, use the step's Test Input with a real ticket number, its company's PSA id, the ticket contact's email as `requester_email`, and your own address as `ccEmail`. Keep `"preview": true`. Expect `status: pending_confirmation` and nothing changed on the ticket.
 3. **Refusals.** Change `company_psa_id` to another company: expect `rejected` and "isn't one you can change". Change `requester_email` to someone who isn't on the ticket: expect `rejected`.
-4. **Add.** Remove `preview`. Expect `success`, your address on the ticket's CC list in the PSA, and an internal note. Run it again: expect "already on the CC list" and no second note.
+4. **Add.** Remove `preview`. Expect `success`, your address on the ticket's CC list in the PSA, an internal note, and a public note naming the ticket (you get it by email as the new CC). Run it again: expect "already on the CC list" and no second note.
 5. **Wire the form.** Enable the webhook in **Properties** (AutomationAI issues the URL and secret), redeploy, and set up the form as above. Submit it from the portal as the ticket's contact, then check the run history and the ticket.
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `step.ps1` (reading the body), `cc.ps1` (each PSA's contact and CC calls) or `add-cc.ps1` (the step), run `node src/build.js` (it pastes in `_shared/psa.ps1`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
@@ -140,7 +142,7 @@ Don't use `@TicketId` for the target ticket: it's the **new** ticket the form it
 
 Mocked PSAs only, in strict mode (`src/test.ps1`, 107 checks). Nothing here has run against a live PSA yet.
 
-- Adding a CC on ConnectWise, Autotask, HaloPSA, Kaseya BMS and Zendesk, including each PSA's request shape, keeping the CCs already on the ticket, the read-back and the internal note.
+- Adding a CC on ConnectWise, Autotask, HaloPSA, Kaseya BMS and Zendesk, including each PSA's request shape, keeping the CCs already on the ticket, the read-back, the internal note and the public note to the new CC (on the Discussion tab in ConnectWise, a public comment in Zendesk), and `notify_cc: false`.
 - Syncro refused with a plain sentence and no calls.
 - Already on the list (any letter case), already the contact, and a ConnectWise ticket with the CC checkbox off.
 - Ownership: wrong company (the message reveals nothing), a ConnectWise company identifier in place of its id, requester not the contact or a CC, requester already a CC, `allow_company_colleagues` (and that it never crosses companies), missing `requester_email` or `company_psa_id`, `technician_run`.

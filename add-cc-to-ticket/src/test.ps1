@@ -139,7 +139,7 @@ function Test-CcInList { param([string]$E, $L) foreach ($x in @($L)) { if ([stri
 function Test-NoDash { param($o) return (($o | ConvertTo-Json -Depth 8) -notmatch "[$([char]0x2013)$([char]0x2014)]") }
 function Test-NoSecret { param($o) return (($o | ConvertTo-Json -Depth 8) -notmatch 'SECRET-') }
 $TOutFields = @('status', 'message', 'ticket_id', 'cc_email', 'added', 'cc_list', 'actions', 'warnings', 'internal_note', 'public_note')
-function Test-Shape { param($o) if ($null -eq $o) { return $false }; foreach ($f in $TOutFields) { if ($null -eq $o.PSObject.Properties[$f]) { return $false } }; return ($o.public_note -eq '') }
+function Test-Shape { param($o) if ($null -eq $o) { return $false }; foreach ($f in $TOutFields) { if ($null -eq $o.PSObject.Properties[$f]) { return $false } }; return $true }
 
 # ---- 1. Success on each PSA ----
 foreach ($TP in @('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'zendesk')) {
@@ -150,7 +150,8 @@ foreach ($TP in @('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'zendesk'))
     Check "$TP add: the ticket's CC list now has the address" (Test-CcInList 'alex.wilber@contoso.com' $TS.cc) ($TS.cc -join ';')
     Check "$TP add: the address already copied is kept" (Test-CcInList 'adele.vance@contoso.com' $TS.cc) ($TS.cc -join ';')
     Check "$TP add: cc_list output from the read-back" ((@($o.cc_list) -join ';') -like '*alex.wilber@contoso.com*' -and (@($o.cc_list) -join ';') -like '*adele.vance@contoso.com*') (@($o.cc_list) -join ';')
-    Check "$TP add: one internal note naming the address and the requester" ($TS.notes.Count -eq 1 -and $TS.notes[0] -like '*alex.wilber@contoso.com*megan.bowen@contoso.com*') ($TS.notes -join ' | ')
+    Check "$TP add: an internal note naming the address and the requester, then a public note" ($TS.notes.Count -eq 2 -and $TS.notes[0] -like '*alex.wilber@contoso.com*megan.bowen@contoso.com*') ($TS.notes -join ' | ')
+    Check "$TP add: the public note tells the new CC what the ticket is about and who asked" ($TS.notes[1] -like '*alex.wilber@contoso.com has been copied on ticket 1001, "Printer offline"*megan.bowen@contoso.com*' -and $o.public_note -eq $TS.notes[1]) "$($TS.notes -join ' | ') || $($o.public_note)"
     Check "$TP add: output shape, plain message, no secrets" ((Test-Shape $o) -and (Test-NoDash $o) -and (Test-NoSecret $o) -and $o.message -eq 'Added alex.wilber@contoso.com to the CC list on ticket 1001.' -and $o.ticket_id -eq '1001' -and $o.cc_email -eq 'alex.wilber@contoso.com') $o.message
     Check "$TP add: no warnings" (@($o.warnings).Count -eq 0) (@($o.warnings) -join ' | ')
 }
@@ -177,7 +178,17 @@ Reset-T; Reset-Mock (Get-TSecrets 'zendesk') $Handler
 $r = Invoke-Cc (New-TBody)
 $TPut = @(Get-WriteCalls | Where-Object { $_.Body -like '*email_ccs*' })
 Check 'zendesk: PUT email_ccs with user_email and action put' ($TPut.Count -eq 1 -and $TPut[0].Body -eq '{"ticket":{"email_ccs":[{"user_email":"alex.wilber@contoso.com","action":"put"}]}}') $TPut[0].Body
-Check 'zendesk: the note is a private comment' ((@(Get-NoteCalls)).Count -eq 1 -and (Read-Body @(Get-NoteCalls)[0]).ticket.comment.public -eq $false)
+Check 'zendesk: the internal note is a private comment, the CC note a public one' ((@(Get-NoteCalls)).Count -eq 2 -and (Read-Body @(Get-NoteCalls)[0]).ticket.comment.public -eq $false -and (Read-Body @(Get-NoteCalls)[1]).ticket.comment.public -eq $true)
+
+# ---- 1b. The public note to the new CC ----
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TBody)
+$TNotes = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
+Check 'connectwise: the CC note goes on the Discussion tab (public), after the internal note' ($TNotes.Count -eq 2 -and (Read-Body $TNotes[0]).internalAnalysisFlag -eq $true -and (Read-Body $TNotes[1]).detailDescriptionFlag -eq $true -and (Read-Body $TNotes[1]).internalAnalysisFlag -eq $false) (Show-Calls)
+Check 'the public note says nothing internal and has no dashes' ($r.out.public_note -notmatch '(?i)internal|technician_run|SECRET' -and (Test-NoDash $r.out)) $r.out.public_note
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TBody @{ notify_cc = 'false' })
+Check 'notify_cc false: CC added, internal note only, no public note' ($r.out.status -eq 'success' -and $TS.notes.Count -eq 1 -and $r.out.public_note -eq '') "$($TS.notes -join ' | ')"
 
 # ---- 2. Syncro: not supported, nothing called ----
 Reset-T; Reset-Mock (Get-TSecrets 'syncro') $Handler

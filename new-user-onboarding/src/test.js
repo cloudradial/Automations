@@ -20,9 +20,18 @@ const byId = Object.fromEntries(agent.definition.activities.map((a) => [a.id, a]
 fs.writeFileSync(path.join(out, 'agentwf-inputs.ps1'), byId['node-inputs'].properties.script);
 fs.writeFileSync(path.join(out, 'agentwf-test.json'), byId['node-inputs'].properties.testInput);
 fs.writeFileSync(path.join(out, 'agentwf-note.ps1'), byId['node-note'].properties.script);
+fs.writeFileSync(path.join(out, 'agentwf-handoff-intake.ps1'), byId['node-handoff-intake'].properties.script);
+fs.writeFileSync(path.join(out, 'agentwf-handoff-provision.ps1'), byId['node-handoff-provision'].properties.script);
 
 let failed = false;
-for (const t of ['test-direct.ps1', 'test-psa.ps1']) {
+// The two hand-off steps run the same script; only the stage line differs.
+const sameScript = (s) => s.replace(/^\$Stage = '[A-Za-z]+'$/m, "$Stage = ''");
+if (sameScript(byId['node-handoff-intake'].properties.script) !== sameScript(byId['node-handoff-provision'].properties.script)) {
+  console.log('FAIL the two hand-off steps differ beyond their $Stage line');
+  failed = true;
+} else console.log('PASS the two hand-off steps match apart from $Stage');
+
+for (const t of ['test-direct.ps1', 'test-psa.ps1', 'test-agentwf.ps1']) {
   console.log(`--- ${t}`);
   try { execFileSync('pwsh', ['-NoProfile', '-File', path.join(here, 'tests', t)], { stdio: 'inherit', env: { ...process.env, NUO_NODE_DIR: out } }); }
   catch { failed = true; }

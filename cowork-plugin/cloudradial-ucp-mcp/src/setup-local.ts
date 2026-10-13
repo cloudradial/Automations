@@ -43,7 +43,7 @@ export async function startLocalSetup({
   const server = createServer(async (request, response) => {
     const headers: Record<string, string> = {
       'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
-      'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     };
     const send = (status: number, body: string) => { response.writeHead(status, headers); response.end(body); };
@@ -51,7 +51,12 @@ export async function startLocalSetup({
     if (request.headers.host !== origin.slice(7)) return send(403, 'Forbidden');
     const url = new URL(request.url || '/', origin);
     if (request.method === 'GET' && url.pathname === '/' && sameToken(url.searchParams.get('token'))) return send(200, form(token));
-    if (request.method !== 'POST' || url.pathname !== '/credentials' || request.headers.origin !== origin || request.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') return send(403, 'Forbidden');
+    // Browsers send Origin "null" on a form POST when the page set Referrer-Policy: no-referrer
+    // (the 2.6.3 bug). Accept the real origin, or "null" only when the browser itself marks the
+    // request same-origin (Sec-Fetch-Site can't be set by web pages). The token is still required.
+    const sameOrigin = request.headers.origin === origin
+      || (request.headers.origin === 'null' && request.headers['sec-fetch-site'] === 'same-origin');
+    if (request.method !== 'POST' || url.pathname !== '/credentials' || !sameOrigin || request.headers['content-type']?.split(';')[0] !== 'application/x-www-form-urlencoded') return send(403, 'Forbidden');
     let body = '';
     try {
       for await (const chunk of request) {

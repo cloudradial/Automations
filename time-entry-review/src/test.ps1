@@ -170,7 +170,8 @@ Check 'ConnectWise calls are sent with -MaximumRedirection 0' ((@($Mock.Calls | 
 Check 'cw: 103 missing billable' (((Get-Issues $o 'missing_billable') -join ',') -eq '103') ''
 Check 'cw: longer of notes and internal notes used' (@($o.findings | Where-Object { $_.issue -eq 'short_note' })[0].detail -match 'only 5 characters') @($o.findings)[1].detail
 $cond = @(Get-Calls GET 'https://cw.example-msp.test/*/service/tickets[?]*')[0].Decoded
-Check 'cw: closed-on-day conditions' ($cond -match "closedFlag=true and closedDate>=\[$($DayText)T00:00:00Z\] and closedDate<\[$($Day.AddDays(1).ToString('yyyy-MM-dd'))T00:00:00Z\]") $cond
+# ConnectWise ignores the time in a [date] literal, so the library asks for a day either side and trims to the exact day.
+Check 'cw: closed-on-day conditions' ($cond -match "closedFlag=true and closedDate>=\[$($Day.AddDays(-1).ToString('yyyy-MM-dd'))T00:00:00Z\] and closedDate<\[$($Day.AddDays(3).ToString('yyyy-MM-dd'))T00:00:00Z\]") $cond
 $pm = @(Get-Calls POST 'https://api.postmark.test/email')
 Check 'cw: one email sent' ($pm.Count -eq 1) $pm.Count
 $pb = $pm[0].Body | ConvertFrom-Json
@@ -259,7 +260,8 @@ $r = Invoke-Workflow @{ date = $DayText; timezone = 'America/New_York' }
 $cond = @(Get-Calls GET 'https://cw.example-msp.test/*/service/tickets[?]*')[0].Decoded
 $ny = [TimeZoneInfo]::FindSystemTimeZoneById('America/New_York')
 $exp = [TimeZoneInfo]::ConvertTimeToUtc([datetime]::SpecifyKind($Day, 'Unspecified'), $ny).ToString('yyyy-MM-ddTHH:mm:ssZ')
-Check 'timezone: window starts at local midnight' ($r.error -eq '' -and $cond -match [regex]::Escape("closedDate>=[$exp]")) "$cond $($r.error)"
+$listed = @($r.out.actions | Where-Object { $_ -like 'Listed *' }) -join ' '
+Check 'timezone: window starts at local midnight' ($r.error -eq '' -and $listed -match [regex]::Escape("between $exp and")) "$listed $($r.error)"
 
 # 14. min_note_chars 0 and check_billable false turn those checks off.
 $r = Invoke-Workflow @{ date = $DayText; min_note_chars = 0; check_billable = $false }

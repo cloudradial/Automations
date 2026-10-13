@@ -2537,16 +2537,21 @@ definition:
             $morePages = $false
             switch ($c.Psa) {
                 'connectwise' {
-                    # Unverified: the dateEntered, lastUpdated and closedDate conditions with [date] literals, and
-                    # "summary contains". closedFlag, company/id and status/name follow the CW conditions syntax.
+                    # Unverified: "summary contains". closedFlag, company/id and status/name follow the CW conditions syntax.
+                    # ConnectWise ignores the time in a [date] literal (CW staging, 2026-10-13: dateEntered<[2026-10-12T20:57:01Z]
+                    # left out a ticket entered at 18:21 that day), so the dates sent are whole days, one day wider on each side,
+                    # and $keep applies the exact times.
                     $esc = { param($x) ([string]$x).Replace('\', '\\').Replace('"', '\"') }
+                    $cwDay = @{}
+                    foreach ($k in @('ca', 'ua', 'xa')) { if ($bd[$k]) { $cwDay[$k] = $bd[$k].Date.AddDays(-1).ToString('yyyy-MM-ddT00:00:00Z', [Globalization.CultureInfo]::InvariantCulture) } }
+                    foreach ($k in @('cb', 'ub', 'xb')) { if ($bd[$k]) { $cwDay[$k] = $bd[$k].Date.AddDays(2).ToString('yyyy-MM-ddT00:00:00Z', [Globalization.CultureInfo]::InvariantCulture) } }
                     $conds = @()
                     if ($wantOpen) { $conds += 'closedFlag=false' } elseif ($Closed) { $conds += 'closedFlag=true' }
                     if ($co) { $conds += "company/id=$co" }
                     if ($names.Count -eq 1) { $conds += ('status/name="' + (& $esc $names[0]) + '"') }
                     elseif ($names.Count -gt 1) { $conds += ('(' + (@($names | ForEach-Object { 'status/name="' + (& $esc $_) + '"' }) -join ' or ') + ')') }
                     foreach ($pair in @(@('ca', 'dateEntered>=', 'created'), @('cb', 'dateEntered<', 'created'), @('ua', 'lastUpdated>=', 'updated'), @('ub', 'lastUpdated<', 'updated'), @('xa', 'closedDate>=', 'closed'), @('xb', 'closedDate<', 'closed'))) {
-                        if ($iso[$pair[0]]) { $conds += "$($pair[1])[$($iso[$pair[0]])]"; $server[$pair[2]] = $true }
+                        if ($cwDay.Contains($pair[0])) { $conds += "$($pair[1])[$($cwDay[$pair[0]])]"; $server[$pair[2]] = $true }
                     }
                     if ($txt) { $conds += ('summary contains "' + (& $esc $txt) + '"'); $server.text = $true }
                     $cq = if ($conds.Count) { "conditions=$(ConvertTo-PsaQuery ($conds -join ' and '))&" } else { '' }

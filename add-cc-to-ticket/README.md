@@ -1,8 +1,8 @@
 # Let Users Add Colleagues to Ticket Updates
 
-Requesters add a coworker to a ticket's email updates from the portal, with no technician needed.
+A requester adds a coworker to the email updates on one of their own open tickets from the portal, with no technician needed, and the ticket records who was added and by whom.
 
-**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow
+**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI)
 
 ## Files (always the latest version)
 
@@ -12,34 +12,145 @@ These links point at the `main` branch, so they always open the current version.
 |---|---|
 | View `add-cc-to-ticket.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
 | Download `add-cc-to-ticket.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
+| Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket/src) |
 | All files in this automation | [add-cc-to-ticket](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/add-cc-to-ticket) |
 
 ## How it works
 
-A standalone **workflow** that adds a user/email to an existing ConnectWise ticket's
-notification CC list (de-duplicated), driven from a self-service form field. No agent, a
-single PowerShell script node.
+A CloudRadial service-request form asks for a ticket number and an email address, and its Automation Webhook posts them to this workflow together with who submitted the form. One step, **Add CC to ticket**, then:
 
-## Pieces
+1. **Checks the request.** It needs a ticket number and exactly one email address. With `allowed_domains` set, the address must be in one of those domains. Nothing is called until these pass.
+2. **Reads the ticket** through the shared six-PSA adapter (`_shared/psa.ps1`): its company, its contact's email address and its current CC list.
+3. **Checks the ticket belongs to the requester** (see [The ownership rule](#the-ownership-rule)). If it doesn't, the run ends with `status: rejected` and nothing changes.
+4. **Adds the address** to the ticket's CC list, then reads the ticket again to confirm the address is there. If it was already on the list (or is the ticket's contact), the run ends with `success`, "nothing changed", and no note.
+5. **Leaves an internal note**, for example "Added alex.wilber@contoso.com to the email CC list at the request of megan.bowen@contoso.com (self-service form).", and reads the notes back to confirm it saved. A note that fails becomes a warning; the CC is already added.
 
-| File | Type | Role |
+It never changes the ticket's status, owner, contact or anything else, and never writes a client-visible note. `"preview": true` returns what it would do (`status: pending_confirmation`) and changes nothing.
+
+### What each PSA supports
+
+| PSA | How the CC is added | Notes |
 |---|---|---|
-| [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) | `automationsWorkflow` | Reads `ticketId` + `ccEmail` from the form payload, appends the address to the CW ticket's `automaticEmailCc` (sets `automaticEmailCcFlag`), and leaves an internal note. Accepts a flat `{key:value}` body or the CloudRadial `{Ticket:{Questions:[{Id,Answer}]}}` shape. |
+| ConnectWise PSA | The ticket's `automaticEmailCc` list (semicolon separated) and its CC checkbox `automaticEmailCcFlag`, by json-patch | Any address. ConnectWise caps the list at 1000 characters. If the address is on the list but the checkbox is off, it turns the checkbox on. |
+| Autotask | A **TicketAdditionalContacts** row | Only an active contact of the ticket's company can be added (an Autotask rule). Any other address stops with a plain sentence and nothing changes. At most 30 additional contacts. |
+| HaloPSA | The ticket's `emailcclist` | Any address. |
+| Kaseya BMS | The ticket's `Ccs` list, by json-patch | A known contact or employee is added by id; any other address as an email address. |
+| Zendesk | `email_ccs` with `action: put` | Any address (Zendesk creates the user if needed). The **CCs** feature must be on in Zendesk; if it's off, the read-back catches it and the run says so. |
+| Syncro | Not supported | Syncro's API has no ticket CC. The run stops with "Syncro's API has no way to add a CC to a ticket, so nothing was changed." and makes no call. |
 
-## Install / run
+Every CC call above comes from the vendor's published API reference and is marked `Unverified` in [`src/cc.ps1`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/src/cc.ps1) until a live run proves it.
 
-1. Import `add-cc-to-ticket.yml` on **Workflows → Import**.
-2. Add the ConnectWise secrets to the runner Key Vault: `CW-ApiUrl`, `CW-CompanyID`,
-   `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId` (the workflow errors listing any missing).
-3. Trigger from a CloudRadial service-request form that supplies `ticketId` (or
-   `ticketNumber`) and `ccEmail`. To webhook-trigger, open **Properties → Webhook** and enable
-   it after import (exports ship with it OFF).
+## The ownership rule
 
-## Confirm in your tenant
+A form submitter must never be able to copy someone onto another person's ticket. The webhook body carries two values CloudRadial fills in at submit time, which the submitter can't change:
 
-- ConnectWise Manage REST creds present in the runner Key Vault under the names above.
-- Payload field ids: `ticketId`/`ticketNumber` and `ccEmail` (aliases handled: `cc`, `ccUser`,
-  `email`, `user`, `contactEmail`).
-- **Idempotent:** if the address is already on the CC list it reports "no change." The
-  internal-note write is non-fatal (a failure is reported but doesn't fail the run).
+- `requester_email`, sent as `@UserEmail`
+- `company_psa_id`, sent as `@CompanyPsaId`
+
+The CC is added only when **both** hold:
+
+1. The ticket's company in the PSA is `company_psa_id` (on ConnectWise, its id or its identifier).
+2. The requester is the ticket's contact, or is already on its CC list.
+
+`"allow_company_colleagues": true` relaxes the second part to "anyone at the ticket's company". The first part always applies.
+
+If `requester_email` or `company_psa_id` is missing (or arrives as a literal `@UserEmail` because the token wasn't filled), the run is refused with `status: rejected` and nothing is called. A technician running it by hand in the designer can send `"technician_run": true` instead: the checks it has data for still run, and the output says which were skipped. Never put `technician_run` in a client-facing form's webhook body.
+
+These fields are only read from the webhook body, never from a form answer, so adding a question with the same Field ID can't override them. A refusal never says whose ticket it is: a ticket from another company gets "Ticket 1001 isn't one you can change, so nothing was changed."
+
+## Download & import
+
+**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml)
+
+Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
+
+## Required runner Key Vault secrets
+
+By name only. The names are the same as the PSA catalog extensions, so one set serves both.
+
+| Secret | For |
+|---|---|
+| `PSA-Type` | `connectwise`, `autotask`, `halopsa`, `kaseyabms`, `syncro` or `zendesk` (a `psa` input overrides it) |
+| ConnectWise: `CW-ApiUrl`, `CW-CompanyID`, `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId` | |
+| Autotask: `Autotask-ApiUrl`, `Autotask-ApiIntegrationCode`, `Autotask-Username`, `Autotask-Secret` | Optional: `Autotask-NotePublishId`, `Autotask-NoteTypeId` |
+| HaloPSA: `Halo-ApiUrl`, `Halo-ClientId`, `Halo-ClientSecret` | Optional: `Halo-NoteOutcomeId` |
+| Kaseya BMS: `KaseyaBMS-ApiUrl`, `KaseyaBMS-Username`, `KaseyaBMS-Password`, `KaseyaBMS-CompanyName`, `KaseyaBMS-NoteTypeId` | |
+| Syncro: `Syncro-ApiUrl`, `Syncro-ApiKey` | Not needed: Syncro isn't supported. |
+| Zendesk: `Zendesk-BaseUrl`, `Zendesk-Email`, `Zendesk-ApiToken` | |
+
+A missing secret stops the run with a sentence naming it.
+
+## Required Graph permissions
+
+None. This workflow doesn't call Microsoft Graph.
+
+The PSA API user needs to read tickets, contacts (users in HaloPSA and Zendesk) and notes, update tickets (Autotask: create ticket additional contacts) and add notes. If the PSA refuses a call, the run stops with its own error text, for example "ConnectWise PATCH /service/tickets/1001 failed (HTTP 403): ...". Secrets and auth headers are never in the output.
+
+## Inputs
+
+| Field | Required | Meaning |
+|---|---|---|
+| `ticketNumber` | Yes | The existing ticket, as people see it (`1001`, `#1001`, or an Autotask number like `T20261008.0001`). `ticket_number`, `ticketId` and `ticket_id` also work. |
+| `ccEmail` | Yes | The one address to add. `cc_email`, `cc`, `email` and `contactEmail` also work. A list, a display name or a malformed address is refused. |
+| `requester_email` | Yes | Who submitted the form. Send `@UserEmail`. `requesterEmail`, `UserEmail` and `User.Email` also work. |
+| `company_psa_id` | Yes | The submitter's company in the PSA. Send `@CompanyPsaId`. `companyPsaId`, `CompanyPsaId` and `Company.CompanyPsaId` also work. |
+| `allow_company_colleagues` | No (default `false`) | `true` lets anyone at the ticket's company add a CC, not only its contact and CCs. |
+| `allowed_domains` | No | Comma-separated domains the new address must be in, for example `contoso.com, contoso.co.uk`. |
+| `technician_run` | No (default `false`) | For a technician running it by hand: allows a run without `requester_email` or `company_psa_id`. |
+| `preview` | No (default `false`) | `true` returns what would happen and changes nothing. `dryRun` works too. |
+| `psa` | No | Overrides the `PSA-Type` secret. |
+
+The ticket number and address are read from the body first, then from the form's answers (`Ticket.Questions` by question Id). A value left as a literal `@token` counts as missing.
+
+## Output
+
+`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (always empty). An `error` also fails the step, so it shows in the run history.
+
+## Form setup
+
+On the CloudRadial service-request form:
+
+1. Add a question **Ticket number** (Text) with **Script / JSON Field ID** `ticketNumber`.
+2. Add a question **Email address to add** (Email) with Field ID `ccEmail`.
+3. On the form's **Automation** tab, add a **Webhook** activity:
+
+| Setting | Value |
+|---|---|
+| URL | This workflow's webhook URL (AutomationAI > the workflow > Properties > Webhook). Use the full `https://` address. |
+| Method | `POST` |
+| Request Headers | `{"X-Crauto-Webhook-Secret":"<secret>"}` with the secret AutomationAI issued |
+| Body | `{"ticketNumber":"@ticketNumber","ccEmail":"@ccEmail","requester_email":"@UserEmail","company_psa_id":"@CompanyPsaId"}` |
+
+Keep `requester_email` and `company_psa_id` last in the body, as above.
+
+Don't use `@TicketId` for the target ticket: it's the **new** ticket the form itself creates, not the one the requester wants to change. That's why the form asks for the ticket number.
+
+## Import & test
+
+1. Import `add-cc-to-ticket.yml`, add the secrets above to the runner vault, then **Publish** and **Deploy** to that runner.
+2. **Preview first.** In **Run**, use the step's Test Input with a real ticket number, its company's PSA id, the ticket contact's email as `requester_email`, and your own address as `ccEmail`. Keep `"preview": true`. Expect `status: pending_confirmation` and nothing changed on the ticket.
+3. **Refusals.** Change `company_psa_id` to another company: expect `rejected` and "isn't one you can change". Change `requester_email` to someone who isn't on the ticket: expect `rejected`.
+4. **Add.** Remove `preview`. Expect `success`, your address on the ticket's CC list in the PSA, and an internal note. Run it again: expect "already on the CC list" and no second note.
+5. **Wire the form.** Enable the webhook in **Properties** (AutomationAI issues the URL and secret), redeploy, and set up the form as above. Submit it from the portal as the ticket's contact, then check the run history and the ticket.
+
+> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `step.ps1` (reading the body), `cc.ps1` (each PSA's contact and CC calls) or `add-cc.ps1` (the step), run `node src/build.js` (it pastes in `_shared/psa.ps1`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
+
+## Tested
+
+Mocked PSAs only, in strict mode (`src/test.ps1`, 107 checks). Nothing here has run against a live PSA yet.
+
+- Adding a CC on ConnectWise, Autotask, HaloPSA, Kaseya BMS and Zendesk, including each PSA's request shape, keeping the CCs already on the ticket, the read-back and the internal note.
+- Syncro refused with a plain sentence and no calls.
+- Already on the list (any letter case), already the contact, and a ConnectWise ticket with the CC checkbox off.
+- Ownership: wrong company (the message reveals nothing), a ConnectWise company identifier in place of its id, requester not the contact or a CC, requester already a CC, `allow_company_colleagues` (and that it never crosses companies), missing `requester_email` or `company_psa_id`, `technician_run`.
+- Invalid addresses, `mailto:`, `allowed_domains`, bad or missing ticket numbers.
+- Preview on three PSAs changes nothing; a preview of someone else's ticket is still refused.
+- Autotask refuses an address that isn't a company contact.
+- PSA errors carry the PSA's own text and no secrets; a missing secret is named; a write the PSA accepts but doesn't keep (Zendesk CCs off) is an error; a write answered with a redirect is read back and never resent.
+- A refused note, or notes that can't be read back, become warnings.
+- Literal `@tokens` count as missing; the CloudRadial `Ticket.Questions` shape (`Answer` or `Value`); `Ticket.TicketId` is never used as the target; ownership fields typed into form answers are ignored.
+
+### Not yet proven live
+
+Every PSA call in `src/cc.ps1` (marked `Unverified`), in particular the ConnectWise CC fields, the Autotask additional-contacts write, the HaloPSA `emailcclist` update, the Kaseya BMS `Ccs` patch, and Zendesk `email_ccs`. Check the first run with `preview` and then on a test ticket.

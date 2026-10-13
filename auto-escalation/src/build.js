@@ -57,6 +57,7 @@ name: Auto-Escalation
 description: Every 15 minutes, finds open tickets nobody has touched for too long for their priority, or whose SLA is at
   risk, adds an internal note with the reason, moves each one up one tier using the escalation map and emails the
   dispatcher through Postmark. A ticket is escalated once, and a retried run never moves or emails it twice. Set preview to true to see the plan without changing anything.
+  With a ticket_number (from a portal form) it escalates just that ticket for its requester, after checking the ticket is theirs.
 definition:
   schemaVersion: 1
   activities:

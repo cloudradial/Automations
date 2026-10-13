@@ -69,8 +69,11 @@ $TBody = @{ escalation_map = ($TMap | ConvertTo-Json -Compress); dispatcher_emai
 #   2007 medium, Tier 2, idle 300 (limit 240)              -> move to Tier 3 and assign "escalations"
 # ConnectWise boards (statuses and teams belong to a board, so a move also sets a status that exists on the new one).
 $TBoardIds = @{ 'Service Desk' = 1; 'Tier 2' = 2; 'Tier 3' = 3; 'Alerts' = 4 }
-function New-TCw { param($Id, $Summary, $Co, $Board, $Prio, $PrioId, $Owner, $Idle, $Created, $Status = 'In Progress', $Sla = $null)
+# Each ticket's contact is Pat Doe (pat@contoso.com) at Contoso Ltd (5), or Sam Roe (sam@example.com) at Example MSP (6).
+function New-TCw { param($Id, $Summary, $Co, $Board, $Prio, $PrioId, $Owner, $Idle, $Created, $Status = 'In Progress', $Sla = $null, [switch]$Closed)
     $t = [ordered]@{ id = $Id; summary = $Summary; company = [pscustomobject]@{ id = $(if ($Co -eq 'Contoso Ltd') { 5 } else { 6 }); name = $Co }; status = [pscustomobject]@{ name = $Status }; priority = [pscustomobject]@{ id = $PrioId; name = $Prio }; board = [pscustomobject]@{ id = $TBoardIds[$Board]; name = $Board }; _info = [pscustomobject]@{ dateEntered = (Get-TAgo $Created); lastUpdated = (Get-TAgo $Idle) } }
+    if ($Co -eq 'Contoso Ltd') { $t.contact = [pscustomobject]@{ id = 11; name = 'Pat Doe' }; $t.contactEmailAddress = 'pat@contoso.com' } else { $t.contact = [pscustomobject]@{ id = 12; name = 'Sam Roe' }; $t.contactEmailAddress = 'sam@example.com' }
+    $t.closedFlag = [bool]$Closed
     if ($Owner) { $t.owner = [pscustomobject]@{ id = 7; identifier = $Owner; name = "$Owner (name)" } }
     if ($Sla) { $t.sla = [pscustomobject]@{ id = $Sla }; $t.dateResponded = $null }
     return [pscustomobject]$t
@@ -84,6 +87,8 @@ $TCwTickets = @(
     (New-TCw 2006 'Quote' 'Example MSP' 'Service Desk' 'Priority 1 - Emergency Response' 1 $null 900 900 -Status 'Waiting on Client')
     (New-TCw 2007 'Database errors' 'Contoso Ltd' 'Tier 2' 'Priority 3 - Normal Response' 3 'jlee' 300 400)
 )
+# Read one at a time only (never in the open-ticket list): 2999 is closed.
+$TCwExtra = @((New-TCw 2999 'Old printer' 'Contoso Ltd' 'Service Desk' 'Priority 3 - Normal Response' 3 $null 9000 9000 -Status 'Closed' -Closed))
 $global:TCw = @{ tickets = $TCwTickets; failFind = 0; failPatch = ''; failNotes = ''; pm = 0 }
 $TCwHandler = { param($c, $n)
     $u = [uri]::UnescapeDataString($c.Uri)
@@ -99,7 +104,7 @@ $TCwHandler = { param($c, $n)
     }
     # One ticket (Set-PsaQueue reads it before and after a board move); the board it was moved to, if any.
     if ($c.Method -eq 'GET' -and $u -match '/service/tickets/(\d+)$') {
-        $TTid = $Matches[1]; $TT = @($global:TCw.tickets | Where-Object { [string]$_.id -eq $TTid }) | Select-Object -First 1
+        $TTid = $Matches[1]; $TT = @(@($global:TCw.tickets) + $TCwExtra | Where-Object { [string]$_.id -eq $TTid }) | Select-Object -First 1
         if (-not $TT) { New-HttpError 404 '{"message":"not found"}' }
         $TCopy = $TT.PSObject.Copy()
         # The last accepted board PATCH this test sent for the ticket (a refused one, failPatch, didn't move it).
@@ -354,5 +359,179 @@ $TR = Invoke-Flow $TBody
 $TWant = 'ConnectWise answered the note on ticket 2001 with a redirect; reading the ticket back showed the note was saved, so it was not sent again.'
 Check 'Shared warning: the redirected note on 2001 was saved, sent once, and 2001 still moved' ($TR.out.status -eq 'success' -and @(Get-Calls POST '*/service/tickets/2001/notes').Count -eq 1 -and @(Get-Calls PATCH '*/2001').Count -eq 1) "$($TR.error) $(Show-Calls)"
 Check 'Shared warning: $PsaState.Warnings reaches the run output warnings, once' (@($TR.out.warnings | Where-Object { $_ -eq $TWant }).Count -eq 1) ($TR.out.warnings -join ' | ')
+
+
+# ======== Single-ticket mode: a user escalates their own ticket from a portal form ========
+# The form sends {"ticketNumber":"@ticketNumber","reason":"@reason","requester_email":"@UserEmail","company_psa_id":"@CompanyPsaId"}.
+# A form request always escalates (the untouched-time and SLA rules are for the sweep), after the ownership check.
+$TFormMap = '{"Service Desk": "Tier 2", "Tier 2": "Tier 3"}'
+$TForm = @{ ticketNumber = '2001'; reason = 'Payroll is blocked for the whole office.'; requester_email = 'pat@contoso.com'; company_psa_id = '5'; escalation_map = $TFormMap; dispatcher_email = 'dispatch@example.com' }
+function Get-TFormBody { param([hashtable]$Set = @{}, [string[]]$Drop = @()) $b = @{}; foreach ($k in $TForm.Keys) { if ($Drop -notcontains $k) { $b[$k] = $TForm[$k] } }; foreach ($k in $Set.Keys) { $b[$k] = $Set[$k] }; return $b }
+function Get-TCwPublic { return @(Get-TCwNotes | Where-Object { (Read-Body $_).detailDescriptionFlag -eq $true }) }
+function Get-TCwInternal { return @(Get-TCwNotes | Where-Object { (Read-Body $_).internalAnalysisFlag -eq $true }) }
+
+# ---- F1. ConnectWise: escalated, moved, noted, emailed, requester told ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody)
+$TP = @(Get-Calls PATCH '*/service/tickets/2001')
+$TIn = @(Get-TCwInternal); $TPub = @(Get-TCwPublic)
+Check 'Form (CW): success, the one ticket moved up a tier (board and status in one patch)' ($TR.stage -eq 'note' -and $TR.out.status -eq 'success' -and $TR.out.mode -eq 'form' -and $TP.Count -eq 1 -and (Read-Body $TP[0])[0].value.id -eq 2 -and (Read-Body $TP[0])[1].path -eq 'status') "$($TR.error) $($TR.out.message) $(Show-Calls)"
+Check 'Form (CW): no ticket list is read and no other ticket is touched' (@(Get-Calls GET '*/service/tickets[?]*').Count -eq 0 -and -not @($Mock.Calls | Where-Object { $_.Uri -match '/service/tickets/(200[2-7])' }).Count) (Show-Calls)
+Check 'Form (CW): the internal marker note says the requester asked, and gives the reason' ($TIn.Count -eq 1 -and (Read-Body $TIn[0]).text -match '^\[Auto-Escalation\] This ticket was escalated at the requester''s request\. pat@contoso\.com asked for it to be escalated from the portal\. Reason: Payroll is blocked for the whole office\. Auto-Escalation is going to move it from Service Desk to Tier 2\.') ((Read-Body $TIn[0]).text)
+Check 'Form (CW): one PUBLIC note tells the requester it was escalated, with no marker text and no time promise' ($TPub.Count -eq 1 -and (Read-Body $TPub[0]).text -match '^Thanks for letting us know\. This ticket has been escalated, and a member of our team will be in touch\.\nRef: [0-9a-f]{8}$' -and (Read-Body $TPub[0]).text -notmatch 'Auto-Escalation') ((Read-Body $TPub[0]).text)
+$TPm = @(Get-TPostmark); $TPmBody = if ($TPm.Count) { $TPm[0].Body | ConvertFrom-Json } else { $null }
+Check 'Form (CW): the dispatcher email names the requester and the reason' ($TPm.Count -eq 1 -and $TPmBody.Subject -eq "Auto-Escalation: ticket 2001 escalated at the requester's request" -and $TPmBody.HtmlBody -match 'pat@contoso\.com asked for ticket 2001' -and $TPmBody.HtmlBody -match 'Payroll is blocked' -and $TPmBody.TextBody -match 'Payroll is blocked') "$(if ($TPmBody) { $TPmBody.Subject })"
+Check 'Form (CW): plain message and public_note' ($TR.out.message -eq 'Ticket 2001 was escalated at the requester''s request. It was moved from Service Desk to Tier 2. The dispatcher was emailed (dispatch@example.com). The requester was told on the ticket.' -and $TR.out.public_note -match '^Thanks for letting us know' -and $TR.out.ticket_id -eq '2001') $TR.out.message
+
+# Run again (a retry, or the user submits the form twice): nothing more is written or sent.
+$TBefore = @(Get-TWrites).Count
+$TR = Invoke-Flow (Get-TFormBody)
+Check 'Form (CW) again: already escalated, said plainly, nothing more written or emailed' ($TR.out.status -eq 'success' -and $TR.out.message -eq "Ticket 2001 has already been escalated, so it wasn't escalated again. Someone from the team will be in touch." -and @(Get-TWrites).Count -eq $TBefore -and @(Get-TPostmark).Count -eq 1) "$($TR.out.message) $(@(Get-TWrites).Count)/$TBefore"
+
+# ---- F2. Ownership ----
+$TDenied = "Ticket 2001 couldn't be escalated because it isn't one of your tickets. Check the ticket number, or contact the service desk."
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ company_psa_id = '6' })
+Check 'Form: wrong company -> rejected, nothing written, the message reveals nothing about the ticket' ($TR.stage -eq 'find' -and $TR.out.status -eq 'rejected' -and $TR.out.message -eq $TDenied -and @(Get-TWrites).Count -eq 0 -and @(Get-TPostmark).Count -eq 0 -and ($TR.out | ConvertTo-Json -Depth 8) -notmatch 'Server down|Contoso Ltd|jlee') "$($TR.out.message) | $(Show-Calls)"
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ requester_email = 'lee@contoso.com' })
+Check 'Form: same company but not the ticket contact -> rejected, nothing written' ($TR.out.status -eq 'rejected' -and $TR.out.message -eq $TDenied -and @(Get-TWrites).Count -eq 0 -and $TR.out.internal_note -match "isn't the ticket's contact") $TR.out.internal_note
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ requester_email = 'lee@contoso.com'; allow_company_colleagues = 'true' })
+Check 'Form: allow_company_colleagues lets a colleague at the same company escalate' ($TR.out.status -eq 'success' -and @(Get-Calls PATCH '*/service/tickets/2001').Count -eq 1 -and (Read-Body (Get-TCwInternal)[0]).text -match 'lee@contoso\.com asked') $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ company_psa_id = '6'; allow_company_colleagues = $true })
+Check 'Form: allow_company_colleagues never crosses companies' ($TR.out.status -eq 'rejected' -and @(Get-TWrites).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ ticketNumber = '8888' })
+Check 'Form: a ticket that does not exist gets the same message as someone else''s ticket' ($TR.out.status -eq 'rejected' -and $TR.out.message -eq ($TDenied -replace '2001', '8888') -and @(Get-TWrites).Count -eq 0) $TR.out.message
+
+# ---- F3. Who sent it ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody -Drop @('requester_email'))
+Check 'Form: missing requester -> rejected before the ticket is read, nothing written' ($TR.out.status -eq 'rejected' -and $TR.out.message -match "^Ticket 2001 wasn't escalated because the request didn't say who sent it\." -and @(Get-Calls GET '*/service/tickets/2001*').Count -eq 0 -and @(Get-TWrites).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody -Drop @('company_psa_id'))
+Check 'Form: missing company -> rejected' ($TR.out.status -eq 'rejected' -and $TR.out.message -match "didn't say who sent it" -and @(Get-TWrites).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ requester_email = '@UserEmail'; company_psa_id = '@CompanyPsaId' })
+Check 'Form: unfilled @UserEmail and @CompanyPsaId tokens count as missing -> rejected' ($TR.out.status -eq 'rejected' -and $TR.out.message -match "didn't say who sent it" -and @(Get-TWrites).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ technician_run = $true } -Drop @('requester_email', 'company_psa_id'))
+Check 'Form: technician_run escalates without a requester; the note says a technician asked; no portal requester named' ($TR.out.status -eq 'success' -and @(Get-Calls PATCH '*/service/tickets/2001').Count -eq 1 -and (Read-Body (Get-TCwInternal)[0]).text -match 'A technician asked for it to be escalated\. Reason: Payroll') "$($TR.out.message) $($TR.error)"
+
+# ---- F4. Closed, no mapping, preview ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ ticketNumber = '2999' })
+Check 'Form: a closed ticket is not escalated, plain message, nothing written' ($TR.out.status -eq 'success' -and $TR.out.message -eq "Ticket 2999 is closed, so it wasn't escalated. If the problem is back, open a new request." -and @(Get-TWrites).Count -eq 0 -and @(Get-TPostmark).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ ticketNumber = '2002' })
+$TE = Get-TEsc $TR '2002'
+Check 'Form: no map entry for the queue -> flagged and noted (not moved), dispatcher emailed, requester told, and said so' ($TR.out.status -eq 'success' -and @(Get-Calls PATCH '*').Count -eq 0 -and $TE.result -eq 'note-only' -and (Read-Body (Get-TCwInternal)[0]).text -match "There is no escalation_map entry for Alerts, so it wasn't moved; it is flagged for the dispatcher instead\." -and @(Get-TPostmark).Count -eq 1 -and @(Get-TCwPublic).Count -eq 1 -and $TR.out.message -match "^Ticket 2002 was escalated at the requester's request\. It was flagged for the dispatcher\. There is no escalation_map entry for Alerts") $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ escalation_map = '{"Service Desk": "Help Desk"}' })
+Check 'Form: a map target that does not exist -> not moved, flagged with the reason, still escalated to the dispatcher' ($TR.out.status -eq 'success' -and @(Get-Calls PATCH '*').Count -eq 0 -and (Get-TEsc $TR '2001').whyNotMoved -match "can't move it to Help Desk: ConnectWise has no service board named 'Help Desk'" -and @(Get-TPostmark).Count -eq 1) (Get-TEsc $TR '2001').whyNotMoved
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ preview = $true })
+Check 'Form preview: pending_confirmation, nothing written or emailed, says what would happen' ($TR.out.status -eq 'pending_confirmation' -and @(Get-TWrites).Count -eq 0 -and @(Get-TPostmark).Count -eq 0 -and $TR.out.message -match '^Preview: ticket 2001 would be escalated for pat@contoso\.com \(moved up a tier\)\. Nothing was changed\.' -and (Get-TEsc $TR '2001').outcome -eq 'Would move it from Service Desk to Tier 2.' -and $TR.out.public_note -eq '') $TR.out.message
+
+# ---- F5. Input shapes ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow @{ Ticket = @{ Id = 77001; Questions = @(@{ Id = 'ticketNumber'; Answer = '#2001' }, @{ Id = 'reason'; Answer = 'Still down after the reboot.' }) }; requester_email = 'pat@contoso.com'; company_psa_id = '5'; escalation_map = $TFormMap; dispatcher_email = 'dispatch@example.com' }
+Check 'Form: the CloudRadial {Ticket:{Questions:[{Id,Answer}]}} shape works (# ignored; the new request ticket id is not used)' ($TR.out.status -eq 'success' -and @(Get-Calls PATCH '*/service/tickets/2001').Count -eq 1 -and (Read-Body (Get-TCwInternal)[0]).text -match 'Reason: Still down after the reboot\.' -and -not @($Mock.Calls | Where-Object { $_.Uri -match '77001' }).Count) "$($TR.out.message) $($TR.error)"
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow @{ trigger = @{ ticketNumber = '2001'; reason = '@reason'; requester_email = 'pat@contoso.com'; company_psa_id = '5'; escalation_map = $TFormMap } }
+Check 'Form: a body wrapped in trigger works, and an unfilled @reason counts as no reason' ($TR.out.status -eq 'success' -and (Read-Body (Get-TCwInternal)[0]).text -match 'No reason was given\.' -and (Read-Body (Get-TCwInternal)[0]).text -notmatch '@reason') ((Read-Body (Get-TCwInternal)[0]).text)
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow (Get-TFormBody @{ ticketNumber = '@ticketNumber' })
+Check 'Form: an unfilled @ticketNumber is refused; it never falls through to a sweep of every ticket' ($TR.stage -eq 'find' -and $TR.out.status -eq 'rejected' -and $TR.out.message -match '^No ticket was escalated because the request had no ticket number\.' -and @(Get-Calls GET '*/service/tickets*').Count -eq 0 -and @(Get-TWrites).Count -eq 0) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow @{ Ticket = @{ Questions = @(@{ Id = 'ticketNumber'; Answer = '2001' }, @{ Id = 'requester_email'; Answer = 'pat@contoso.com' }, @{ Id = 'company_psa_id'; Answer = '5' }) }; escalation_map = $TFormMap }
+Check 'Form: who sent it is never taken from a question answer (a user could type someone else''s email)' ($TR.out.status -eq 'rejected' -and $TR.out.message -match "didn't say who sent it" -and @(Get-TWrites).Count -eq 0) $TR.out.message
+
+# ---- F6. Sweep mode is unchanged when no ticket number is given ----
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ preview = $true })
+Check 'Sweep (no ticket_number): still the sweep, same plan as before, no public note' ($TR.out.status -eq 'pending_confirmation' -and @($TR.out.escalations).Count -eq 4 -and $TR.out.counts.toReassign -eq 2 -and $TR.out.public_note -eq '' -and $TR.out.mode -eq 'sweep' -and @(Get-Calls GET '*/service/tickets[?]*').Count -eq 1) $TR.out.message
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow $TBody
+Check 'Sweep live: no public notes are written' ($TR.out.status -eq 'success' -and @(Get-TCwPublic).Count -eq 0 -and @(Get-TCwNotes).Count -eq 4) $TR.out.message
+
+# ---- F7. The other five PSAs: escalated, moved, internal and public notes, dispatcher emailed ----
+function Test-TFormPsa {
+    param([string]$TFPsa, [hashtable]$TFBody, [scriptblock]$TFHandler, [scriptblock]$TFMove, [scriptblock]$TFInternal, [scriptblock]$TFPublic)
+    $TS = Get-TSecrets $TFPsa
+    Reset-Mock -Secrets $TS -Handler $TFHandler
+    $TR = Invoke-Flow ($TFBody + @{ reason = 'Payroll is blocked for the whole office.'; requester_email = 'pat@contoso.com'; company_psa_id = '5'; dispatcher_email = 'dispatch@example.com' })
+    $TW = @(Get-TWrites)
+    $TMv = @($TW | Where-Object { & $TFMove $_ (Read-Body $_) })
+    $TNi = @($TW | Where-Object { & $TFInternal $_ (Read-Body $_) })
+    $TNp = @($TW | Where-Object { & $TFPublic $_ (Read-Body $_) })
+    Check "Form ($TFPsa): success, moved up a tier, internal note with the reason, public note to the requester, dispatcher emailed" ($TR.out.status -eq 'success' -and $TMv.Count -eq 1 -and $TNi.Count -eq 1 -and $TNp.Count -eq 1 -and @(Get-TPostmark).Count -eq 1 -and $TR.out.message -match "was escalated at the requester's request\. It was moved from " -and $TR.out.message -match 'The requester was told on the ticket\.$') "$($TR.error) | $($TR.out.message) | $(($TW | ForEach-Object { "$($_.Method) $($_.Uri) $($_.Body)" }) -join ' ;; ')"
+}
+$TPsa.halopsa = @{ 'PSA-Type' = 'halopsa'; 'Halo-ApiUrl' = 'https://halo.example.com'; 'Halo-ClientId' = 'cid'; 'Halo-ClientSecret' = 'sec' }
+$TPsa.kaseyabms = @{ 'PSA-Type' = 'kaseyabms'; 'KaseyaBMS-ApiUrl' = 'https://bms.example.com'; 'KaseyaBMS-Username' = 'u'; 'KaseyaBMS-Password' = 'p'; 'KaseyaBMS-CompanyName' = 'Example MSP'; 'KaseyaBMS-NoteTypeId' = '4' }
+$TPsa.syncro = @{ 'PSA-Type' = 'syncro'; 'Syncro-ApiUrl' = 'https://example.syncromsp.com/api/v1'; 'Syncro-ApiKey' = 'key' }
+$TReason = 'Reason: Payroll is blocked'
+$TTold = 'a member of our team will be in touch'
+
+# Autotask: the number customers see (T20261013.0001) is resolved to the id; the contact's email comes from Contacts.
+Test-TFormPsa 'autotask' @{ ticketNumber = 'T20261013.0001'; escalation_map = '{"Service Desk": "Tier 2"}' } { param($c, $n)
+    if ($c.Uri -like 'https://api.postmarkapp.com/email') { return [pscustomobject]@{ ErrorCode = 0 } }
+    if ($c.Uri -like '*/Tickets/entityInformation/fields') { return $TAtFields }
+    if ($c.Uri -like '*/TicketNotes/entityInformation/fields') { return $TAtNoteFields }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/Tickets/query?*') { return [pscustomobject]@{ pageDetails = [pscustomobject]@{ nextPageUrl = $null }; items = @([pscustomobject]@{ id = 9101; ticketNumber = 'T20261013.0001' }) } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/Tickets/9101') { return [pscustomobject]@{ item = [pscustomobject]@{ id = 9101; ticketNumber = 'T20261013.0001'; title = 'VPN down'; companyID = 5; contactID = 11; status = 1; priority = 1; queueID = 29683; assignedResourceID = $null; createDate = (Get-TAgo 300); lastActivityDate = (Get-TAgo 20) } } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/Contacts/query?*') { return [pscustomobject]@{ pageDetails = [pscustomobject]@{ nextPageUrl = $null }; items = @([pscustomobject]@{ id = 11; firstName = 'Pat'; lastName = 'Doe'; emailAddress = 'pat@contoso.com' }) } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/TicketNotes/query?*') { return [pscustomobject]@{ pageDetails = [pscustomobject]@{ nextPageUrl = $null }; items = @() } }
+    if ($c.Method -eq 'PATCH' -and $c.Uri -like '*/Tickets') { return [pscustomobject]@{ itemId = 9101 } }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/Tickets/9101/Notes') { return [pscustomobject]@{ itemId = 1 } }
+    return $null
+} { param($c, $b) $c.Method -eq 'PATCH' -and $b.queueID -eq 29684 } { param($c, $b) $c.Uri -like '*/Notes' -and $b.publish -eq 2 -and $b.description -match '^\[Auto-Escalation\] ' -and $b.description -match $TReason } { param($c, $b) $c.Uri -like '*/Notes' -and $b.publish -eq 1 -and $b.description -match $TTold }
+
+# HaloPSA: team by name.
+Test-TFormPsa 'halopsa' @{ ticketNumber = '9201'; escalation_map = '{"Service Desk": "Tier 2"}' } { param($c, $n)
+    if ($c.Uri -like 'https://api.postmarkapp.com/email') { return [pscustomobject]@{ ErrorCode = 0 } }
+    if ($c.Uri -like '*/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/api/Tickets/9201?includedetails=true') { return [pscustomobject]@{ id = 9201; summary = 'VPN down'; client_id = 5; client_name = 'Contoso Ltd'; user_id = 11; user_name = 'Pat Doe'; user_email = 'pat@contoso.com'; status_id = 2; status_name = 'In Progress'; team_id = 3; team = 'Service Desk'; agent_id = 0; priority_id = 2; dateoccurred = (Get-TAgo 300); lastactiondate = (Get-TAgo 20) } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/api/Actions?ticket_id=9201*') { return [pscustomobject]@{ actions = @() } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/api/Team') { return , @([pscustomobject]@{ id = 3; name = 'Service Desk' }, [pscustomobject]@{ id = 4; name = 'Tier 2' }) }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/api/Actions') { return , @([pscustomobject]@{ id = 1 }) }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/api/Tickets') { return , @([pscustomobject]@{ id = 9201 }) }
+    return $null
+} { param($c, $b) $c.Uri -like '*/api/Tickets' -and $b[0].id -eq 9201 -and $b[0].team -eq 'Tier 2' } { param($c, $b) $c.Uri -like '*/api/Actions' -and $b[0].hiddenfromuser -eq $true -and $b[0].note -match $TReason } { param($c, $b) $c.Uri -like '*/api/Actions' -and $b[0].hiddenfromuser -eq $false -and $b[0].note -match $TTold }
+
+# Kaseya BMS: numeric queue id.
+Test-TFormPsa 'kaseyabms' @{ ticketNumber = '9301'; escalation_map = '{"Service Desk": "8"}' } { param($c, $n)
+    if ($c.Uri -like 'https://api.postmarkapp.com/email') { return [pscustomobject]@{ ErrorCode = 0 } }
+    if ($c.Uri -like '*/security/authenticate') { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/servicedesk/tickets/9301') { return [pscustomobject]@{ Result = [pscustomobject]@{ Id = 9301; TicketNumber = 'T20261013.0002'; Title = 'VPN down'; AccountId = 5; AccountName = 'Contoso Ltd'; ContactId = 11; ContactEmail = 'pat@contoso.com'; StatusName = 'In Progress'; QueueId = 7; QueueName = 'Service Desk'; PriorityName = 'High'; OpenDate = (Get-TAgo 300); LastActivityUpdate = (Get-TAgo 20) } } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/servicedesk/tickets/9301/notes*') { return [pscustomobject]@{ Result = @() } }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/servicedesk/tickets/9301/notes') { return [pscustomobject]@{ Result = 1 } }
+    if ($c.Method -eq 'PATCH' -and $c.Uri -like '*/servicedesk/tickets/9301') { return [pscustomobject]@{ Result = 9301 } }
+    return $null
+} { param($c, $b) $c.Method -eq 'PATCH' -and $b[0].path -eq '/QueueId' -and $b[0].value -eq 8 } { param($c, $b) $c.Uri -like '*/notes' -and $b.IsInternal -eq $true -and $b.Details -match $TReason } { param($c, $b) $c.Uri -like '*/notes' -and $b.IsInternal -eq $false -and $b.Details -match $TTold }
+
+# Syncro: the number customers see (1001) is resolved to the id; issue type as the queue.
+Test-TFormPsa 'syncro' @{ ticketNumber = '1001'; escalation_map = '{"Network": "Escalations"}' } { param($c, $n)
+    if ($c.Uri -like 'https://api.postmarkapp.com/email') { return [pscustomobject]@{ ErrorCode = 0 } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/tickets?number=1001') { return [pscustomobject]@{ tickets = @([pscustomobject]@{ id = 9401; number = 1001 }) } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/tickets/9401') { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 9401; number = 1001; subject = 'VPN down'; customer_id = 5; customer_business_then_name = 'Contoso Ltd'; contact_id = 11; contact = [pscustomobject]@{ email = 'pat@contoso.com' }; status = 'In Progress'; problem_type = 'Network'; priority = '1 High'; created_at = (Get-TAgo 300); updated_at = (Get-TAgo 20); comments = @() } } }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/tickets/9401/comment') { return [pscustomobject]@{ comment = [pscustomobject]@{ id = 1 } } }
+    if ($c.Method -eq 'PUT' -and $c.Uri -like '*/tickets/9401') { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 9401 } } }
+    return $null
+} { param($c, $b) $c.Method -eq 'PUT' -and $b.problem_type -eq 'Escalations' } { param($c, $b) $c.Uri -like '*/comment' -and $b.hidden -eq $true -and $b.body -match $TReason } { param($c, $b) $c.Uri -like '*/comment' -and $b.hidden -eq $false -and $b.body -match $TTold }
+
+# Zendesk: the requester's email comes from the organization's users; group by name.
+Test-TFormPsa 'zendesk' @{ ticketNumber = '#9501'; escalation_map = '{"21": "Tier 2"}' } { param($c, $n)
+    if ($c.Uri -like 'https://api.postmarkapp.com/email') { return [pscustomobject]@{ ErrorCode = 0 } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/tickets/9501') { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 9501; subject = 'VPN down'; description = 'd'; organization_id = 5; requester_id = 11; status = 'open'; priority = 'high'; group_id = 21; assignee_id = $null; created_at = (Get-TAgo 300); updated_at = (Get-TAgo 20) } } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/organizations/5/users*') { return [pscustomobject]@{ users = @([pscustomobject]@{ id = 11; name = 'Pat Doe'; email = 'pat@contoso.com'; active = $true }) } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/tickets/9501/comments*') { return [pscustomobject]@{ next_page = $null; comments = @() } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/groups?*') { return [pscustomobject]@{ groups = @([pscustomobject]@{ id = 21; name = 'Service Desk' }, [pscustomobject]@{ id = 22; name = 'Tier 2' }) } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/groups/21') { return [pscustomobject]@{ group = [pscustomobject]@{ id = 21; name = 'Service Desk' } } }
+    if ($c.Method -eq 'PUT' -and $c.Uri -like '*/tickets/9501') { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 9501 } } }
+    return $null
+} { param($c, $b) $c.Method -eq 'PUT' -and $null -ne $b.ticket.PSObject.Properties['group_id'] -and $b.ticket.group_id -eq 22 } { param($c, $b) $null -ne $b.ticket.PSObject.Properties['comment'] -and $b.ticket.comment.public -eq $false -and $b.ticket.comment.body -match $TReason } { param($c, $b) $null -ne $b.ticket.PSObject.Properties['comment'] -and $b.ticket.comment.public -eq $true -and $b.ticket.comment.body -match $TTold }
 
 Complete-Test

@@ -200,6 +200,16 @@ Invoke-WithLib @('psa.ps1', 'psa-tickets.ps1') {
     $u = Unesc (Get-LastCall).Uri
     Check 'connectwise: closed range sent, and a row outside it dropped here' ($u -match 'closedFlag=true and closedDate>=\[.*\] and closedDate<\[' -and $r.Count -eq 1 -and $r[0].id -eq '1' -and $r[0].closed -is [datetime] -and $r[0].isClosed) $u
 }
+# ConnectWise ignores the time in a [date] literal, so whole days one day wider are sent and the exact cut is applied here.
+Use-Routes 'connectwise' @(@{ m = 'GET'; u = '*/service/tickets[?]*'; r = , @((O @{ id = 1; summary = 'A'; closedFlag = $false; company = (O @{ id = 42 }); _info = (O @{ dateEntered = '2026-10-12T18:21:03Z' }) }), (O @{ id = 2; summary = 'B'; closedFlag = $false; company = (O @{ id = 42 }); _info = (O @{ dateEntered = '2026-10-12T21:30:00Z' }) })) })
+Invoke-WithLib @('psa.ps1', 'psa-tickets.ps1') {
+    $null = Connect-Psa
+    $cut = [datetime]::new(2026, 10, 12, 20, 57, 1, [DateTimeKind]::Utc)
+    $r = @(Find-PsaTickets -CompanyId '42' -CreatedBefore $cut -UpdatedAfter $cut.AddDays(-5))
+    $u = Unesc (Get-LastCall).Uri
+    Check 'connectwise: date conditions are whole days, one day wider' ($u -match 'dateEntered<\[2026-10-14T00:00:00Z\]' -and $u -match 'lastUpdated>=\[2026-10-06T00:00:00Z\]') $u
+    Check 'connectwise: the exact created-before time is applied here' ($r.Count -eq 1 -and $r[0].id -eq '1') (@($r | ForEach-Object { $_.id }) -join ',')
+}
 Use-Routes 'zendesk' @(@{ m = 'GET'; u = '*/search[?]*'; r = (O @{ results = @((O @{ id = 1; subject = 'A'; status = 'solved'; organization_id = 42; created_at = (Iso -50) })); next_page = $null }) })
 Invoke-WithLib @('psa.ps1', 'psa-tickets.ps1') {
     $null = Connect-Psa

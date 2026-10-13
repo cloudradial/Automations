@@ -1,6 +1,6 @@
 # Escalate Forgotten Tickets Before They Breach
 
-Every 15 minutes, tickets nobody has touched for too long, or whose SLA is about to run out, get an internal note saying why, move up one tier, and the dispatcher gets an email. A ticket is escalated once and never bounced around, even when a run is retried.
+Every 15 minutes, tickets nobody has touched for too long, or whose SLA is about to run out, get an internal note saying why, move up one tier, and the dispatcher gets an email. A ticket is escalated once and never bounced around, even when a run is retried. Users can also [escalate their own ticket](#let-users-escalate-their-own-ticket) from a portal form.
 
 **Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI), run every 15 minutes by a Routine
 
@@ -52,6 +52,43 @@ A preview also checks every board, queue, team or group the map would move a tic
 
 **ConnectWise board moves.** In ConnectWise, statuses and teams belong to a board. A move sets the board, a status that exists on the new board (the same status name if it has one, else its default open status) and a team on it (the same team name, else its default team, else none) in one change, then reads the ticket back to confirm it moved. Without this, ConnectWise refuses the move with "Service Status ... not found for Service Board ...". If the API member can't read board statuses, the move tries the status by name and the run warns you to give the security role Inquire access to service board statuses (System > Table Setup).
 
+## Let users escalate their own ticket
+
+A CloudRadial service-request form lets a user enter their **Ticket #** and a **Reason**, and the ticket is escalated for them. A form request **always** escalates: the untouched-time and SLA rules are only for the scheduled sweep. The same workflow does both; a `ticket_number` in the request switches it to single-ticket mode, and without one it runs the sweep exactly as before.
+
+**What happens to the ticket:**
+
+1. **Ownership check.** The ticket's company must be the requester's company (`company_psa_id`), and the requester (`requester_email`) must be the ticket's contact. Set `allow_company_colleagues: true` to let anyone at the same company escalate it. A request without a requester or company is refused (`status: rejected`, nothing changed) unless `technician_run: true`. A ticket the requester can't escalate gets the same message whether or not it exists, so nothing about another company's ticket is ever shown.
+2. **Closed or already escalated.** A closed ticket isn't escalated ("Ticket 1234 is closed, so it wasn't escalated."). A ticket that already has the `[Auto-Escalation]` note isn't escalated again ("Ticket 1234 has already been escalated..."), so submitting the form twice does nothing more.
+3. **Escalation.** Through the same escalation map as the sweep (`escalation_map` input or the `AutoEscalation-Map` secret): the internal `[Auto-Escalation]` note goes on first, with the requester and their reason; then the ticket moves up one tier; then the dispatcher gets the Postmark email with the requester and the reason. If its queue has no map entry, or the mapped board or queue can't be used, the ticket is flagged and noted instead of moved, the dispatcher is still emailed, and the message says so.
+4. **The requester is told.** A short **public** note on the ticket: "Thanks for letting us know. This ticket has been escalated, and a member of our team will be in touch." It makes no promise about times. It is written once, even when the run is retried.
+
+`preview: true` still changes nothing and returns what would happen.
+
+**Form wiring (CloudRadial):**
+
+1. Create a service-request form with two questions:
+   - **Ticket #** (short text), **Field ID** `ticketNumber`.
+   - **Reason** of type **Memo**, **Field ID** `reason`.
+2. Add an **Automation Webhook** pointing at this workflow's webhook URL, with this body:
+
+   ```json
+   {"ticketNumber":"@ticketNumber","reason":"@reason","requester_email":"@UserEmail","company_psa_id":"@CompanyPsaId"}
+   ```
+
+   and this header (the secret by name only, never pasted into a ticket or chat):
+
+   ```json
+   {"X-Crauto-Webhook-Secret":"<secret>"}
+   ```
+
+   Add `"escalation_map"` and `"dispatcher_email"` to the body if the runner doesn't have the `AutoEscalation-Map` and `Dispatcher-Email` secrets.
+3. **`@TicketId` is not the ticket to escalate.** It is the NEW request ticket the form itself creates. The ticket to escalate is the one the user types in the Ticket # question (`@ticketNumber`).
+4. **Enable the webhook.** The workflow ships with its webhook disabled (the sweep runs on a Routine). Turn it on in the workflow's Start step, then Publish and Deploy.
+5. **The escalation map must name boards or queues that exist.** Run a preview first (`preview: true` with a test ticket number and `technician_run: true`): a board that doesn't exist shows as "can't move it to ...".
+
+`requester_email` and `company_psa_id` are only read from the webhook body's own fields, never from a question answer, because a user could type someone else's email into a question. An unfilled `@token` counts as missing, and a form request whose ticket number is missing is refused rather than running the sweep.
+
 ## Download & import
 
 **Download the workflow:** [`auto-escalation.yml`](https://github.com/cloudradial/Automations/blob/main/auto-escalation/auto-escalation.yml)
@@ -99,6 +136,12 @@ A Routine sends no input, so every field has a default.
 | `skip_statuses` | `waiting,pending,on hold,scheduled` | Leave out tickets whose status contains any of these words. |
 | `from`, `message_stream` | `Postmark-FromEmail`, `outbound` | Postmark sender and stream. |
 | `psa` | `PSA-Type` | Overrides the PSA. |
+| `ticket_number` | (none: the sweep runs) | Single-ticket mode: escalate just this ticket, as people see its number (`#1234`, `T20261013.0001`). Also accepted as `ticketNumber`, `ticketId` or `ticket`, or as the answer to a form question with that Field ID. See [Let users escalate their own ticket](#let-users-escalate-their-own-ticket). |
+| `reason` | (none) | Single-ticket mode: why the user wants it escalated (the form's Memo question). Goes in the internal note and the dispatcher email. |
+| `requester_email` | (none) | Single-ticket mode: who asked (`@UserEmail`). Must be the ticket's contact. |
+| `company_psa_id` | (none) | Single-ticket mode: the requester's company in the PSA (`@CompanyPsaId`). Must be the ticket's company. |
+| `allow_company_colleagues` | `false` | Single-ticket mode: `true` lets anyone at the ticket's company escalate it, not only its contact. |
+| `technician_run` | `false` | Single-ticket mode: `true` skips the ownership check, for a technician running it by hand. Never put it in a portal form's webhook. |
 
 **`escalation_map`** is JSON. The key is the queue a ticket is in now (name or id; `"*"` matches any queue without its own entry). The value is the next tier, as a queue name or id, or an object with `queue`, `assignee` (a user id, or a ConnectWise member identifier) and, for Autotask, an optional `role`:
 
@@ -114,7 +157,7 @@ A list works too: `[{"from": "Service Desk", "queue": "Tier 2"}]`. The target ca
 
 ## Output
 
-`status` (`success`, `pending_confirmation` for a preview, `incomplete` when a move or a marker note failed, `rejected` for invalid input, `error` when the PSA can't be read), `message`, `public_note` (always empty), `internal_note` (one line per ticket), `ticket_id` (when exactly one ticket was escalated), `preview`, `dispatcher_emailed`, `counts` (`open`, `skipped`, `atRisk`, `alreadyEscalated`, `notesUnreadable`, `selected`, `toReassign`, `noteOnly`, `overLimit`), `escalations` (per ticket: reason, action, target queue and assignee, result (`reassigned`, `partial`, `failed`, `note-only`, or `already-escalated` when another run got there first), outcome, error, noted), `actions` and `warnings`.
+`status` (`success`, `pending_confirmation` for a preview, `incomplete` when a move or a marker note failed, `rejected` for invalid input, `error` when the PSA can't be read), `message`, `public_note` (empty for the sweep; in single-ticket mode, the public note the requester was sent), `internal_note` (one line per ticket), `mode` (`sweep` or `form`), `ticket_id` (when exactly one ticket was escalated), `preview`, `dispatcher_emailed`, `counts` (`open`, `skipped`, `atRisk`, `alreadyEscalated`, `notesUnreadable`, `selected`, `toReassign`, `noteOnly`, `overLimit`), `escalations` (per ticket: reason, action, target queue and assignee, result (`reassigned`, `partial`, `failed`, `note-only`, or `already-escalated` when another run got there first), outcome, error, noted), `actions` and `warnings`.
 
 ## Import & test
 

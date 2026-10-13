@@ -36,10 +36,17 @@ else {
     $n = $report.Count
     $moved = @($report | Where-Object { (Get-PmProp $_ 'result') -in @('reassigned', 'partial') }).Count
     $subject = "Auto-Escalation: $n ticket$(if ($n -ne 1) { 's' }) escalated"
+    # Single-ticket mode: the requester asked for it from the portal form.
+    $isForm = [string](Get-PmProp $settings 'mode') -eq 'form'
+    if ($isForm) { $subject = "Auto-Escalation: ticket $(Get-PmProp $report[0] 'number') escalated at the requester's request" }
     $cell = 'padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;'
     $sb = New-Object System.Text.StringBuilder
     $null = $sb.Append('<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#111827;">')
-    $null = $sb.Append("<p style=`"margin:0 0 12px;`">$n ticket$(if ($n -ne 1) { 's were' } else { ' was' }) escalated in $(ConvertTo-PmHtml $psaName). $moved moved up a tier. Any others were flagged without being moved, and the table says why. Each ticket also has an internal note with the same detail.</p>")
+    if ($isForm) {
+        $who = [string](Get-PmProp $report[0] 'requester'); if (-not $who) { $who = 'A technician' }
+        $null = $sb.Append("<p style=`"margin:0 0 12px;`">$(ConvertTo-PmHtml $who) asked for ticket $(ConvertTo-PmHtml ([string](Get-PmProp $report[0] 'number'))) to be escalated in $(ConvertTo-PmHtml $psaName). The reason they gave is in the table. $(if ($moved) { 'It was moved up a tier.' } else { 'It was not moved; the table says why, so please pick it up.' }) The ticket also has an internal note with the same detail, and the requester was told it was escalated.</p>")
+    }
+    else { $null = $sb.Append("<p style=`"margin:0 0 12px;`">$n ticket$(if ($n -ne 1) { 's were' } else { ' was' }) escalated in $(ConvertTo-PmHtml $psaName). $moved moved up a tier. Any others were flagged without being moved, and the table says why. Each ticket also has an internal note with the same detail.</p>") }
     $null = $sb.Append("<table style=`"border-collapse:collapse;width:100%;`"><tr style=`"background:#f3f4f6;`"><th style=`"$cell`">Ticket</th><th style=`"$cell`">Company</th><th style=`"$cell`">Summary</th><th style=`"$cell`">Priority</th><th style=`"$cell`">Technician</th><th style=`"$cell`">Why</th><th style=`"$cell`">What happened</th></tr>")
     foreach ($e in $report) {
         $prio = [string](Get-PmProp $e 'priorityLabel'); if (-not $prio) { $prio = [string](Get-PmProp $e 'priority') }

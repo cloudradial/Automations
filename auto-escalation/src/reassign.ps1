@@ -69,7 +69,9 @@ if (-not $preview -and $escalations.Count) {
         if (-not $connected) { $e.result = 'failed'; $e.error = 'Could not connect to the PSA.'; $e.outcome = "It wasn't escalated because the PSA connection failed."; continue }
 
         # 1. The marker note. 'already-present' means another run (or an earlier try of this one) escalated it.
-        $text = "$marker This ticket was escalated automatically. $($e.reason) $($e.planText) $emailLine".Trim() -replace '\s{2,}', ' '
+        # A portal-form escalation (single-ticket mode) says it was the requester's request; the sweep says it was automatic.
+        $lead = if ($e.Contains('noteLead') -and $e.noteLead) { [string]$e.noteLead } else { 'This ticket was escalated automatically.' }
+        $text = "$marker $lead $($e.reason) $($e.planText) $emailLine".Trim() -replace '\s{2,}', ' '
         $noteResult = ''
         try { $noteResult = Add-PsaNote -Id $e.id -Text $text -Title 'Auto-Escalation' -Marker $marker }
         catch {

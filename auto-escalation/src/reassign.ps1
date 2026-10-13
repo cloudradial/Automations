@@ -52,7 +52,7 @@ foreach ($e in $escalations) {
     if ($e.action -eq 'reassign') {
         $plan = @(); if ($e.toQueue) { $plan += "move it from $($e.queue) to $($e.toQueue)" }; if ($e.toAssignee) { $plan += "assign it to $($e.toAssignee)" }
         $e.planText = "Auto-Escalation is going to $($plan -join ' and ')."
-        if ($preview) { $e.outcome = "Would $($plan -join ' and ')." }
+        if ($preview) { $e.outcome = "Would $($plan -join ' and ')."; if ($e.queueProblem) { $e.outcome += " Would be flagged, $($e.queueProblem)" } }
     }
     else {
         $e.planText = $e.whyNotMoved

@@ -48,6 +48,10 @@ The `[Auto-Escalation]` note is the record that a ticket was escalated, so it is
 
 There's no approval step in AutomationAI, and a Routine every 15 minutes has nobody to approve, so this workflow runs live by default. **Set `preview: true` to see the plan without changing anything:** it reads tickets and notes, and returns `status: pending_confirmation` with what it would move, note and email. It writes nothing and sends nothing. Use it for the first run in any tenant, and whenever you change the map.
 
+A preview also checks every board, queue, team or group the map would move a ticket to (`Test-PsaQueue`, read-only). When one doesn't exist, or can't take tickets (for example an inactive ConnectWise board, or a Kaseya BMS queue given by name), that ticket's outcome reads "Would be flagged, can't move it to Help Desk: ConnectWise has no service board named 'Help Desk'..." instead of "Would move it", and the message says how many can't be moved. Fix the map before the live run.
+
+**ConnectWise board moves.** In ConnectWise, statuses and teams belong to a board. A move sets the board, a status that exists on the new board (the same status name if it has one, else its default open status) and a team on it (the same team name, else its default team, else none) in one change, then reads the ticket back to confirm it moved. Without this, ConnectWise refuses the move with "Service Status ... not found for Service Board ...". If the API member can't read board statuses, the move tries the status by name and the run warns you to give the security role Inquire access to service board statuses (System > Table Setup).
+
 ## Download & import
 
 **Download the workflow:** [`auto-escalation.yml`](https://github.com/cloudradial/Automations/blob/main/auto-escalation/auto-escalation.yml)
@@ -71,7 +75,7 @@ By name only. Use the same names as the catalog extensions, so one set serves bo
 | `Dispatcher-Email` (optional) | Who gets the email when the run has no `dispatcher_email` input. A Routine sends no input, so set this for the schedule. |
 | `AutoEscalation-Map` (optional) | The escalation map as JSON, used when the run has no `escalation_map` input. Set this for the schedule, or nothing is ever moved (tickets are only noted). |
 
-**PSA permissions:** the API user reads service tickets and their notes, updates the ticket's board, queue, team or group and its assignee, and adds internal notes. A missing permission shows up as a plain sentence, for example "ConnectWise refused the change (HTTP 403). Give the API user permission to update service tickets."
+**PSA permissions:** the API user reads service tickets and their notes, updates the ticket's board, queue, team or group and its assignee, and adds internal notes. On ConnectWise it also reads service boards, their statuses and their teams (Inquire access under System > Table Setup) so a move lands on a valid status and team. A missing permission shows up as a plain sentence, for example "ConnectWise refused the change (HTTP 403). Give the API user permission to update service tickets."
 
 ## Required Graph permissions
 

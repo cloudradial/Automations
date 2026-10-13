@@ -1240,17 +1240,15 @@ definition:
 
         # Moves a ticket to another board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro)
         # or group (Zendesk). -Queue is a name or an id. Throws when the PSA refuses.
+        # ConnectWise: statuses and teams belong to a board, so the move also sets a status and team that exist on the
+        # new board (Move-PsaCwBoard). Test-PsaQueue checks a target without changing anything.
         function Set-PsaQueue {
             param([string]$Id, [string]$Queue)
             $c = Get-PsaConn
             if ([string]::IsNullOrWhiteSpace($Queue)) { throw 'Set-PsaQueue needs a queue name or id.' }
             $q = $Queue.Trim(); $isNum = $q -match '^\d+$'
             switch ($c.Psa) {
-                'connectwise' {
-                    # Unverified: json-patch on board (a reference, so {id} or {name}). CW may refuse when the status doesn't exist on the new board.
-                    $val = if ($isNum) { @{ id = [int]$q } } else { @{ name = $q } }
-                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'board'; value = $val })
-                }
+                'connectwise' { Move-PsaCwBoard -Id $Id -Board $q }
                 'autotask' {
                     # Unverified: PATCH /Tickets with queueID (the field at_create_ticket uses).
                     $qv = if ($isNum) { $q } else { Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'queueID') @("(?i)^$([regex]::Escape($q))$") }
@@ -1282,6 +1280,172 @@ definition:
                     $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ group_id = [long]$gid } }
                 }
             }
+        }
+
+        # ---- ConnectWise board moves ----
+        # A ConnectWise service board by id or exact name (case-insensitive). Throws a plain sentence naming the board
+        # when there is none. A 403 becomes a permission sentence (Invoke-PsaRead).
+        function Get-PsaCwBoard {
+            param([string]$Board)
+            $b = ([string]$Board).Trim()
+            if (-not $b) { throw 'No ConnectWise board was given.' }
+            $need = 'read service boards (Inquire access to service boards under System > Table Setup in the security role)'
+            if ($b -match '^\d+$') {
+                $hit = $null
+                try { $hit = Invoke-PsaRead "/service/boards/$b" 'read service boards' $need }
+                catch { if ([string]$_.Exception.Message -match '\(HTTP 404\)') { throw "ConnectWise has no service board with id $b. Use an existing board's name or id." }; throw }
+                if ($null -eq $hit -or (Test-PsaBlank (Get-PsaProp $hit 'id'))) { throw "ConnectWise has no service board with id $b. Use an existing board's name or id." }
+                return $hit
+            }
+            $q = $b.Replace('\', '\\').Replace('"', '\"')
+            $cond = ConvertTo-PsaQuery ('name="' + $q + '"')
+            $rows = @(Invoke-PsaRead "/service/boards?conditions=$cond&pageSize=25" 'read service boards' $need | Where-Object { $null -ne $_ })
+            $hit = @($rows | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $b }) | Select-Object -First 1
+            if (-not $hit) { throw "ConnectWise has no service board named '$b'. Use the exact board name or its id." }
+            return $hit
+        }
+        # A ConnectWise board's teams, or $null when the API member's role can't read them (401 or 403).
+        # Unverified: GET /service/boards/{id}/teams and its defaultFlag (vendor docs, not yet read live).
+        function Get-PsaCwBoardTeams {
+            param([string]$BoardId)
+            try { return @(Invoke-Psa GET "/service/boards/$BoardId/teams?pageSize=200" | Where-Object { $null -ne $_ }) }
+            catch {
+                if ([string]$_.Exception.Message -notmatch '\(HTTP 40[13]\)') { throw }
+                Add-PsaWarning "ConnectWise wouldn't list the teams of board $BoardId, so a moved ticket's team was cleared. Give the API member's security role Inquire access to service board teams (System > Table Setup) to keep a matching team."
+                return $null
+            }
+        }
+        # Moves a ConnectWise ticket to another board in ONE json-patch that also sets a status and a team that exist on
+        # that board (ConnectWise refuses a board change that keeps the old board's status or team, HTTP 400 "Service
+        # Status 16 not found for Service Board 14"). Status: the same name as now when the new board has it open, else
+        # the board's default open status, else its first open status. Team: the same name, else the board's default
+        # team, else none. When the board's statuses can't be read (403), statuses are tried by name (the current one,
+        # then $PsaState.CwOpenNames) with a warning. The ticket is read back to confirm the board changed.
+        # Unverified: the status and team ops and the team "remove" op (the board op's 400 was seen live on staging).
+        function Move-PsaCwBoard {
+            param([string]$Id, [string]$Board)
+            $t = Invoke-Psa GET "/service/tickets/$Id"
+            $target = Get-PsaCwBoard $Board
+            $bid = [string](Get-PsaProp $target 'id'); $bname = [string](Get-PsaProp $target 'name'); if (-not $bname) { $bname = $Board }
+            if ((Get-PsaProp $target 'inactiveFlag') -eq $true) { throw "ConnectWise board '$bname' is inactive, so ticket $Id can't be moved there." }
+            if ([string](Get-PsaPath $t 'board.id') -eq $bid) { return }
+            $curStatus = ([string](Get-PsaPath $t 'status.name')).Trim()
+            $curTeam = ([string](Get-PsaPath $t 'team.name')).Trim(); $hasTeam = -not (Test-PsaBlank (Get-PsaPath $t 'team.id'))
+            $boardOp = [ordered]@{ op = 'replace'; path = 'board'; value = @{ id = [int]$bid } }
+
+            # The team: one with the same name on the new board, else its default team, else none.
+            $teamOp = $null
+            $teams = Get-PsaCwBoardTeams $bid
+            $keep = $null
+            if ($null -ne $teams) {
+                if ($curTeam) { $keep = @($teams | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $curTeam }) | Select-Object -First 1 }
+                if (-not $keep) { $keep = @($teams | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1 }
+            }
+            if ($keep) { $teamOp = [ordered]@{ op = 'replace'; path = 'team'; value = @{ id = [int](Get-PsaProp $keep 'id') } } }
+            elseif ($hasTeam) { $teamOp = [ordered]@{ op = 'remove'; path = 'team' } }
+
+            $statuses = Get-PsaCwBoardStatuses $bid
+            $tries = New-Object System.Collections.ArrayList
+            if ($null -ne $statuses) {
+                $open = @($statuses | Where-Object { (Get-PsaProp $_ 'closedStatus') -ne $true })
+                $st = $null
+                if ($curStatus) { $st = @($open | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $curStatus }) | Select-Object -First 1 }
+                if (-not $st) { $st = @($open | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1 }
+                if (-not $st -and $open.Count) { $st = $open[0] }
+                if (-not $st) { throw "ConnectWise board '$bname' has no open status, so ticket $Id can't be moved there. Add an open status to the board." }
+                $null = $tries.Add(@{ name = [string](Get-PsaProp $st 'name'); value = @{ id = [int](Get-PsaProp $st 'id') } })
+            }
+            else {
+                foreach ($n in @(@($curStatus) + @($PsaState.CwOpenNames) | Where-Object { $_ } | Select-Object -Unique)) { $null = $tries.Add(@{ name = $n; value = @{ name = $n } }) }
+            }
+
+            $tried = New-Object System.Collections.ArrayList
+            $sent = $false
+            foreach ($try in $tries) {
+                $null = $tried.Add($try.name)
+                $ops = @($boardOp, [ordered]@{ op = 'replace'; path = 'status'; value = $try.value })
+                if ($null -ne $teamOp) { $ops += $teamOp }
+                $PsaState.LastWriteRedirect = $null
+                try { $null = Invoke-Psa PATCH "/service/tickets/$Id" $ops; $sent = $true; break }
+                catch {
+                    $m = [string]$_.Exception.Message
+                    # A redirected write may have been saved: the read-back below decides.
+                    if ($null -ne $PsaState.LastWriteRedirect) { $sent = $true; break }
+                    # With the statuses unreadable, a name the board lacks is refused (400): try the next name.
+                    if ($null -eq $statuses -and $m -match '\(HTTP 400\)') { continue }
+                    throw "ConnectWise refused to move ticket $Id to board '$bname': $m"
+                }
+            }
+            if (-not $sent) {
+                throw "Couldn't move ConnectWise ticket $Id to board '$bname': the statuses of that board can't be read (no permission), and it has none of: $(@($tried) -join ', '). Give the API member's security role Inquire access to service board statuses (System > Table Setup)."
+            }
+            $now = Invoke-Psa GET "/service/tickets/$Id"
+            $nowId = [string](Get-PsaPath $now 'board.id')
+            if ($nowId -ne $bid) {
+                $nowName = [string](Get-PsaPath $now 'board.name'); if (-not $nowName) { $nowName = $(if ($nowId) { "board $nowId" } else { 'no board' }) }
+                throw "ConnectWise accepted the move of ticket $Id to board '$bname', but the ticket is still on '$nowName'."
+            }
+            if ($null -ne $PsaState.LastWriteRedirect) { Add-PsaWarning "ConnectWise answered the board move of ticket $Id with a redirect; reading the ticket back showed it on board '$bname', so it was not sent again." }
+        }
+
+        # Checks a Set-PsaQueue target without changing anything: @{ ok; reason; id; name }. ok is $false only when the
+        # target is known to be wrong (missing, inactive or the wrong kind of value); reason is a plain sentence. When
+        # the PSA's list can't be read, ok stays $true and reason says the target wasn't checked.
+        function Test-PsaQueue {
+            param([string]$Queue)
+            $c = Get-PsaConn
+            $q = ([string]$Queue).Trim(); $isNum = $q -match '^\d+$'
+            $res = @{ ok = $true; reason = ''; id = $(if ($isNum) { $q } else { '' }); name = $(if ($isNum) { '' } else { $q }) }
+            if (-not $q) { $res.ok = $false; $res.reason = 'No queue was given.'; return $res }
+            $unchecked = { param($why) $res.reason = "$(Get-PsaName) couldn't list its $why, so '$q' wasn't checked." }
+            switch ($c.Psa) {
+                'connectwise' {
+                    $b = $null
+                    try { $b = Get-PsaCwBoard $q }
+                    catch {
+                        $m = [string]$_.Exception.Message
+                        if ($m -match 'has no service board') { $res.ok = $false; $res.reason = $m; return $res }
+                        # Any other failure (no permission, a server error) means the board wasn't checked, not that it's wrong.
+                        & $unchecked 'service boards'; $res.reason += " $m"; return $res
+                    }
+                    $res.id = [string](Get-PsaProp $b 'id'); $res.name = [string](Get-PsaProp $b 'name')
+                    if ((Get-PsaProp $b 'inactiveFlag') -eq $true) { $res.ok = $false; $res.reason = "ConnectWise board '$($res.name)' is inactive." }
+                }
+                'autotask' {
+                    # The queueID picklist, as Set-PsaQueue uses it.
+                    $vals = $null
+                    try { $vals = @(Get-PsaAtPicklist 'Tickets' 'queueID') } catch { & $unchecked 'ticket queues'; return $res }
+                    $hit = if ($isNum) { @($vals | Where-Object { [string](Get-PsaProp $_ 'value') -eq $q }) | Select-Object -First 1 } else { Select-PsaByLabel $vals 'label' @("(?i)^$([regex]::Escape($q))$") }
+                    if (-not $hit) { $res.ok = $false; $res.reason = $(if ($isNum) { "Autotask has no active ticket queue with id $q." } else { "Autotask has no ticket queue named '$q'." }); return $res }
+                    $res.id = [string](Get-PsaProp $hit 'value'); $res.name = [string](Get-PsaProp $hit 'label')
+                }
+                'halopsa' {
+                    # Unverified: GET /api/Team lists teams as { id, name } (or { teams: [...] }).
+                    $rows = $null
+                    try { $rows = @(Get-PsaListReply (Invoke-Psa GET '/Team') @('teams')) } catch { & $unchecked 'teams'; return $res }
+                    $hit = @($rows | Where-Object { $null -ne $_ -and $(if ($isNum) { [string](Get-PsaProp $_ 'id') -eq $q } else { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $q }) }) | Select-Object -First 1
+                    if (-not $hit) { $res.ok = $false; $res.reason = $(if ($isNum) { "HaloPSA has no team with id $q." } else { "HaloPSA has no team named '$q'." }); return $res }
+                    $res.id = [string](Get-PsaProp $hit 'id'); $res.name = [string](Get-PsaProp $hit 'name')
+                }
+                'kaseyabms' {
+                    # Unverified: no queue list is read; only the numeric id Set-PsaQueue needs is checked.
+                    if (-not $isNum) { $res.ok = $false; $res.reason = "Kaseya BMS needs a numeric queue id, not '$q'." }
+                }
+                'syncro' {
+                    # Unverified: Syncro's issue type (problem_type) is the "queue"; its list isn't read, so any text passes.
+                    $res.reason = "Syncro issue types aren't checked, so '$q' is used as given."
+                }
+                'zendesk' {
+                    # Unverified: the GET /groups list (Set-PsaQueue reads it for a name).
+                    $rows = $null
+                    try { $rows = @(Get-PsaProp (Invoke-Psa GET '/groups?per_page=100') 'groups' | Where-Object { $null -ne $_ }) }
+                    catch { if ($isNum) { & $unchecked 'groups'; return $res }; $res.ok = $false; $res.reason = "Zendesk's groups couldn't be read to find '$q': $($_.Exception.Message)"; return $res }
+                    $hit = @($rows | Where-Object { $(if ($isNum) { [string](Get-PsaProp $_ 'id') -eq $q } else { [string](Get-PsaProp $_ 'name') -ieq $q }) }) | Select-Object -First 1
+                    if (-not $hit) { $res.ok = $false; $res.reason = $(if ($isNum) { "Zendesk has no group with id $q." } else { "Zendesk has no group named '$q'." }); return $res }
+                    $res.id = [string](Get-PsaProp $hit 'id'); $res.name = [string](Get-PsaProp $hit 'name')
+                }
+            }
+            return $res
         }
 
         # Sets a ticket's contact (the requester in Zendesk). Throws when the PSA rejects it.
@@ -2785,17 +2949,15 @@ definition:
 
         # Moves a ticket to another board (ConnectWise), queue (Autotask, Kaseya BMS), team (HaloPSA), issue type (Syncro)
         # or group (Zendesk). -Queue is a name or an id. Throws when the PSA refuses.
+        # ConnectWise: statuses and teams belong to a board, so the move also sets a status and team that exist on the
+        # new board (Move-PsaCwBoard). Test-PsaQueue checks a target without changing anything.
         function Set-PsaQueue {
             param([string]$Id, [string]$Queue)
             $c = Get-PsaConn
             if ([string]::IsNullOrWhiteSpace($Queue)) { throw 'Set-PsaQueue needs a queue name or id.' }
             $q = $Queue.Trim(); $isNum = $q -match '^\d+$'
             switch ($c.Psa) {
-                'connectwise' {
-                    # Unverified: json-patch on board (a reference, so {id} or {name}). CW may refuse when the status doesn't exist on the new board.
-                    $val = if ($isNum) { @{ id = [int]$q } } else { @{ name = $q } }
-                    $null = Invoke-Psa PATCH "/service/tickets/$Id" @([ordered]@{ op = 'replace'; path = 'board'; value = $val })
-                }
+                'connectwise' { Move-PsaCwBoard -Id $Id -Board $q }
                 'autotask' {
                     # Unverified: PATCH /Tickets with queueID (the field at_create_ticket uses).
                     $qv = if ($isNum) { $q } else { Select-PsaAtValue (Get-PsaAtPicklist 'Tickets' 'queueID') @("(?i)^$([regex]::Escape($q))$") }
@@ -2827,6 +2989,172 @@ definition:
                     $null = Invoke-Psa PUT "/tickets/$Id" @{ ticket = @{ group_id = [long]$gid } }
                 }
             }
+        }
+
+        # ---- ConnectWise board moves ----
+        # A ConnectWise service board by id or exact name (case-insensitive). Throws a plain sentence naming the board
+        # when there is none. A 403 becomes a permission sentence (Invoke-PsaRead).
+        function Get-PsaCwBoard {
+            param([string]$Board)
+            $b = ([string]$Board).Trim()
+            if (-not $b) { throw 'No ConnectWise board was given.' }
+            $need = 'read service boards (Inquire access to service boards under System > Table Setup in the security role)'
+            if ($b -match '^\d+$') {
+                $hit = $null
+                try { $hit = Invoke-PsaRead "/service/boards/$b" 'read service boards' $need }
+                catch { if ([string]$_.Exception.Message -match '\(HTTP 404\)') { throw "ConnectWise has no service board with id $b. Use an existing board's name or id." }; throw }
+                if ($null -eq $hit -or (Test-PsaBlank (Get-PsaProp $hit 'id'))) { throw "ConnectWise has no service board with id $b. Use an existing board's name or id." }
+                return $hit
+            }
+            $q = $b.Replace('\', '\\').Replace('"', '\"')
+            $cond = ConvertTo-PsaQuery ('name="' + $q + '"')
+            $rows = @(Invoke-PsaRead "/service/boards?conditions=$cond&pageSize=25" 'read service boards' $need | Where-Object { $null -ne $_ })
+            $hit = @($rows | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $b }) | Select-Object -First 1
+            if (-not $hit) { throw "ConnectWise has no service board named '$b'. Use the exact board name or its id." }
+            return $hit
+        }
+        # A ConnectWise board's teams, or $null when the API member's role can't read them (401 or 403).
+        # Unverified: GET /service/boards/{id}/teams and its defaultFlag (vendor docs, not yet read live).
+        function Get-PsaCwBoardTeams {
+            param([string]$BoardId)
+            try { return @(Invoke-Psa GET "/service/boards/$BoardId/teams?pageSize=200" | Where-Object { $null -ne $_ }) }
+            catch {
+                if ([string]$_.Exception.Message -notmatch '\(HTTP 40[13]\)') { throw }
+                Add-PsaWarning "ConnectWise wouldn't list the teams of board $BoardId, so a moved ticket's team was cleared. Give the API member's security role Inquire access to service board teams (System > Table Setup) to keep a matching team."
+                return $null
+            }
+        }
+        # Moves a ConnectWise ticket to another board in ONE json-patch that also sets a status and a team that exist on
+        # that board (ConnectWise refuses a board change that keeps the old board's status or team, HTTP 400 "Service
+        # Status 16 not found for Service Board 14"). Status: the same name as now when the new board has it open, else
+        # the board's default open status, else its first open status. Team: the same name, else the board's default
+        # team, else none. When the board's statuses can't be read (403), statuses are tried by name (the current one,
+        # then $PsaState.CwOpenNames) with a warning. The ticket is read back to confirm the board changed.
+        # Unverified: the status and team ops and the team "remove" op (the board op's 400 was seen live on staging).
+        function Move-PsaCwBoard {
+            param([string]$Id, [string]$Board)
+            $t = Invoke-Psa GET "/service/tickets/$Id"
+            $target = Get-PsaCwBoard $Board
+            $bid = [string](Get-PsaProp $target 'id'); $bname = [string](Get-PsaProp $target 'name'); if (-not $bname) { $bname = $Board }
+            if ((Get-PsaProp $target 'inactiveFlag') -eq $true) { throw "ConnectWise board '$bname' is inactive, so ticket $Id can't be moved there." }
+            if ([string](Get-PsaPath $t 'board.id') -eq $bid) { return }
+            $curStatus = ([string](Get-PsaPath $t 'status.name')).Trim()
+            $curTeam = ([string](Get-PsaPath $t 'team.name')).Trim(); $hasTeam = -not (Test-PsaBlank (Get-PsaPath $t 'team.id'))
+            $boardOp = [ordered]@{ op = 'replace'; path = 'board'; value = @{ id = [int]$bid } }
+
+            # The team: one with the same name on the new board, else its default team, else none.
+            $teamOp = $null
+            $teams = Get-PsaCwBoardTeams $bid
+            $keep = $null
+            if ($null -ne $teams) {
+                if ($curTeam) { $keep = @($teams | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $curTeam }) | Select-Object -First 1 }
+                if (-not $keep) { $keep = @($teams | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1 }
+            }
+            if ($keep) { $teamOp = [ordered]@{ op = 'replace'; path = 'team'; value = @{ id = [int](Get-PsaProp $keep 'id') } } }
+            elseif ($hasTeam) { $teamOp = [ordered]@{ op = 'remove'; path = 'team' } }
+
+            $statuses = Get-PsaCwBoardStatuses $bid
+            $tries = New-Object System.Collections.ArrayList
+            if ($null -ne $statuses) {
+                $open = @($statuses | Where-Object { (Get-PsaProp $_ 'closedStatus') -ne $true })
+                $st = $null
+                if ($curStatus) { $st = @($open | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $curStatus }) | Select-Object -First 1 }
+                if (-not $st) { $st = @($open | Where-Object { (Get-PsaProp $_ 'defaultFlag') -eq $true }) | Select-Object -First 1 }
+                if (-not $st -and $open.Count) { $st = $open[0] }
+                if (-not $st) { throw "ConnectWise board '$bname' has no open status, so ticket $Id can't be moved there. Add an open status to the board." }
+                $null = $tries.Add(@{ name = [string](Get-PsaProp $st 'name'); value = @{ id = [int](Get-PsaProp $st 'id') } })
+            }
+            else {
+                foreach ($n in @(@($curStatus) + @($PsaState.CwOpenNames) | Where-Object { $_ } | Select-Object -Unique)) { $null = $tries.Add(@{ name = $n; value = @{ name = $n } }) }
+            }
+
+            $tried = New-Object System.Collections.ArrayList
+            $sent = $false
+            foreach ($try in $tries) {
+                $null = $tried.Add($try.name)
+                $ops = @($boardOp, [ordered]@{ op = 'replace'; path = 'status'; value = $try.value })
+                if ($null -ne $teamOp) { $ops += $teamOp }
+                $PsaState.LastWriteRedirect = $null
+                try { $null = Invoke-Psa PATCH "/service/tickets/$Id" $ops; $sent = $true; break }
+                catch {
+                    $m = [string]$_.Exception.Message
+                    # A redirected write may have been saved: the read-back below decides.
+                    if ($null -ne $PsaState.LastWriteRedirect) { $sent = $true; break }
+                    # With the statuses unreadable, a name the board lacks is refused (400): try the next name.
+                    if ($null -eq $statuses -and $m -match '\(HTTP 400\)') { continue }
+                    throw "ConnectWise refused to move ticket $Id to board '$bname': $m"
+                }
+            }
+            if (-not $sent) {
+                throw "Couldn't move ConnectWise ticket $Id to board '$bname': the statuses of that board can't be read (no permission), and it has none of: $(@($tried) -join ', '). Give the API member's security role Inquire access to service board statuses (System > Table Setup)."
+            }
+            $now = Invoke-Psa GET "/service/tickets/$Id"
+            $nowId = [string](Get-PsaPath $now 'board.id')
+            if ($nowId -ne $bid) {
+                $nowName = [string](Get-PsaPath $now 'board.name'); if (-not $nowName) { $nowName = $(if ($nowId) { "board $nowId" } else { 'no board' }) }
+                throw "ConnectWise accepted the move of ticket $Id to board '$bname', but the ticket is still on '$nowName'."
+            }
+            if ($null -ne $PsaState.LastWriteRedirect) { Add-PsaWarning "ConnectWise answered the board move of ticket $Id with a redirect; reading the ticket back showed it on board '$bname', so it was not sent again." }
+        }
+
+        # Checks a Set-PsaQueue target without changing anything: @{ ok; reason; id; name }. ok is $false only when the
+        # target is known to be wrong (missing, inactive or the wrong kind of value); reason is a plain sentence. When
+        # the PSA's list can't be read, ok stays $true and reason says the target wasn't checked.
+        function Test-PsaQueue {
+            param([string]$Queue)
+            $c = Get-PsaConn
+            $q = ([string]$Queue).Trim(); $isNum = $q -match '^\d+$'
+            $res = @{ ok = $true; reason = ''; id = $(if ($isNum) { $q } else { '' }); name = $(if ($isNum) { '' } else { $q }) }
+            if (-not $q) { $res.ok = $false; $res.reason = 'No queue was given.'; return $res }
+            $unchecked = { param($why) $res.reason = "$(Get-PsaName) couldn't list its $why, so '$q' wasn't checked." }
+            switch ($c.Psa) {
+                'connectwise' {
+                    $b = $null
+                    try { $b = Get-PsaCwBoard $q }
+                    catch {
+                        $m = [string]$_.Exception.Message
+                        if ($m -match 'has no service board') { $res.ok = $false; $res.reason = $m; return $res }
+                        # Any other failure (no permission, a server error) means the board wasn't checked, not that it's wrong.
+                        & $unchecked 'service boards'; $res.reason += " $m"; return $res
+                    }
+                    $res.id = [string](Get-PsaProp $b 'id'); $res.name = [string](Get-PsaProp $b 'name')
+                    if ((Get-PsaProp $b 'inactiveFlag') -eq $true) { $res.ok = $false; $res.reason = "ConnectWise board '$($res.name)' is inactive." }
+                }
+                'autotask' {
+                    # The queueID picklist, as Set-PsaQueue uses it.
+                    $vals = $null
+                    try { $vals = @(Get-PsaAtPicklist 'Tickets' 'queueID') } catch { & $unchecked 'ticket queues'; return $res }
+                    $hit = if ($isNum) { @($vals | Where-Object { [string](Get-PsaProp $_ 'value') -eq $q }) | Select-Object -First 1 } else { Select-PsaByLabel $vals 'label' @("(?i)^$([regex]::Escape($q))$") }
+                    if (-not $hit) { $res.ok = $false; $res.reason = $(if ($isNum) { "Autotask has no active ticket queue with id $q." } else { "Autotask has no ticket queue named '$q'." }); return $res }
+                    $res.id = [string](Get-PsaProp $hit 'value'); $res.name = [string](Get-PsaProp $hit 'label')
+                }
+                'halopsa' {
+                    # Unverified: GET /api/Team lists teams as { id, name } (or { teams: [...] }).
+                    $rows = $null
+                    try { $rows = @(Get-PsaListReply (Invoke-Psa GET '/Team') @('teams')) } catch { & $unchecked 'teams'; return $res }
+                    $hit = @($rows | Where-Object { $null -ne $_ -and $(if ($isNum) { [string](Get-PsaProp $_ 'id') -eq $q } else { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $q }) }) | Select-Object -First 1
+                    if (-not $hit) { $res.ok = $false; $res.reason = $(if ($isNum) { "HaloPSA has no team with id $q." } else { "HaloPSA has no team named '$q'." }); return $res }
+                    $res.id = [string](Get-PsaProp $hit 'id'); $res.name = [string](Get-PsaProp $hit 'name')
+                }
+                'kaseyabms' {
+                    # Unverified: no queue list is read; only the numeric id Set-PsaQueue needs is checked.
+                    if (-not $isNum) { $res.ok = $false; $res.reason = "Kaseya BMS needs a numeric queue id, not '$q'." }
+                }
+                'syncro' {
+                    # Unverified: Syncro's issue type (problem_type) is the "queue"; its list isn't read, so any text passes.
+                    $res.reason = "Syncro issue types aren't checked, so '$q' is used as given."
+                }
+                'zendesk' {
+                    # Unverified: the GET /groups list (Set-PsaQueue reads it for a name).
+                    $rows = $null
+                    try { $rows = @(Get-PsaProp (Invoke-Psa GET '/groups?per_page=100') 'groups' | Where-Object { $null -ne $_ }) }
+                    catch { if ($isNum) { & $unchecked 'groups'; return $res }; $res.ok = $false; $res.reason = "Zendesk's groups couldn't be read to find '$q': $($_.Exception.Message)"; return $res }
+                    $hit = @($rows | Where-Object { $(if ($isNum) { [string](Get-PsaProp $_ 'id') -eq $q } else { [string](Get-PsaProp $_ 'name') -ieq $q }) }) | Select-Object -First 1
+                    if (-not $hit) { $res.ok = $false; $res.reason = $(if ($isNum) { "Zendesk has no group with id $q." } else { "Zendesk has no group named '$q'." }); return $res }
+                    $res.id = [string](Get-PsaProp $hit 'id'); $res.name = [string](Get-PsaProp $hit 'name')
+                }
+            }
+            return $res
         }
 
         # Sets a ticket's contact (the requester in Zendesk). Throws when the PSA rejects it.

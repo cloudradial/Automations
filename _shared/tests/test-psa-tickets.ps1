@@ -496,7 +496,7 @@ Invoke-WithLib @('psa.ps1') {
 
 # ======== Set-PsaQueue, Set-PsaTicketContact, Close-PsaTicket ========
 $WriteCases = @(
-    @{ psa = 'connectwise'; queue = 'Tier 2'; q = { param($l, $b) $l.Method -eq 'PATCH' -and $l.Uri -eq "$CW/service/tickets/11" -and $b[0].path -eq 'board' -and $b[0].value.name -eq 'Tier 2' }; contact = { param($l, $b) $l.Method -eq 'PATCH' -and $b[0].path -eq 'contact' -and $b[0].value.id -eq 5 } }
+    @{ psa = 'connectwise'; queue = 'Tier 2'; q = { param($l, $b) $l.Method -eq 'PATCH' -and $l.Uri -eq "$CW/service/tickets/11" -and $b[0].path -eq 'board' -and $b[0].value.id -eq 15 -and $b[1].path -eq 'status' -and $b[1].value.id -eq 151 }; contact = { param($l, $b) $l.Method -eq 'PATCH' -and $b[0].path -eq 'contact' -and $b[0].value.id -eq 5 } }
     @{ psa = 'autotask'; queue = 'tier 2'; q = { param($l, $b) $l.Method -eq 'PATCH' -and $l.Uri -eq "$AT/Tickets" -and $b.id -eq 11 -and $b.queueID -eq 29684 }; contact = { param($l, $b) $l.Method -eq 'PATCH' -and $b.contactID -eq 5 } }
     @{ psa = 'halopsa'; queue = '4'; q = { param($l, $b) $l.Method -eq 'POST' -and $l.Uri -eq "$HALO/Tickets" -and $b[0].team_id -eq 4 }; contact = { param($l, $b) $l.Method -eq 'POST' -and $b[0].user_id -eq 5 } }
     @{ psa = 'kaseyabms'; queue = '7'; q = { param($l, $b) $l.Method -eq 'PATCH' -and $l.Uri -eq "$BMS/servicedesk/tickets/11" -and $b[0].path -eq '/QueueId' -and $b[0].value -eq 7 }; contact = { param($l, $b) $l.Method -eq 'PATCH' -and $b[0].path -eq '/ContactId' -and $b[0].value -eq 5 } }
@@ -504,11 +504,18 @@ $WriteCases = @(
     @{ psa = 'zendesk'; queue = 'Tier 2'; q = { param($l, $b) $l.Method -eq 'PUT' -and $l.Uri -eq "$ZD/tickets/11" -and $b.ticket.group_id -eq 22 }; contact = { param($l, $b) $l.Method -eq 'PUT' -and $b.ticket.requester_id -eq 5 } }
 )
 foreach ($case in $WriteCases) {
-    Use-Routes $case.psa @(@{ m = 'GET'; u = '*/groups[?]*'; r = (O @{ groups = @((O @{ id = 21; name = 'Service Desk' }), (O @{ id = 22; name = 'Tier 2' })) }) })
+    # ConnectWise reads the ticket, the target board, its teams and statuses, then reads the ticket back.
+    Use-Routes $case.psa @(
+        @{ m = 'GET'; u = '*/groups[?]*'; r = (O @{ groups = @((O @{ id = 21; name = 'Service Desk' }), (O @{ id = 22; name = 'Tier 2' })) }) }
+        @{ m = 'GET'; u = "$CW/service/tickets/11"; r = { param($c, $n) $moved = @(Get-Calls 'PATCH' "$CW/service/tickets/11").Count; O @{ id = 11; board = (O @{ id = $(if ($moved) { 15 } else { 1 }) }); status = (O @{ name = 'New' }) } } }
+        @{ m = 'GET'; u = "$CW/service/boards[?]*"; r = (O @{ id = 15; name = 'Tier 2' }) }
+        @{ m = 'GET'; u = "$CW/service/boards/15/teams*"; r = $null }
+        @{ m = 'GET'; u = "$CW/service/boards/15/statuses*"; r = { param($c, $n) , @((O @{ id = 151; name = 'New'; closedStatus = $false }), (O @{ id = 152; name = 'Closed'; closedStatus = $true })) } }
+    )
     Invoke-WithLib @('psa.ps1') {
         $null = Connect-Psa
         Set-PsaQueue 11 $case.queue
-        $l = Get-LastCall
+        $l = @(Write-Calls)[-1]
         Check "$($case.psa): Set-PsaQueue request" ([bool](& $case.q $l (Read-Body $l))) "$($l.Method) $($l.Uri) $($l.Body)"
         Set-PsaTicketContact 11 5
         $l = Get-LastCall

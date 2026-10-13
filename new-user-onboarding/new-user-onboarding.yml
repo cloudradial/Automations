@@ -21,17 +21,86 @@ definition:
       properties:
         script: |
           # === NODE: Read the request ===
-          # Reads the "Add a New User" webhook body (see form-webhook-mapping.md), drops answers
-          # CloudRadial left as literal @tokens (an unset Field ID arrives as "@startDate"), and
-          # writes the briefing every stage reads.
+          # Reads the "Add a New User" request in whichever shape it arrives:
+          #   - a CloudRadial Action on the form: the answers in Ticket.Questions, the submitter in User, the client in Company
+          #   - a form Webhook activity's flat body (see form-webhook-mapping.md)
+          #   - the Run dialog's Trigger input
+          # Drops answers CloudRadial left as literal @tokens (an unset Field ID arrives as "@startDate") and writes the
+          # briefing every stage reads. The requester and company come only from fields CloudRadial fills in (User.*,
+          # Company.*, or the webhook body's own keys), never from a typed answer, so a form answer can't impersonate them.
           $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
           function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
-          $in = Get-NodeInput
-          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
-          $b = Get-Prop $in 'body'; if ($null -ne $b) { $in = $b }
-          if ($in -is [string]) { $in = $(if ($in.Trim().StartsWith('{')) { $in | ConvertFrom-Json } else { $null }) }
+          function Read-Json { param($v) if ($v -is [string]) { $s = $v.Trim(); if ($s.StartsWith('{')) { try { return ($s | ConvertFrom-Json) } catch { return $null } }; return $null }; return $v }
+          function Get-Pairs { param($o) if ($o -is [System.Collections.IDictionary]) { return @($o.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $o[$_] } }) }; return @($o.PSObject.Properties | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }) }
+          function Test-Simple { param($v) return ($null -ne $v -and ($v -is [string] -or $v.GetType().IsValueType)) }
+          function Test-Object { param($v) return ($null -ne $v -and -not (Test-Simple $v) -and $v -isnot [array]) }
+          # A value as text: lists are joined, and a leftover @token counts as empty.
+          function Get-Text { param($v)
+              if ($null -eq $v) { return '' }
+              if ($v -is [array]) { $v = (@($v | Where-Object { $null -ne $_ } | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })) -join ', ' }
+              $s = ([string]$v).Trim(); if ($s.StartsWith('@')) { return '' }; return $s
+          }
 
-          $labels = [ordered]@{
+          $in = Read-Json (Get-NodeInput)
+          $w = Get-Prop $in 'trigger'; if ($null -ne $w) { $in = Read-Json $w }
+          $w = Get-Prop $in 'body'; if ($null -ne $w) { $in = Read-Json $w }
+          if (-not (Test-Object $in)) { $in = [ordered]@{} }
+
+          # flat: the body's own simple fields, plus Company.*, User.* and Ticket.* under those prefixes (set by CloudRadial or
+          # whoever configured the webhook). answers: the form's answers by question Id (typed by the submitter).
+          $flat = @{}; $answers = @{}
+          foreach ($p in (Get-Pairs $in)) { if (Test-Simple $p.Value) { $flat[$p.Name] = $p.Value } }
+          foreach ($group in @('Company', 'User', 'Ticket')) {
+              $g = Get-Prop $in $group
+              if (-not (Test-Object $g)) { continue }
+              foreach ($p in (Get-Pairs $g)) { if (Test-Simple $p.Value) { $flat["$group.$($p.Name)"] = $p.Value } }
+          }
+          $qs = @(); $t = Get-Prop $in 'Ticket'
+          if (Test-Object $t) { $qs += @(Get-Prop $t 'Questions') }
+          $qs += @(Get-Prop $in 'Questions')
+          $qs = @($qs | Where-Object { Test-Object $_ })
+          foreach ($q in $qs) {
+              $qid = [string](Get-Prop $q 'Id'); if (-not $qid) { continue }
+              $ans = Get-Prop $q 'Answer'; if ('' -eq (Get-Text $ans)) { $ans = Get-Prop $q 'Value' }
+              if ('' -ne (Get-Text $ans) -and -not $answers.ContainsKey($qid)) { $answers[$qid] = $ans }
+          }
+          $source = $(if ($qs.Count -or $flat.Keys -match '^(User|Company|Ticket)\.') { 'action' } else { 'webhook' })
+
+          # The first non-empty value among the names. CloudRadial cuts a Field ID at 40 characters, so a long name also
+          # matches a key that starts with its first 40.
+          function Get-Field { param([hashtable]$From, [string[]]$Names)
+              foreach ($n in $Names) { if ($From.ContainsKey($n)) { $v = Get-Text $From[$n]; if ($v) { return $v } } }
+              foreach ($n in @($Names | Where-Object { $_.Length -ge 40 })) {
+                  $k = @($From.Keys | Where-Object { ([string]$_).Length -ge 40 -and $n.StartsWith(([string]$_).Substring(0, 40), [StringComparison]::OrdinalIgnoreCase) }) | Select-Object -First 1
+                  if ($k) { $v = Get-Text $From[$k]; if ($v) { return $v } }
+              }
+              return ''
+          }
+
+          # Set by CloudRadial or the webhook's configuration: read from flat only.
+          $contextNames = [ordered]@{
+              ticketId = @('ticketId', 'Ticket.TicketId', 'Ticket.Id'); ticketSubject = @('ticketSubject', 'Ticket.Subject', 'Ticket.TicketSubject')
+              companyName = @('companyName', 'Company.CompanyName', 'Company.Name'); companyPsaId = @('companyPsaId', 'company_psa_id', 'Company.CompanyPsaId', 'Company.PsaId')
+              companyTenantId = @('companyTenantId', 'Company.CompanyTenantId', 'Company.TenantId')
+              requestedBy = @('requestedBy', 'requester_email', 'User.Email', 'User.UserEmail'); requestedByName = @('requestedByName', 'User.FullName', 'User.DisplayName', 'User.Name')
+              requestedByOfficeId = @('requestedByOfficeId', 'User.OfficeId', 'User.UserOfficeId'); requestedByPsaId = @('requestedByPsaId', 'User.PsaId', 'User.ContactPsaId')
+              requestedByIsAdmin = @('requestedByIsAdmin', 'User.IsAdmin', 'User.IsPartnerAdmin')
+          }
+          # Typed on the form: the answers first, then the flat body. The second name onward are the stock form's Field IDs.
+          $formNames = [ordered]@{
+              firstName = @('firstName'); lastName = @('lastName'); department = @('department'); jobTitle = @('jobTitle')
+              managerEmail = @('managerEmail', 'manager'); officeLocation = @('officeLocation'); startDate = @('startDate')
+              mirrorFromUser = @('mirrorFromUser', 'modelAccessFrom', 'modelTheNewUsersAccountAccessFrom')
+              software = @('software', 'softwareLicenses'); needsM365License = @('needsM365License'); m365License = @('m365License')
+              securityGroups = @('securityGroups', 'companyFileAccess'); vpnRequired = @('vpnRequired', 'isVpnRemoteAccessRequired'); otherAdditions = @('otherAdditions')
+              needsEmail = @('needsEmail', 'doesTheUserRequireAnEmailAccount'); email = @('email', 'newUserEmail'); mailGroups = @('mailGroups', 'mailDistributionGroups')
+              computerSource = @('computerSource', 'willTheNewUserBeUsingAnExistingOrNewComputer')
+              existingEndpoint = @('existingEndpoint', 'whichExistingEndpointWillBeUsedForTheNewUser')
+              newComputerType = @('newComputerType', 'deviceType', 'whatTypeOfNewComputerDoesTheNewUserRequire')
+              printer = @('printer', 'whichPrinterDoesTheUserNeedAccessTo'); otherEquipment = @('otherEquipment'); deskPhone = @('deskPhone', 'doesThisUserNeedADeskPhone')
+          }
+          $labels = @{
               ticketId = 'Ticket'; ticketSubject = 'Ticket subject'; companyName = 'Company'; companyPsaId = 'Company PSA id'
               companyTenantId = 'Microsoft 365 tenant'; requestedBy = 'Requested by (email)'; requestedByName = 'Requested by'
               requestedByOfficeId = 'Requester Microsoft 365 id'; requestedByPsaId = 'Requester PSA contact'; requestedByIsAdmin = 'Requester is a portal admin'
@@ -44,26 +113,34 @@ definition:
               printer = 'Printer'; otherEquipment = 'Other equipment'; deskPhone = 'Desk phone'
           }
           $fields = [ordered]@{}; $missing = New-Object System.Collections.ArrayList
-          foreach ($k in $labels.Keys) {
-              $v = Get-Prop $in $k
-              if ($v -is [array]) { $v = ($v | ForEach-Object { [string]$_ }) -join ', ' }
-              $v = ([string]$v).Trim()
-              if ($v -eq '' -or $v.StartsWith('@')) { $null = $missing.Add($labels[$k]); continue }
-              $fields[$k] = $v
+          foreach ($k in $contextNames.Keys) { $v = Get-Field $flat $contextNames[$k]; if ($v) { $fields[$k] = $v } else { $null = $missing.Add($labels[$k]) } }
+          foreach ($k in $formNames.Keys) {
+              $v = Get-Field $answers $formNames[$k]; if (-not $v) { $v = Get-Field $flat $formNames[$k] }
+              if ($v) { $fields[$k] = $v } else { $null = $missing.Add($labels[$k]) }
           }
           $name = ((@($fields['firstName'], $fields['lastName']) | Where-Object { $_ }) -join ' ')
           $lines = foreach ($k in $fields.Keys) { "- $($labels[$k]): $($fields[$k])" }
           $briefing = "New starter request from the CloudRadial 'Add a New User' form.`n" + ($lines -join "`n") +
               $(if ($missing.Count) { "`nNot answered: $($missing -join ', ')." } else { '' })
 
-          # confirm (or approvedToWrite) must be true for the ticket note to be posted. psa overrides the PSA-Type secret.
-          $confirm = @('true', 'yes', 'y', '1') -contains ([string]$(if ($null -ne (Get-Prop $in 'confirm')) { Get-Prop $in 'confirm' } else { Get-Prop $in 'approvedToWrite' })).Trim().ToLowerInvariant()
-          $psa = ([string](Get-Prop $in 'psa')).Trim(); if ($psa.StartsWith('@')) { $psa = '' }
+          # Writes (the ticket note and the hand-offs) happen only when confirmed: confirm or approvedToWrite true in the body,
+          # or the NewUserOnboarding-Confirm runner secret set to true. A form Action can't send confirm, so the secret is how a
+          # form-started run goes live. psa overrides the PSA-Type secret.
+          $isTrue = { param($v) return (@('true', 'yes', 'y', '1') -contains ([string]$v).Trim().ToLowerInvariant()) }
+          $bodyConfirm = $(if ($flat.ContainsKey('confirm')) { $flat['confirm'] } elseif ($flat.ContainsKey('approvedToWrite')) { $flat['approvedToWrite'] } else { $null })
+          $confirmSource = ''
+          if (& $isTrue $bodyConfirm) { $confirmSource = 'request' }
+          elseif ($env:RUNNER_KV_NAME -and (Get-Command Get-AzKeyVaultSecret -ErrorAction SilentlyContinue)) {
+              $s = $null; try { $s = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'NewUserOnboarding-Confirm' -AsPlainText -ErrorAction SilentlyContinue } catch { $s = $null }
+              if (& $isTrue $s) { $confirmSource = 'secret' }
+          }
+          $psa = Get-Text $(if ($flat.ContainsKey('psa')) { $flat['psa'] } else { '' })
 
           Set-NodeOutput ([ordered]@{
               briefing = $briefing; starter = $name; startDate = [string]$fields['startDate']; ticketId = [string]$fields['ticketId']
-              hasStartDate = [bool]$fields['startDate']; fields = $fields; confirm = $confirm; psa = $psa
-              message = "Request read for $(if ($name) { $name } else { 'an unnamed starter' })$(if (-not $fields['startDate']) { ' - no start date, so intake will report it as blocked' })."
+              hasStartDate = [bool]$fields['startDate']; fields = $fields; confirm = [bool]$confirmSource; confirmSource = $confirmSource; psa = $psa
+              source = $source; request = $in
+              message = "Request read for $(if ($name) { $name } else { 'an unnamed starter' })$(if (-not $fields['startDate']) { ' - no start date, so intake will report it as blocked' })$(if (-not $confirmSource) { '. Preview only: nothing will be written' })."
           })
         timeoutSeconds: 60
         retryCount: 0
@@ -96,11 +173,81 @@ definition:
         timeoutSeconds: 900
         autoApprove: false
         inputBindingsJson: '{"stage":"intake","briefing":"{{ nodes.node-inputs.output.briefing }}"}'
+    - id: node-handoff-intake
+      name: Hand off after intake
+      type: powershell-script
+      position:
+        x: 640
+        y: 200
+      properties:
+        script: |
+          # === NODE: Hand off to other workflows ===
+          # Starts other AutomationAI workflows through their webhooks, so this automation can grow by adding workflows
+          # instead of editing it. Each one gets the original form request (the same body the form sent, so a workflow
+          # built for the form reads it unchanged) plus an "onboarding" block with this run's starter, start date,
+          # ticket and briefing.
+          # Which workflows: the names in the NewUserOnboarding-<stage> runner secret, comma separated (AfterIntake runs
+          # after Intake, AfterProvision after Provision). For each name N, set NewUserOnboarding-N-Url (the workflow's
+          # full webhook URL) and NewUserOnboarding-N-Secret (its webhook secret). With no AfterIntake list,
+          # NewUserOnboarding-SplitRequest-Url alone turns on Split Request - Service + Quote.
+          # A webhook starts a run and returns straight away, so this reports the runs it started, never their results.
+          # It calls nothing unless the request is confirmed (see Read the request); otherwise it lists what it would
+          # call. A failed call is a warning: onboarding carries on.
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $Stage = 'AfterIntake'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function Get-Secret { param([string]$n) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue } catch { $v = $null }; return ([string]$v).Trim() }
+
+          $req = Get-Prop (Get-NodeInput) 'request'
+          $confirm = [bool](Get-Prop $req 'confirm')
+          $names = @(((Get-Secret "NewUserOnboarding-$Stage") -split '[,;\s]+') | Where-Object { $_ })
+          if (-not $names.Count -and $Stage -eq 'AfterIntake' -and (Get-Secret 'NewUserOnboarding-SplitRequest-Url')) { $names = @('SplitRequest') }
+
+          # The body: the original request's fields, then the onboarding block.
+          $body = [ordered]@{}
+          $orig = Get-Prop $req 'request'
+          if ($orig -is [System.Collections.IDictionary]) { foreach ($k in $orig.Keys) { $body[[string]$k] = $orig[$k] } }
+          elseif ($null -ne $orig -and $orig -isnot [string] -and $orig -isnot [array]) { foreach ($p in $orig.PSObject.Properties) { $body[$p.Name] = $p.Value } }
+          $body['onboarding'] = [ordered]@{ source = 'new-user-onboarding'; stage = $Stage; starter = [string](Get-Prop $req 'starter'); startDate = [string](Get-Prop $req 'startDate'); ticketId = [string](Get-Prop $req 'ticketId'); briefing = [string](Get-Prop $req 'briefing') }
+          $json = $body | ConvertTo-Json -Depth 20 -Compress
+
+          $handoffs = @(); $warnings = @()
+          foreach ($n in $names) {
+              if ($n -notmatch '^[A-Za-z0-9]+$') { $warnings += "Skipped '$n': a hand-off name can only use letters and digits, because it's part of a secret name."; continue }
+              $url = Get-Secret "NewUserOnboarding-$n-Url"; $secret = Get-Secret "NewUserOnboarding-$n-Secret"
+              if (-not $url) { $handoffs += [ordered]@{ name = $n; status = 'skipped'; runId = ''; message = "Skipped $n`: add the NewUserOnboarding-$n-Url secret." }; continue }
+              if ($url -notmatch '^https://') { $handoffs += [ordered]@{ name = $n; status = 'skipped'; runId = ''; message = "Skipped $n`: NewUserOnboarding-$n-Url must be a full https:// address." }; continue }
+              if (-not $confirm) { $handoffs += [ordered]@{ name = $n; status = 'preview'; runId = ''; message = "Would start $n (preview: the request isn't confirmed)." }; continue }
+              $headers = @{}; if ($secret) { $headers['X-Crauto-Webhook-Secret'] = $secret }
+              try {
+                  $r = Invoke-RestMethod -Method POST -Uri $url -Headers $headers -Body $json -ContentType 'application/json'
+                  $runId = ''; foreach ($k in @('runId', 'workflowRunId', 'id')) { $x = [string](Get-Prop $r $k); if ($x) { $runId = $x; break } }
+                  $handoffs += [ordered]@{ name = $n; status = 'started'; runId = $runId; message = "Started $n$(if ($runId) { " (run $runId)" })." }
+              } catch {
+                  $handoffs += [ordered]@{ name = $n; status = 'failed'; runId = ''; message = "Couldn't start $n`: $($_.Exception.Message)" }
+              }
+          }
+          $message = $(if (-not $names.Count) { "No hand-offs are set up for $Stage." } else { (@($handoffs | ForEach-Object { $_.message }) + $warnings) -join ' ' })
+          $failed = @($handoffs | Where-Object { $_.status -eq 'failed' })
+          $warnings += @($failed | ForEach-Object { $_.message })
+          Set-NodeOutput ([ordered]@{
+              stage = $Stage; status = $(if (-not $names.Count) { 'none' } elseif (-not $confirm) { 'preview' } elseif ($failed.Count) { 'partial' } else { 'done' })
+              handoffs = $handoffs; warnings = $warnings; message = $message
+              started = @($handoffs | Where-Object { $_.status -eq 'started' }).Count
+          })
+        timeoutSeconds: 300
+        retryCount: 0
+        # Starts the workflows named in NewUserOnboarding-AfterIntake (default: Split Request, for the tickets and quote).
+        parameters:
+          - name: request
+            expression: '{{ nodes.node-inputs.output }}'
+        aiExtensions: []
     - id: node-procurement
       name: Procurement
       type: agent
       position:
-        x: 640
+        x: 820
         y: 200
       properties:
         agentSlug: new-user-onboarding
@@ -119,7 +266,7 @@ definition:
       name: Access plan
       type: agent
       position:
-        x: 820
+        x: 1000
         y: 200
       properties:
         agentSlug: new-user-onboarding
@@ -137,7 +284,7 @@ definition:
       name: Provision
       type: agent
       position:
-        x: 1000
+        x: 1180
         y: 200
       properties:
         agentSlug: new-user-onboarding
@@ -152,11 +299,81 @@ definition:
         # false = every account, licence and group change waits for approval in the Inbox.
         autoApprove: false
         inputBindingsJson: '{"stage":"provision","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-access.output }}"}'
+    - id: node-handoff-provision
+      name: Hand off after provision
+      type: powershell-script
+      position:
+        x: 1360
+        y: 200
+      properties:
+        script: |
+          # === NODE: Hand off to other workflows ===
+          # Starts other AutomationAI workflows through their webhooks, so this automation can grow by adding workflows
+          # instead of editing it. Each one gets the original form request (the same body the form sent, so a workflow
+          # built for the form reads it unchanged) plus an "onboarding" block with this run's starter, start date,
+          # ticket and briefing.
+          # Which workflows: the names in the NewUserOnboarding-<stage> runner secret, comma separated (AfterIntake runs
+          # after Intake, AfterProvision after Provision). For each name N, set NewUserOnboarding-N-Url (the workflow's
+          # full webhook URL) and NewUserOnboarding-N-Secret (its webhook secret). With no AfterIntake list,
+          # NewUserOnboarding-SplitRequest-Url alone turns on Split Request - Service + Quote.
+          # A webhook starts a run and returns straight away, so this reports the runs it started, never their results.
+          # It calls nothing unless the request is confirmed (see Read the request); otherwise it lists what it would
+          # call. A failed call is a warning: onboarding carries on.
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $Stage = 'AfterProvision'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function Get-Secret { param([string]$n) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue } catch { $v = $null }; return ([string]$v).Trim() }
+
+          $req = Get-Prop (Get-NodeInput) 'request'
+          $confirm = [bool](Get-Prop $req 'confirm')
+          $names = @(((Get-Secret "NewUserOnboarding-$Stage") -split '[,;\s]+') | Where-Object { $_ })
+          if (-not $names.Count -and $Stage -eq 'AfterIntake' -and (Get-Secret 'NewUserOnboarding-SplitRequest-Url')) { $names = @('SplitRequest') }
+
+          # The body: the original request's fields, then the onboarding block.
+          $body = [ordered]@{}
+          $orig = Get-Prop $req 'request'
+          if ($orig -is [System.Collections.IDictionary]) { foreach ($k in $orig.Keys) { $body[[string]$k] = $orig[$k] } }
+          elseif ($null -ne $orig -and $orig -isnot [string] -and $orig -isnot [array]) { foreach ($p in $orig.PSObject.Properties) { $body[$p.Name] = $p.Value } }
+          $body['onboarding'] = [ordered]@{ source = 'new-user-onboarding'; stage = $Stage; starter = [string](Get-Prop $req 'starter'); startDate = [string](Get-Prop $req 'startDate'); ticketId = [string](Get-Prop $req 'ticketId'); briefing = [string](Get-Prop $req 'briefing') }
+          $json = $body | ConvertTo-Json -Depth 20 -Compress
+
+          $handoffs = @(); $warnings = @()
+          foreach ($n in $names) {
+              if ($n -notmatch '^[A-Za-z0-9]+$') { $warnings += "Skipped '$n': a hand-off name can only use letters and digits, because it's part of a secret name."; continue }
+              $url = Get-Secret "NewUserOnboarding-$n-Url"; $secret = Get-Secret "NewUserOnboarding-$n-Secret"
+              if (-not $url) { $handoffs += [ordered]@{ name = $n; status = 'skipped'; runId = ''; message = "Skipped $n`: add the NewUserOnboarding-$n-Url secret." }; continue }
+              if ($url -notmatch '^https://') { $handoffs += [ordered]@{ name = $n; status = 'skipped'; runId = ''; message = "Skipped $n`: NewUserOnboarding-$n-Url must be a full https:// address." }; continue }
+              if (-not $confirm) { $handoffs += [ordered]@{ name = $n; status = 'preview'; runId = ''; message = "Would start $n (preview: the request isn't confirmed)." }; continue }
+              $headers = @{}; if ($secret) { $headers['X-Crauto-Webhook-Secret'] = $secret }
+              try {
+                  $r = Invoke-RestMethod -Method POST -Uri $url -Headers $headers -Body $json -ContentType 'application/json'
+                  $runId = ''; foreach ($k in @('runId', 'workflowRunId', 'id')) { $x = [string](Get-Prop $r $k); if ($x) { $runId = $x; break } }
+                  $handoffs += [ordered]@{ name = $n; status = 'started'; runId = $runId; message = "Started $n$(if ($runId) { " (run $runId)" })." }
+              } catch {
+                  $handoffs += [ordered]@{ name = $n; status = 'failed'; runId = ''; message = "Couldn't start $n`: $($_.Exception.Message)" }
+              }
+          }
+          $message = $(if (-not $names.Count) { "No hand-offs are set up for $Stage." } else { (@($handoffs | ForEach-Object { $_.message }) + $warnings) -join ' ' })
+          $failed = @($handoffs | Where-Object { $_.status -eq 'failed' })
+          $warnings += @($failed | ForEach-Object { $_.message })
+          Set-NodeOutput ([ordered]@{
+              stage = $Stage; status = $(if (-not $names.Count) { 'none' } elseif (-not $confirm) { 'preview' } elseif ($failed.Count) { 'partial' } else { 'done' })
+              handoffs = $handoffs; warnings = $warnings; message = $message
+              started = @($handoffs | Where-Object { $_.status -eq 'started' }).Count
+          })
+        timeoutSeconds: 300
+        retryCount: 0
+        # Starts the workflows named in NewUserOnboarding-AfterProvision, for example group or device set-up.
+        parameters:
+          - name: request
+            expression: '{{ nodes.node-inputs.output }}'
+        aiExtensions: []
     - id: node-portal
       name: Portal and training
       type: agent
       position:
-        x: 1180
+        x: 1540
         y: 200
       properties:
         agentSlug: new-user-onboarding
@@ -173,7 +390,7 @@ definition:
       name: Verify
       type: agent
       position:
-        x: 1360
+        x: 1720
         y: 200
       properties:
         agentSlug: new-user-onboarding
@@ -192,7 +409,7 @@ definition:
       name: Note the ticket
       type: powershell-script
       position:
-        x: 1540
+        x: 1900
         y: 200
       properties:
         script: |
@@ -381,6 +598,16 @@ definition:
               $lines += ''; $lines += 'Needs approval by name before anyone adds it:'
               $lines += @($approve | ForEach-Object { if ($_ -is [string]) { " - $_" } else { " - $(Get-Prop $_ 'starter'): $(Get-Prop $_ 'item') (held by $(Get-Prop $_ 'heldBy'); $(Get-Prop $_ 'whyFlagged'))" } })
           }
+          # Other workflows this run started. Each of those runs reports its own result.
+          $ho = @()
+          foreach ($k in @('handoffIntake', 'handoffProvision')) {
+              $h = Get-Prop $in $k; if ($h -is [string] -and $h.Trim().StartsWith('{')) { $h = $h | ConvertFrom-Json }
+              if ($null -ne $h -and $h -isnot [string]) { $ho += @(List (Get-Prop $h 'handoffs')) }
+          }
+          if ($ho.Count) {
+              $lines += ''; $lines += 'Other workflows for this request (each run reports its own result):'
+              $lines += @($ho | ForEach-Object { " - $(Get-Prop $_ 'message')" })
+          }
           $internal = $lines -join "`n"
 
           $posted = $false; $psaName = ''
@@ -412,12 +639,16 @@ definition:
             expression: '{{ nodes.node-access.output }}'
           - name: verify
             expression: '{{ nodes.node-verify.output }}'
+          - name: handoffIntake
+            expression: '{{ nodes.node-handoff-intake.output }}'
+          - name: handoffProvision
+            expression: '{{ nodes.node-handoff-provision.output }}'
         aiExtensions: []
     - id: end
       name: End
       type: end
       position:
-        x: 1720
+        x: 2080
         y: 200
   connections:
     - source: start
@@ -427,6 +658,9 @@ definition:
       target: node-intake
       sourceHandle: null
     - source: node-intake
+      target: node-handoff-intake
+      sourceHandle: null
+    - source: node-handoff-intake
       target: node-procurement
       sourceHandle: null
     - source: node-procurement
@@ -436,6 +670,9 @@ definition:
       target: node-provision
       sourceHandle: null
     - source: node-provision
+      target: node-handoff-provision
+      sourceHandle: null
+    - source: node-handoff-provision
       target: node-portal
       sourceHandle: null
     - source: node-portal

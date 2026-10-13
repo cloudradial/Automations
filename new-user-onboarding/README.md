@@ -33,10 +33,19 @@ These links point at the `main` branch, so they always open the current version.
 ## How it works
 
 A guarded onboarding **agent** that takes one new starter from request to ready for
-day one, plus the **workflow** that runs it. The workflow reads the *Add a New User*
-form's webhook and calls the agent once per stage, in order: `intake`, `procurement`,
-`access_plan`, `provision`, `portal_training`, `verify`. The **New User Onboarding -
-Day One** playbook runs the same stages.
+day one, plus the **workflow** that runs it. The *Add a New User* form starts the
+workflow, either through an **Action** question or a Webhook activity. The workflow calls
+the agent once per stage, in order: `intake`, `procurement`, `access_plan`, `provision`,
+`portal_training`, `verify`.
+
+The workflow can also start **other workflows** at two points, after intake and after
+provision, through their webhooks. Split Request - Service + Quote can raise the service
+ticket and the quote, and you can add your own, such as a group or device set-up
+workflow, without editing this one. See [Hand-offs to other workflows](#hand-offs-to-other-workflows).
+
+The **New User Onboarding - Day One** playbook runs the same stages, but a form can't
+start a playbook yet (AutomationAI request AAI-143), so the workflow is the one to use
+with the form.
 
 > **Still in testing.** Keep the agent in dry run and every Agent node on
 > `autoApprove: false` until a full run has been checked end to end.
@@ -47,7 +56,7 @@ Day One** playbook runs the same stages.
 |---|---|---|
 | [`form-webhook-mapping.md`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md) | Reference | How the CloudRadial *Add a New User* form maps, question by question, to the webhook JSON that starts the Day One playbook. |
 | [`new-user-onboarding.agent.yml`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.agent.yml) | `automationsAgent` | The brain. Refuses privileged or sensitive group copies, purchases, changes to existing users and insecure credential handoff; reports what it verified, not what it attempted. Publish it → slug `new-user-onboarding`. |
-| [`new-user-onboarding.yml`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.yml) | `automationsWorkflow` | **Read the request** (turns the webhook body into the briefing and drops unanswered `@token` values) → six Agent nodes, one per stage → **Note the ticket** (posts the result to the PSA ticket). Each stage gets the briefing and the previous stage's output as `context`, and passes a block on instead of acting. No Agent node calls the PSA, so the workflow works with any of the six PSAs. |
+| [`new-user-onboarding.yml`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.yml) | `automationsWorkflow` | **Read the request** (turns the form's Action input or webhook body into the briefing and drops unanswered `@token` values) → six Agent nodes, one per stage, with a **Hand off** step after Intake and after Provision → **Note the ticket** (posts the result to the PSA ticket). Each stage gets the briefing and the previous stage's output as `context`, and passes a block on instead of acting. No Agent node calls the PSA, so the workflow works with any of the six PSAs. |
 | [`src/`](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding/src) | Source and tests | `psa.ps1` holds the PSA calls both workflows use, and `build.js` pastes it into their PowerShell steps. `test.js` runs the strict-mode tests. Edit `psa.ps1`, never the block between the `src/psa.ps1` markers in a `.yml`. |
 
 ## Install / run
@@ -56,10 +65,16 @@ Day One** playbook runs the same stages.
 2. Make sure these extensions are installed and connected: `microsoft-365`, `microsoft-entra-id`, `cloudradial-v2-companies`, `cloudradial-v2-training`, `1password-business`, `microsoft-teams`. No PSA extension is needed.
 3. For the ticket note, add `PSA-Type` and your PSA's secrets to the runner's Key Vault (see [PSA](#psa-both-workflows)), and deploy to that runner.
 4. Set the agent variables: `credentialVault` (the 1Password vault for credential handoff; the agent stops rather than falling back to email or chat without it), `defaultLicenceSku`, `sensitiveGroupPatterns`, `hardwareBufferDays`, and `rmmPlatform` if the playbook checks device readiness.
-5. On **Workflows → Import**, upload `new-user-onboarding.yml`. Enable the webhook under **Properties → Webhook**, then **Publish** and **deploy** it to your runner.
-6. Point the *Add a New User* form's Webhook activity at the workflow's webhook URL, with the secret in the `X-Crauto-Webhook-Secret` header. The Content is the JSON in [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md). Make the form changes it lists (Field IDs, the Manager question, the Security Groups and licence choices) in the package source, not in a client portal.
+5. On **Workflows → Import**, upload `new-user-onboarding.yml`, then **Publish** and **deploy** it to your runner.
+6. Start it from the *Add a New User* form, in one of two ways:
+   - **Action (portals with Actions):** add a question of type **Action** at the end of the form and pick **New User Onboarding**. Nothing to map: **Read the request** reads the answers from `Ticket.Questions`, and the requester and client from `User` and `Company`. The stock form's Field IDs work as they are (for example `modelTheNewUsersAccountAccessFrom`, `doesTheUserRequireAnEmailAccount`, `mailDistributionGroups`, and the long equipment IDs CloudRadial cuts at 40 characters).
+   - **Webhook activity:** enable the webhook under **Properties → Webhook**, and point the form's Webhook activity at the workflow's webhook URL, with the secret in the `X-Crauto-Webhook-Secret` header. The Content is the JSON in [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md). Make the form changes it lists (Field IDs, the Manager question, the Security Groups and licence choices) in the package source, not in a client portal.
+
+   Either way, the requester and the client come only from what CloudRadial fills in, never from a typed answer.
 7. To test without the form, run the workflow from **Test** with a request body as the Trigger input. The **Read the request** node has a sample.
-8. The ticket note is posted only when the request has `"confirm": "true"`. Without it, **Note the ticket** returns the note as `internal_note` and posts nothing. Add `"confirm": "true"` to the form's Content once you trust the runs.
+8. Nothing is written (no ticket note, no hand-off) until the request is **confirmed**. Without it, **Note the ticket** returns the note as `internal_note`, and the hand-off steps list what they would start. To confirm:
+   - **Webhook activity:** add `"confirm": "true"` to the form's Content once you trust the runs.
+   - **Action:** an Action can't send extra fields, so set the runner secret `NewUserOnboarding-Confirm` to `true` instead. That makes every run on that runner live, so set it only once a test run has been checked. A form answer named `confirm` is ignored.
 
 ### Microsoft 365 secrets stored per company
 
@@ -73,14 +88,33 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 | Node | Stage | What it does | Extensions allowed |
 |---|---|---|---|
 | Intake | `intake` | Names, start date, role, requester check (from the CloudRadial requester fields and the client's CloudRadial users), mirror-from user, ticket. No start date → blocked. | `cloudradial-v2-companies`, `microsoft-entra-id` |
+| Hand off after intake | (PowerShell) | Starts the workflows in `NewUserOnboarding-AfterIntake`, by default Split Request - Service + Quote. Only when confirmed. | none (webhooks) |
 | Procurement | `procurement` | Lists quote requests for hardware, phone and software as `Quote:` items. Never buys. | none |
 | Access plan | `access_plan` | Access from the mirror-from user; privileged or sensitive groups go to `needsApproval`. | `microsoft-entra-id`, `microsoft-365` |
 | Provision | `provision` | Account, licence, mailbox, approved access; credential only through 1Password. | `microsoft-entra-id`, `microsoft-365`, `1password-business` |
+| Hand off after provision | (PowerShell) | Starts the workflows in `NewUserOnboarding-AfterProvision`, for example group or device set-up. Only when confirmed. | none (webhooks) |
 | Portal and training | `portal_training` | CloudRadial portal user and onboarding courses. | `cloudradial-v2-companies`, `cloudradial-v2-training` |
 | Verify | `verify` | Checks what exists now and reports each starter as ready or not. | `microsoft-entra-id`, `microsoft-365`, `cloudradial-v2-companies`, `cloudradial-v2-training`, `microsoft-teams` |
-| Note the ticket | (PowerShell) | Posts one internal note to the form's ticket: the Verify result, the `Quote:` items, and anything that needs approval by name. Only when `confirm` is true. | none (calls the PSA directly) |
+| Note the ticket | (PowerShell) | Posts one internal note to the form's ticket: the Verify result, the `Quote:` items, anything that needs approval by name, and the other workflows it started. Only when confirmed. | none (calls the PSA directly) |
 
 Every Agent node ships with `autoApprove: false`, so each change waits for approval in the Inbox. Each stage sees only the stage before it; **Verify** re-reads the live state rather than trusting earlier stages.
+
+## Hand-offs to other workflows
+
+AutomationAI has no step that runs another workflow, so the two **Hand off** steps start other workflows through their webhooks. Add a workflow here instead of editing this one.
+
+| Runner secret | Value |
+|---|---|
+| `NewUserOnboarding-AfterIntake` | Names of the workflows to start after Intake, comma separated, letters and digits only (for example `SplitRequest`). |
+| `NewUserOnboarding-AfterProvision` | Names of the workflows to start after Provision (for example `AddToGroup`). |
+| `NewUserOnboarding-<Name>-Url` | That workflow's full webhook URL (**Properties → Webhook** on that workflow, with its webhook enabled). Must start with `https://`. |
+| `NewUserOnboarding-<Name>-Secret` | That workflow's webhook secret, sent in the `X-Crauto-Webhook-Secret` header. |
+
+- **Split Request by default.** With no `NewUserOnboarding-AfterIntake` list, setting `NewUserOnboarding-SplitRequest-Url` (and its `-Secret`) is enough to start [Split Request - Service + Quote](https://github.com/cloudradial/Automations/tree/main/split-request-two-tickets) after intake. On its form profile, the stock form's computer question needs the Field ID `deviceType` (see that README).
+- **What each workflow receives:** the same request the form sent (so a workflow built for the *Add a New User* form reads it unchanged), plus an `onboarding` block with `stage`, `starter`, `startDate`, `ticketId` and `briefing`.
+- **Started, not finished.** A webhook starts a run and returns straight away. The step records each run id, and **Note the ticket** lists them. Each of those runs reports its own result in its own run history.
+- **Only when confirmed.** Before that, the steps list what they would start. A workflow that can't be started (missing URL, `http://` address, the call refused) is a warning, and onboarding carries on.
+- Secret values never appear in the run output.
 
 ## Confirm in your tenant
 

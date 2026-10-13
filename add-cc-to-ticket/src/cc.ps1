@@ -54,7 +54,7 @@ function Get-CcTicket {
     $c = Get-PsaConn
     $t = Get-PsaTicket $Id
     $raw = $t.raw
-    $info = @{ id = $Id; companyId = ([string]$t.companyId).Trim(); companyKeys = @(); contactEmail = ''; cc = @(); ccEnabled = $true; raw = $raw; extra = @{} }
+    $info = @{ id = $Id; summary = ([string]$t.summary).Trim(); companyId = ([string]$t.companyId).Trim(); companyKeys = @(); contactEmail = ''; cc = @(); ccEnabled = $true; raw = $raw; extra = @{} }
     switch ($c.Psa) {
         'connectwise' {
             # Unverified: contactEmailAddress, automaticEmailCc and automaticEmailCcFlag on GET /service/tickets/{id} (CW swagger Ticket model).

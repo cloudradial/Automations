@@ -2,11 +2,11 @@
 
 Each client gets a current patch compliance score and a list of problem devices in their Planner, ready for review meetings.
 
-**Formerly:** Patch Compliance | **Marketplace ID:** AAI-00035 | **Type:** Workflow
+**Formerly:** Patch Compliance | **Marketplace ID:** AAI-00035 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=patch-compliance&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `patch-compliance.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/patch-compliance/patch-compliance.yml) |
-| Download `patch-compliance.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/patch-compliance/patch-compliance.yml) |
+| Download `patch-compliance.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=patch-compliance&expanded=true) |
 | Needs the agent | [RMM Agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) |
 | All files in this automation | [patch-compliance](https://github.com/cloudradial/Automations/tree/main/patch-compliance) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/patch-compliance) |

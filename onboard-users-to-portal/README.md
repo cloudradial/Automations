@@ -2,11 +2,11 @@
 
 Give it a list of people and they're added as portal users under the right company, with anyone who already has an account skipped.
 
-**Formerly:** User Management bulk import script | **Marketplace ID:** AAI-00006 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent)
+**Formerly:** User Management bulk import script | **Marketplace ID:** AAI-00006 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=onboard-users-to-portal&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `onboard-users-to-portal.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/onboard-users-to-portal/onboard-users-to-portal.yml) |
-| Download `onboard-users-to-portal.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/onboard-users-to-portal/onboard-users-to-portal.yml) |
+| Download `onboard-users-to-portal.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=onboard-users-to-portal&expanded=true) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [onboard-users-to-portal](https://github.com/cloudradial/Automations/tree/main/onboard-users-to-portal) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/onboard-users-to-portal) |

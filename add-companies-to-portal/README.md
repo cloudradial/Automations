@@ -2,11 +2,11 @@
 
 Give it a list of client companies and they're added to CloudRadial, with any that already exist skipped and each addition approved first.
 
-**Formerly:** Company Management bulk-add script | **Marketplace ID:** AAI-00002 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent)
+**Formerly:** Company Management bulk-add script | **Marketplace ID:** AAI-00002 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=add-companies-to-portal&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `add-companies-to-portal.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/add-companies-to-portal/add-companies-to-portal.yml) |
-| Download `add-companies-to-portal.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/add-companies-to-portal/add-companies-to-portal.yml) |
+| Download `add-companies-to-portal.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=add-companies-to-portal&expanded=true) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [add-companies-to-portal](https://github.com/cloudradial/Automations/tree/main/add-companies-to-portal) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/add-companies-to-portal) |

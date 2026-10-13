@@ -2,11 +2,11 @@
 
 Lets any automation finish by opening a ticket in your PSA, sending an email or handing the result back to ServiceAI, without rebuilding that step each time.
 
-**Formerly:** Deliver Result | **Marketplace ID:** AAI-00039 | **Type:** Agent
+**Formerly:** Deliver Result | **Marketplace ID:** AAI-00039 | **Type:** Agent | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=deliver-result&expanded=true).
 
 **Import** [`deliver-result.agent.yml`](https://github.com/cloudradial/Automations/blob/main/deliver-result/deliver-result.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
 
@@ -15,7 +15,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `deliver-result.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/deliver-result/deliver-result.agent.yml) |
-| Download `deliver-result.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/deliver-result/deliver-result.agent.yml) |
+| Download `deliver-result.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=deliver-result&expanded=true) |
 | Used by | [Get a Weekly List of Warranty and Ownership Gaps](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit) |
 | All files in this automation | [deliver-result](https://github.com/cloudradial/Automations/tree/main/deliver-result) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/deliver-result) |

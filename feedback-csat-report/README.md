@@ -2,16 +2,16 @@
 
 Turns portal feedback into a CSAT score and summary for each client on a Planner card, updated every run.
 
-**Formerly:** Feedback & CSAT Report | **Marketplace ID:** AAI-00022 | **Type:** Workflow
+**Formerly:** Feedback & CSAT Report | **Marketplace ID:** AAI-00022 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `feedback-csat-report.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=feedback-csat-report&expanded=true).
 
 | What | Link |
 |---|---|
-| View `feedback-csat-report.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/feedback-csat-report/feedback-csat-report.yml) |
-| Download `feedback-csat-report.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/feedback-csat-report/feedback-csat-report.yml) |
+| Download `feedback-csat-report.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=feedback-csat-report&expanded=true) |
+| View the current source | [`feedback-csat-report.yml`](https://github.com/cloudradial/Automations/blob/main/feedback-csat-report/feedback-csat-report.yml) |
 | All files in this automation | [feedback-csat-report](https://github.com/cloudradial/Automations/tree/main/feedback-csat-report) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/feedback-csat-report) |
 | Marketplace listing | [AAI-00022](https://automations.cloudradial.com/marketplace/AAI-00022) |

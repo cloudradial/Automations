@@ -2,16 +2,16 @@
 
 Password reset tickets close on their own when the requester owns the account, and wait for a quick confirmation when someone else asked.
 
-**Formerly:** Password Reset (ServiceAI Triage) | **Marketplace ID:** AAI-00028 | **Type:** Workflow (ServiceAI Triage Action)
+**Formerly:** Password Reset (ServiceAI Triage) | **Marketplace ID:** AAI-00028 | **Type:** Workflow (ServiceAI Triage Action) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `password-reset-triage.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=password-reset-triage&expanded=true).
 
 | What | Link |
 |---|---|
-| View `password-reset-triage.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/password-reset-triage/password-reset-triage.yml) |
-| Download `password-reset-triage.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/password-reset-triage/password-reset-triage.yml) |
+| Download `password-reset-triage.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=password-reset-triage&expanded=true) |
+| View the current source | [`password-reset-triage.yml`](https://github.com/cloudradial/Automations/blob/main/password-reset-triage/password-reset-triage.yml) |
 | All files in this automation | [password-reset-triage](https://github.com/cloudradial/Automations/tree/main/password-reset-triage) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/password-reset-triage) |
 | Marketplace listing | [AAI-00028](https://automations.cloudradial.com/marketplace/AAI-00028) |
@@ -25,7 +25,7 @@ what to do based on who asked.
 
 ## Download & import
 
-**Download the workflow:** [`password-reset-triage.yml`](https://github.com/cloudradial/Automations/blob/main/password-reset-triage/password-reset-triage.yml)
+**Download the workflow:** [`password-reset-triage.yml`](https://github.com/cloudradial/Automations/releases?q=password-reset-triage&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Wire a ServiceAI **Use in Triage** Action at the webhook. Full steps are under [Import & test](#import--test) below.
 

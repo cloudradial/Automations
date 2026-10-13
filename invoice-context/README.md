@@ -2,16 +2,16 @@
 
 When a client questions an invoice, the account manager finds an internal note on the ticket that already shows what was billed, how much time was logged and how much of it was billable, the tickets with the most time, and which agreements covered the period.
 
-**Marketplace ID:** AAI-00055 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00055 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `invoice-context.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=invoice-context&expanded=true).
 
 | What | Link |
 |---|---|
-| View `invoice-context.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/invoice-context/invoice-context.yml) |
-| Download `invoice-context.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/invoice-context/invoice-context.yml) |
+| Download `invoice-context.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=invoice-context&expanded=true) |
+| View the current source | [`invoice-context.yml`](https://github.com/cloudradial/Automations/blob/main/invoice-context/invoice-context.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/invoice-context/src) |
 | All files in this automation | [invoice-context](https://github.com/cloudradial/Automations/tree/main/invoice-context) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/invoice-context) |
@@ -53,7 +53,7 @@ The tracker row suggests an Agent node. This is a PowerShell workflow with a sin
 
 ## Download & import
 
-**Download the workflow:** [`invoice-context.yml`](https://github.com/cloudradial/Automations/blob/main/invoice-context/invoice-context.yml)
+**Download the workflow:** [`invoice-context.yml`](https://github.com/cloudradial/Automations/releases?q=invoice-context&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties** if ServiceAI calls it, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

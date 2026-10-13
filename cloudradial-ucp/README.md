@@ -2,11 +2,11 @@
 
 Look up, audit and update companies, users, devices, services and tokens in plain English, with every change previewed and approved first.
 
-**Formerly:** CloudRadial UCP Assistant | **Marketplace ID:** AAI-00031 | **Type:** Agent
+**Formerly:** CloudRadial UCP Assistant | **Marketplace ID:** AAI-00031 | **Type:** Agent | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=cloudradial-ucp&expanded=true).
 
 **Import** [`cloudradial-ucp.agent.yml`](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/cloudradial-ucp.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
 
@@ -22,7 +22,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `cloudradial-ucp.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/cloudradial-ucp.agent.yml) |
-| Download `cloudradial-ucp.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/cloudradial-ucp/cloudradial-ucp.agent.yml) |
+| Download `cloudradial-ucp.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=cloudradial-ucp&expanded=true) |
 | Used by | [Add Many Client Companies at Once](https://github.com/cloudradial/Automations/tree/main/add-companies-to-portal) |
 | Used by | [Add Many KB Articles at Once](https://github.com/cloudradial/Automations/tree/main/bulk-create-kb-articles) |
 | Used by | [Add Many Training Courses at Once](https://github.com/cloudradial/Automations/tree/main/bulk-create-training-courses) |
@@ -41,7 +41,7 @@ A general-purpose CloudRadial **AutomationAI agent**, the platform-native analog
 
 ## Download & import
 
-**Download the agent:** [`cloudradial-ucp.agent.yml`](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/cloudradial-ucp.agent.yml)
+**Download the agent:** [`cloudradial-ucp.agent.yml`](https://github.com/cloudradial/Automations/releases?q=cloudradial-ucp&expanded=true)
 
 In AutomationAI: **Agents → Custom → Import**, upload the `.yml` (import is keyed on the slug `cloudradial-ucp-assistant`). Make sure these first-party CloudRadial extensions are installed and connected: `cloudradial-v2-companies` (which also carries the user tools), `cloudradial-v2-endpoints`, `cloudradial-v2-services`, `cloudradial-v2-tokens`, `cloudradial-v2-compliance` (assessments, certificates and flexible assets, added in 0.1.4).
 

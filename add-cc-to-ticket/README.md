@@ -2,16 +2,16 @@
 
 A requester adds a coworker to the email updates on one of their own open tickets from the portal, with no technician needed, and the ticket records who was added and by whom.
 
-**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI)
+**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=add-cc-to-ticket&expanded=true).
 
 | What | Link |
 |---|---|
-| View `add-cc-to-ticket.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
-| Download `add-cc-to-ticket.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
+| Download `add-cc-to-ticket.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=add-cc-to-ticket&expanded=true) |
+| View the current source | [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket/src) |
 | All files in this automation | [add-cc-to-ticket](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/add-cc-to-ticket) |
@@ -62,7 +62,7 @@ These fields are only read from the webhook body, never from a form answer, so a
 
 ## Download & import
 
-**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml)
+**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases?q=add-cc-to-ticket&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

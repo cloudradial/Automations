@@ -2,11 +2,11 @@
 
 Workstation RMM alerts get a safe fix, a re-check and are resolved after you approve, and anything that can't be fixed safely becomes a PSA ticket.
 
-**Formerly:** RMM Auto-Remediation | **Marketplace ID:** AAI-00036 | **Type:** Workflow
+**Formerly:** RMM Auto-Remediation | **Marketplace ID:** AAI-00036 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=rmm-auto-remediation&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `rmm-auto-remediation.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/rmm-auto-remediation/rmm-auto-remediation.yml) |
-| Download `rmm-auto-remediation.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/rmm-auto-remediation/rmm-auto-remediation.yml) |
+| Download `rmm-auto-remediation.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=rmm-auto-remediation&expanded=true) |
 | Needs the agent | [RMM Agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) |
 | All files in this automation | [rmm-auto-remediation](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/rmm-auto-remediation) |

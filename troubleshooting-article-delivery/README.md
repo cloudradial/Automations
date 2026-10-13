@@ -2,16 +2,16 @@
 
 When ServiceAI triage matches a new ticket to a knowledge base article, the client gets the article straight away with a "Reply 'fixed' and we'll close this" line, and a clear "fixed" reply closes the ticket without a technician touching it.
 
-**Marketplace ID:** AAI-00053 | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00053 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `troubleshooting-article-delivery.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=troubleshooting-article-delivery&expanded=true).
 
 | What | Link |
 |---|---|
-| View `troubleshooting-article-delivery.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/troubleshooting-article-delivery/troubleshooting-article-delivery.yml) |
-| Download `troubleshooting-article-delivery.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/troubleshooting-article-delivery/troubleshooting-article-delivery.yml) |
+| Download `troubleshooting-article-delivery.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=troubleshooting-article-delivery&expanded=true) |
+| View the current source | [`troubleshooting-article-delivery.yml`](https://github.com/cloudradial/Automations/blob/main/troubleshooting-article-delivery/troubleshooting-article-delivery.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/troubleshooting-article-delivery/src) |
 | All files in this automation | [troubleshooting-article-delivery](https://github.com/cloudradial/Automations/tree/main/troubleshooting-article-delivery) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/troubleshooting-article-delivery) |
@@ -44,7 +44,7 @@ Three PowerShell steps, no AI. The judgment (which article fits the ticket) is S
 
 ## Download & import
 
-**Download the workflow:** [`troubleshooting-article-delivery.yml`](https://github.com/cloudradial/Automations/blob/main/troubleshooting-article-delivery/troubleshooting-article-delivery.yml)
+**Download the workflow:** [`troubleshooting-article-delivery.yml`](https://github.com/cloudradial/Automations/releases?q=troubleshooting-article-delivery&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the MSP's runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

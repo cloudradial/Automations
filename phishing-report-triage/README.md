@@ -2,16 +2,16 @@
 
 When a user reports a suspicious email, the technician gets a categorized ticket that already shows who really sent it, whether it passed SPF, DKIM and DMARC, where its links go and what is attached, with a risk verdict and, for malicious mail, a ready-to-review purge script.
 
-**Marketplace ID:** AAI-00044 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00044 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `phishing-report-triage.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=phishing-report-triage&expanded=true).
 
 | What | Link |
 |---|---|
-| View `phishing-report-triage.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/phishing-report-triage/phishing-report-triage.yml) |
-| Download `phishing-report-triage.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/phishing-report-triage/phishing-report-triage.yml) |
+| Download `phishing-report-triage.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=phishing-report-triage&expanded=true) |
+| View the current source | [`phishing-report-triage.yml`](https://github.com/cloudradial/Automations/blob/main/phishing-report-triage/phishing-report-triage.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/phishing-report-triage/src) |
 | All files in this automation | [phishing-report-triage](https://github.com/cloudradial/Automations/tree/main/phishing-report-triage) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/phishing-report-triage) |
@@ -52,7 +52,7 @@ You can use both: this workflow for user reports, the agent for a technician's d
 
 ## Download & import
 
-**Download the workflow:** [`phishing-report-triage.yml`](https://github.com/cloudradial/Automations/blob/main/phishing-report-triage/phishing-report-triage.yml)
+**Download the workflow:** [`phishing-report-triage.yml`](https://github.com/cloudradial/Automations/releases?q=phishing-report-triage&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner of the company it serves, enable the webhook in **Properties** if a form or ServiceAI calls it, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

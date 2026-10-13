@@ -2,16 +2,16 @@
 
 Every week the service manager gets one email listing the open tickets that have breached their SLA or are about to, grouped by company and technician, read straight from the PSA and without changing a single ticket.
 
-**Marketplace ID:** AAI-00049 | **Type:** Workflow (PowerShell steps, no AI), run weekly by a Routine
+**Marketplace ID:** AAI-00049 | **Type:** Workflow (PowerShell steps, no AI), run weekly by a Routine | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `sla-breach-report.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=sla-breach-report&expanded=true).
 
 | What | Link |
 |---|---|
-| View `sla-breach-report.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/sla-breach-report/sla-breach-report.yml) |
-| Download `sla-breach-report.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/sla-breach-report/sla-breach-report.yml) |
+| Download `sla-breach-report.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=sla-breach-report&expanded=true) |
+| View the current source | [`sla-breach-report.yml`](https://github.com/cloudradial/Automations/blob/main/sla-breach-report/sla-breach-report.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/sla-breach-report/src) |
 | All files in this automation | [sla-breach-report](https://github.com/cloudradial/Automations/tree/main/sla-breach-report) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/sla-breach-report) |
@@ -41,7 +41,7 @@ Two steps, no AI. It works with ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, 
 
 ## Download & import
 
-**Download the workflow:** [`sla-breach-report.yml`](https://github.com/cloudradial/Automations/blob/main/sla-breach-report/sla-breach-report.yml)
+**Download the workflow:** [`sla-breach-report.yml`](https://github.com/cloudradial/Automations/releases?q=sla-breach-report&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, **Publish**, **Deploy**, and attach a weekly **Routine**. Full steps are under [Import & test](#import--test).
 

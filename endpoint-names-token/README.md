@@ -2,16 +2,16 @@
 
 Keeps each client's device list current in the portal, so forms offer a "which computer?" dropdown and tickets arrive with the right device.
 
-**Formerly:** Endpoint Names Token | **Marketplace ID:** AAI-00005 | **Type:** Workflow
+**Formerly:** Endpoint Names Token | **Marketplace ID:** AAI-00005 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `cloudradial-endpoint-tokens.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=endpoint-names-token&expanded=true).
 
 | What | Link |
 |---|---|
-| View `cloudradial-endpoint-tokens.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/endpoint-names-token/cloudradial-endpoint-tokens.yml) |
-| Download `cloudradial-endpoint-tokens.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/endpoint-names-token/cloudradial-endpoint-tokens.yml) |
+| Download `cloudradial-endpoint-tokens.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=endpoint-names-token&expanded=true) |
+| View the current source | [`cloudradial-endpoint-tokens.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-names-token/cloudradial-endpoint-tokens.yml) |
 | All files in this automation | [endpoint-names-token](https://github.com/cloudradial/Automations/tree/main/endpoint-names-token) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/endpoint-names-token) |
 | Marketplace listing | [AAI-00005](https://automations.cloudradial.com/marketplace/AAI-00005) |
@@ -22,7 +22,7 @@ A CloudRadial **AutomationAI workflow** that builds a sorted, de-duplicated, com
 
 ## Download & import
 
-**Download the workflow:** [`cloudradial-endpoint-tokens.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-names-token/cloudradial-endpoint-tokens.yml)
+**Download the workflow:** [`cloudradial-endpoint-tokens.yml`](https://github.com/cloudradial/Automations/releases?q=endpoint-names-token&expanded=true)
 
 In AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **deploy** it to your runner. Run it on demand with **Test**, or attach a **Routine**.
 

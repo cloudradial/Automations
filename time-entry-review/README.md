@@ -2,17 +2,17 @@
 
 Every morning, email the service manager a plain list of yesterday's closed tickets that have no time logged, time notes too short to bill from, or time entries with no billable setting.
 
-**Marketplace ID:** AAI-00051 | **Type:** Workflow (run daily by a Routine, or by hand)
+**Marketplace ID:** AAI-00051 | **Type:** Workflow (run daily by a Routine, or by hand) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `time-entry-review.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=time-entry-review&expanded=true).
 
 | What | Link |
 |---|---|
-| View `time-entry-review.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/time-entry-review/time-entry-review.yml) |
-| Download `time-entry-review.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/time-entry-review/time-entry-review.yml) |
-| Step source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/time-entry-review/src) |
+| Download `time-entry-review.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=time-entry-review&expanded=true) |
+| View the current source | [`time-entry-review.yml`](https://github.com/cloudradial/Automations/blob/main/time-entry-review/time-entry-review.yml) |
+| Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/time-entry-review/src) |
 | All files in this automation | [time-entry-review](https://github.com/cloudradial/Automations/tree/main/time-entry-review) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/time-entry-review) |
 
@@ -43,7 +43,7 @@ Where each PSA keeps its time:
 
 ## Download & import
 
-**Download the workflow:** [`time-entry-review.yml`](https://github.com/cloudradial/Automations/blob/main/time-entry-review/time-entry-review.yml)
+**Download the workflow:** [`time-entry-review.yml`](https://github.com/cloudradial/Automations/releases?q=time-entry-review&expanded=true)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds your PSA secrets. **Attach a daily Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

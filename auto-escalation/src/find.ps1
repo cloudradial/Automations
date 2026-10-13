@@ -195,6 +195,9 @@ try { Resolve-PsaTicketNames @($picked | ForEach-Object { $_.t }) }
 catch { $null = $run.warnings.Add("Couldn't look up some company or technician names: $($_.Exception.Message)") }
 
 # ---- plan each escalation ----
+# A preview checks each move target once (Test-PsaQueue, read-only), so a board or queue that doesn't exist, or
+# can't take the ticket, shows in the plan instead of failing on the live run.
+$queueChecks = @{}
 $escalations = @(foreach ($cd in $picked) {
         $t = $cd.t
         $qid = $t.queueId.ToLowerInvariant(); $qname = $t.queueName.Trim().ToLowerInvariant()
@@ -205,7 +208,7 @@ $escalations = @(foreach ($cd in $picked) {
         if ($cd.slaRisk) { $reasons += $cd.slaText }
         $qLabel = if ($t.queueName) { $t.queueName } elseif ($t.queueId) { "queue $($t.queueId)" } else { 'no queue' }
         $active = (-not $cd.untouched) -and [bool]$t.assigneeId
-        $action = 'note-only'; $why = ''; $toQ = ''; $toA = ''; $toR = ''
+        $action = 'note-only'; $why = ''; $toQ = ''; $toA = ''; $toR = ''; $queueProblem = ''
         if ($active) { $why = "It was updated recently and is assigned to $($t.assigneeName), so it stays with them." }
         elseif (-not $entry) { $why = "There is no escalation_map entry for $qLabel, so it wasn't moved." }
         else {
@@ -214,7 +217,17 @@ $escalations = @(foreach ($cd in $picked) {
             if ($sameQ) { $toQ = '' }
             $sameA = $toA -and ($toA -eq $t.assigneeId)
             if ($sameA) { $toA = '' }
+            if ($preview -and $toQ) {
+                $qk = $toQ.ToLowerInvariant()
+                if (-not $queueChecks.Contains($qk)) {
+                    try { $queueChecks[$qk] = Test-PsaQueue -Queue $toQ }
+                    catch { $queueChecks[$qk] = @{ ok = $true; reason = ''; id = ''; name = $toQ }; $null = $run.warnings.Add("Couldn't check the escalation target '$toQ': $($_.Exception.Message)") }
+                }
+                $qc = $queueChecks[$qk]
+                if (-not $qc.ok) { $queueProblem = "can't move it to $($toQ): $($qc.reason)"; $toQ = '' }
+            }
             if ($toQ -or $toA) { $action = 'reassign' }
+            elseif ($queueProblem) { $why = "Would be flagged, $queueProblem" }
             else { $why = "It is already where the escalation_map sends $qLabel tickets, so it wasn't moved again." }
         }
         if ($action -eq 'reassign') { $counts.toReassign++ } else { $counts.noteOnly++ }
@@ -222,7 +235,7 @@ $escalations = @(foreach ($cd in $picked) {
             id = $t.id; number = $t.number; summary = $t.summary; company = $t.companyName; technician = $t.assigneeName; assigneeId = $t.assigneeId
             queue = $qLabel; queueId = $t.queueId; priority = $cd.prio; priorityLabel = $t.priority; status = $t.status
             minutesUntouched = [int][Math]::Round($cd.idle); untouched = $cd.untouched; slaAtRisk = $cd.slaRisk
-            reason = ($reasons -join ' '); action = $action; whyNotMoved = $why; toQueue = $toQ; toAssignee = $toA; toRole = $toR
+            reason = ($reasons -join ' '); action = $action; whyNotMoved = $why; queueProblem = $queueProblem; toQueue = $toQ; toAssignee = $toA; toRole = $toR
             result = $(if ($preview) { 'preview' } else { 'planned' }); outcome = ''; error = ''; noted = $false
         }
     })
@@ -233,7 +246,12 @@ if (-not $escalations.Count) {
     $msg = "No open tickets$scope need escalating. $checked open tickets were checked."
     if ($counts.alreadyEscalated) { $msg += " $($counts.alreadyEscalated) at-risk tickets were already escalated earlier." }
 }
-elseif ($preview) { $msg = "Preview: $($escalations.Count) ticket$(if ($escalations.Count -ne 1) { 's' }) would be escalated$scope ($($counts.toReassign) moved up a tier, $($counts.noteOnly) noted and flagged only). Nothing was changed. Run again with preview set to false to make the changes." }
+elseif ($preview) {
+    $msg = "Preview: $($escalations.Count) ticket$(if ($escalations.Count -ne 1) { 's' }) would be escalated$scope ($($counts.toReassign) moved up a tier, $($counts.noteOnly) noted and flagged only). Nothing was changed."
+    $bad = @($escalations | Where-Object { $_.queueProblem }).Count
+    if ($bad) { $msg += " $bad can't be moved because the escalation_map target isn't valid; each ticket's outcome says why. Fix the map before a live run." }
+    $msg += ' Run again with preview set to false to make the changes.'
+}
 else { $msg = "$($escalations.Count) ticket$(if ($escalations.Count -ne 1) { 's' }) to escalate: $($counts.toReassign) to move up a tier and $($counts.noteOnly) to note and flag only." }
 
 Set-NodeOutput ([ordered]@{

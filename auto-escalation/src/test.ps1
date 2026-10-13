@@ -67,8 +67,10 @@ $TBody = @{ escalation_map = ($TMap | ConvertTo-Json -Compress); dispatcher_emai
 #   2005 low, idle 60 (limit 480)                          -> fine
 #   2006 waiting on client                                 -> skipped
 #   2007 medium, Tier 2, idle 300 (limit 240)              -> move to Tier 3 and assign "escalations"
+# ConnectWise boards (statuses and teams belong to a board, so a move also sets a status that exists on the new one).
+$TBoardIds = @{ 'Service Desk' = 1; 'Tier 2' = 2; 'Tier 3' = 3; 'Alerts' = 4 }
 function New-TCw { param($Id, $Summary, $Co, $Board, $Prio, $PrioId, $Owner, $Idle, $Created, $Status = 'In Progress', $Sla = $null)
-    $t = [ordered]@{ id = $Id; summary = $Summary; company = [pscustomobject]@{ id = $(if ($Co -eq 'Contoso Ltd') { 5 } else { 6 }); name = $Co }; status = [pscustomobject]@{ name = $Status }; priority = [pscustomobject]@{ id = $PrioId; name = $Prio }; board = [pscustomobject]@{ id = 1; name = $Board }; _info = [pscustomobject]@{ dateEntered = (Get-TAgo $Created); lastUpdated = (Get-TAgo $Idle) } }
+    $t = [ordered]@{ id = $Id; summary = $Summary; company = [pscustomobject]@{ id = $(if ($Co -eq 'Contoso Ltd') { 5 } else { 6 }); name = $Co }; status = [pscustomobject]@{ name = $Status }; priority = [pscustomobject]@{ id = $PrioId; name = $Prio }; board = [pscustomobject]@{ id = $TBoardIds[$Board]; name = $Board }; _info = [pscustomobject]@{ dateEntered = (Get-TAgo $Created); lastUpdated = (Get-TAgo $Idle) } }
     if ($Owner) { $t.owner = [pscustomobject]@{ id = 7; identifier = $Owner; name = "$Owner (name)" } }
     if ($Sla) { $t.sla = [pscustomobject]@{ id = $Sla }; $t.dateResponded = $null }
     return [pscustomobject]$t
@@ -95,10 +97,27 @@ $TCwHandler = { param($c, $n)
         $TPosted = @($Mock.Calls | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like "*/service/tickets/$TTid/notes" } | ForEach-Object { [pscustomobject]@{ id = 50; text = (Read-Body $_).text; internalAnalysisFlag = $true; dateCreated = (Get-TAgo 0) } })
         return , @(@($TBase) + $TPosted)
     }
+    # One ticket (Set-PsaQueue reads it before and after a board move); the board it was moved to, if any.
+    if ($c.Method -eq 'GET' -and $u -match '/service/tickets/(\d+)$') {
+        $TTid = $Matches[1]; $TT = @($global:TCw.tickets | Where-Object { [string]$_.id -eq $TTid }) | Select-Object -First 1
+        if (-not $TT) { New-HttpError 404 '{"message":"not found"}' }
+        $TCopy = $TT.PSObject.Copy()
+        # The last accepted board PATCH this test sent for the ticket (a refused one, failPatch, didn't move it).
+        $TMoves = @($Mock.Calls | Where-Object { $_.Method -eq 'PATCH' -and $_.Uri -like "*/service/tickets/$TTid" -and $global:TCw.failPatch -ne $TTid } | ForEach-Object { @((Read-Body $_)) | Where-Object { $_.path -eq 'board' } })
+        if ($TMoves.Count) { $TBid = [int]$TMoves[-1].value.id; $TCopy.board = [pscustomobject]@{ id = $TBid; name = @($TBoardIds.Keys | Where-Object { $TBoardIds[$_] -eq $TBid })[0] } }
+        return $TCopy
+    }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards[?]conditions=name="([^"]*)"') { $TW = $Matches[1]; return , @($TBoardIds.Keys | Where-Object { $_ -eq $TW } | ForEach-Object { [pscustomobject]@{ id = $TBoardIds[$_]; name = $_; inactiveFlag = $false } }) }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards/\d+/statuses') { return , @([pscustomobject]@{ id = 31; name = 'New'; defaultFlag = $true; closedStatus = $false }, [pscustomobject]@{ id = 32; name = 'In Progress'; defaultFlag = $false; closedStatus = $false }, [pscustomobject]@{ id = 33; name = 'Closed'; defaultFlag = $false; closedStatus = $true }) }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards/\d+/teams') { return , @() }
     if ($u -like '*/company/companies*') { if ($u -match 'name="Contoso Ltd"') { return , @([pscustomobject]@{ id = 5; name = 'Contoso Ltd' }) }; return , @() }
     if ($u -like '*/service/SLAs/5/priorities*') { return , @([pscustomobject]@{ priority = [pscustomobject]@{ id = 2 }; respondHours = 2; resolutionHours = 8 }) }
     if ($u -like '*/service/SLAs/5') { return [pscustomobject]@{ id = 5; respondHours = 4; resolutionHours = 24 } }
-    if ($c.Method -eq 'PATCH' -and $u -match '/service/tickets/(\d+)$') { if ($global:TCw.failPatch -eq $Matches[1]) { New-HttpError 403 '{"message":"denied"}' }; return [pscustomobject]@{ id = [int]$Matches[1] } }
+    if ($c.Method -eq 'PATCH' -and $u -match '/service/tickets/(\d+)$') {
+        $TTid = $Matches[1]
+        if ($global:TCw.failPatch -eq $TTid) { New-HttpError 403 '{"message":"denied"}' }
+        return [pscustomobject]@{ id = [int]$TTid }
+    }
     if ($c.Method -eq 'POST' -and $u -match '/service/tickets/(\d+)/notes$') { return [pscustomobject]@{ id = 99 } }
     throw "unmocked $($c.Method) $u"
 }
@@ -113,14 +132,28 @@ Check 'Preview: 4 planned (2 moves, 2 note-only), 1 already escalated, 1 waiting
 Check 'Preview: message says nothing changed and how to apply' ($TR.out.message -match '^Preview: 4 tickets would be escalated \(2 moved up a tier, 2 noted and flagged only\)\. Nothing was changed\.') $TR.out.message
 Check 'Preview: outcome says what would happen' ((Get-TEsc $TR '2007').outcome -eq 'Would move it from Tier 2 to Tier 3 and assign it to escalations.') (Get-TEsc $TR '2007').outcome
 
+# ---- 1b. Preview checks each move target (Test-PsaQueue): a board that doesn't exist is flagged, not "moved" ----
+# Live on ConnectWise staging, a map to "Help Desk" failed with "Service board Help Desk not found" although the
+# preview had said the ticket would be moved.
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow @{ escalation_map = '{"Service Desk": "Help Desk", "Tier 2": {"queue": "Tier 9", "assignee": "escalations"}}'; preview = $true }
+$TE1 = Get-TEsc $TR '2001'; $TE7 = Get-TEsc $TR '2007'
+Check 'Preview, missing board: 2001 is flagged, not moved, and the outcome names the board' ($TE1.action -eq 'note-only' -and $TE1.outcome -eq "Would be flagged, can't move it to Help Desk: ConnectWise has no service board named 'Help Desk'. Use the exact board name or its id.") ($TE1 | ConvertTo-Json -Compress)
+Check 'Preview, missing board with an assignee: 2007 is still assigned, and the outcome says the move cannot happen' ($TE7.action -eq 'reassign' -and $TE7.toQueue -eq '' -and $TE7.outcome -match '^Would assign it to escalations. Would be flagged, can''t move it to Tier 9: ') ($TE7 | ConvertTo-Json -Compress)
+Check 'Preview, missing board: the message says some can''t be moved, nothing written, each board looked up once' ($TR.out.status -eq 'pending_confirmation' -and $TR.out.message -match "2 can't be moved because the escalation_map target isn't valid" -and @(Get-TWrites).Count -eq 0 -and @(Get-Calls GET '*/service/boards[?]*').Count -eq 2) "$($TR.out.message) | $(Show-Calls)"
+Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
+$TR = Invoke-Flow ($TBody + @{ preview = $true })
+Check 'Preview, valid boards: the targets are checked and the plan still says it would move' ((Get-TEsc $TR '2001').outcome -eq 'Would move it from Service Desk to Tier 2.' -and @(Get-Calls GET '*/service/boards[?]*').Count -eq 2 -and $TR.out.message -notmatch "can't be moved") (Show-Calls)
+
 # ---- 2. Live (preview false, the default) ----
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow $TBody
 Check 'Live: success' ($TR.stage -eq 'note' -and $TR.out.status -eq 'success') "$($TR.error) $($TR.out.message)"
 $TP = @(Get-Calls PATCH '*/service/tickets/*')
 $TP2001 = @($TP | Where-Object { $_.Uri -like '*/2001' }); $TP2007 = @($TP | Where-Object { $_.Uri -like '*/2007' })
-Check 'Live: 2001 moved to Tier 2 (board), owner untouched' ($TP2001.Count -eq 1 -and (Read-Body $TP2001[0])[0].path -eq 'board' -and (Read-Body $TP2001[0])[0].value.name -eq 'Tier 2') (Show-Calls)
-Check 'Live: 2007 moved to Tier 3 and assigned to the mapped user, one tier only' ($TP2007.Count -eq 2 -and (Read-Body $TP2007[0])[0].value.name -eq 'Tier 3' -and (Read-Body $TP2007[1])[0].path -eq 'owner' -and (Read-Body $TP2007[1])[0].value.identifier -eq 'escalations') (Show-Calls)
+Check 'Live: 2001 moved to Tier 2 (board), owner untouched' ($TP2001.Count -eq 1 -and (Read-Body $TP2001[0])[0].path -eq 'board' -and (Read-Body $TP2001[0])[0].value.id -eq 2) (Show-Calls)
+Check 'Live: the ConnectWise board move carries a status that exists on the new board (In Progress kept), in the same patch' ((Read-Body $TP2001[0])[1].path -eq 'status' -and (Read-Body $TP2001[0])[1].value.id -eq 32) $TP2001[0].Body
+Check 'Live: 2007 moved to Tier 3 and assigned to the mapped user, one tier only' ($TP2007.Count -eq 2 -and (Read-Body $TP2007[0])[0].value.id -eq 3 -and (Read-Body $TP2007[1])[0].path -eq 'owner' -and (Read-Body $TP2007[1])[0].value.identifier -eq 'escalations') (Show-Calls)
 Check 'Live: no reassignment for the unmapped queue or the actively worked ticket' (@($TP | Where-Object { $_.Uri -like '*/2002' -or $_.Uri -like '*/2003' -or $_.Uri -like '*/2004' }).Count -eq 0) (Show-Calls)
 $TPm = @(Get-TPostmark); $TPmBody = if ($TPm.Count) { $TPm[0].Body | ConvertFrom-Json } else { $null }
 Check 'Live: one dispatcher email listing all 4, HTML-escaped' ($TPm.Count -eq 1 -and $TPmBody.To -eq 'dispatch@example.com' -and $TPmBody.Subject -eq 'Auto-Escalation: 4 tickets escalated' -and $TPmBody.HtmlBody -match 'Firewall alert &lt;WAN&gt;' -and $TPmBody.HtmlBody -match '2007') (Show-Calls)
@@ -273,8 +306,8 @@ $TPut = @(Get-Calls PUT '*/tickets/3001')
 Check 'Zendesk live: a private comment with the marker, then the group moved by name' ($TR.out.status -eq 'success' -and $TPut.Count -eq 2 -and (Read-Body $TPut[0]).ticket.comment.public -eq $false -and (Read-Body $TPut[0]).ticket.comment.body.StartsWith('[Auto-Escalation] ') -and (Read-Body $TPut[1]).ticket.group_id -eq 22) "$($TR.error) $(Show-Calls)"
 
 # ---- 14. Retry safety: a rerun writes nothing twice, moves nothing twice and emails nothing twice ----
-# The mock returns the notes this test has POSTed, as the PSA would, but never changes a ticket's board,
-# so without the marker check a rerun would move 2001 and 2007 again (Tier 2 to Tier 3, and so on).
+# The mock returns the notes this test has POSTed, as the PSA would, but its ticket list never shows a ticket's
+# new board, so without the marker check a rerun would move 2001 and 2007 again (Tier 2 to Tier 3, and so on).
 Reset-Mock -Secrets (Get-TSecrets connectwise) -Handler $TCwHandler
 $TR = Invoke-Flow $TBody
 $TBefore = @{ patch = @(Get-Calls PATCH '*').Count; notes = @(Get-TCwNotes).Count; pm = @(Get-TPostmark).Count }

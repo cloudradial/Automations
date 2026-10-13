@@ -396,4 +396,201 @@ Invoke-WithLib @('psa.ps1') {
     Check 'kaseyabms: a status number is sent as given' ($r -eq '14' -and (Read-Body @(Get-Calls 'PATCH' "$BMS/servicedesk/tickets/12345")[-1])[0].value -eq 14) (Show-Calls)
 }
 
+
+# --- ConnectWise board moves: statuses and teams belong to a board ---
+# Live on staging, moving a ticket to another board with only the board op failed with HTTP 400 "Service Status 16
+# not found for Service Board 14" and "Service Team 25 not found for Service Board 14". The move now sends ONE
+# json-patch with a status and team that exist on the new board, then reads the ticket back.
+$TBoards = @{
+    '1'  = [pscustomobject]@{ id = 1; name = 'Service Desk'; inactiveFlag = $false }
+    '14' = [pscustomobject]@{ id = 14; name = 'Test Board'; inactiveFlag = $false }
+    '15' = [pscustomobject]@{ id = 15; name = 'Tier 2'; inactiveFlag = $false }
+    '16' = [pscustomobject]@{ id = 16; name = 'Old Board'; inactiveFlag = $true }
+    '17' = [pscustomobject]@{ id = 17; name = 'Tier 3'; inactiveFlag = $false }
+}
+function CwSt { param($id, $name, [bool]$def = $false, [bool]$closed = $false) [pscustomobject]@{ id = $id; name = $name; defaultFlag = $def; closedStatus = $closed; inactive = $false } }
+$TBoardStatuses = @{
+    '1'  = @((CwSt 10 'New' $true), (CwSt 12 'In Progress'), (CwSt 13 'Waiting Vendor'), (CwSt 11 'Closed' $false $true))
+    '14' = @((CwSt 20 'New (not responded)' $true), (CwSt 21 'In Progress'), (CwSt 22 'Closed' $false $true))
+    '15' = @((CwSt 30 'Open'), (CwSt 31 'Assigned' $true), (CwSt 32 'Waiting Vendor' $false $true))
+    '17' = @((CwSt 70 'Closed' $false $true), (CwSt 71 'Triage'), (CwSt 72 'Working'))
+}
+$TBoardTeams = @{
+    '1'  = @([pscustomobject]@{ id = 25; name = 'Help Desk Team'; defaultFlag = $true })
+    '14' = @([pscustomobject]@{ id = 40; name = 'Escalations'; defaultFlag = $false })
+    '15' = @([pscustomobject]@{ id = 50; name = 'Tier 2 Team'; defaultFlag = $true })
+    '17' = @([pscustomobject]@{ id = 60; name = 'help desk team'; defaultFlag = $false }, [pscustomobject]@{ id = 61; name = 'Night'; defaultFlag = $true })
+}
+# The board names a status-by-name PATCH may use when the statuses can't be listed (the rest get a 400).
+$TBm = @{ board = '1'; status = 'In Progress'; team = 25; ignorePatch = $false; statuses403 = $false; boards403 = $false; byName = @('New (not responded)', 'In Progress') }
+$TBoardHandler = {
+    param($c, $n)
+    $u = [uri]::UnescapeDataString($c.Uri)
+    if ($c.Method -eq 'GET' -and $u -eq "$CW/service/tickets/12345") {
+        $b = $TBoards[$TBm.board]
+        $t = [ordered]@{ id = 12345; board = [pscustomobject]@{ id = $b.id; name = $b.name }; status = [pscustomobject]@{ name = $TBm.status } }
+        if ($TBm.team) { $t.team = [pscustomobject]@{ id = $TBm.team; name = 'Help Desk Team' } }
+        return [pscustomobject]$t
+    }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards/(\d+)/statuses') { if ($TBm.statuses403) { New-HttpError 403 '{"code":"Security","message":"You do not have security permission to perform this action."}' }; return , @($TBoardStatuses[$Matches[1]]) }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards/(\d+)/teams') { return , @($TBoardTeams[$Matches[1]]) }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards/(\d+)$') { if ($TBoards.Contains($Matches[1])) { return $TBoards[$Matches[1]] }; New-HttpError 404 '{"code":"NotFound","message":"Service Board not found"}' }
+    if ($c.Method -eq 'GET' -and $u -match '/service/boards\?conditions=name="([^"]*)"') {
+        if ($TBm.boards403) { New-HttpError 403 '{"code":"Security","message":"denied"}' }
+        $want = $Matches[1]; return , @($TBoards.Values | Where-Object { $_.name -eq $want })
+    }
+    if ($c.Method -eq 'PATCH' -and $u -eq "$CW/service/tickets/12345") {
+        $ops = @(($c.Body | ConvertFrom-Json -NoEnumerate))
+        $st = @($ops | Where-Object { $_.path -eq 'status' }) | Select-Object -First 1
+        if ($null -ne $st -and $null -ne $st.value.PSObject.Properties['name'] -and $TBm.byName -notcontains [string]$st.value.name) { New-HttpError 400 '{"code":"InvalidObject","message":"status is invalid"}' }
+        if (-not $TBm.ignorePatch) { $bo = @($ops | Where-Object { $_.path -eq 'board' })[0]; $TBm.board = [string]$bo.value.id }
+        return [pscustomobject]@{ id = 12345 }
+    }
+    return [pscustomobject]@{ id = 1 }
+}
+function Get-TPatchOps { return @(Get-Calls 'PATCH' '*/service/tickets/12345' | ForEach-Object { , @(Read-Body $_) }) }
+function Reset-TBoard { param([hashtable]$Set = @{}) $TBm.board = '1'; $TBm.status = 'In Progress'; $TBm.team = 25; $TBm.ignorePatch = $false; $TBm.statuses403 = $false; $TBm.boards403 = $false; foreach ($k in $Set.Keys) { $TBm[$k] = $Set[$k] }; Reset-Mock $S['connectwise'].Clone() $TBoardHandler }
+
+Reset-TBoard
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    Set-PsaQueue -Id '12345' -Queue 'Test Board'
+    $p = @(Get-TPatchOps)
+    $ops = if ($p.Count) { @($p[0]) } else { @() }
+    $bo = @($ops | Where-Object { $_.path -eq 'board' }); $so = @($ops | Where-Object { $_.path -eq 'status' }); $to = @($ops | Where-Object { $_.path -eq 'team' })
+    Check 'connectwise board move: ONE json-patch with board (by id), status and team' ($p.Count -eq 1 -and $ops.Count -eq 3 -and $bo.Count -eq 1 -and $bo[0].value.id -eq 14 -and $so.Count -eq 1 -and $to.Count -eq 1) (Show-Calls)
+    Check 'connectwise board move: the same-name open status on the new board is kept (In Progress -> id 21)' ($so.Count -eq 1 -and $so[0].op -eq 'replace' -and $so[0].value.id -eq 21) ($ops | ConvertTo-Json -Compress)
+    Check 'connectwise board move: a team the new board lacks is cleared (op remove)' ($to.Count -eq 1 -and $to[0].op -eq 'remove' -and $null -eq $to[0].PSObject.Properties['value']) ($ops | ConvertTo-Json -Compress)
+    Check 'connectwise board move: the ticket is read back after the move' ((Get-LastCall).Method -eq 'GET' -and (Get-LastCall).Uri -eq "$CW/service/tickets/12345") (Show-Calls)
+}
+Reset-TBoard @{ status = 'Waiting Vendor' }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    Set-PsaQueue -Id '12345' -Queue '15'
+    $ops = @(@(Get-TPatchOps)[0])
+    $so = @($ops | Where-Object { $_.path -eq 'status' }); $to = @($ops | Where-Object { $_.path -eq 'team' })
+    Check 'connectwise board move: a status the new board only has as closed is not used; its default open status is (Assigned, id 31)' ($so[0].value.id -eq 31) ($ops | ConvertTo-Json -Compress)
+    Check 'connectwise board move: the new board''s default team is used when no team matches by name' ($to[0].op -eq 'replace' -and $to[0].value.id -eq 50) ($ops | ConvertTo-Json -Compress)
+    Check 'connectwise board move by id: the board is read by id, not searched by name' (@(Get-Calls 'GET' "$CW/service/boards/15").Count -eq 1 -and @(Get-Calls 'GET' '*/service/boards[?]*').Count -eq 0) (Show-Calls)
+}
+Reset-TBoard @{ status = 'Waiting Vendor' }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    Set-PsaQueue -Id '12345' -Queue 'tier 3'
+    $ops = @(@(Get-TPatchOps)[0])
+    $so = @($ops | Where-Object { $_.path -eq 'status' }); $to = @($ops | Where-Object { $_.path -eq 'team' })
+    Check 'connectwise board move: no same-name and no default open status -> the first open status (Triage, id 71)' ($so[0].value.id -eq 71) ($ops | ConvertTo-Json -Compress)
+    Check 'connectwise board move: a team with the same name (any case) on the new board is kept by its new id' ($to[0].op -eq 'replace' -and $to[0].value.id -eq 60) ($ops | ConvertTo-Json -Compress)
+}
+Reset-TBoard @{ team = 0 }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    Set-PsaQueue -Id '12345' -Queue 'Test Board'
+    $ops = @(@(Get-TPatchOps)[0])
+    Check 'connectwise board move: a ticket with no team gets no team op when the new board has no default team' ($ops.Count -eq 2 -and -not @($ops | Where-Object { $_.path -eq 'team' }).Count) ($ops | ConvertTo-Json -Compress)
+}
+Reset-TBoard
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $m = Get-ThrowMessage { Set-PsaQueue -Id '12345' -Queue 'Help Desk' }
+    Check 'connectwise board move: a board that does not exist is a plain sentence naming it, and nothing is changed' ($m -eq "ConnectWise has no service board named 'Help Desk'. Use the exact board name or its id." -and @(Get-Calls 'PATCH' '*').Count -eq 0) "$m / $(Show-Calls)"
+    $m = Get-ThrowMessage { Set-PsaQueue -Id '12345' -Queue '99' }
+    Check 'connectwise board move: a board id that does not exist (404) is a plain sentence, nothing changed' ($m -match 'no service board with id 99' -and @(Get-Calls 'PATCH' '*').Count -eq 0) $m
+    $m = Get-ThrowMessage { Set-PsaQueue -Id '12345' -Queue 'Old Board' }
+    Check 'connectwise board move: an inactive board is refused, nothing changed' ($m -match "board 'Old Board' is inactive" -and @(Get-Calls 'PATCH' '*').Count -eq 0) $m
+    Set-PsaQueue -Id '12345' -Queue 'Service Desk'
+    Check 'connectwise board move: a ticket already on the board is left alone (no PATCH)' (@(Get-Calls 'PATCH' '*').Count -eq 0) (Show-Calls)
+}
+Reset-TBoard @{ statuses403 = $true; status = 'Waiting Vendor' }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    Set-PsaQueue -Id '12345' -Queue 'Test Board'
+    $p = @(Get-TPatchOps)
+    $names = @($p | ForEach-Object { [string](@($_ | Where-Object { $_.path -eq 'status' })[0].value.name) })
+    Check 'connectwise board move, statuses 403: board plus status BY NAME, current name first, then the usual open names, until one is accepted' (($names -join '|') -eq 'Waiting Vendor|New|New (not responded)' -and $TBm.board -eq '14') ($names -join '|')
+    Check 'connectwise board move, statuses 403: every try carries the board op in the same patch' (-not @($p | Where-Object { -not @($_ | Where-Object { $_.path -eq 'board' -and $_.value.id -eq 14 }).Count }).Count) (Show-Calls)
+    Check 'connectwise board move, statuses 403: a warning names the Table Setup permission' (@($PsaState.Warnings | Where-Object { $_ -match "wouldn't list the statuses of board 14" -and $_ -match 'Table Setup' }).Count -eq 1) (@($PsaState.Warnings) -join ' | ')
+}
+Reset-TBoard @{ statuses403 = $true; status = 'Waiting Vendor'; byName = @('Escalated') }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $m = Get-ThrowMessage { Set-PsaQueue -Id '12345' -Queue 'Test Board' }
+    Check 'connectwise board move, statuses 403 and no known name fits: a plain sentence naming the board and the permission; ticket unchanged' ($m -match "Couldn't move ConnectWise ticket 12345 to board 'Test Board'" -and $m -match 'Table Setup' -and $TBm.board -eq '1') $m
+}
+$TBm.byName = @('New (not responded)', 'In Progress')
+Reset-TBoard @{ ignorePatch = $true }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $m = Get-ThrowMessage { Set-PsaQueue -Id '12345' -Queue 'Test Board' }
+    Check 'connectwise board move: a read-back still on the old board is a plain error' ($m -eq "ConnectWise accepted the move of ticket 12345 to board 'Test Board', but the ticket is still on 'Service Desk'.") $m
+}
+Reset-TBoard
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $m = Get-ThrowMessage { Set-PsaQueue -Id '12345' -Queue 'Test Board' }
+    Check 'connectwise board move: the move goes through when the board, statuses and teams are readable' ($m -eq '' -and $TBm.board -eq '14') $m
+}
+
+# --- Test-PsaQueue: checks a target without changing anything ---
+Reset-TBoard
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $r = Test-PsaQueue -Queue 'test board'
+    Check 'Test-PsaQueue connectwise: an existing board by name -> ok, with its id and name' ($r.ok -and $r.id -eq '14' -and $r.name -eq 'Test Board' -and $r.reason -eq '') ($r | ConvertTo-Json -Compress)
+    $r = Test-PsaQueue -Queue '15'
+    Check 'Test-PsaQueue connectwise: an existing board by id -> ok' ($r.ok -and $r.name -eq 'Tier 2') ($r | ConvertTo-Json -Compress)
+    $r = Test-PsaQueue -Queue 'Help Desk'
+    Check 'Test-PsaQueue connectwise: a missing board -> not ok, the reason names it' (-not $r.ok -and $r.reason -match "no service board named 'Help Desk'") ($r | ConvertTo-Json -Compress)
+    $r = Test-PsaQueue -Queue 'Old Board'
+    Check 'Test-PsaQueue connectwise: an inactive board -> not ok' (-not $r.ok -and $r.reason -match 'inactive') ($r | ConvertTo-Json -Compress)
+    $r = Test-PsaQueue -Queue ' '
+    Check 'Test-PsaQueue: blank -> not ok' (-not $r.ok -and $r.reason -eq 'No queue was given.') ($r | ConvertTo-Json -Compress)
+    Check 'Test-PsaQueue connectwise: only reads' (@($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) (Show-Calls)
+}
+Reset-TBoard @{ boards403 = $true }
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'cw'
+    $r = Test-PsaQueue -Queue 'Test Board'
+    Check 'Test-PsaQueue connectwise: boards 403 -> ok (not known to be wrong), reason says it was not checked and names the permission' ($r.ok -and $r.reason -match "wasn't checked" -and $r.reason -match 'Table Setup') ($r | ConvertTo-Json -Compress)
+}
+Reset-Mock $S['autotask'].Clone() $Handler
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'autotask'
+    $a = Test-PsaQueue 'service desk'; $b = Test-PsaQueue 'Tier 9'; $n = Test-PsaQueue '29684'; $x = Test-PsaQueue '1'
+    Check 'Test-PsaQueue autotask: queue picklist by label and by value; missing ones are not ok' ($a.ok -and $a.id -eq '29683' -and -not $b.ok -and $b.reason -match "no ticket queue named 'Tier 9'" -and $n.ok -and $n.name -eq 'Projects' -and -not $x.ok) (@($a, $b, $n, $x) | ConvertTo-Json -Compress)
+}
+Reset-Mock $S['kaseyabms'].Clone() $Handler
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'kaseyabms'
+    $a = Test-PsaQueue '7'; $b = Test-PsaQueue 'Tier 2'
+    Check 'Test-PsaQueue kaseyabms: a numeric id passes, a name does not' ($a.ok -and -not $b.ok -and $b.reason -match 'numeric queue id') (@($a, $b) | ConvertTo-Json -Compress)
+}
+Reset-Mock $S['halopsa'].Clone() {
+    param($c, $n)
+    if ($c.Uri -eq 'https://halo.example.com/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
+    if ($c.Method -eq 'GET' -and $c.Uri -eq "$HALO/Team") { return , @([pscustomobject]@{ id = 3; name = 'Service Desk' }, [pscustomobject]@{ id = 4; name = 'Tier 2' }) }
+    return [pscustomobject]@{ id = 1 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'halopsa'
+    $a = Test-PsaQueue 'tier 2'; $b = Test-PsaQueue '9'; $c2 = Test-PsaQueue '3'
+    Check 'Test-PsaQueue halopsa: team by name or id; a missing one is not ok' ($a.ok -and $a.id -eq '4' -and -not $b.ok -and $b.reason -match 'no team with id 9' -and $c2.ok -and $c2.name -eq 'Service Desk') (@($a, $b, $c2) | ConvertTo-Json -Compress)
+}
+Reset-Mock $S['syncro'].Clone() $Handler
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'syncro'
+    $a = Test-PsaQueue 'Network'
+    Check 'Test-PsaQueue syncro: issue types are not checked (ok, with a reason), no call' ($a.ok -and $a.reason -match "aren't checked" -and @($Mock.Calls).Count -eq 0) ($a | ConvertTo-Json -Compress)
+}
+Reset-Mock $S['zendesk'].Clone() {
+    param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/groups?*') { return [pscustomobject]@{ groups = @([pscustomobject]@{ id = 21; name = 'Service Desk' }, [pscustomobject]@{ id = 22; name = 'Tier 2' }) } }
+    return [pscustomobject]@{ id = 1 }
+}
+Invoke-WithLib @('psa.ps1') {
+    $null = Connect-Psa 'zendesk'
+    $a = Test-PsaQueue 'Tier 2'; $b = Test-PsaQueue 'Tier 3'; $c2 = Test-PsaQueue '21'
+    Check 'Test-PsaQueue zendesk: group by name or id; a missing one is not ok' ($a.ok -and $a.id -eq '22' -and -not $b.ok -and $b.reason -match "no group named 'Tier 3'" -and $c2.ok -and $c2.name -eq 'Service Desk' -and @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) (@($a, $b, $c2) | ConvertTo-Json -Compress)
+}
+
 Complete-Test

@@ -83,6 +83,8 @@ Emits the same contract as the original single-node version:
 ```
 
 The **temporary password appears only in `internal_note`** (never a top-level field, never in `public_note`).
+
+`status: success` and `passwordReset: true` are reported **only** when the Reset Password step confirms the reset. If Microsoft Graph refuses it (for example 403 because the app lacks a password-reset role), Finish returns `status: error` with "Something went wrong resetting your password. A technician will follow up shortly." and the run fails, so it shows in the run history. Resetting passwords as an app needs both a Graph application permission (`User-PasswordProfile.ReadWrite.All` or `User.ReadWrite.All`, admin-consented) and an Entra role on the app's service principal (Helpdesk Administrator for non-admin users).
 The workflow **returns** the notes; it does not post to the PSA itself, the caller (ServiceAI/CloudRadial)
 writes them to the ticket.
 

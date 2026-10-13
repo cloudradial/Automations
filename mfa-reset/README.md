@@ -43,7 +43,7 @@ Most write automations take `confirm` and preview by default. This one doesn't, 
 
 ## Download & import
 
-**Download the workflow** from the [releases page](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true) — the versioned `mfa-reset.yml` is attached to each release.
+**Download the workflow** from the [releases page](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true). The versioned `mfa-reset.yml` is attached to each release.
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner of the company it serves, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

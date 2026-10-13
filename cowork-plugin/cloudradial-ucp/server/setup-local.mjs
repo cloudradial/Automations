@@ -240,7 +240,7 @@ async function startLocalSetup({
     const headers = {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-      "Referrer-Policy": "no-referrer",
+      "Referrer-Policy": "same-origin",
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
@@ -253,7 +253,8 @@ async function startLocalSetup({
     if (request.headers.host !== origin.slice(7)) return send(403, "Forbidden");
     const url = new URL(request.url || "/", origin);
     if (request.method === "GET" && url.pathname === "/" && sameToken(url.searchParams.get("token"))) return send(200, form(token));
-    if (request.method !== "POST" || url.pathname !== "/credentials" || request.headers.origin !== origin || request.headers["content-type"]?.split(";")[0] !== "application/x-www-form-urlencoded") return send(403, "Forbidden");
+    const sameOrigin = request.headers.origin === origin || request.headers.origin === "null" && request.headers["sec-fetch-site"] === "same-origin";
+    if (request.method !== "POST" || url.pathname !== "/credentials" || !sameOrigin || request.headers["content-type"]?.split(";")[0] !== "application/x-www-form-urlencoded") return send(403, "Forbidden");
     let body = "";
     try {
       for await (const chunk of request) {

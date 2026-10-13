@@ -88,6 +88,24 @@ test('local form rejects missing token, wrong origin, and rebinding Host without
     assert.equal(writes,0);
   } finally {session.close();}
 });
+test('form page lets the browser send its origin on submit (no-referrer made Chrome send Origin: null)', async () => {
+  const session = await startLocalSetup({verify:()=>{},save:async()=>{}});
+  try {
+    const response = await fetch(session.url);
+    assert.equal(response.headers.get('referrer-policy'),'same-origin');
+  } finally {session.close();}
+});
+test('Origin null is accepted only with Sec-Fetch-Site same-origin', async () => {
+  let saved = 0;
+  const session = await startLocalSetup({verify:()=>{},save:async()=>{saved++;}});
+  try {
+    const url = new URL(session.url), body = () => new URLSearchParams({...input,token:url.searchParams.get('token')});
+    assert.equal((await fetch(`${url.origin}/credentials`,{method:'POST',body:body(),headers:{Origin:'null','Sec-Fetch-Site':'cross-site'}})).status,403);
+    assert.equal(saved,0);
+    assert.equal((await fetch(`${url.origin}/credentials`,{method:'POST',body:body(),headers:{Origin:'null','Sec-Fetch-Site':'same-origin'}})).status,200);
+    assert.equal(saved,1);
+  } finally {session.close();}
+});
 test('local form saves directly, emits no keys, and stops listening after success', async () => {
   let saved;
   const session = await startLocalSetup({verify:()=>{},save:async data=>{saved=data;}});

@@ -1,6 +1,6 @@
 {
   "name": "@cloudradial/ucp-mcp",
-  "version": "2.6.3",
+  "version": "2.6.4",
   "description": "MCP server for the CloudRadial UCP Portal \u2014 exposes the CloudRadial API V2 as MCP tools for Claude Desktop, Claude Code, and other MCP clients.",
   "license": "MIT",
   "type": "module",

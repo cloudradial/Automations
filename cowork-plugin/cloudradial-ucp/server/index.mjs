@@ -16752,7 +16752,7 @@ var tools = [
 
 // src/index.ts
 var server = new Server(
-  { name: "cloudradial-ucp", version: "2.6.3" },
+  { name: "cloudradial-ucp", version: "2.6.4" },
   { capabilities: { tools: {} } }
 );
 var toolByName = new Map(tools.map((t) => [t.name, t]));

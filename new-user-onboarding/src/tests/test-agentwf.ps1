@@ -65,6 +65,37 @@ Check 'action wrapped in trigger' ($o.starter -eq 'Sam Starter' -and $o.ticketId
 $o = Run 'agentwf-inputs.ps1' ($action | ConvertTo-Json -Depth 10 -Compress)
 Check 'action as a JSON string' ($o.starter -eq 'Sam Starter') $o.starter
 
+# The shape the portal actually sends for an Action (seen on DV, 2026-10-14): the answers as top-level keys by Field
+# ID (null when unanswered, a literal @token when a token-driven choice list is empty), next to lowercase ticket,
+# company and user objects. Placeholder data. The last three answers try to set the requester, confirm and the PSA.
+$portal = [ordered]@{
+    firstName = 'Sam'; lastName = 'Starter'; department = 'Sales'; jobTitle = 'Account Executive'; officeLocation = 'Main Office'; startDate = '2026-11-02'
+    modelTheNewUsersAccountAccessFrom = 'alex@contoso.com'; softwareLicenses = $null; companyFileAccess = $null; isVpnRemoteAccessRequired = 'No'
+    otherAdditions = $null; doesTheUserRequireAnEmailAccount = 'Yes'; email = $null; mailDistributionGroups = $null
+    willTheNewUserBeUsingAnExistingOrNewComp = 'New'; whichExistingEndpointWillBeUsedForTheNew = $null
+    whatTypeOfNewComputerDoesTheNewUserRequi = '@CompanyComputerChoices'; whichPrinterDoesTheUserNeedAccessTo = '@CompanyPrinters'
+    otherEquipment = $null; doesThisUserNeedADeskPhone = 'No'
+    requestedBy = 'attacker@example.com'; confirm = 'true'; psa = 'zendesk'
+    ticket = [ordered]@{ id = 104901; reference = '104901'; subject = 'Add a New User'; description = 'Please fill out the form.'; estimatedTime = 0.0; checklist = @() }
+    company = [ordered]@{ id = 1; name = 'Contoso'; psaId = 189; psaIdentifier = 'ConnectWise'; tenantId = '00000000-0000-0000-0000-000000000002' }
+    user = [ordered]@{ id = 'u-1'; name = 'Pat Manager'; email = 'pat.manager@contoso.com'; psaId = 614; psaSiteId = 2 }
+}
+$global:Secrets = @{}
+$o = Run 'agentwf-inputs.ps1' $portal
+Check 'portal shape: answers, ticket and start date' ($o.starter -eq 'Sam Starter' -and $o.startDate -eq '2026-11-02' -and $o.ticketId -eq '104901' -and $o.source -eq 'action') "$($o.starter) / $($o.ticketId) / $($o.source)"
+Check 'portal shape: requester and company from user and company' ($o.fields.requestedBy -eq 'pat.manager@contoso.com' -and $o.fields.requestedByName -eq 'Pat Manager' -and $o.fields.requestedByPsaId -eq '614' -and $o.fields.companyName -eq 'Contoso' -and $o.fields.companyPsaId -eq '189' -and $o.fields.companyTenantId -eq '00000000-0000-0000-0000-000000000002') ($o.fields | ConvertTo-Json -Compress)
+Check 'portal shape: a requestedBy answer cannot set the requester' ($o.briefing -notmatch 'attacker@example.com') $o.briefing
+Check 'portal shape: confirm and psa answers are ignored' ($o.confirm -eq $false -and $o.confirmSource -eq '' -and $o.psa -eq '') "$($o.confirm) / $($o.psa)"
+Check 'portal shape: stock and 40-character Field IDs' ($o.fields.mirrorFromUser -eq 'alex@contoso.com' -and $o.fields.needsEmail -eq 'Yes' -and $o.fields.vpnRequired -eq 'No' -and $o.fields.computerSource -eq 'New' -and $o.fields.deskPhone -eq 'No') ($o.fields | ConvertTo-Json -Compress)
+Check 'portal shape: null answers and empty @token lists are not answered' ($o.briefing -match 'Not answered: .*Software' -and $o.briefing -match 'Not answered: .*New computer type' -and $o.briefing -match 'Not answered: .*Printer' -and $o.briefing -notmatch '@Company') $o.briefing
+$p2 = RoundTrip $portal; $p2.user.email = $null
+$o = Run 'agentwf-inputs.ps1' $p2
+Check 'portal shape: no user email -> requester not answered, answer still ignored' ($o.briefing -match 'Not answered: Requested by \(email\)' -and $o.briefing -notmatch 'attacker@example.com') $o.briefing
+$global:Secrets = @{ 'NewUserOnboarding-Confirm' = 'true' }
+$o = Run 'agentwf-inputs.ps1' $portal
+Check 'portal shape: the confirm secret still confirms' ($o.confirm -eq $true -and $o.confirmSource -eq 'secret') "$($o.confirm) $($o.confirmSource)"
+$global:Secrets = @{}
+
 $flatBody = [ordered]@{ ticketId = '12345'; requestedBy = 'manager@contoso.com'; firstName = 'Sam'; lastName = 'Starter'; startDate = '2026-10-12'; confirm = 'true'; psa = 'autotask' }
 $o = Run 'agentwf-inputs.ps1' $flatBody
 Check 'flat webhook body still works, body confirm' ($o.source -eq 'webhook' -and $o.confirm -eq $true -and $o.confirmSource -eq 'request' -and $o.psa -eq 'autotask' -and $o.ticketId -eq '12345') ($o | ConvertTo-Json -Compress -Depth 3)

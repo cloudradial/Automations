@@ -22,12 +22,14 @@ definition:
         script: |
           # === NODE: Read the request ===
           # Reads the "Add a New User" request in whichever shape it arrives:
-          #   - a CloudRadial Action on the form: the answers in Ticket.Questions, the submitter in User, the client in Company
+          #   - a CloudRadial Action on the form: the answers as top-level keys by Field ID, next to the portal's own
+          #     ticket {id, subject}, company {name, psaId, tenantId} and user {name, email, psaId} objects
+          #     (older shapes put the answers in Ticket.Questions; those are read too)
           #   - a form Webhook activity's flat body (see form-webhook-mapping.md)
           #   - the Run dialog's Trigger input
           # Drops answers CloudRadial left as literal @tokens (an unset Field ID arrives as "@startDate") and writes the
-          # briefing every stage reads. The requester and company come only from fields CloudRadial fills in (User.*,
-          # Company.*, or the webhook body's own keys), never from a typed answer, so a form answer can't impersonate them.
+          # briefing every stage reads. When the portal's objects are there, the requester, company and ticket come only
+          # from them, and confirm and psa are ignored, so no form answer can impersonate the requester or confirm a run.
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
           function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -65,7 +67,9 @@ definition:
               $ans = Get-Prop $q 'Answer'; if ('' -eq (Get-Text $ans)) { $ans = Get-Prop $q 'Value' }
               if ('' -ne (Get-Text $ans) -and -not $answers.ContainsKey($qid)) { $answers[$qid] = $ans }
           }
-          $source = $(if ($qs.Count -or $flat.Keys -match '^(User|Company|Ticket)\.') { 'action' } else { 'webhook' })
+          # From the portal: it sent its own user, company or ticket object. Top-level keys are then form answers.
+          $fromPortal = (@($flat.Keys | Where-Object { $_ -match '^(User|Company|Ticket)\.' }).Count -gt 0)
+          $source = $(if ($qs.Count -or $fromPortal) { 'action' } else { 'webhook' })
 
           # The first non-empty value among the names. CloudRadial cuts a Field ID at 40 characters, so a long name also
           # matches a key that starts with its first 40.
@@ -78,7 +82,8 @@ definition:
               return ''
           }
 
-          # Set by CloudRadial or the webhook's configuration: read from flat only.
+          # Set by CloudRadial or the webhook's configuration, never by a typed answer. From the portal, only the names with
+          # a User., Company. or Ticket. prefix count; from a webhook, the body's own keys count too.
           $contextNames = [ordered]@{
               ticketId = @('ticketId', 'Ticket.TicketId', 'Ticket.Id'); ticketSubject = @('ticketSubject', 'Ticket.Subject', 'Ticket.TicketSubject')
               companyName = @('companyName', 'Company.CompanyName', 'Company.Name'); companyPsaId = @('companyPsaId', 'company_psa_id', 'Company.CompanyPsaId', 'Company.PsaId')
@@ -113,7 +118,11 @@ definition:
               printer = 'Printer'; otherEquipment = 'Other equipment'; deskPhone = 'Desk phone'
           }
           $fields = [ordered]@{}; $missing = New-Object System.Collections.ArrayList
-          foreach ($k in $contextNames.Keys) { $v = Get-Field $flat $contextNames[$k]; if ($v) { $fields[$k] = $v } else { $null = $missing.Add($labels[$k]) } }
+          foreach ($k in $contextNames.Keys) {
+              $names = @($contextNames[$k] | Where-Object { -not $fromPortal -or $_.Contains('.') })
+              $v = Get-Field $flat $names
+              if ($v) { $fields[$k] = $v } else { $null = $missing.Add($labels[$k]) }
+          }
           foreach ($k in $formNames.Keys) {
               $v = Get-Field $answers $formNames[$k]; if (-not $v) { $v = Get-Field $flat $formNames[$k] }
               if ($v) { $fields[$k] = $v } else { $null = $missing.Add($labels[$k]) }
@@ -123,18 +132,18 @@ definition:
           $briefing = "New starter request from the CloudRadial 'Add a New User' form.`n" + ($lines -join "`n") +
               $(if ($missing.Count) { "`nNot answered: $($missing -join ', ')." } else { '' })
 
-          # Writes (the ticket note and the hand-offs) happen only when confirmed: confirm or approvedToWrite true in the body,
-          # or the NewUserOnboarding-Confirm runner secret set to true. A form Action can't send confirm, so the secret is how a
-          # form-started run goes live. psa overrides the PSA-Type secret.
+          # Writes (the ticket note and the hand-offs) happen only when confirmed: confirm or approvedToWrite true in a webhook
+          # body, or the NewUserOnboarding-Confirm runner secret set to true. From the portal, top-level keys are form answers,
+          # so confirm and psa there are ignored and only the secret confirms. psa overrides the PSA-Type secret.
           $isTrue = { param($v) return (@('true', 'yes', 'y', '1') -contains ([string]$v).Trim().ToLowerInvariant()) }
-          $bodyConfirm = $(if ($flat.ContainsKey('confirm')) { $flat['confirm'] } elseif ($flat.ContainsKey('approvedToWrite')) { $flat['approvedToWrite'] } else { $null })
+          $bodyConfirm = $(if ($fromPortal) { $null } elseif ($flat.ContainsKey('confirm')) { $flat['confirm'] } elseif ($flat.ContainsKey('approvedToWrite')) { $flat['approvedToWrite'] } else { $null })
           $confirmSource = ''
           if (& $isTrue $bodyConfirm) { $confirmSource = 'request' }
           elseif ($env:RUNNER_KV_NAME -and (Get-Command Get-AzKeyVaultSecret -ErrorAction SilentlyContinue)) {
               $s = $null; try { $s = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'NewUserOnboarding-Confirm' -AsPlainText -ErrorAction SilentlyContinue } catch { $s = $null }
               if (& $isTrue $s) { $confirmSource = 'secret' }
           }
-          $psa = Get-Text $(if ($flat.ContainsKey('psa')) { $flat['psa'] } else { '' })
+          $psa = Get-Text $(if (-not $fromPortal -and $flat.ContainsKey('psa')) { $flat['psa'] } else { '' })
 
           Set-NodeOutput ([ordered]@{
               briefing = $briefing; starter = $name; startDate = [string]$fields['startDate']; ticketId = [string]$fields['ticketId']

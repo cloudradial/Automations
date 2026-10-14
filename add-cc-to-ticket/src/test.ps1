@@ -344,6 +344,36 @@ Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $TCr = @{ Ticket = @{ TicketId = 2002; Questions = @(@{ Id = 'ticketNumber'; Value = '1001' }, @{ Id = 'ccEmail'; Value = 'alex.wilber@contoso.com' }) }; Company = @{ CompanyName = 'Contoso'; CompanyPsaId = 42 }; User = @{ Email = 'megan.bowen@contoso.com' } }
 $r = Invoke-Cc $TCr
 Check 'CloudRadial shape: Company.CompanyPsaId and User.Email are read' ($r.out.status -eq 'success') "$($r.out.message) $($r.error)"
+# A CloudRadial Action on the form (the shape seen on DV, 2026-10-14): the answers as top-level keys by Field ID, next
+# to the portal's own lowercase ticket, company and user objects, and no Questions. Placeholder data.
+function New-TPortal { param([hashtable]$Answers = @{}, $UserEmail = 'megan.bowen@contoso.com', $TicketId = 1001)
+    $b = [ordered]@{ userPrincipalName = 'megan.bowen@contoso.com'; ccEmail = 'alex.wilber@contoso.com' }
+    foreach ($k in $Answers.Keys) { $b[$k] = $Answers[$k] }
+    $b['ticket'] = [ordered]@{ id = $TicketId; reference = [string]$TicketId; subject = 'Reset Password'; description = ''; estimatedTime = 0; checklist = @() }
+    $b['company'] = [ordered]@{ id = 7; name = 'Contoso'; psaId = 42; psaIdentifier = 'ConnectWise'; tenantId = '00000000-0000-0000-0000-000000000002' }
+    $b['user'] = [ordered]@{ id = 'u-1'; name = 'Megan Bowen'; email = $UserEmail; psaId = 501; psaSiteId = 2 }
+    return $b
+}
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal)
+Check 'Action: no ticket-number question -> the form''s own ticket (ticket.id) is the target' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '1001' -and $r.out.added -eq $true) "$($r.out.message) $($r.error)"
+Check 'Action: requester from user.email, in the note' ($TS.notes.Count -ge 1 -and $TS.notes[0] -like '*alex.wilber@contoso.com*megan.bowen@contoso.com*') ($TS.notes -join ' | ')
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ticketNumber = '#1001' } -TicketId 2002)
+Check 'Action: a ticket-number answer wins over the form''s own ticket' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '1001' -and @($Mock.Calls | Where-Object { $_.Uri -like '*2002*' }).Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ requester_email = 'megan.bowen@contoso.com'; company_psa_id = '42'; technician_run = 'true' } -UserEmail $null)
+Check 'Action: requester, company and technician_run answers are ignored -> rejected, no calls' ($r.out.status -eq 'rejected' -and $r.out.message -like '*requester_email*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ requester_email = 'attacker@fabrikam.com'; preview = 'true'; notify_cc = 'false' })
+Check 'Action: a requester_email answer cannot replace user.email' ($r.out.status -eq 'success' -and ($TS.notes -join ' ') -notlike '*attacker@fabrikam.com*') "$($r.out.message) $($TS.notes -join ' | ')"
+Check 'Action: preview and notify_cc answers are ignored (real change, public note sent)' ($r.out.added -eq $true -and $TS.notes.Count -eq 2) "$($r.out.status) notes=$($TS.notes.Count)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal -UserEmail 'adele.vance@contoso.com' -TicketId 1001)
+Check 'Action: the ownership check still runs on the form''s own ticket (a CC can add, a stranger cannot)' ($r.out.status -eq 'success') "$($r.out.message)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal -UserEmail 'lee.gu@fabrikam.com')
+Check 'Action: someone who is not on the ticket is refused' ($r.out.status -eq 'rejected' -and @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) "$($r.out.message) $(Show-Calls)"
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc ((New-TBody) | ConvertTo-Json -Compress) -Raw
 Check 'a flat JSON string body works' ($r.out.status -eq 'success') "$($r.out.message) $($r.error)"

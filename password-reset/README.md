@@ -12,6 +12,7 @@ Each version is published as a release, with `password-reset.yml` attached. Down
 |---|---|
 | Download `password-reset.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0) |
 | View the current source | [`password-reset.yml`](https://github.com/cloudradial/Automations/blob/main/password-reset/password-reset.yml) |
+| Test harness for the Parse & Validate step | [`src/test-parse.ps1`](https://github.com/cloudradial/Automations/blob/main/password-reset/src/test-parse.ps1) |
 | All files in this automation | [password-reset](https://github.com/cloudradial/Automations/tree/main/password-reset) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/password-reset) |
 | Marketplace listing | [AAI-00027](https://automations.cloudradial.com/marketplace/AAI-00027) |
@@ -62,6 +63,14 @@ object), it is **never** a user-typed field.
 
 Handles both a flat `{key:value}` body and the nested `{trigger:{Ticket:{Questions:[{Id,Value}]},Company:{…}}}` shape.
 
+### Starting it from a form Action
+
+On portals with Actions, add a question of type **Action** to the form and pick **Password Reset**. There's nothing to map. The portal sends each answer under its Field ID (so the form needs a `userPrincipalName` question for the account to reset), plus its own `ticket`, `company` and `user` objects. From an Action:
+
+- **The submitter** is the portal's `user.email`, **the ticket** is `ticket.id` (the ticket the form creates), and **the tenant** is `company.tenantId`. Set the company's Microsoft 365 tenant in the portal so the tenant-scope gate can check it.
+- **A form answer can't set** `submittedByUpn`, `userOfficeId`, `companyTenantId`, `ticketId` or `revokeSessions`. Answers with those Field IDs are ignored, and sessions are always revoked.
+- The Action doesn't send the submitter's Entra object id, so ownership is matched by email (the submitter's portal email against the target's UPN, mail or proxy addresses).
+
 ## Gates (all fail-closed), in order
 
 1. **Ownership**, submitter must equal the target (above).
@@ -98,8 +107,9 @@ password-admin role, or the reset PATCH / gate reads return 403. `aiExtensions: 
 ## Import & test
 
 1. AutomationAI → import `password-reset.yml`; **Publish** and **deploy** to the runner holding the secrets.
-2. Wire the CloudRadial form/Automation (or ServiceAI Action) to the Start webhook's URL + secret.
-3. Node 1's **Test Input** has `submittedByUpn` == the target, run it against a disposable account you own to see `status: success`; change `submittedByUpn` to a different address to see the ownership gate return `rejected`.
+2. Wire the CloudRadial form to it: an Action question (see [Starting it from a form Action](#starting-it-from-a-form-action)), or a form Automation or ServiceAI Action pointed at the Start webhook's URL and secret.
+3. Run `pwsh -NoProfile -File password-reset/src/test-parse.ps1` after changing Parse & Validate. It checks every input shape in strict mode.
+4. Node 1's **Test Input** has `submittedByUpn` == the target, run it against a disposable account you own to see `status: success`; change `submittedByUpn` to a different address to see the ownership gate return `rejected`.
 
 > Webhook secrets are stripped from this export, the portal issues a new URL/secret on import. A `success`
 > run changes that account's password and revokes its sessions; test against a disposable account.

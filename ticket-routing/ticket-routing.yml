@@ -543,7 +543,11 @@ definition:
       properties:
         goal: 'Read the ticket summary and description in your input and pick the one skill from skillList that an engineer needs to work it, and the role for that skill. Copy the skill and role exactly as they are written in skillList. Return skill, role, confidence (0 to 1) and a one-sentence reason. If nothing in the list fits, return an empty skill and a confidence below 0.5. If skip is true, return an empty skill and confidence 0 straight away. This is read-only: you have no tools and change nothing.'
         model: ''
-        allowedExtensions: []
+        # Never leave this list empty: an empty list gives the agent every installed
+        # extension (925 tools on 2026-10-14, over the model's 128-tool limit).
+        # The agent calls no tools; the list only has to be short and non-empty.
+        allowedExtensions:
+          - cloudradial-v2-companies
         timeoutSeconds: 120
         autoApprove: true
         agentSlug: ticket-skill-classifier

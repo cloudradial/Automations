@@ -257,7 +257,10 @@ definition:
           stage. List each quote request under the starter's awaitingHuman as "Quote: <item> - <why
           and any spec from the form>". The last step adds them to the ticket for whoever orders.
           If intake reported the starter blocked, do nothing and pass the block on.
-        allowedExtensions: []
+        # Never leave this list empty: an empty list gives the agent every installed
+        # extension (925 tools on 2026-10-14, over the model's 128-tool limit).
+        # This stage calls no tools; the workflow needs this extension anyway.
+        allowedExtensions: [cloudradial-v2-companies]
         model: ""
         timeoutSeconds: 900
         autoApprove: false

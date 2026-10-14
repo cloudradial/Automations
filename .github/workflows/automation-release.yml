@@ -20,7 +20,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Parse tag and locate the automation's .yml files
         id: tag
@@ -44,7 +44,7 @@ jobs:
           printf '  %s\n' "${ymls[@]}"
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ steps.tag.outputs.folder }} ${{ steps.tag.outputs.version }}
           files: ${{ steps.tag.outputs.folder }}/*.yml

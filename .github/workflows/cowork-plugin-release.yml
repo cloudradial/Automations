@@ -12,18 +12,18 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Build universal pure-JS plugin
         working-directory: cowork-plugin/cloudradial-ucp
         run: node scripts/build-plugin.mjs
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: cowork-plugin/cloudradial-ucp/cloudradial-ucp.plugin
           generate_release_notes: true

@@ -176,7 +176,7 @@ Plus:
 - It never trusts an invented skill. An AI answer that isn't in the table counts as no match.
 - If the routing table fails its checks, nothing happens, and `internal_note` lists the errors.
 - If the assignment fails, no note is written and the run returns `error`.
-- The classifier's Agent node lists one extension (`cloudradial-v2-companies`) even though it calls no tools. Don't empty that list: an empty list gives the agent every installed extension, and with more than 128 tools the model call fails.
+- The classifier's Agent node lists one extension (`cloudradial-v2-companies`) even though it calls no tools. Don't empty that list: an empty list gives the agent every installed extension, and with more than 128 tools the model call fails. The node also ships with `autoApprove` off, so if the classifier ever tries a tool call, it waits for approval in the Inbox instead of running.
 - The routing articles list engineer emails, so keep them in your own company and out of client-facing content.
 
 ## Test

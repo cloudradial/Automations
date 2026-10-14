@@ -549,7 +549,7 @@ definition:
         allowedExtensions:
           - cloudradial-v2-companies
         timeoutSeconds: 120
-        autoApprove: true
+        autoApprove: false
         agentSlug: ticket-skill-classifier
         inputSchema: |
           {"type":"object","properties":{"summary":{"type":"string","description":"The ticket summary or subject."},"description":{"type":"string","description":"The ticket description or first note, as plain text."},"skillList":{"type":"string","description":"One line per skill: '<skill>: <description> [roles: ...]'. Pick only from this list."},"roles":{"type":"string","description":"Every role used in the table, comma separated."},"skip":{"type":"boolean","description":"True when the workflow has already decided not to route this ticket."}},"required":["skillList"]}

@@ -57,7 +57,7 @@ const wf = {
           model: '',
           allowedExtensions: ['cloudradial-v2-companies'], // never empty: see EXT_COMMENT below
           timeoutSeconds: 120,
-          autoApprove: true,
+          autoApprove: false, // any tool call waits in the Inbox; the classifier should make none
           agentSlug: agent.slug,
           inputSchema: agent.inputSchema,
           outputSchema: agent.outputSchema,

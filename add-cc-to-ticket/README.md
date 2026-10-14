@@ -58,7 +58,7 @@ The CC is added only when **both** hold:
 
 If `requester_email` or `company_psa_id` is missing (or arrives as a literal `@UserEmail` because the token wasn't filled), the run is refused with `status: rejected` and nothing is called. A technician running it by hand in the designer can send `"technician_run": true` instead: the checks it has data for still run, and the output says which were skipped. Never put `technician_run` in a client-facing form's webhook body.
 
-These fields are only read from the webhook body, never from a form answer, so adding a question with the same Field ID can't override them. A refusal never says whose ticket it is: a ticket from another company gets "Ticket 1001 isn't one you can change, so nothing was changed."
+These fields are only read from the webhook body (or, on an Action, from the portal's own `user` and `company` objects), never from a form answer, so adding a question with the same Field ID can't override them. A refusal never says whose ticket it is: a ticket from another company gets "Ticket 1001 isn't one you can change, so nothing was changed."
 
 ## Download & import
 
@@ -103,13 +103,23 @@ The PSA API user needs to read tickets, contacts (users in HaloPSA and Zendesk) 
 | `preview` | No (default `false`) | `true` returns what would happen and changes nothing. `dryRun` works too. |
 | `psa` | No | Overrides the `PSA-Type` secret. |
 
-The ticket number and address are read from the body first, then from the form's answers (`Ticket.Questions` by question Id). A value left as a literal `@token` counts as missing.
+The ticket number and address are read from the body first, then from the form's answers (`Ticket.Questions` by question Id). A value left as a literal `@token` counts as missing. On a CloudRadial **Action** the input is different. See [Form setup](#form-setup).
 
 ## Output
 
 `status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (the public note written to the new CC; empty when none was). An `error` also fails the step, so it shows in the run history.
 
 ## Form setup
+
+### With an Action (portals with Actions)
+
+Add a question of type **Action** at the end of the form and pick **Add CC to Ticket**. There's nothing to map. The portal sends each answer under its Field ID, plus its own `ticket`, `company` and `user` objects:
+
+- **Which ticket:** with a **Ticket number** question (Field ID `ticketNumber`), that ticket. Without one, the ticket the form itself creates. That suits a form like *Reset Password* that also asks who to copy, with an Email question whose Field ID is `ccEmail`.
+- **Who's asking and their company:** only from the portal's `user.email` and `company.psaId`. The ownership rule applies as usual, so on the form's own ticket the requester is its contact.
+- **The switches** (`technician_run`, `allow_company_colleagues`, `allowed_domains`, `notify_cc`, `preview`, `psa`) can't be set from an Action, and a form answer with one of those Field IDs is ignored. An Action run uses the defaults: contact or CC only, any domain, public note on, live. If you need `allowed_domains`, use the Webhook activity below.
+
+### With a Webhook activity
 
 On the CloudRadial service-request form:
 

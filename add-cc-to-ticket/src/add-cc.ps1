@@ -30,10 +30,15 @@ function Invoke-CcMain {
     # Ticket and address: the webhook body first, then the form's answers.
     $ticketRef = Get-StepField $f @('ticket_number', 'ticketNumber', 'ticketId', 'ticket_id')
     if (-not $ticketRef) { $ticketRef = Get-StepField $q @('ticket_number', 'ticketNumber', 'ticketId', 'ticket_id') }
+    # From a CloudRadial Action with no ticket-number question, the target is the ticket the form itself created
+    # (for example a Password Reset form that also asks who to copy). The ownership check below still applies, so the
+    # requester must be that ticket's contact, which the person who submitted the form is.
+    if (-not $ticketRef -and $in.portal) { $ticketRef = Get-StepField $f @('Ticket.Id', 'Ticket.Reference') }
     $ccIn = Get-StepField $f @('cc_email', 'ccEmail', 'cc', 'email', 'contactEmail')
     if (-not $ccIn) { $ccIn = Get-StepField $q @('cc_email', 'ccEmail', 'cc', 'email', 'contactEmail') }
     # Who is asking, and the rules: the webhook body only (CloudRadial fills @UserEmail and @CompanyPsaId at submit;
-    # the submitter can't change them). A form answer never sets these.
+    # the submitter can't change them), or on an Action the portal's user and company objects. A form answer never sets
+    # these, and on an Action the switches below (technician_run, preview and so on) can't be set at all.
     $requester = Get-StepField $f @('requester_email', 'requesterEmail', 'UserEmail', 'User.Email', 'User.UserEmail')
     $companyPsa = Get-StepField $f @('company_psa_id', 'companyPsaId', 'CompanyPsaId', 'Company.CompanyPsaId', 'Company.PsaId')
     $techRun = Test-StepTrue (Get-StepField $f @('technician_run', 'technicianRun'))

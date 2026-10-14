@@ -6,7 +6,7 @@ A one-page snapshot of any client's users, devices, warranties and portal setup 
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=portal-lookup&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/portal-lookup/v1.0.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `portal-lookup.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/portal-lookup/portal-lookup.yml) |
-| Download `portal-lookup.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=portal-lookup&expanded=true) |
+| Download `portal-lookup.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/portal-lookup/v1.0.0) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [portal-lookup](https://github.com/cloudradial/Automations/tree/main/portal-lookup) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/portal-lookup) |

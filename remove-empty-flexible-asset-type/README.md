@@ -6,7 +6,7 @@ Deletes one empty flexible asset type, such as the old "ScalePad Assets" list, w
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=remove-empty-flexible-asset-type&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/remove-empty-flexible-asset-type/v1.0.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `remove-empty-flexible-asset-type.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/remove-empty-flexible-asset-type/remove-empty-flexible-asset-type.yml) |
-| Download `remove-empty-flexible-asset-type.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=remove-empty-flexible-asset-type&expanded=true) |
+| Download `remove-empty-flexible-asset-type.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/remove-empty-flexible-asset-type/v1.0.0) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [remove-empty-flexible-asset-type](https://github.com/cloudradial/Automations/tree/main/remove-empty-flexible-asset-type) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/remove-empty-flexible-asset-type) |

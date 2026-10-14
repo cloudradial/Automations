@@ -6,7 +6,7 @@ Lets any automation finish by opening a ticket in your PSA, sending an email or 
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=deliver-result&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/deliver-result/v1.0.0).
 
 **Import** [`deliver-result.agent.yml`](https://github.com/cloudradial/Automations/blob/main/deliver-result/deliver-result.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
 
@@ -15,7 +15,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `deliver-result.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/deliver-result/deliver-result.agent.yml) |
-| Download `deliver-result.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=deliver-result&expanded=true) |
+| Download `deliver-result.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/deliver-result/v1.0.0) |
 | Used by | [Get a Weekly List of Warranty and Ownership Gaps](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit) |
 | All files in this automation | [deliver-result](https://github.com/cloudradial/Automations/tree/main/deliver-result) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/deliver-result) |

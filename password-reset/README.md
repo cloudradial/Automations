@@ -6,11 +6,11 @@ End users reset their own Microsoft 365 password from the portal in seconds, and
 
 ## Files
 
-Each version is published as a release, with `password-reset.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=password-reset&expanded=true).
+Each version is published as a release, with `password-reset.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `password-reset.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=password-reset&expanded=true) |
+| Download `password-reset.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0) |
 | View the current source | [`password-reset.yml`](https://github.com/cloudradial/Automations/blob/main/password-reset/password-reset.yml) |
 | All files in this automation | [password-reset](https://github.com/cloudradial/Automations/tree/main/password-reset) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/password-reset) |
@@ -26,7 +26,7 @@ Nodes: **Parse & Validate → Resolve & Ownership Gate → Safety Gates → Rese
 
 ## Download & import
 
-**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/Automations/releases?q=password-reset&expanded=true)
+**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Full steps are under [Import & test](#import--test) below.
 

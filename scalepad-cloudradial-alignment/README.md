@@ -6,7 +6,7 @@ Optional. When ScalePad data is messy, it matches clients and plans the move so 
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-alignment&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-alignment/v1.0.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,9 +16,9 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `scalepad-cloudradial-alignment.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) |
-| Download `scalepad-cloudradial-alignment.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-alignment&expanded=true) |
+| Download `scalepad-cloudradial-alignment.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-alignment/v1.0.0) |
 | View `scalepad-cloudradial-alignment.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) |
-| Download `scalepad-cloudradial-alignment.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-alignment&expanded=true) |
+| Download `scalepad-cloudradial-alignment.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-alignment/v1.0.0) |
 | View `knowledge/scalepad-to-cloudradial-migration-map.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) |
 | Download `knowledge/scalepad-to-cloudradial-migration-map.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) |
 | All files in this automation | [scalepad-cloudradial-alignment](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-alignment) |

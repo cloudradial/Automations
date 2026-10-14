@@ -6,11 +6,11 @@ Every morning, email the service manager a plain list of yesterday's closed tick
 
 ## Files
 
-Each version is published as a release, with `time-entry-review.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=time-entry-review&expanded=true).
+Each version is published as a release, with `time-entry-review.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/time-entry-review/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `time-entry-review.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=time-entry-review&expanded=true) |
+| Download `time-entry-review.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/time-entry-review/v1.0.0) |
 | View the current source | [`time-entry-review.yml`](https://github.com/cloudradial/Automations/blob/main/time-entry-review/time-entry-review.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/time-entry-review/src) |
 | All files in this automation | [time-entry-review](https://github.com/cloudradial/Automations/tree/main/time-entry-review) |
@@ -43,7 +43,7 @@ Where each PSA keeps its time:
 
 ## Download & import
 
-**Download the workflow:** [`time-entry-review.yml`](https://github.com/cloudradial/Automations/releases?q=time-entry-review&expanded=true)
+**Download the workflow:** [`time-entry-review.yml`](https://github.com/cloudradial/Automations/releases/tag/time-entry-review/v1.0.0)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds your PSA secrets. **Attach a daily Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

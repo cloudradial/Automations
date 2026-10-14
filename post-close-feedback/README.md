@@ -6,11 +6,11 @@ When a ticket closes, the requester gets a one-click satisfaction survey from th
 
 ## Files
 
-Each version is published as a release, with `post-close-feedback.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=post-close-feedback&expanded=true).
+Each version is published as a release, with `post-close-feedback.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `post-close-feedback.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=post-close-feedback&expanded=true) |
+| Download `post-close-feedback.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0) |
 | View the current source | [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/blob/main/post-close-feedback/post-close-feedback.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/post-close-feedback/src) |
 | All files in this automation | [post-close-feedback](https://github.com/cloudradial/Automations/tree/main/post-close-feedback) |
@@ -65,7 +65,7 @@ What this workflow does with it: in score mode, when `cr_company_id` (the CloudR
 
 ## Download & import
 
-**Download the workflow:** [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/releases?q=post-close-feedback&expanded=true)
+**Download the workflow:** [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

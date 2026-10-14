@@ -6,11 +6,11 @@ Every hour, find the users Microsoft flags as high risk, open a priority ticket,
 
 ## Files
 
-Each version is published as a release, with `risky-signin-response.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=risky-signin-response&expanded=true).
+Each version is published as a release, with `risky-signin-response.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/risky-signin-response/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `risky-signin-response.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=risky-signin-response&expanded=true) |
+| Download `risky-signin-response.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/risky-signin-response/v1.0.0) |
 | View the current source | [`risky-signin-response.yml`](https://github.com/cloudradial/Automations/blob/main/risky-signin-response/risky-signin-response.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/risky-signin-response/src) |
 | All files in this automation | [risky-signin-response](https://github.com/cloudradial/Automations/tree/main/risky-signin-response) |
@@ -42,7 +42,7 @@ With `preview` true the run reads everything, including the PSA, and says what i
 
 ## Download & import
 
-**Download the workflow:** [`risky-signin-response.yml`](https://github.com/cloudradial/Automations/releases?q=risky-signin-response&expanded=true)
+**Download the workflow:** [`risky-signin-response.yml`](https://github.com/cloudradial/Automations/releases/tag/risky-signin-response/v1.0.0)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds that client's secrets. **Attach an hourly Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

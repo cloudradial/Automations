@@ -6,11 +6,11 @@ Keeps each client's device list current in the portal, so forms offer a "which c
 
 ## Files
 
-Each version is published as a release, with `cloudradial-endpoint-tokens.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=endpoint-names-token&expanded=true).
+Each version is published as a release, with `cloudradial-endpoint-tokens.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/endpoint-names-token/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `cloudradial-endpoint-tokens.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=endpoint-names-token&expanded=true) |
+| Download `cloudradial-endpoint-tokens.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-names-token/v1.0.0) |
 | View the current source | [`cloudradial-endpoint-tokens.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-names-token/cloudradial-endpoint-tokens.yml) |
 | All files in this automation | [endpoint-names-token](https://github.com/cloudradial/Automations/tree/main/endpoint-names-token) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/endpoint-names-token) |
@@ -22,7 +22,7 @@ A CloudRadial **AutomationAI workflow** that builds a sorted, de-duplicated, com
 
 ## Download & import
 
-**Download the workflow:** [`cloudradial-endpoint-tokens.yml`](https://github.com/cloudradial/Automations/releases?q=endpoint-names-token&expanded=true)
+**Download the workflow:** [`cloudradial-endpoint-tokens.yml`](https://github.com/cloudradial/Automations/releases/tag/endpoint-names-token/v1.0.0)
 
 In AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **deploy** it to your runner. Run it on demand with **Test**, or attach a **Routine**.
 

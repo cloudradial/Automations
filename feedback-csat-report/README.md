@@ -6,11 +6,11 @@ Turns portal feedback into a CSAT score and summary for each client on a Planner
 
 ## Files
 
-Each version is published as a release, with `feedback-csat-report.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=feedback-csat-report&expanded=true).
+Each version is published as a release, with `feedback-csat-report.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/feedback-csat-report/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `feedback-csat-report.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=feedback-csat-report&expanded=true) |
+| Download `feedback-csat-report.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/feedback-csat-report/v1.0.0) |
 | View the current source | [`feedback-csat-report.yml`](https://github.com/cloudradial/Automations/blob/main/feedback-csat-report/feedback-csat-report.yml) |
 | All files in this automation | [feedback-csat-report](https://github.com/cloudradial/Automations/tree/main/feedback-csat-report) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/feedback-csat-report) |

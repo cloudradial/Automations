@@ -54,7 +54,7 @@ jobs:
 
             Import the attached file in AutomationAI → **Workflows → Import**.
 
-            All versions of this automation: https://github.com/cloudradial/Automations/releases?q=${{ steps.tag.outputs.folder }}
+            Docs and source: https://github.com/cloudradial/Automations/tree/main/${{ steps.tag.outputs.folder }}
           # A version containing '-' (e.g. v1.1.0-rc.1) is a pre-release and does
           # not get the "Latest" badge. Folder names may contain '-', so this
           # checks the version part only, never the whole tag.

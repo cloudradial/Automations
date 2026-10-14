@@ -6,11 +6,11 @@ Reads a client's Microsoft Secure Score and builds it into a CloudRadial assessm
 
 ## Files
 
-Each version is published as a release, with `secure-score-assessment.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=secure-score-assessment&expanded=true).
+Each version is published as a release, with `secure-score-assessment.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `secure-score-assessment.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=secure-score-assessment&expanded=true) |
+| Download `secure-score-assessment.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.0.0) |
 | View the current source | [`secure-score-assessment.yml`](https://github.com/cloudradial/Automations/blob/main/secure-score-assessment/secure-score-assessment.yml) |
 | All files in this automation | [secure-score-assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/secure-score-assessment) |

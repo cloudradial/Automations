@@ -6,11 +6,11 @@ Domains expiring in the next 60 days show up as a Planner card for each client, 
 
 ## Files
 
-Each version is published as a release, with `domain-expiration-report.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=domain-expiration-report&expanded=true).
+Each version is published as a release, with `domain-expiration-report.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `domain-expiration-report.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=domain-expiration-report&expanded=true) |
+| Download `domain-expiration-report.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0) |
 | View the current source | [`domain-expiration-report.yml`](https://github.com/cloudradial/Automations/blob/main/domain-expiration-report/domain-expiration-report.yml) |
 | All files in this automation | [domain-expiration-report](https://github.com/cloudradial/Automations/tree/main/domain-expiration-report) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/domain-expiration-report) |
@@ -22,7 +22,7 @@ A CloudRadial **AutomationAI workflow** that checks every company's managed doma
 
 ## Download & import
 
-**Download the workflow:** [`domain-expiration-report.yml`](https://github.com/cloudradial/Automations/releases?q=domain-expiration-report&expanded=true)
+**Download the workflow:** [`domain-expiration-report.yml`](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0)
 
 In AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **deploy** it to your runner. Run it on demand with **Test**, or attach a **Routine** to run it on a schedule (e.g. weekly). No trigger input is required, it covers all companies.
 

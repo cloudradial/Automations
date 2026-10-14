@@ -6,11 +6,11 @@ When a client questions an invoice, the account manager finds an internal note o
 
 ## Files
 
-Each version is published as a release, with `invoice-context.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=invoice-context&expanded=true).
+Each version is published as a release, with `invoice-context.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/invoice-context/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `invoice-context.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=invoice-context&expanded=true) |
+| Download `invoice-context.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/invoice-context/v1.0.0) |
 | View the current source | [`invoice-context.yml`](https://github.com/cloudradial/Automations/blob/main/invoice-context/invoice-context.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/invoice-context/src) |
 | All files in this automation | [invoice-context](https://github.com/cloudradial/Automations/tree/main/invoice-context) |
@@ -53,7 +53,7 @@ The tracker row suggests an Agent node. This is a PowerShell workflow with a sin
 
 ## Download & import
 
-**Download the workflow:** [`invoice-context.yml`](https://github.com/cloudradial/Automations/releases?q=invoice-context&expanded=true)
+**Download the workflow:** [`invoice-context.yml`](https://github.com/cloudradial/Automations/releases/tag/invoice-context/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties** if ServiceAI calls it, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

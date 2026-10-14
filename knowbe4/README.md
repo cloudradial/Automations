@@ -6,11 +6,11 @@ Shows which users are behind on KnowBe4 training in the client's portal and open
 
 ## Files
 
-Each version is published as a release, with `knowbe4.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=knowbe4&expanded=true).
+Each version is published as a release, with `knowbe4.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `knowbe4.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=knowbe4&expanded=true) |
+| Download `knowbe4.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.0.0) |
 | View the current source | [`knowbe4.yml`](https://github.com/cloudradial/Automations/blob/main/knowbe4/knowbe4.yml) |
 | All files in this automation | [knowbe4](https://github.com/cloudradial/Automations/tree/main/knowbe4) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/knowbe4) |

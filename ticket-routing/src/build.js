@@ -55,9 +55,9 @@ const wf = {
             'and a one-sentence reason. If nothing in the list fits, return an empty skill and a confidence below 0.5. If skip is true, return an ' +
             'empty skill and confidence 0 straight away. This is read-only: you have no tools and change nothing.',
           model: '',
-          allowedExtensions: [],
+          allowedExtensions: ['cloudradial-v2-companies'], // never empty: see EXT_COMMENT below
           timeoutSeconds: 120,
-          autoApprove: true,
+          autoApprove: false, // any tool call waits in the Inbox; the classifier should make none
           agentSlug: agent.slug,
           inputSchema: agent.inputSchema,
           outputSchema: agent.outputSchema,
@@ -99,13 +99,23 @@ const header = [
   '# Import on Workflows -> Import, after uploading ticket-skill-classifier.agent.yml on Agents -> Custom.',
   '# See README.md for the routing table, secrets and the ServiceAI Action.',
 ].join('\n');
-const out = header + '\n' + y.dump(wf, { lineWidth: -1, noRefs: true });
+// js-yaml can't write comments, so the classifier's allowedExtensions comment is added after the dump.
+const EXT_COMMENT = [
+  '# Never leave this list empty: an empty list gives the agent every installed',
+  "# extension (925 tools on 2026-10-14, over the model's 128-tool limit).",
+  '# The agent calls no tools; the list only has to be short and non-empty.',
+];
+const EXT_LINE = '        allowedExtensions:\n          - cloudradial-v2-companies\n';
+let out = header + '\n' + y.dump(wf, { lineWidth: -1, noRefs: true });
+if (out.split(EXT_LINE).length !== 2) throw new Error('classifier allowedExtensions not found exactly once');
+out = out.replace(EXT_LINE, () => EXT_COMMENT.map((l) => `        ${l}\n`).join('') + EXT_LINE);
 const back = y.load(out);
 // Embedded JSON must parse.
 const cls = back.definition.activities.find((a) => a.id === 'node-classify').properties;
 for (const k of ['inputSchema', 'outputSchema', 'inputBindingsJson']) JSON.parse(cls[k]);
 JSON.parse(back.definition.activities.find((a) => a.id === 'node-prepare').properties.testInput);
 if (back.definition.activities[0].properties.webhookEnabled !== false) throw new Error('webhook must ship off');
+if (!Array.isArray(cls.allowedExtensions) || cls.allowedExtensions.length === 0) throw new Error('classifier allowedExtensions must not be empty');
 fs.writeFileSync(path.join(root, 'ticket-routing.yml'), out);
 
 const cli = read('Test-RoutingTable.cli.ps1').replace('#@@ROUTING_TABLE@@\n', () => read('routing-table.ps1')); // a function, so "$'" in the script isn't a replace pattern

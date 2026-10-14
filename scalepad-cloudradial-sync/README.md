@@ -2,19 +2,19 @@
 
 Moves every matched client's devices, other hardware, software, assessments, roadmap, budget, SaaS, insights and QBR documents from ScalePad into CloudRadial, and is safe to re-run.
 
-**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** AAI-00030 | **Type:** Workflow
+**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** AAI-00030 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `scalepad-cloudradial-sync.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-sync&expanded=true).
 
 | What | Link |
 |---|---|
-| View `scalepad-cloudradial-sync.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
-| Download `scalepad-cloudradial-sync.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
+| Download `scalepad-cloudradial-sync.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-sync&expanded=true) |
+| View the current source | [`scalepad-cloudradial-sync.yml`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
+| Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync/src) |
 | All files in this automation | [scalepad-cloudradial-sync](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/scalepad-cloudradial-sync) |
-| Source (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync/src) |
 | Marketplace listing | [AAI-00030](https://automations.cloudradial.com/marketplace/AAI-00030) |
 
 ## How it works

@@ -2,16 +2,16 @@
 
 When someone changes department, their Microsoft 365 groups, department, title and manager are brought in line with your department map in one run, and you see every add and remove before anything changes.
 
-**Formerly:** Role change (mover) | **Marketplace ID:** AAI-00043 | **Type:** Workflow
+**Formerly:** Role change (mover) | **Marketplace ID:** AAI-00043 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=role-change-mover&expanded=true).
 
 | What | Link |
 |---|---|
 | View `role-change-mover.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/role-change-mover/role-change-mover.yml) |
-| Download `role-change-mover.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/role-change-mover/role-change-mover.yml) |
+| Download `role-change-mover.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=role-change-mover&expanded=true) |
 | Download the **Role Change: Department Map** KB article (paste into your portal) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/role-change-mover/kb-articles/role-change-department-map.txt) |
 | Download `department-map-template.csv` (to build the map in Excel) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/role-change-mover/department-map-template.csv) |
 | Source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/role-change-mover/src) |
@@ -75,7 +75,7 @@ Only the rows for the two departments in the request are checked against Microso
 
 ## Download & import
 
-**Download the workflow:** [`role-change-mover.yml`](https://github.com/cloudradial/Automations/blob/main/role-change-mover/role-change-mover.yml)
+**Download the workflow:** [`role-change-mover.yml`](https://github.com/cloudradial/Automations/releases?q=role-change-mover&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [secrets](#required-runner-key-vault-secrets), create the department map article, then publish and deploy. Full steps are under [Import & test](#import--test).
 

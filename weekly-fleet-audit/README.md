@@ -2,11 +2,11 @@
 
 A weekly email grades every managed computer against hardware-refresh standards, lists warranty gaps, and flags clients with no account manager, so refresh and ownership conversations don't slip.
 
-**Formerly:** Weekly Fleet Audit | **Marketplace ID:** AAI-00032 | **Type:** Workflow (PowerShell audit + Deliver Result agent)
+**Formerly:** Weekly Fleet Audit | **Marketplace ID:** AAI-00032 | **Type:** Workflow (PowerShell audit + Deliver Result agent) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=weekly-fleet-audit&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `weekly-fleet-audit.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/weekly-fleet-audit/weekly-fleet-audit.yml) |
-| Download `weekly-fleet-audit.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/weekly-fleet-audit/weekly-fleet-audit.yml) |
+| Download `weekly-fleet-audit.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=weekly-fleet-audit&expanded=true) |
 | Needs the agent | [Deliver Result](https://github.com/cloudradial/Automations/tree/main/deliver-result) |
 | All files in this automation | [weekly-fleet-audit](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/weekly-fleet-audit) |

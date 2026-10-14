@@ -2,16 +2,16 @@
 
 Shows which users are behind on KnowBe4 training in the client's portal and opens one follow-up ticket per company, ready as compliance evidence.
 
-**Formerly:** KnowBe4 Training Sync | **Marketplace ID:** AAI-00029 | **Type:** Workflow
+**Formerly:** KnowBe4 Training Sync | **Marketplace ID:** AAI-00029 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `knowbe4.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=knowbe4&expanded=true).
 
 | What | Link |
 |---|---|
-| View `knowbe4.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/knowbe4/knowbe4.yml) |
-| Download `knowbe4.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/knowbe4/knowbe4.yml) |
+| Download `knowbe4.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=knowbe4&expanded=true) |
+| View the current source | [`knowbe4.yml`](https://github.com/cloudradial/Automations/blob/main/knowbe4/knowbe4.yml) |
 | All files in this automation | [knowbe4](https://github.com/cloudradial/Automations/tree/main/knowbe4) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/knowbe4) |
 | Marketplace listing | [AAI-00029](https://automations.cloudradial.com/marketplace/AAI-00029) |

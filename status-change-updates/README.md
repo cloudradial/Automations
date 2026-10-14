@@ -2,16 +2,16 @@
 
 Every time a ticket moves to a status the client should know about, the requester gets a short, specific update in plain words, posted to the ticket so the PSA emails it, and internal-only statuses stay quiet.
 
-**Marketplace ID:** AAI-00054 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00054 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `status-change-updates.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=status-change-updates&expanded=true).
 
 | What | Link |
 |---|---|
-| View `status-change-updates.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/status-change-updates/status-change-updates.yml) |
-| Download `status-change-updates.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/status-change-updates/status-change-updates.yml) |
+| Download `status-change-updates.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=status-change-updates&expanded=true) |
+| View the current source | [`status-change-updates.yml`](https://github.com/cloudradial/Automations/blob/main/status-change-updates/status-change-updates.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/status-change-updates/src) |
 | All files in this automation | [status-change-updates](https://github.com/cloudradial/Automations/tree/main/status-change-updates) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/status-change-updates) |
@@ -49,7 +49,7 @@ If you also run **Post-Close Feedback**, consider adding your closed status to `
 
 ## Download & import
 
-**Download the workflow:** [`status-change-updates.yml`](https://github.com/cloudradial/Automations/blob/main/status-change-updates/status-change-updates.yml)
+**Download the workflow:** [`status-change-updates.yml`](https://github.com/cloudradial/Automations/releases?q=status-change-updates&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

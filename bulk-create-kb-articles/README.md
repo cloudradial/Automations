@@ -2,11 +2,11 @@
 
 Give it a list of articles and they're created in the client's knowledge base, with any that already exist skipped.
 
-**Formerly:** Article Bulk Import script | **Marketplace ID:** AAI-00025 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent)
+**Formerly:** Article Bulk Import script | **Marketplace ID:** AAI-00025 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=bulk-create-kb-articles&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `bulk-create-kb-articles.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/bulk-create-kb-articles/bulk-create-kb-articles.yml) |
-| Download `bulk-create-kb-articles.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/bulk-create-kb-articles/bulk-create-kb-articles.yml) |
+| Download `bulk-create-kb-articles.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=bulk-create-kb-articles&expanded=true) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [bulk-create-kb-articles](https://github.com/cloudradial/Automations/tree/main/bulk-create-kb-articles) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/bulk-create-kb-articles) |

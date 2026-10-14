@@ -2,11 +2,11 @@
 
 The shared engine behind the device fix and patch compliance automations. It works through Datto RMM, matches sites to clients, and never acts without approval.
 
-**Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** AAI-00037 | **Type:** Agent
+**Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** AAI-00037 | **Type:** Agent | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=rmm-agent&expanded=true).
 
 **Import** [`rmm-agent.agent.yml`](https://github.com/cloudradial/Automations/blob/main/rmm-agent/rmm-agent.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `rmm-agent.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/rmm-agent/rmm-agent.agent.yml) |
-| Download `rmm-agent.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/rmm-agent/rmm-agent.agent.yml) |
+| Download `rmm-agent.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=rmm-agent&expanded=true) |
 | Used by | [Show Every Client's Patch Compliance in Their Planner](https://github.com/cloudradial/Automations/tree/main/patch-compliance) |
 | Used by | [Fix Common Workstation Alerts Without a Technician](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation) |
 | All files in this automation | [rmm-agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) |

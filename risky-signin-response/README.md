@@ -2,17 +2,17 @@
 
 Every hour, find the users Microsoft flags as high risk, open a priority ticket, sign them out, require a new password and tell their manager. Accounts are blocked only when you confirm it.
 
-**Marketplace ID:** AAI-00046 | **Type:** Workflow (run hourly by a Routine, or by hand)
+**Marketplace ID:** AAI-00046 | **Type:** Workflow (run hourly by a Routine, or by hand) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `risky-signin-response.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=risky-signin-response&expanded=true).
 
 | What | Link |
 |---|---|
-| View `risky-signin-response.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/risky-signin-response/risky-signin-response.yml) |
-| Download `risky-signin-response.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/risky-signin-response/risky-signin-response.yml) |
-| Step source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/risky-signin-response/src) |
+| Download `risky-signin-response.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=risky-signin-response&expanded=true) |
+| View the current source | [`risky-signin-response.yml`](https://github.com/cloudradial/Automations/blob/main/risky-signin-response/risky-signin-response.yml) |
+| Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/risky-signin-response/src) |
 | All files in this automation | [risky-signin-response](https://github.com/cloudradial/Automations/tree/main/risky-signin-response) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/risky-signin-response) |
 
@@ -42,7 +42,7 @@ With `preview` true the run reads everything, including the PSA, and says what i
 
 ## Download & import
 
-**Download the workflow:** [`risky-signin-response.yml`](https://github.com/cloudradial/Automations/blob/main/risky-signin-response/risky-signin-response.yml)
+**Download the workflow:** [`risky-signin-response.yml`](https://github.com/cloudradial/Automations/releases?q=risky-signin-response&expanded=true)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds that client's secrets. **Attach an hourly Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

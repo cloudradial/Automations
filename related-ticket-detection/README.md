@@ -2,16 +2,16 @@
 
 When a new ticket comes in, the technician sees an internal note listing the same company's open tickets that describe the same issue, with links and a one-line reason for each, so duplicates get worked once and outages get spotted early.
 
-**Marketplace ID:** AAI-00052 | **Type:** Workflow (PowerShell steps plus one AI Prompt step)
+**Marketplace ID:** AAI-00052 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `related-ticket-detection.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=related-ticket-detection&expanded=true).
 
 | What | Link |
 |---|---|
-| View `related-ticket-detection.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/related-ticket-detection/related-ticket-detection.yml) |
-| Download `related-ticket-detection.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/related-ticket-detection/related-ticket-detection.yml) |
+| Download `related-ticket-detection.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=related-ticket-detection&expanded=true) |
+| View the current source | [`related-ticket-detection.yml`](https://github.com/cloudradial/Automations/blob/main/related-ticket-detection/related-ticket-detection.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/related-ticket-detection/src) |
 | All files in this automation | [related-ticket-detection](https://github.com/cloudradial/Automations/tree/main/related-ticket-detection) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/related-ticket-detection) |
@@ -53,7 +53,7 @@ The tracker row suggests an Agent node. This is a PowerShell workflow with a sin
 
 ## Download & import
 
-**Download the workflow:** [`related-ticket-detection.yml`](https://github.com/cloudradial/Automations/blob/main/related-ticket-detection/related-ticket-detection.yml)
+**Download the workflow:** [`related-ticket-detection.yml`](https://github.com/cloudradial/Automations/releases?q=related-ticket-detection&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties** if ServiceAI calls it, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

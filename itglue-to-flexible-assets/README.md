@@ -2,11 +2,11 @@
 
 Copies an IT Glue flexible asset type and its records into a client's portal as flexible assets, so documentation lives where clients and technicians already look.
 
-**Formerly:** Flexible Assets / IT Glue sync script | **Marketplace ID:** AAI-00004 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent)
+**Formerly:** Flexible Assets / IT Glue sync script | **Marketplace ID:** AAI-00004 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=itglue-to-flexible-assets&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `itglue-to-flexible-assets.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/itglue-to-flexible-assets/itglue-to-flexible-assets.yml) |
-| Download `itglue-to-flexible-assets.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/itglue-to-flexible-assets/itglue-to-flexible-assets.yml) |
+| Download `itglue-to-flexible-assets.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=itglue-to-flexible-assets&expanded=true) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [itglue-to-flexible-assets](https://github.com/cloudradial/Automations/tree/main/itglue-to-flexible-assets) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/itglue-to-flexible-assets) |

@@ -2,11 +2,11 @@
 
 A one-page snapshot of any client's users, devices, warranties and portal setup gaps in seconds, with nothing changed.
 
-**Formerly:** Portal Lookup | **Marketplace ID:** AAI-00014 | **Type:** Agent
+**Formerly:** Portal Lookup | **Marketplace ID:** AAI-00014 | **Type:** Agent | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=portal-lookup&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `portal-lookup.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/portal-lookup/portal-lookup.yml) |
-| Download `portal-lookup.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/portal-lookup/portal-lookup.yml) |
+| Download `portal-lookup.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=portal-lookup&expanded=true) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [portal-lookup](https://github.com/cloudradial/Automations/tree/main/portal-lookup) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/portal-lookup) |

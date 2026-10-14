@@ -2,16 +2,16 @@
 
 Reads a client's Microsoft Secure Score and builds it into a CloudRadial assessment, one question per control with its current status, so security gaps are ready to review with the client.
 
-**Formerly:** Secure Score Assessment script | **Marketplace ID:** AAI-00001 | **Type:** Workflow
+**Formerly:** Secure Score Assessment script | **Marketplace ID:** AAI-00001 | **Type:** Workflow | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `secure-score-assessment.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=secure-score-assessment&expanded=true).
 
 | What | Link |
 |---|---|
-| View `secure-score-assessment.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/secure-score-assessment/secure-score-assessment.yml) |
-| Download `secure-score-assessment.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/secure-score-assessment/secure-score-assessment.yml) |
+| Download `secure-score-assessment.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=secure-score-assessment&expanded=true) |
+| View the current source | [`secure-score-assessment.yml`](https://github.com/cloudradial/Automations/blob/main/secure-score-assessment/secure-score-assessment.yml) |
 | All files in this automation | [secure-score-assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/secure-score-assessment) |
 | Marketplace listing | [AAI-00001](https://automations.cloudradial.com/marketplace/AAI-00001) |

@@ -2,16 +2,16 @@
 
 The moment a VIP client's ticket lands, their account manager gets a short email with the summary and a link, and the ticket records that they were told, once per ticket.
 
-**Marketplace ID:** AAI-00047 | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00047 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `vip-ticket-alert.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=vip-ticket-alert&expanded=true).
 
 | What | Link |
 |---|---|
-| View `vip-ticket-alert.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/vip-ticket-alert/vip-ticket-alert.yml) |
-| Download `vip-ticket-alert.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/vip-ticket-alert/vip-ticket-alert.yml) |
+| Download `vip-ticket-alert.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=vip-ticket-alert&expanded=true) |
+| View the current source | [`vip-ticket-alert.yml`](https://github.com/cloudradial/Automations/blob/main/vip-ticket-alert/vip-ticket-alert.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/vip-ticket-alert/src) |
 | All files in this automation | [vip-ticket-alert](https://github.com/cloudradial/Automations/tree/main/vip-ticket-alert) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/vip-ticket-alert) |
@@ -51,7 +51,7 @@ Add `=address` to alert a specific person, and `|` between several: `Contoso=am@
 
 ## Download & import
 
-**Download the workflow:** [`vip-ticket-alert.yml`](https://github.com/cloudradial/Automations/blob/main/vip-ticket-alert/vip-ticket-alert.yml)
+**Download the workflow:** [`vip-ticket-alert.yml`](https://github.com/cloudradial/Automations/releases?q=vip-ticket-alert&expanded=true)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

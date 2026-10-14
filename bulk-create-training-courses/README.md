@@ -2,11 +2,11 @@
 
 Give it a list of courses and lessons and they're created in the client's portal, ready to assign, with any that already exist skipped.
 
-**Formerly:** Course Bulk Import script | **Marketplace ID:** AAI-00026 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent)
+**Formerly:** Course Bulk Import script | **Marketplace ID:** AAI-00026 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=bulk-create-training-courses&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `bulk-create-training-courses.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/bulk-create-training-courses/bulk-create-training-courses.yml) |
-| Download `bulk-create-training-courses.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/bulk-create-training-courses/bulk-create-training-courses.yml) |
+| Download `bulk-create-training-courses.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=bulk-create-training-courses&expanded=true) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [bulk-create-training-courses](https://github.com/cloudradial/Automations/tree/main/bulk-create-training-courses) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/bulk-create-training-courses) |

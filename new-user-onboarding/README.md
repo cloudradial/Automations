@@ -2,13 +2,13 @@
 
 Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
 
-**Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow
+**Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow | **Version:** 1.0.0
 
 This folder has two ways to onboard. The agent workflow below plans and verifies each stage with AI. The [direct workflow](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#direct-workflow-create-a-new-hires-accounts-straight-from-the-form) does the same core account setup with PowerShell only and no AI.
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=new-user-onboarding&expanded=true).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -20,11 +20,11 @@ These links point at the `main` branch, so they always open the current version.
 | What | Link |
 |---|---|
 | View `new-user-onboarding.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.yml) |
-| Download `new-user-onboarding.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/new-user-onboarding/new-user-onboarding.yml) |
+| Download `new-user-onboarding.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=new-user-onboarding&expanded=true) |
 | View `new-user-onboarding.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.agent.yml) |
-| Download `new-user-onboarding.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/new-user-onboarding/new-user-onboarding.agent.yml) |
+| Download `new-user-onboarding.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=new-user-onboarding&expanded=true) |
 | View `new-user-onboarding-direct.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding-direct.yml) |
-| Download `new-user-onboarding-direct.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/new-user-onboarding/new-user-onboarding-direct.yml) |
+| Download `new-user-onboarding-direct.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=new-user-onboarding&expanded=true) |
 | View `form-webhook-mapping.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md) |
 | All files in this automation | [new-user-onboarding](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/new-user-onboarding) |

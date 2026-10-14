@@ -1,0 +1,5 @@
+Write the acknowledgement paragraph for this ticket. Reply with one JSON object in this shape:
+{"paragraph": "<one to three plain sentences>", "articleIds": [<up to two ids from articles>]}
+
+Facts (JSON):
+{{ nodes.gather.output.facts_json }}

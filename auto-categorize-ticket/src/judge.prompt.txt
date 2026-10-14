@@ -1,0 +1,7 @@
+Categorize this ticket. Reply with one JSON object in this shape:
+{"picks": ["<name for the first level in choose>", "<name for the next level, or empty>"], "confidence": 0.0, "reason": "<one plain sentence>"}
+
+"picks" has one entry per level in "choose", in the same order. Use "" for a level you leave empty.
+
+Facts (JSON):
+{{ nodes.gather.output.facts_json }}

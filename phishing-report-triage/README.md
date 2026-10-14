@@ -6,11 +6,11 @@ When a user reports a suspicious email, the technician gets a categorized ticket
 
 ## Files
 
-Each version is published as a release, with `phishing-report-triage.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=phishing-report-triage&expanded=true).
+Each version is published as a release, with `phishing-report-triage.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/phishing-report-triage/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `phishing-report-triage.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=phishing-report-triage&expanded=true) |
+| Download `phishing-report-triage.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/phishing-report-triage/v1.0.0) |
 | View the current source | [`phishing-report-triage.yml`](https://github.com/cloudradial/Automations/blob/main/phishing-report-triage/phishing-report-triage.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/phishing-report-triage/src) |
 | All files in this automation | [phishing-report-triage](https://github.com/cloudradial/Automations/tree/main/phishing-report-triage) |
@@ -52,7 +52,7 @@ You can use both: this workflow for user reports, the agent for a technician's d
 
 ## Download & import
 
-**Download the workflow:** [`phishing-report-triage.yml`](https://github.com/cloudradial/Automations/releases?q=phishing-report-triage&expanded=true)
+**Download the workflow:** [`phishing-report-triage.yml`](https://github.com/cloudradial/Automations/releases/tag/phishing-report-triage/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner of the company it serves, enable the webhook in **Properties** if a form or ServiceAI calls it, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

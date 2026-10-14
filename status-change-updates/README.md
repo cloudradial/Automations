@@ -6,11 +6,11 @@ Every time a ticket moves to a status the client should know about, the requeste
 
 ## Files
 
-Each version is published as a release, with `status-change-updates.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=status-change-updates&expanded=true).
+Each version is published as a release, with `status-change-updates.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/status-change-updates/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `status-change-updates.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=status-change-updates&expanded=true) |
+| Download `status-change-updates.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/status-change-updates/v1.0.0) |
 | View the current source | [`status-change-updates.yml`](https://github.com/cloudradial/Automations/blob/main/status-change-updates/status-change-updates.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/status-change-updates/src) |
 | All files in this automation | [status-change-updates](https://github.com/cloudradial/Automations/tree/main/status-change-updates) |
@@ -49,7 +49,7 @@ If you also run **Post-Close Feedback**, consider adding your closed status to `
 
 ## Download & import
 
-**Download the workflow:** [`status-change-updates.yml`](https://github.com/cloudradial/Automations/releases?q=status-change-updates&expanded=true)
+**Download the workflow:** [`status-change-updates.yml`](https://github.com/cloudradial/Automations/releases/tag/status-change-updates/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

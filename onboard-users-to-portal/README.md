@@ -6,7 +6,7 @@ Give it a list of people and they're added as portal users under the right compa
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=onboard-users-to-portal&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/onboard-users-to-portal/v1.0.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `onboard-users-to-portal.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/onboard-users-to-portal/onboard-users-to-portal.yml) |
-| Download `onboard-users-to-portal.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=onboard-users-to-portal&expanded=true) |
+| Download `onboard-users-to-portal.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/onboard-users-to-portal/v1.0.0) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [onboard-users-to-portal](https://github.com/cloudradial/Automations/tree/main/onboard-users-to-portal) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/onboard-users-to-portal) |

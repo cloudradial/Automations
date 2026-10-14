@@ -6,11 +6,11 @@ Every week, email the service manager the open tickets that have gone quiet, hav
 
 ## Files
 
-Each version is published as a release, with `psa-hygiene.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=psa-hygiene&expanded=true).
+Each version is published as a release, with `psa-hygiene.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/psa-hygiene/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `psa-hygiene.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=psa-hygiene&expanded=true) |
+| Download `psa-hygiene.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/psa-hygiene/v1.0.0) |
 | View the current source | [`psa-hygiene.yml`](https://github.com/cloudradial/Automations/blob/main/psa-hygiene/psa-hygiene.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/psa-hygiene/src) |
 | All files in this automation | [psa-hygiene](https://github.com/cloudradial/Automations/tree/main/psa-hygiene) |
@@ -44,7 +44,7 @@ How each PSA answers "who is the primary contact":
 
 ## Download & import
 
-**Download the workflow:** [`psa-hygiene.yml`](https://github.com/cloudradial/Automations/releases?q=psa-hygiene&expanded=true)
+**Download the workflow:** [`psa-hygiene.yml`](https://github.com/cloudradial/Automations/releases/tag/psa-hygiene/v1.0.0)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds your PSA secrets. **Attach a weekly Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

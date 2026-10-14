@@ -6,11 +6,11 @@ Moves every matched client's devices, other hardware, software, assessments, roa
 
 ## Files
 
-Each version is published as a release, with `scalepad-cloudradial-sync.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-sync&expanded=true).
+Each version is published as a release, with `scalepad-cloudradial-sync.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `scalepad-cloudradial-sync.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=scalepad-cloudradial-sync&expanded=true) |
+| Download `scalepad-cloudradial-sync.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.0.0) |
 | View the current source | [`scalepad-cloudradial-sync.yml`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync/src) |
 | All files in this automation | [scalepad-cloudradial-sync](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync) |

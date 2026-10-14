@@ -6,7 +6,7 @@ One portal form or triaged ticket becomes a service ticket written to your stand
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=split-request-two-tickets&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/split-request-two-tickets/v1.1.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -18,11 +18,11 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `split-request-service-quote.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/split-request-service-quote.yml) |
-| Download `split-request-service-quote.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=split-request-two-tickets&expanded=true) |
+| Download `split-request-service-quote.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/split-request-two-tickets/v1.1.0) |
 | View `split-request-classifier.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/split-request-classifier.agent.yml) |
-| Download `split-request-classifier.agent.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=split-request-two-tickets&expanded=true) |
+| Download `split-request-classifier.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/split-request-two-tickets/v1.1.0) |
 | View `split-request-two-tickets.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/split-request-two-tickets.yml) |
-| Download `split-request-two-tickets.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=split-request-two-tickets&expanded=true) |
+| Download `split-request-two-tickets.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/split-request-two-tickets/v1.1.0) |
 | View `knowledge/quote-request-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/knowledge/quote-request-standards.md) |
 | Download `knowledge/quote-request-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/split-request-two-tickets/knowledge/quote-request-standards.md) |
 | View `knowledge/service-ticket-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/split-request-two-tickets/knowledge/service-ticket-standards.md) |

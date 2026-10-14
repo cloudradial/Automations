@@ -6,11 +6,11 @@ A requester adds a coworker to the email updates on one of their own open ticket
 
 ## Files
 
-Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=add-cc-to-ticket&expanded=true).
+Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `add-cc-to-ticket.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=add-cc-to-ticket&expanded=true) |
+| Download `add-cc-to-ticket.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.0.0) |
 | View the current source | [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket/src) |
 | All files in this automation | [add-cc-to-ticket](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket) |
@@ -62,7 +62,7 @@ These fields are only read from the webhook body, never from a form answer, so a
 
 ## Download & import
 
-**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases?q=add-cc-to-ticket&expanded=true)
+**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

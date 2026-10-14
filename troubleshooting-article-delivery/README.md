@@ -6,11 +6,11 @@ When ServiceAI triage matches a new ticket to a knowledge base article, the clie
 
 ## Files
 
-Each version is published as a release, with `troubleshooting-article-delivery.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=troubleshooting-article-delivery&expanded=true).
+Each version is published as a release, with `troubleshooting-article-delivery.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/troubleshooting-article-delivery/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `troubleshooting-article-delivery.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=troubleshooting-article-delivery&expanded=true) |
+| Download `troubleshooting-article-delivery.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/troubleshooting-article-delivery/v1.0.0) |
 | View the current source | [`troubleshooting-article-delivery.yml`](https://github.com/cloudradial/Automations/blob/main/troubleshooting-article-delivery/troubleshooting-article-delivery.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/troubleshooting-article-delivery/src) |
 | All files in this automation | [troubleshooting-article-delivery](https://github.com/cloudradial/Automations/tree/main/troubleshooting-article-delivery) |
@@ -44,7 +44,7 @@ Three PowerShell steps, no AI. The judgment (which article fits the ticket) is S
 
 ## Download & import
 
-**Download the workflow:** [`troubleshooting-article-delivery.yml`](https://github.com/cloudradial/Automations/releases?q=troubleshooting-article-delivery&expanded=true)
+**Download the workflow:** [`troubleshooting-article-delivery.yml`](https://github.com/cloudradial/Automations/releases/tag/troubleshooting-article-delivery/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the MSP's runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

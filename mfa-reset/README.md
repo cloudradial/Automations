@@ -6,11 +6,11 @@ A user who lost their phone or authenticator resets their own multi-factor authe
 
 ## Files
 
-Each version is published as a release, with `mfa-reset.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true).
+Each version is published as a release, with `mfa-reset.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/mfa-reset/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `mfa-reset.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true) |
+| Download `mfa-reset.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/mfa-reset/v1.0.0) |
 | View the current source | [`mfa-reset.yml`](https://github.com/cloudradial/Automations/blob/main/mfa-reset/mfa-reset.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/mfa-reset/src) |
 | All files in this automation | [mfa-reset](https://github.com/cloudradial/Automations/tree/main/mfa-reset) |
@@ -43,7 +43,7 @@ Most write automations take `confirm` and preview by default. This one doesn't, 
 
 ## Download & import
 
-**Download the workflow** from the [releases page](https://github.com/cloudradial/Automations/releases?q=mfa-reset&expanded=true). The versioned `mfa-reset.yml` is attached to each release.
+**Download the workflow** from the [releases page](https://github.com/cloudradial/Automations/releases/tag/mfa-reset/v1.0.0). The versioned `mfa-reset.yml` is attached to each release.
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner of the company it serves, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

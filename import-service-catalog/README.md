@@ -6,7 +6,7 @@ Give it a list of service request forms and their questions and they're created 
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=import-service-catalog&expanded=true).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/import-service-catalog/v1.0.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -16,7 +16,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `import-service-catalog.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/import-service-catalog/import-service-catalog.yml) |
-| Download `import-service-catalog.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=import-service-catalog&expanded=true) |
+| Download `import-service-catalog.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/import-service-catalog/v1.0.0) |
 | Needs the agent | [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) |
 | All files in this automation | [import-service-catalog](https://github.com/cloudradial/Automations/tree/main/import-service-catalog) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/import-service-catalog) |

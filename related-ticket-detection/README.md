@@ -6,11 +6,11 @@ When a new ticket comes in, the technician sees an internal note listing the sam
 
 ## Files
 
-Each version is published as a release, with `related-ticket-detection.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=related-ticket-detection&expanded=true).
+Each version is published as a release, with `related-ticket-detection.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/related-ticket-detection/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `related-ticket-detection.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=related-ticket-detection&expanded=true) |
+| Download `related-ticket-detection.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/related-ticket-detection/v1.0.0) |
 | View the current source | [`related-ticket-detection.yml`](https://github.com/cloudradial/Automations/blob/main/related-ticket-detection/related-ticket-detection.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/related-ticket-detection/src) |
 | All files in this automation | [related-ticket-detection](https://github.com/cloudradial/Automations/tree/main/related-ticket-detection) |
@@ -53,7 +53,7 @@ The tracker row suggests an Agent node. This is a PowerShell workflow with a sin
 
 ## Download & import
 
-**Download the workflow:** [`related-ticket-detection.yml`](https://github.com/cloudradial/Automations/releases?q=related-ticket-detection&expanded=true)
+**Download the workflow:** [`related-ticket-detection.yml`](https://github.com/cloudradial/Automations/releases/tag/related-ticket-detection/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties** if ServiceAI calls it, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

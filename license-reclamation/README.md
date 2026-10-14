@@ -6,11 +6,11 @@ Every month, each client's CloudRadial Planner board gets one card listing the p
 
 ## Files
 
-Each version is published as a release, with `license-reclamation.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=license-reclamation&expanded=true).
+Each version is published as a release, with `license-reclamation.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `license-reclamation.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=license-reclamation&expanded=true) |
+| Download `license-reclamation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0) |
 | View the current source | [`license-reclamation.yml`](https://github.com/cloudradial/Automations/blob/main/license-reclamation/license-reclamation.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/license-reclamation/src) |
 | All files in this automation | [license-reclamation](https://github.com/cloudradial/Automations/tree/main/license-reclamation) |
@@ -53,7 +53,7 @@ If the chosen company is linked to a different Microsoft 365 tenant, the run sto
 
 ## Download & import
 
-**Download the workflow:** [`license-reclamation.yml`](https://github.com/cloudradial/Automations/releases?q=license-reclamation&expanded=true)
+**Download the workflow:** [`license-reclamation.yml`](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **Deploy** it to the runner that holds this company's Microsoft 365 secrets. Then attach the monthly Routine (see [Import & test](#import--test)). A Routine isn't part of the export, so it has to be added after every fresh import.
 

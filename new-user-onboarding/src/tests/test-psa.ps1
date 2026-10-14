@@ -16,6 +16,10 @@ function Invoke-RestMethod { param($Method, $Uri, $Headers, $Body, $ContentType,
     if ($Uri -like '*/TicketNotes/entityInformation/fields') { return [pscustomobject]@{ fields = @(
         [pscustomobject]@{ name = 'publish'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'All Autotask Users'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Internal Only'; isActive = $true }) },
         [pscustomobject]@{ name = 'noteType'; picklistValues = @([pscustomobject]@{ value = '13'; label = 'System Workflow Note'; isActive = $true }, [pscustomobject]@{ value = '1'; label = 'Task Detail'; isActive = $true }) }) } }
+    # New tickets: ConnectWise answers with the ticket, Zendesk wraps it. A ConnectWise company identifier lookup finds 42.
+    if ($Method -eq 'POST' -and $Uri -like '*/service/tickets') { return [pscustomobject]@{ id = 5001 } }
+    if ($Method -eq 'POST' -and $Uri -like '*/api/v2/tickets') { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 7001 } } }
+    if ($Method -eq 'GET' -and $Uri -like '*/company/companies?*') { return , @([pscustomobject]@{ id = 42 }) }
     return [pscustomobject]@{ id = 1 }
 }
 function RoundTrip { param($o) return ($o | ConvertTo-Json -Depth 20 | ConvertFrom-Json) }
@@ -93,11 +97,41 @@ $global:Secrets = @{ 'PSA-Type' = 'autotask' } + $mockSecrets['autotask']
 $o = Run 'node-node-finish.ps1' $s
 Check 'direct preview posts nothing' ($global:Calls.Count -eq 0 -and $o.status -eq 'pending_confirmation') (Show)
 
-# --- Direct workflow: no ticket on a non-ConnectWise PSA is left for a technician ---
-$psaState = [ordered]@{ status = 'ok'; ticketId = ''; upn = 'sam.starter@contoso.com'; managerMail = ''; fields = [ordered]@{ displayName = 'Sam Starter'; psa = '' }; actions = @(); warnings = @(); followUp = @() }
+# --- Direct workflow: no ticket given, so one is created through the shared PSA library ---
+$psaState = [ordered]@{ status = 'ok'; ticketId = ''; upn = 'sam.starter@contoso.com'; managerMail = ''; fields = [ordered]@{ displayName = 'Sam Starter'; psa = ''; companyPsaId = ''; companyName = '' }; actions = @(); warnings = @(); followUp = @() }
+function New-PsaState { param([hashtable]$Fields = @{}) $s = RoundTrip $psaState; foreach ($k in $Fields.Keys) { $s.fields.$k = $Fields[$k] }; return $s }
+# No company to match: a follow-up, and no ticket is created.
 $global:Secrets = @{ 'PSA-Type' = 'autotask' } + $mockSecrets['autotask']
 $o = Run 'node-node-psa.ps1' $psaState
-Check 'no ticket on Autotask -> follow-up, no calls' ($global:Calls.Count -eq 0 -and (@($o.followUp) -join ' ') -match 'Create the onboarding ticket in Autotask by hand') "$(Show) / $(@($o.followUp) -join ' ')"
+Check 'no ticket, no company -> follow-up, nothing created' (-not @($global:Calls | Where-Object { $_.Method -eq 'POST' }).Count -and (@($o.followUp) -join ' ') -match 'Autotask company could not be matched' -and -not $o.ticketId) "$(Show) / $(@($o.followUp) -join ' ')"
+# ConnectWise: a numeric company id and the CW-ServiceBoard board.
+$global:Secrets = @{ 'PSA-Type' = 'connectwise'; 'CW-ServiceBoard' = 'Service Desk' } + $mockSecrets['connectwise']
+$o = Run 'node-node-psa.ps1' (New-PsaState @{ companyPsaId = '42' })
+$post = @($global:Calls | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like '*/service/tickets' })
+$pb = $(if ($post.Count) { $post[0].Body | ConvertFrom-Json } else { $null })
+Check 'cw: no ticket -> created on CW-ServiceBoard for the company' ($post.Count -eq 1 -and $pb.board.name -eq 'Service Desk' -and $pb.company.id -eq 42 -and $pb.summary -eq 'New user onboarding: Sam Starter' -and $o.ticketId -eq '5001') "$(Show) / $($post | ForEach-Object { $_.Body })"
+Check 'cw: the action names the ticket and board' ((@($o.actions) -join ' ') -match 'Created ConnectWise ticket 5001 on Service Desk') (@($o.actions) -join ' | ')
+# PSA-ServiceQueue wins over CW-ServiceBoard; a ConnectWise identifier is looked up.
+$global:Secrets = @{ 'PSA-Type' = 'connectwise'; 'CW-ServiceBoard' = 'Service Desk'; 'PSA-ServiceQueue' = 'Onboarding' } + $mockSecrets['connectwise']
+$o = Run 'node-node-psa.ps1' (New-PsaState @{ companyPsaId = 'Contoso' })
+$post = @($global:Calls | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like '*/service/tickets' })
+$pb = $(if ($post.Count) { $post[0].Body | ConvertFrom-Json } else { $null })
+Check 'cw: identifier looked up, PSA-ServiceQueue used' ($post.Count -eq 1 -and $pb.board.name -eq 'Onboarding' -and $pb.company.id -eq 42 -and @($global:Calls | Where-Object { [uri]::UnescapeDataString($_.Uri) -like '*identifier="Contoso"*' }).Count -eq 1) (Show)
+# Zendesk: created too (other PSAs used to be left for a technician), with no queue set.
+$global:Secrets = @{ 'PSA-Type' = 'zendesk' } + $mockSecrets['zendesk']
+$o = Run 'node-node-psa.ps1' (New-PsaState @{ companyPsaId = '77' })
+$post = @($global:Calls | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like '*/api/v2/tickets' })
+$pb = $(if ($post.Count) { $post[0].Body | ConvertFrom-Json } else { $null })
+Check 'zendesk: no ticket -> created for the organization' ($post.Count -eq 1 -and $pb.ticket.organization_id -eq 77 -and $o.ticketId -eq '7001' -and (@($o.actions) -join ' ') -match 'Created Zendesk ticket 7001$') "$(Show) / $(@($o.actions) -join ' | ') / $(@($o.followUp) -join ' ')"
+# No PSA at all: a follow-up, no calls.
+$global:Secrets = @{}
+$o = Run 'node-node-psa.ps1' (New-PsaState @{ companyPsaId = '42' })
+Check 'no PSA set up -> follow-up, no calls' ($global:Calls.Count -eq 0 -and (@($o.followUp) -join ' ') -match 'no PSA is set up') "$(Show) / $(@($o.followUp) -join ' ')"
+# A ticket already given: nothing is created.
+$s = New-PsaState @{ companyPsaId = '42' }; $s.ticketId = '12345'
+$global:Secrets = @{ 'PSA-Type' = 'connectwise'; 'CW-ServiceBoard' = 'Service Desk' } + $mockSecrets['connectwise']
+$o = Run 'node-node-psa.ps1' $s
+Check 'ticket given -> nothing created' ($global:Calls.Count -eq 0 -and $o.ticketId -eq '12345') (Show)
 
 # --- Agent workflow: Note the ticket ---
 $verify = '{"starters":[{"name":"Sam Starter","startDate":"2026-10-12","ready":false,"done":["Account sam.starter@contoso.com exists"],"awaitingHuman":["Quote: Laptop - new starter, no spare device"],"skipped":[]}],"summary":"Sam Starter is not ready yet: the laptop is waiting on a quote."}'

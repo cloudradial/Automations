@@ -2,7 +2,7 @@
 
 Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
 
-**Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow | **Version:** 1.0.0
+**Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow | **Version:** 1.1.0
 
 This folder has two ways to onboard. The agent workflow below plans and verifies each stage with AI. The [direct workflow](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#direct-workflow-create-a-new-hires-accounts-straight-from-the-form) does the same core account setup with PowerShell only and no AI.
 
@@ -57,7 +57,7 @@ with the form.
 | [`form-webhook-mapping.md`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md) | Reference | How the CloudRadial *Add a New User* form maps, question by question, to the webhook JSON that starts the Day One playbook. |
 | [`new-user-onboarding.agent.yml`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.agent.yml) | `automationsAgent` | The brain. Refuses privileged or sensitive group copies, purchases, changes to existing users and insecure credential handoff; reports what it verified, not what it attempted. Publish it → slug `new-user-onboarding`. |
 | [`new-user-onboarding.yml`](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.yml) | `automationsWorkflow` | **Read the request** (turns the form's Action input or webhook body into the briefing and drops unanswered `@token` values) → six Agent nodes, one per stage, with a **Hand off** step after Intake and after Provision → **Note the ticket** (posts the result to the PSA ticket). Each stage gets the briefing and the previous stage's output as `context`, and passes a block on instead of acting. No Agent node calls the PSA, so the workflow works with any of the six PSAs. |
-| [`src/`](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding/src) | Source and tests | `psa.ps1` holds the PSA calls both workflows use, and `build.js` pastes it into their PowerShell steps. `test.js` runs the strict-mode tests. Edit `psa.ps1`, never the block between the `src/psa.ps1` markers in a `.yml`. |
+| [`src/`](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding/src) | Source and tests | The PSA calls come from the shared library [`_shared/psa.ps1`](https://github.com/cloudradial/Automations/blob/main/_shared/psa.ps1), pasted into the PowerShell steps by `node _shared/inject.js new-user-onboarding`. `test.js` checks those blocks are current and runs the strict-mode tests. Edit `_shared/psa.ps1`, never the block between the `_shared/psa.ps1` markers in a `.yml`. |
 
 ## Install / run
 
@@ -124,6 +124,11 @@ AutomationAI has no step that runs another workflow, so the two **Hand off** ste
 
 ## PSA (both workflows)
 
+Both workflows use the shared PSA library, `_shared/psa.ps1`, the same code as the repo's other automations. It adds two things this workflow needs:
+
+- **ConnectWise redirects are safe.** ConnectWise has answered note and ticket writes with a redirect after saving them. The library reads the ticket back instead of sending again, so the note holding the temporary password is never written twice or reported as failed.
+- **Ticket numbers work.** A ticket number as the PSA shows it (for example an Autotask `T20261014.0001`) is turned into its id before the note is posted.
+
 The PSA writes happen in PowerShell steps, not in the agent, so both workflows work with **ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk**. Kaseya BMS has no working extension, so it couldn't work any other way. Each call is the one the PSA's catalog extension makes, or comes from the vendor's API docs. The secrets have the same names as each PSA's catalog extension, so one set of vault secrets serves both.
 
 | Secret | Required | Value |
@@ -179,7 +184,7 @@ One node per step, so each can be tested on its own:
 | Create Microsoft 365 user | Creates the account with a random 16-character temporary password (change forced at first sign-in) and sets the manager. | Yes |
 | Assign licence and groups | Assigns the licence (Exchange Online creates the mailbox from it) and adds the approved groups. | Yes |
 | Create portal user | Creates the CloudRadial portal user (`POST /v2/user`). | Yes |
-| PSA ticket and manager | Uses the form's ticket. If there isn't one, it creates a ConnectWise ticket; with any other PSA it lists the ticket for a technician, because creating one needs queue and status ids that differ per tenant. Emails the manager that the account exists (no password). | Yes |
+| PSA ticket and manager | Uses the form's ticket. If there isn't one, it creates the onboarding ticket in your PSA, for the company in `companyPsaId` (a PSA company id or ConnectWise identifier) or the exact `companyName`, on the `PSA-ServiceQueue` board or queue (ConnectWise also reads `CW-ServiceBoard`). If the company can't be matched or the PSA refuses, it's listed for a technician. Emails the manager that the account exists (no password). | Yes |
 | Internal note and result | Builds the output and posts `internal_note` to the ticket as an internal note, in any of the six PSAs (see [PSA](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#psa-both-workflows)). | Yes, only when `confirm` is true |
 
 It records the device type in the notes but doesn't order hardware. For quotes, use the agent workflow or [Split Request](https://github.com/cloudradial/Automations/tree/main/split-request-two-tickets).
@@ -193,7 +198,8 @@ No extensions. Every call is made from PowerShell with runner Key Vault secrets.
 | `M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` | Yes | Microsoft Graph. The same secrets Password Reset uses (`Entra-*` and `Graph-*` names also work). |
 | `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey` | For the portal user | Without them the portal user is skipped and listed as follow-up. |
 | `PSA-Type` and your PSA's secrets | For the ticket note | See [PSA](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#psa-both-workflows). Without them the note isn't posted, but it's still returned in `internal_note`. |
-| `CW-ServiceBoard` | ConnectWise only, when the request has no ticket | The board for the new onboarding ticket. |
+| `PSA-ServiceQueue` | No, used when the request has no ticket | The board (ConnectWise) or queue for the new onboarding ticket. Without it, other PSAs use their default queue. |
+| `CW-ServiceBoard` | ConnectWise, when the request has no ticket and `PSA-ServiceQueue` isn't set | The board for the new onboarding ticket. |
 | `Onboarding-NotifySender` | No | A mailbox to email the manager from. Without it the manager isn't emailed. |
 | `Onboarding-ProtectedGroupPatterns` | No | Extra comma-separated group name patterns to never add, on top of `admin`, `administrator`, `privileged` and `global`. |
 | `Onboarding-DefaultLicenceSku` | No | The licence to use when the form says a licence is needed but none is chosen. Same values as `m365License`. Without it, the account gets no licence and a warning. |
@@ -227,7 +233,7 @@ Every input is optional apart from the name, and each has a default.
 | `deviceType` / `newComputerType` | none | Recorded in the notes only. |
 | `companyTenantId` | none | Send `@CompanyTenantId`. Required: a missing or different tenant is rejected. |
 | `companyId`, `companyPsaId`, `companyName` | none | Used to match the CloudRadial company and, for a new ticket, the ConnectWise company. |
-| `ticketId` | none | The form's ticket. Without it, a ConnectWise ticket is created; other PSAs list it for a technician. |
+| `ticketId` | none | The form's ticket, as the PSA shows it (Autotask and Kaseya BMS ticket numbers are looked up). Without it, the onboarding ticket is created in your PSA. |
 | `psa` | the `PSA-Type` secret | Which PSA the ticket is in. Overrides the secret for one request. |
 | `confirm` (or `approvedToWrite`) | `false` | `false` returns a preview and changes nothing. |
 

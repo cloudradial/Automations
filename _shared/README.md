@@ -63,7 +63,7 @@ node _shared/inject.js <automation-folder> --check   # exit 1 if a block is out 
 
 `inject.js` looks at every `.yml` directly in that folder, replaces what's between each start and end marker with the named file from `_shared`, keeps the start marker's indentation, keeps CRLF files as CRLF, and parses the result with js-yaml before writing. A missing end marker or an unknown library stops it with an error and nothing is written.
 
-An automation with its own build (like `new-user-onboarding/src/build.js`) calls it the same way, and its test runs the `--check` form first:
+An automation with its own build (like `add-cc-to-ticket/src/build.js`) calls it the same way, and its test runs the `--check` form first:
 
 ```js
 const { execFileSync } = require('child_process');

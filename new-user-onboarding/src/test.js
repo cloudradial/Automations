@@ -1,4 +1,4 @@
-// Checks the PSA blocks are current, pulls each PowerShell step out of the two workflows, and
+// Checks the shared PSA library blocks are current, pulls each PowerShell step out of the two workflows, and
 // runs the strict-mode harnesses in tests/ against them (mocked runner, Key Vault, Graph and PSAs).
 // Usage: node test.js   (needs pwsh and js-yaml; set JS_YAML_PATH if js-yaml isn't installed here)
 const fs = require('fs');
@@ -10,7 +10,8 @@ try { y = require('js-yaml'); } catch { y = require(process.env.JS_YAML_PATH); }
 
 const here = __dirname;
 const root = path.join(here, '..');
-execFileSync(process.execPath, [path.join(here, 'build.js'), '--check'], { stdio: 'inherit' });
+// The shared PSA library blocks must match _shared/psa.ps1.
+execFileSync(process.execPath, [path.join(root, '..', '_shared', 'inject.js'), root, '--check'], { stdio: 'inherit' });
 
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'nuo-'));
 const direct = y.load(fs.readFileSync(path.join(root, 'new-user-onboarding-direct.yml'), 'utf8'));

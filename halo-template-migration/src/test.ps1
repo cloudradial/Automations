@@ -51,7 +51,7 @@ $TSecrets = @{ 'Halo-ApiUrl' = $THalo; 'Halo-ClientId' = 'cid'; 'Halo-ClientSecr
 $TH = @{ existing = @(); listFail = ''; postFail = ''; posts = (New-Object System.Collections.ArrayList) }
 $TTemplates = @(
     @{ id = 12; name = 'New starter setup' }, @{ id = 15; name = 'Printer not working' },
-    @{ id = 20; name = 'Old VPN request'; inactive = $true }, @{ id = 21; name = 'Laptop request' }
+    @{ id = 20; name = 'Old VPN request'; disabled = $true }, @{ id = 21; name = 'Laptop request' }
 )
 $TDetail = @{
     '12' = @{ id = 12; name = 'New starter setup'; tickettype_id = 3; priority_id = 4; status_id = 1; team = 'Service Desk'; category_1 = 'Accounts'; summary = 'New starter for Contoso'; details = '<p>Set up a new starter.</p><script>alert(1)</script><a href="javascript:void(0)" onclick="x()">link</a>'; customfields = @(@{ id = 103; name = 'CFCostCentre'; value = 'FIN-01' }) }
@@ -59,16 +59,18 @@ $TDetail = @{
     '21' = @{ id = 21; name = 'Laptop request'; tickettype_id = 3 }
 }
 $TTypes = @{
+    # Halo's real shape (verified 2026-10-16): link rows with no name, label or type; those are in /Field/{fieldid}.
     '3' = @{ id = 3; name = 'Service Request'; fields = @(
-            @{ fieldid = 101; name = 'CFStartDate'; label = 'Start date'; type = 4; mandatory = $true },
-            @{ fieldid = 102; name = 'CFLicence'; label = 'Licence'; type = 2; values = @(@{ name = 'Business Basic' }, @{ name = 'Business Premium, annual' }) },
-            @{ fieldid = 103; name = 'CFCostCentre'; label = 'Cost centre'; type = 0 },
-            @{ fieldid = 104; name = 'CFAssetTag'; label = 'Asset tag'; type = 0 },
-            @{ fieldid = 1; name = 'summary'; label = 'Summary'; type = 0 },
-            @{ fieldid = 105; name = 'CFMystery'; label = 'Mystery'; type = 77 }) }
+            @{ id = 9001; rtid = 3; fieldid = 101; seq = 1; endusernew = 2; technew = 1 },
+            @{ id = 9002; rtid = 3; fieldid = 102; seq = 2; endusernew = 1; technew = 1 },
+            @{ id = 9003; rtid = 3; fieldid = 103; seq = 3; endusernew = 1; technew = 1 },
+            @{ id = 9004; rtid = 3; fieldid = 104; seq = 4; endusernew = 1; technew = 1 },
+            @{ id = 9005; rtid = 3; fieldid = 1; seq = 5; endusernew = 1; technew = 1 },
+            @{ id = 9006; rtid = 3; fieldid = 105; seq = 6; endusernew = 1; technew = 1 },
+            @{ id = 9007; rtid = 3; fieldid = 106; seq = 7; endusernew = 0; technew = 1 }) }
+    # A field-group row (fieldid 0, groupid 14), as Halo sends it; the group lists the fields.
     '1' = @{ id = 1; name = 'Incident'; fields = @(
-            @{ fieldid = 201; name = 'CFPrinterLocation'; label = 'Printer location'; type = 0 },
-            @{ fieldid = 202; name = 'CFDept'; label = 'Department'; type = 2 }) }
+            @{ id = 9101; rtid = 1; fieldid = 0; groupid = 14; seq = 1; endusernew = 1; technew = 1 }) }
 }
 $TRouter = {
     param($c, $n)
@@ -78,11 +80,27 @@ $TRouter = {
         if ($TH.listFail -eq '403') { New-HttpError 403 '{"message":"Forbidden"}' }
         if ($TH.listFail -eq 'odd') { return [pscustomobject]@{ total = 1; ticket_templates = @([pscustomobject]@{ tid = 12; title = 'New starter setup' }) } }
         $rows = @($TTemplates | Where-Object { $u -notmatch 'search=' -or $_.name -like "*$(([regex]::Match($u, 'search=([^&]*)')).Groups[1].Value)*" })
-        return ([pscustomobject]@{ record_count = $rows.Count; templates = @($rows | ForEach-Object { [pscustomobject]$_ }) })
+        return ([pscustomobject]@{ page_no = 1; page_size = 50; record_count = $rows.Count; stdrequests = @($rows | ForEach-Object { [pscustomobject]$_ }) })
     }
     if ($c.Method -eq 'GET' -and $u -match "/api/Template/(\d+)\?") { return ($TDetail[$Matches[1]] | ConvertTo-Json -Depth 6 | ConvertFrom-Json) }
     if ($c.Method -eq 'GET' -and $u -match "/api/TicketType/(\d+)\?") { return ($TTypes[$Matches[1]] | ConvertTo-Json -Depth 6 | ConvertFrom-Json) }
-    if ($c.Method -eq 'GET' -and $u -match "/api/Field/202\?") { return [pscustomobject]@{ id = 202; name = 'CFDept'; type = 2; values = @([pscustomobject]@{ name = 'Finance' }, [pscustomobject]@{ name = 'Sales' }) } }
+    if ($c.Method -eq 'GET' -and $u -match "/api/FieldGroup/14\?") { return [pscustomobject]@{ id = 14; name = 'Printer details'; fields = @([pscustomobject]@{ id = 7001; fieldid = 201; seq = 1 }, [pscustomobject]@{ id = 7002; fieldid = 202; seq = 2 }) } }
+    if ($c.Method -eq 'GET' -and $u -match "/api/Field/(\d+)\?") { New-HttpError 400 '"Field kind must be specified"' }
+    if ($c.Method -eq 'GET' -and $u -match "/api/FieldInfo/(\d+)\?") {
+        $TDefs = @{
+            '1'   = @{ id = 1; name = 'summary'; label = 'Summary'; type = 0 }
+            '101' = @{ id = 101; name = 'CFStartDate'; label = 'Start date'; type = 4 }
+            '102' = @{ id = 102; name = 'CFLicence'; label = 'Licence'; type = 2; values = @(@{ name = 'Business Basic' }, @{ name = 'Business Premium, annual' }) }
+            '103' = @{ id = 103; name = 'CFCostCentre'; label = 'Cost centre'; type = 0 }
+            '104' = @{ id = 104; name = 'CFAssetTag'; label = 'Asset tag'; type = 0 }
+            '105' = @{ id = 105; name = 'CFMystery'; label = 'Mystery'; type = 77 }
+            '106' = @{ id = 106; name = 'CFInternalCode'; label = 'Internal code'; type = 0 }
+            '201' = @{ id = 201; name = 'CFPrinterLocation'; label = 'Printer location'; type = 0 }
+            '202' = @{ id = 202; name = 'CFDept'; type = 2; values = @(@{ name = 'Finance' }, @{ name = 'Sales' }) }
+        }
+        if ($TDefs.Contains($Matches[1])) { return ($TDefs[$Matches[1]] | ConvertTo-Json -Depth 5 | ConvertFrom-Json) }
+        New-HttpError 404 '{"message":"Not found"}'
+    }
     if ($c.Method -eq 'GET' -and $u -eq "$THalo/api/Priority") { return , @([pscustomobject]@{ priorityid = 2; name = 'High' }, [pscustomobject]@{ priorityid = 4; name = 'Low' }) }
     if ($c.Method -eq 'GET' -and $u -eq "$THalo/api/Status") { return , @([pscustomobject]@{ id = 1; name = 'New' }) }
     if ($c.Method -eq 'GET' -and $u -like "$TCr/v2/odata/company*") { if ($u -match 'companyId eq 1&') { return [pscustomobject]@{ value = @([pscustomobject]@{ companyId = 1; name = 'Example MSP' }) } }; return [pscustomobject]@{ value = @() } }

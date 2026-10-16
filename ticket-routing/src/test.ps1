@@ -366,6 +366,12 @@ foreach ($p in ($parts | Sort-Object Name -Descending)) { $split[($p.BaseName -r
 $x = Invoke-Routing $body -Source ucp -SkillArticles $split
 Check 'ucp: skills split across several articles' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and @($x.prep.actions | Where-Object { $_ -match "Read $($parts.Count) articles" }).Count -eq 1) "$($x.r.status): $($x.r.message) / $($x.prep.actions -join '; ')"
 
+$dashed = [ordered]@{}; $i = 0
+foreach ($p in $parts) { $i++; $dashed["Ticket Routing - Skills $i"] = (Get-Content $p.FullName | ForEach-Object { "<p>$([System.Net.WebUtility]::HtmlEncode($_))</p>" }) -join '' }
+$dashed['Ticket Routing - Skills notes'] = '<p>Skill: Should Not Be Read</p><p>Engineers for Should Not Be Read / Tickets: Ghost, Casper</p>'
+$x = Invoke-Routing $body -Source ucp -SkillArticles $dashed
+Check 'ucp: titles with " - " instead of ":" are found; other titles ignored' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and $x.prep.skillList -notmatch 'Should Not Be Read') "$($x.r.status): $($x.r.message)"
+
 $kb = Join-Path $here '..\kb-articles'
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $kb 'ticket-routing-engineers-and-settings.txt')','$(Join-Path $kb 'ticket-routing-skills.txt')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1
 Check 'shipped KB article templates pass the validator' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Engineers named: 3; engineers table: 3' -and ($v -join "`n") -match 'liveAssign=no') ($v -join ' / ')

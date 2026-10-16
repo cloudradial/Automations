@@ -625,12 +625,17 @@ definition:
               $crBase = $crBase.TrimEnd('/')
               # -Parts: a table too big for one article can be split across "<Subject> 1", "<Subject> 2", ...
               # (KB articles have a size limit). They're read in number order and joined.
+              # Subjects match with ':' or '-' after the first word group ("Ticket Routing - Skills 1" is "Ticket Routing: Skills 1"),
+              # because the exported files can't have ':' in their names.
+              $normSubject = { param($x) (([string]$x).Trim() -replace '^(.+?)\s*[:\-–—]\s+', '$1: ' -replace '\s{2,}', ' ') }
               function Get-Article { param([string]$Subject, [switch]$Parts)
-                  $q = $Subject -replace "'", "''"
-                  $f = if ($Parts) { "companyId eq $companyId and startswith(subject,'$q')" } else { "companyId eq $companyId and subject eq '$q'" }
+                  $want = & $normSubject $Subject
+                  $root = (($want -split ':')[0]).Trim() -replace "'", "''"
+                  $f = "companyId eq $companyId and startswith(subject,'$root')"
                   $list = @(Get-Prop (Invoke-RestMethod -Method GET -Uri "$crBase/v2/odata/article?`$filter=$([uri]::EscapeDataString($f))&`$select=articleId,subject" -Headers $crHeaders) 'value' | Where-Object { $null -ne $_ })
+                  if (-not $Parts) { $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -eq $want }) }
                   if ($Parts) {
-                      $list = @($list | Where-Object { ([string](Get-Prop $_ 'subject')).Trim() -match ('^' + [regex]::Escape($Subject) + '(\s+(\d+))?$') } |
+                      $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -match ('^' + [regex]::Escape($want) + '(\s+(\d+))?$') } |
                           Sort-Object { $m = [regex]::Match(([string](Get-Prop $_ 'subject')).Trim(), '\s(\d+)$'); if ($m.Success) { [int]$m.Groups[1].Value } else { 0 } })
                   }
                   if (-not $list.Count) { return $null }

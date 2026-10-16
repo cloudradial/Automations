@@ -115,7 +115,7 @@ For CloudRadial UCP partners. Set `$TableSource = 'ucp'` and add the `CloudRadia
 ./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportArticleDir .\articles
 ```
 
-It writes `Ticket Routing - Skills 1.txt`, `Ticket Routing - Skills 2.txt` and so on, each under 90,000 characters, which leaves room under the 100,000-character article limit (change it with `-MaxArticleChars`), plus `Ticket Routing - Engineers and Settings.txt`. Create each as a KB article with the subject `Ticket Routing: Skills 1`, `Ticket Routing: Skills 2` and so on, and paste the text in. The workflow reads every article whose subject is `Ticket Routing: Skills` or `Ticket Routing: Skills <number>`, in number order.
+It writes `Ticket Routing - Skills 1.txt`, `Ticket Routing - Skills 2.txt` and so on, each under 90,000 characters, which leaves room under the 100,000-character article limit (change it with `-MaxArticleChars`), plus `Ticket Routing - Engineers and Settings.txt`. Create each as a KB article with the subject `Ticket Routing: Skills 1`, `Ticket Routing: Skills 2` and so on, and paste the text in. The file names use "-" because Windows doesn't allow ":", and the workflow accepts either: `Ticket Routing - Skills 1` works too. The workflow reads every article whose subject is `Ticket Routing: Skills` or `Ticket Routing: Skills <number>`, in number order.
 
 Cells pasted straight from Excel work too, with or without `[Settings]`, `[Engineers]` and `[Skills]` heading lines.
 

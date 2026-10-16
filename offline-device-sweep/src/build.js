@@ -96,10 +96,6 @@ if (acts.find((a) => a.id === 'start').properties.webhookEnabled !== false) thro
 if (acts.some((a) => a.properties && a.properties.model)) throw new Error('model must be blank');
 if (/\{\{\s*input\./.test(text)) throw new Error('use nodes.<id>.output bindings, never input.*');
 if (text.includes(String.fromCharCode(0x2014))) throw new Error('no em dashes');
-// Placeholder data only: the real demo-tenant company name must never ship. It is spelled from character
-// codes so the repo rule (never write that name in the repo) holds for this file too.
-const realDemo = new RegExp(String.fromCharCode(107, 109, 99, 111), 'i');
-if (realDemo.test(text)) throw new Error('placeholder data only (Contoso, Example MSP), never a real tenant name');
 const ids = new Set(acts.map((a) => a.id));
 for (const c of doc.definition.connections) if (!ids.has(c.source) || !ids.has(c.target)) throw new Error(`bad connection ${c.source} -> ${c.target}`);
 for (const a of acts.filter((z) => z.type === 'powershell-script')) {

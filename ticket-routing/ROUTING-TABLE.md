@@ -109,13 +109,13 @@ Workflow scripts can't read AutomationAI Knowledge, which is why the engineers a
 
 For CloudRadial UCP partners. Set `$TableSource = 'ucp'` and add the `CloudRadial-*` and `Routing-CompanyId` secrets.
 
-**A large table:** KB articles have a size limit, and a 1,200-row skills CSV (about 155 KB) is over it. Export the skills in a compact form instead: one block per skill, listing the engineers per role. That's about 45 KB for 66 skills, split across numbered articles:
+**A large table:** KB articles hold about 100,000 characters, and a 1,200-row skills CSV (about 155 KB) is over that. Export the skills in a compact form instead: one block per skill, listing the engineers per role. That's about 45 KB for 66 skills, split across numbered articles:
 
 ```
 ./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportArticleDir .\articles
 ```
 
-It writes `Ticket Routing - Skills 1.txt`, `Ticket Routing - Skills 2.txt` and so on, each under 30,000 characters (change it with `-MaxArticleChars`), plus `Ticket Routing - Engineers and Settings.txt`. Create each as a KB article with the subject `Ticket Routing: Skills 1`, `Ticket Routing: Skills 2` and so on, and paste the text in. The workflow reads every article whose subject is `Ticket Routing: Skills` or `Ticket Routing: Skills <number>`, in number order.
+It writes `Ticket Routing - Skills 1.txt`, `Ticket Routing - Skills 2.txt` and so on, each under 90,000 characters, which leaves room under the 100,000-character article limit (change it with `-MaxArticleChars`), plus `Ticket Routing - Engineers and Settings.txt`. Create each as a KB article with the subject `Ticket Routing: Skills 1`, `Ticket Routing: Skills 2` and so on, and paste the text in. The workflow reads every article whose subject is `Ticket Routing: Skills` or `Ticket Routing: Skills <number>`, in number order.
 
 Cells pasted straight from Excel work too, with or without `[Settings]`, `[Engineers]` and `[Skills]` heading lines.
 

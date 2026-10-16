@@ -37,7 +37,7 @@ param(
     [string]$Psa = '',
     [string]$ExportKnowledgeDir,
     [string]$ExportArticleDir,
-    [int]$MaxArticleChars = 30000,
+    [int]$MaxArticleChars = 90000,   # KB articles hold about 100,000 characters; this leaves room for editor markup
     [switch]$Placeholders
 )
 $ErrorActionPreference = 'Stop'

@@ -119,10 +119,17 @@ if (-not $all.Count) { Stop-Run 'incomplete' 'HaloPSA returned no ticket templat
 
 $skipped = New-Object System.Collections.ArrayList
 $todo = New-Object System.Collections.ArrayList
+$unknown = @{ count = 0; first = '' }
 foreach ($t in $all) {
     $tid = [string](Get-First $t @('id', 'template_id'))
     $name = ([string](Get-First $t @('name', 'templatename', 'summary'))).Trim()
-    if (-not $tid -or -not $name) { continue }
+    if (-not $tid -or -not $name) {
+        # Never dropped silently: name the properties Halo sent, so the field names can be corrected.
+        $props = if ($t -is [System.Collections.IDictionary]) { @($t.Keys) } elseif ($null -ne $t -and $t -isnot [string]) { @($t.PSObject.Properties | ForEach-Object { $_.Name }) } else { @() }
+        $w = "A HaloPSA template reply had no id or name this workflow recognises, so it was skipped. Its properties: $((@($props) | Select-Object -First 40) -join ', ')."
+        $null = $warnings.Add($w); $unknown.count++; if (-not $unknown.first) { $unknown.first = $w }
+        continue
+    }
     if ($f.templateIds.Count -and $f.templateIds -notcontains [int]$tid) { continue }
     if (-not $f.includeInactive -and (Get-Prop $t 'inactive') -eq $true) { $null = $skipped.Add([ordered]@{ templateId = [int]$tid; template = $name; action = 'skipped'; catalogId = 0; questions = 0; note = 'Inactive in HaloPSA.' }); continue }
     if ($moved.ContainsKey($tid)) { $null = $skipped.Add([ordered]@{ templateId = [int]$tid; template = $name; action = 'skipped'; catalogId = $moved[$tid]; questions = 0; note = 'Already moved.' }); continue }
@@ -132,6 +139,7 @@ foreach ($t in $all) {
 foreach ($i in $f.templateIds) { if (-not @($all | Where-Object { [string](Get-First $_ @('id', 'template_id')) -eq [string]$i }).Count) { $null = $warnings.Add("Halo template $i wasn't found, so it was skipped.") } }
 $batch = @($todo | Select-Object -First $f.maxTemplates)
 $remaining = [Math]::Max(0, $todo.Count - $batch.Count)
+if (-not $batch.Count -and $unknown.count -and -not $skipped.Count) { Stop-Run 'incomplete' "HaloPSA's template list wasn't in a shape this workflow recognises, so nothing was moved. $($unknown.first)" }
 if (-not $batch.Count) {
     $msg = "Nothing new to move: every matching Halo template is already in '$($f.companyName)', inactive, or named like an existing form."
     $stopState.done = $true

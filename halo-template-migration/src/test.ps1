@@ -75,7 +75,8 @@ $TRouter = {
     $u = [uri]::UnescapeDataString($c.Uri)
     if ($c.Method -eq 'POST' -and $u -eq "$THalo/auth/token") { return [pscustomobject]@{ access_token = 'tok' } }
     if ($c.Method -eq 'GET' -and $u -match '/api/Template\?') {
-        if ($TH.listFail) { New-HttpError 403 '{"message":"Forbidden"}' }
+        if ($TH.listFail -eq '403') { New-HttpError 403 '{"message":"Forbidden"}' }
+        if ($TH.listFail -eq 'odd') { return [pscustomobject]@{ total = 1; ticket_templates = @([pscustomobject]@{ tid = 12; title = 'New starter setup' }) } }
         $rows = @($TTemplates | Where-Object { $u -notmatch 'search=' -or $_.name -like "*$(([regex]::Match($u, 'search=([^&]*)')).Groups[1].Value)*" })
         return ([pscustomobject]@{ record_count = $rows.Count; templates = @($rows | ForEach-Object { [pscustomobject]$_ }) })
     }
@@ -186,7 +187,13 @@ $TH.listFail = '403'
 $r = Invoke-Flow $TBody $TAi
 Check 'halo 403: error with the permission to grant, nothing created' ($r.stage -eq 'read' -and $r.out.status -eq 'error' -and $r.out.message -like '*refused to read the ticket templates*' -and -not (Get-TCrWrites).Count) "$($r.out.message)"
 
-# 11. Missing secrets stop cleanly.
+# 11. A template list in an unknown shape stops and names what Halo sent, instead of "nothing new".
+Reset-T
+$TH.listFail = 'odd'
+$r = Invoke-Flow $TBody $TAi
+Check 'unknown list shape: incomplete, names the properties, nothing created' ($r.stage -eq 'read' -and $r.out.status -eq 'incomplete' -and $r.out.message -like '*total, ticket_templates*' -and -not (Get-TCrWrites).Count) "$($r.out.status) $($r.out.message)"
+
+# 12. Missing secrets stop cleanly.
 Reset-Mock @{ 'CloudRadial-BaseUrl' = $TCr; 'CloudRadial-PublicKey' = 'pub'; 'CloudRadial-PrivateKey' = 'priv' } $TRouter
 $TH.existing = @()
 $r = Invoke-Flow $TBody $TAi

@@ -48,7 +48,7 @@ function Invoke-Flow {
 $THalo = 'https://halo.example.com'
 $TCr = 'https://api.example.com'
 $TSecrets = @{ 'Halo-ApiUrl' = $THalo; 'Halo-ClientId' = 'cid'; 'Halo-ClientSecret' = 'csecret'; 'CloudRadial-BaseUrl' = $TCr; 'CloudRadial-PublicKey' = 'pub'; 'CloudRadial-PrivateKey' = 'priv' }
-$TH = @{ existing = @(); listFail = ''; postFail = ''; posts = (New-Object System.Collections.ArrayList) }
+$TH = @{ existing = @(); listFail = ''; postFail = ''; patchFail = ''; posts = (New-Object System.Collections.ArrayList); patches = @{} }
 $TTemplates = @(
     @{ id = 12; name = 'New starter setup' }, @{ id = 15; name = 'Printer not working' },
     @{ id = 20; name = 'Old VPN request'; disabled = $true }, @{ id = 21; name = 'Laptop request' }
@@ -109,11 +109,20 @@ $TRouter = {
         $b = Read-Body $c
         if ($TH.postFail -and $b.subject -eq $TH.postFail) { New-HttpError 500 '{"message":"Error creating catalog item"}' }
         $null = $TH.posts.Add($b)
-        return [pscustomobject]@{ companyCatalogId = 500 + $TH.posts.Count; questions = @($b.questions) }
+        # As the real API answers (verified 2026-10-16): wrapped in data, and each question keeps only label, type and order.
+        $cid = 500 + $TH.posts.Count; $i = 0
+        $qs = @($b.questions | ForEach-Object { $i++; [pscustomobject]@{ companyCatalogQuestionId = $cid * 100 + $i; label = $_.label; type = $_.type; order = $_.order; options = ''; jsonId = ''; customFieldName = ''; isRequired = $false; isDescription = $false } })
+        return [pscustomobject]@{ data = [pscustomobject]@{ companyCatalogId = $cid; questions = $qs }; success = $true; message = '' }
+    }
+    if ($c.Method -eq 'PATCH' -and $u -match "$TCr/v2/catalogquestion/(\d+)\?companyId=1$") {
+        if ($TH.patchFail -and $Matches[1] -eq $TH.patchFail) { New-HttpError 400 '{"message":"Invalid patch document"}' }
+        $TH.patches[$Matches[1]] = @(Read-Body $c); return $null
     }
     return $null
 }
-function Reset-T { $TH.existing = @([pscustomobject]@{ companyCatalogId = 77; subject = 'Laptop request'; tags = 'halo-template:21' }); $TH.listFail = ''; $TH.postFail = ''; $TH.posts.Clear(); Reset-Mock $TSecrets $TRouter }
+function Reset-T { $TH.existing = @([pscustomobject]@{ companyCatalogId = 77; subject = 'Laptop request'; tags = 'halo-template:21' }); $TH.listFail = ''; $TH.postFail = ''; $TH.patchFail = ''; $TH.posts.Clear(); $TH.patches = @{}; Reset-Mock $TSecrets $TRouter }
+# The PATCH ops sent for one question, as {path: value}.
+function Get-TOps { param([string]$Qid) $o = @{}; if ($TH.patches.Contains($Qid)) { foreach ($op in @($TH.patches[$Qid])) { $o[$op.path] = $op.value } }; return $o }
 function Get-THaloWrites { return , @($Mock.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Uri -like "$THalo*" -and $_.Uri -notlike '*/auth/token' }) }
 function Get-TCrWrites { return , @($Mock.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Uri -like "$TCr*" }) }
 function Get-TRow { param($Out, [int]$Id) return @($Out.forms | Where-Object { $_.templateId -eq $Id })[0] }
@@ -147,6 +156,17 @@ Check 'live: invented field dropped with a warning' ([bool](@($r.out.warnings) -
 Check 'live: template HTML kept without script or handlers' ($b12.description -like '*Set up a new starter.*' -and $b12.description -notmatch '(?i)<script|onclick|javascript:') ($b12.description)
 Check 'live: problem report with defaults where Halo had none' ($b15.catalogUsage -eq 0 -and $b15.selectText -eq 'REPORT' -and $b15.psaPriority -eq 'High' -and $b15.psaBoard -eq '@DefaultBoard' -and $b15.psaStatus -eq '@DefaultStatus' -and $b15.description -like '*Report a printer fault.*' -and @($b15.questions).Count -eq 2) ($b15 | ConvertTo-Json -Depth 3 -Compress)
 Check 'live: never writes to Halo' (-not (Get-THaloWrites).Count) (Show-Calls)
+# Form 501 is the first one created. Its questions are 50101 (Which licence?), 50102 (First day), 50103 (free text).
+$TOpsLicence = Get-TOps '50101'; $TOpsDay = Get-TOps '50102'; $TOpsLast = Get-TOps '50103'
+Check 'live: options, jsonId and customFieldName set on each question after the create' ($TOpsLicence['/options'] -eq 'Business Basic,Business Premium annual' -and $TOpsLicence['/customFieldName'] -eq 'CFLicence' -and $TOpsLicence['/jsonId'] -eq 'CFLicence') ($TOpsLicence | ConvertTo-Json -Compress)
+Check 'live: required, hint and description flag set after the create' ($TOpsDay['/isRequired'] -eq $true -and $TOpsDay['/info'] -eq 'Their first working day.' -and $TOpsLast['/isDescription'] -eq $true) "$($TOpsDay | ConvertTo-Json -Compress) $($TOpsLast | ConvertTo-Json -Compress)"
+Check 'live: question count read from the wrapped reply' ((Get-TRow $r.out 12).action -eq 'created' -and $r.out.counts.questionsCreated -eq 5) "$($r.out.counts | ConvertTo-Json -Compress)"
+
+# 2b. A question's details fail to save: the form is incomplete and says so.
+Reset-T
+$TH.patchFail = '50101'
+$r = Invoke-Flow ($TBody + @{ confirm = $true; templateIds = @(12) }) $TAi
+Check 'patch fails: form incomplete, names the question' ($r.out.status -eq 'incomplete' -and (Get-TRow $r.out 12).action -eq 'incomplete' -and [bool](@($r.out.warnings) -match 'Which licence')) "$($r.out.status) $((Get-TRow $r.out 12).note)"
 
 # 3. No usable AI answer: every field is asked with Halo's labels.
 Reset-T

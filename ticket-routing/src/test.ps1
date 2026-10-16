@@ -327,6 +327,21 @@ ConvertTo-PastedHtml (@('[Skills]') + $skillsCsv) | Set-Content (Join-Path $tmp 
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $tmp 'eng.html')','$(Join-Path $tmp 'skills.html')'; exit `$LASTEXITCODE" 2>&1
 Check 'validator reads article HTML and fails a bad setting' ($LASTEXITCODE -eq 1 -and ($v -join "`n") -match "tieBreak 'busiest'" -and ($v -join "`n") -match 'Engineers named: 5; engineers table: 5') ($v -join ' / ')
 
+# The shape the CloudRadial KB editor stores when cells are pasted from Excel (article 5789, 2026-10-16):
+# blank neighbours merged into colspan, and <br> in an empty cell.
+$excelPaste = '<p>&nbsp;</p><table border="0" data-pasted="true"><tbody><tr><td height="19" style="width: 64px;">Engineer</td><td>Email</td><td>PSA User Id</td><td>PSA Role Id</td><td>Active</td><td>Max Open Tickets</td></tr>' +
+    '<tr><td height="19">Engineer 01</td><td colspan="3">engineer01@example.com</td><td>Yes</td><td><br></td></tr>' +
+    '<tr><td height="19">Engineer 02</td><td>engineer02@example.com</td><td colspan="2">102</td><td>No</td><td>20</td></tr></tbody></table>'
+$excelPaste | Set-Content (Join-Path $tmp 'excel-paste.html')
+$v = & pwsh -NoProfile -Command "`$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; . ([scriptblock]::Create((Get-Content -Raw '$(Join-Path $here 'routing-table.ps1')'))); `$s = Split-RoutingSections (ConvertFrom-ArticleBody (Get-Content -Raw '$(Join-Path $tmp 'excel-paste.html')')); `$t = Read-RoutingTable @() @(`$s.Engineers) @(); `$t.Engineers | ConvertTo-Json -Compress" 2>&1
+$pe = ($v -join '') | ConvertFrom-Json
+Check 'Excel paste: merged blank cells keep later columns in place' (@($pe).Count -eq 2 -and $pe[0].Email -eq 'engineer01@example.com' -and $pe[0].PsaUserId -eq '' -and $pe[0].Active -eq $true -and $pe[0].MaxOpen -eq '') ($v -join ' ')
+('<p>tieBreak: listed-order</p>' + (ConvertTo-TableHtml (New-EngineersCsv))) | Set-Content (Join-Path $tmp 'eng-noheading.html')
+ConvertTo-TableHtml $skillsCsv | Set-Content (Join-Path $tmp 'skills-noheading.html')
+$v = & pwsh -NoProfile -Command "& '$(Join-Path $here '..\Test-RoutingTable.ps1')' -ArticleHtmlPath '$(Join-Path $tmp 'eng-noheading.html')','$(Join-Path $tmp 'skills-noheading.html')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1
+Check 'pasted tables need no [Section] headings' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Engineers named: 5; engineers table: 5' -and ($v -join "`n") -match 'tieBreak=listed-order') ($v -join ' / ')
+Check 'Excel paste: a merged cell further along, and No for Active' ($pe[1].PsaUserId -eq '102' -and $pe[1].PsaRoleId -eq '' -and $pe[1].Active -eq $false -and $pe[1].MaxOpen -eq '20') ($v -join ' ')
+
 $kdir = Join-Path $tmp 'knowledge'
 $v = & pwsh -NoProfile -File $validator -SkillsPath (Join-Path $tmp 'skills.csv') -EngineersPath (Join-Path $tmp 'engineers.csv') -ExportKnowledgeDir $kdir -Placeholders 2>&1
 $files = @(Get-ChildItem $kdir -Filter *.md | Sort-Object Name)

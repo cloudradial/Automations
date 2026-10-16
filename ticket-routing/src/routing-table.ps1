@@ -5,6 +5,12 @@
 function ConvertFrom-ArticleBody {
     param([string]$Html)
     $t = $Html -replace '\r', ''
+    # A cell pasted from Excel can span blank neighbours (colspan="3"): count it as that many columns.
+    $t = [regex]::Replace($t, '(?is)<t([dh])([^>]*)\bcolspan\s*=\s*"?(\d+)"?([^>]*)>(.*?)</t[dh]>', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m) "<t$($m.Groups[1].Value)$($m.Groups[2].Value)$($m.Groups[4].Value)>$($m.Groups[5].Value)</t$($m.Groups[1].Value)>" + ('<td></td>' * ([Math]::Max(1, [int]$m.Groups[3].Value) - 1)) })
+    # A line break or paragraph inside a cell (an empty pasted cell holds <br>) must not split the row.
+    $t = [regex]::Replace($t, '(?is)(<t[dh][^>]*>)(.*?)(</t[dh]>)', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m) $m.Groups[1].Value + (($m.Groups[2].Value -replace '(?i)<br\s*/?>|</(p|div)>', ' ').Trim()) + $m.Groups[3].Value })
     $t = $t -replace '(?i)<br\s*/?>', "`n"
     $t = $t -replace '(?i)</(p|div|tr|li|h[1-6]|pre)>', "`n"
     # Table cells become quoted CSV fields so commas inside a cell survive.
@@ -21,12 +27,19 @@ function ConvertFrom-ArticleBody {
 
 # Splits lines into [Settings], [Engineers] and [Skills] sections. Lines before
 # any marker count as [Skills], so a plain skills CSV works on its own.
+# Without markers (a table pasted straight from Excel), a header row starting
+# Engineer or Skill starts that section, and a known setting line is a setting.
 function Split-RoutingSections {
     param([string[]]$Lines)
     $s = @{ Settings = @(); Engineers = @(); Skills = @() }
-    $cur = 'Skills'
+    $cur = 'Skills'; $marked = $false
     foreach ($l in $Lines) {
-        if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); continue }
+        if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); $marked = $true; continue }
+        if (-not $marked) {
+            if ($l -match '^\s*"?Engineer"?\s*,') { $cur = 'Engineers' }
+            elseif ($l -match '^\s*"?Skill"?\s*,') { $cur = 'Skills' }
+            elseif ($l -match '^\s*"?(tieBreak|respectMaxOpen|noMatch|fallbackEngineer|minConfidence|liveAssign)"?\s*[:=]') { $s.Settings += $l; continue }
+        }
         $s[$cur] += $l
     }
     return $s

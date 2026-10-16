@@ -36,6 +36,8 @@ param(
     [ValidateSet('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 'zendesk', '')]
     [string]$Psa = '',
     [string]$ExportKnowledgeDir,
+    [string]$ExportArticleDir,
+    [int]$MaxArticleChars = 30000,
     [switch]$Placeholders
 )
 $ErrorActionPreference = 'Stop'
@@ -79,6 +81,7 @@ function Split-RoutingSections {
     foreach ($l in $Lines) {
         if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); $marked = $true; continue }
         if (-not $marked) {
+            if (Test-SkillBlockLine $l) { $s.Skills += $l; continue }
             if ($l -match '^\s*"?Engineer"?\s*,') { $cur = 'Engineers' }
             elseif ($l -match '^\s*"?Skill"?\s*,') { $cur = 'Skills' }
             elseif ($l -match '^\s*"?(tieBreak|respectMaxOpen|noMatch|fallbackEngineer|minConfidence|liveAssign)"?\s*[:=]') { $s.Settings += $l; continue }
@@ -96,9 +99,38 @@ function Select-FromHeader {
     return @()
 }
 
+# The compact skills format (one block per skill, as ConvertTo-SkillDocuments writes it):
+#   Skill: <name> / Covers: <description> / Roles: ... / Engineers for <name> / <role>: <name>; <name>
+# About a third of the size of the CSV, so a large table fits in KB articles.
+function Test-SkillBlockLine { param([string]$l) return ($l -match '^\s*(#\s|Skill:|Covers:|Roles:|Engineers for\s)') }
+# True when lines hold a skills table in either form: a CSV with its header, or compact blocks.
+function Test-HasSkills { param([string[]]$Lines) return ([bool]@(Select-FromHeader @($Lines) 'Skill').Count -or [bool]@(@($Lines) | Where-Object { $_ -match '^\s*Engineers for\s' }).Count) }
+function ConvertFrom-SkillBlocks {
+    param([string[]]$Lines)
+    $rows = @(); $skill = ''; $desc = ''
+    foreach ($l in $Lines) {
+        $x = $l.Trim()
+        if ($x -match '^Skill:\s*(.+)$') { $skill = $Matches[1].Trim(); $desc = ''; continue }
+        if ($x -match '^Covers:\s*(.*)$') { $desc = $Matches[1].Trim(); continue }
+        if ($x -notmatch '^Engineers for\s') { continue }
+        # Role names can contain " / " (Documentation / Knowledge Base), so take the skill from its Skill: line.
+        $rest = $null
+        if ($skill -and $x.StartsWith("Engineers for $skill / ")) { $rest = $x.Substring("Engineers for $skill / ".Length) }
+        elseif ($x -match '^Engineers for (.+?) / (.+)$') { $skill = $Matches[1].Trim(); $rest = $Matches[2] }
+        if ($null -eq $rest) { continue }
+        $i = $rest.IndexOf(':'); if ($i -lt 0) { continue }
+        $role = $rest.Substring(0, $i).Trim()
+        foreach ($n in @($rest.Substring($i + 1) -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+            $rows += [pscustomobject]@{ Skill = $skill; Role = $role; Engineer = $n; Description = $desc }
+        }
+    }
+    return $rows
+}
+
 function Read-RoutingTable {
     param([string[]]$SkillLines, [string[]]$EngineerLines, [string[]]$SettingLines)
-    $SkillLines = @(Select-FromHeader @($SkillLines) 'Skill')
+    $blockRows = @(ConvertFrom-SkillBlocks @(@($SkillLines) | Where-Object { Test-SkillBlockLine $_ }))
+    $SkillLines = @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill')
     $EngineerLines = @(Select-FromHeader @($EngineerLines) 'Engineer')
     $clean = { param($v) $x = ([string]$v).Trim(); if ($x -eq '#N/A') { '' } else { $x } }
     # Names are matched across the two tables, so tidy spacing: "Hildebrand , Caleb" -> "Hildebrand, Caleb".
@@ -112,6 +144,7 @@ function Read-RoutingTable {
             }
         }
     }
+    foreach ($r in $blockRows) { $skills += [pscustomobject]@{ Skill = & $clean $r.Skill; Role = & $clean $r.Role; Engineer = & $name $r.Engineer; Description = & $clean $r.Description } }
     $engineers = @()
     if ($EngineerLines.Count) {
         foreach ($r in @($EngineerLines | ConvertFrom-Csv)) {
@@ -212,7 +245,7 @@ $skillLines = @(); $engLines = @(); $setLines = @()
 if ($ArticleHtmlPath) {
     foreach ($p in $ArticleHtmlPath) {
         $sec = Split-RoutingSections (ConvertFrom-ArticleBody (Get-Content -Raw -LiteralPath $p))
-        if (@(Select-FromHeader @($sec.Skills) 'Skill').Count) { $skillLines += $sec.Skills }
+        if (Test-HasSkills @($sec.Skills)) { $skillLines += $sec.Skills }
         $engLines += $sec.Engineers; $setLines += $sec.Settings
     }
 }
@@ -244,6 +277,32 @@ if ($ExportKnowledgeDir) {
         [IO.File]::WriteAllText((Join-Path $ExportKnowledgeDir 'engineers-placeholder.csv'), ($csv -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
     }
     "Exported $($docs.Count) skill documents to $ExportKnowledgeDir$(if ($Placeholders) { ', plus engineers-placeholder.csv (not for Knowledge: paste it into the Routing table step)' })."
+    ''
+}
+if ($ExportArticleDir) {
+    # The skills in the compact block format, split into numbered KB articles that each stay under
+    # MaxArticleChars once the editor wraps every line in <p></p> (counted as 7 extra characters a line).
+    $docs = ConvertTo-SkillDocuments $t
+    New-Item -ItemType Directory -Force -Path $ExportArticleDir | Out-Null
+    $parts = New-Object System.Collections.ArrayList; $cur = New-Object System.Collections.ArrayList; $size = 0
+    foreach ($k in $docs.Keys) {
+        $lines = @($docs[$k] -split "`n" | Where-Object { $_ -and $_ -notmatch '^#\s' })
+        $cost = ($lines | Measure-Object -Property Length -Sum).Sum + 7 * $lines.Count
+        if ($cost -gt $MaxArticleChars) { "WARNING: skill '$($lines[0])' alone is $cost characters, over MaxArticleChars." }
+        if ($cur.Count -and $size + $cost -gt $MaxArticleChars) { $null = $parts.Add(@($cur)); $cur = New-Object System.Collections.ArrayList; $size = 0 }
+        foreach ($l in $lines) { $null = $cur.Add($l) }; $null = $cur.Add(''); $size += $cost
+    }
+    if ($cur.Count) { $null = $parts.Add(@($cur)) }
+    $i = 0
+    foreach ($p in $parts) {
+        $i++
+        [IO.File]::WriteAllText((Join-Path $ExportArticleDir "Ticket Routing - Skills $i.txt"), ((@($p) -join "`n").TrimEnd() + "`n"), [Text.UTF8Encoding]::new($false))
+    }
+    $eng = @('[Settings]') + @($t.Settings.Keys | ForEach-Object { "$($_): $($t.Settings[$_])" }) + @('', '[Engineers]', 'Engineer,Email,PSA User Id,PSA Role Id,Active,Max Open Tickets') +
+        @($t.Engineers | ForEach-Object { "`"$($_.Engineer)`",$($_.Email),$($_.PsaUserId),$($_.PsaRoleId),$(if ($_.Active) { 'Yes' } else { 'No' }),$($_.MaxOpen)" })
+    [IO.File]::WriteAllText((Join-Path $ExportArticleDir 'Ticket Routing - Engineers and Settings.txt'), ($eng -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    "Exported $i skills article$(if ($i -ne 1) { 's' }) (each under $MaxArticleChars characters) and the engineers and settings article to $ExportArticleDir."
+    "Create each as a KB article titled as its file name, with ':' after 'Ticket Routing' (for example 'Ticket Routing: Skills 1'), and paste the text in."
     ''
 }
 

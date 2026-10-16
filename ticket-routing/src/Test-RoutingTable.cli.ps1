@@ -36,6 +36,8 @@ param(
     [ValidateSet('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 'zendesk', '')]
     [string]$Psa = '',
     [string]$ExportKnowledgeDir,
+    [string]$ExportArticleDir,
+    [int]$MaxArticleChars = 30000,
     [switch]$Placeholders
 )
 $ErrorActionPreference = 'Stop'
@@ -49,7 +51,7 @@ $skillLines = @(); $engLines = @(); $setLines = @()
 if ($ArticleHtmlPath) {
     foreach ($p in $ArticleHtmlPath) {
         $sec = Split-RoutingSections (ConvertFrom-ArticleBody (Get-Content -Raw -LiteralPath $p))
-        if (@(Select-FromHeader @($sec.Skills) 'Skill').Count) { $skillLines += $sec.Skills }
+        if (Test-HasSkills @($sec.Skills)) { $skillLines += $sec.Skills }
         $engLines += $sec.Engineers; $setLines += $sec.Settings
     }
 }
@@ -81,6 +83,32 @@ if ($ExportKnowledgeDir) {
         [IO.File]::WriteAllText((Join-Path $ExportKnowledgeDir 'engineers-placeholder.csv'), ($csv -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
     }
     "Exported $($docs.Count) skill documents to $ExportKnowledgeDir$(if ($Placeholders) { ', plus engineers-placeholder.csv (not for Knowledge: paste it into the Routing table step)' })."
+    ''
+}
+if ($ExportArticleDir) {
+    # The skills in the compact block format, split into numbered KB articles that each stay under
+    # MaxArticleChars once the editor wraps every line in <p></p> (counted as 7 extra characters a line).
+    $docs = ConvertTo-SkillDocuments $t
+    New-Item -ItemType Directory -Force -Path $ExportArticleDir | Out-Null
+    $parts = New-Object System.Collections.ArrayList; $cur = New-Object System.Collections.ArrayList; $size = 0
+    foreach ($k in $docs.Keys) {
+        $lines = @($docs[$k] -split "`n" | Where-Object { $_ -and $_ -notmatch '^#\s' })
+        $cost = ($lines | Measure-Object -Property Length -Sum).Sum + 7 * $lines.Count
+        if ($cost -gt $MaxArticleChars) { "WARNING: skill '$($lines[0])' alone is $cost characters, over MaxArticleChars." }
+        if ($cur.Count -and $size + $cost -gt $MaxArticleChars) { $null = $parts.Add(@($cur)); $cur = New-Object System.Collections.ArrayList; $size = 0 }
+        foreach ($l in $lines) { $null = $cur.Add($l) }; $null = $cur.Add(''); $size += $cost
+    }
+    if ($cur.Count) { $null = $parts.Add(@($cur)) }
+    $i = 0
+    foreach ($p in $parts) {
+        $i++
+        [IO.File]::WriteAllText((Join-Path $ExportArticleDir "Ticket Routing - Skills $i.txt"), ((@($p) -join "`n").TrimEnd() + "`n"), [Text.UTF8Encoding]::new($false))
+    }
+    $eng = @('[Settings]') + @($t.Settings.Keys | ForEach-Object { "$($_): $($t.Settings[$_])" }) + @('', '[Engineers]', 'Engineer,Email,PSA User Id,PSA Role Id,Active,Max Open Tickets') +
+        @($t.Engineers | ForEach-Object { "`"$($_.Engineer)`",$($_.Email),$($_.PsaUserId),$($_.PsaRoleId),$(if ($_.Active) { 'Yes' } else { 'No' }),$($_.MaxOpen)" })
+    [IO.File]::WriteAllText((Join-Path $ExportArticleDir 'Ticket Routing - Engineers and Settings.txt'), ($eng -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    "Exported $i skills article$(if ($i -ne 1) { 's' }) (each under $MaxArticleChars characters) and the engineers and settings article to $ExportArticleDir."
+    "Create each as a KB article titled as its file name, with ':' after 'Ticket Routing' (for example 'Ticket Routing: Skills 1'), and paste the text in."
     ''
 }
 

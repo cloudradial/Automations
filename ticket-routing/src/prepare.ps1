@@ -68,16 +68,27 @@ try {
     if (-not $crBase -or -not $crPub -or -not $crPriv) { Stop-Prepare 'error' 'Add these secrets to the runner Key Vault: CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey'; return }
     $crHeaders = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)")); Accept = 'application/json' }
     $crBase = $crBase.TrimEnd('/')
-    function Get-Article { param([string]$Subject)
-        $f = "companyId eq $companyId and subject eq '$($Subject -replace "'", "''")'"
+    # -Parts: a table too big for one article can be split across "<Subject> 1", "<Subject> 2", ...
+    # (KB articles have a size limit). They're read in number order and joined.
+    function Get-Article { param([string]$Subject, [switch]$Parts)
+        $q = $Subject -replace "'", "''"
+        $f = if ($Parts) { "companyId eq $companyId and startswith(subject,'$q')" } else { "companyId eq $companyId and subject eq '$q'" }
         $list = @(Get-Prop (Invoke-RestMethod -Method GET -Uri "$crBase/v2/odata/article?`$filter=$([uri]::EscapeDataString($f))&`$select=articleId,subject" -Headers $crHeaders) 'value' | Where-Object { $null -ne $_ })
+        if ($Parts) {
+            $list = @($list | Where-Object { ([string](Get-Prop $_ 'subject')).Trim() -match ('^' + [regex]::Escape($Subject) + '(\s+(\d+))?$') } |
+                Sort-Object { $m = [regex]::Match(([string](Get-Prop $_ 'subject')).Trim(), '\s(\d+)$'); if ($m.Success) { [int]$m.Groups[1].Value } else { 0 } })
+        }
         if (-not $list.Count) { return $null }
-        if ($list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used.") }
-        $a = Invoke-RestMethod -Method GET -Uri "$crBase/v2/article/$(Get-Prop $list[0] 'articleId')" -Headers $crHeaders
-        $body = Get-Prop $a 'body'; if ($null -eq $body) { $body = Get-Path $a 'data.body' }
-        return [string]$body
+        if (-not $Parts -and $list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used."); $list = @($list[0]) }
+        $bodies = foreach ($item in $list) {
+            $a = Invoke-RestMethod -Method GET -Uri "$crBase/v2/article/$(Get-Prop $item 'articleId')" -Headers $crHeaders
+            $body = Get-Prop $a 'body'; if ($null -eq $body) { $body = Get-Path $a 'data.body' }
+            [string]$body
+        }
+        if ($list.Count -gt 1) { $null = $actions.Add("Read $($list.Count) articles for '$Subject'") }
+        return (@($bodies) -join "`n")
     }
-    $skillsHtml = Get-Article $skillsSubject
+    $skillsHtml = Get-Article $skillsSubject -Parts
     $engHtml = Get-Article $engSubject
     $missingArticles = @(); if ($null -eq $skillsHtml) { $missingArticles += "'$skillsSubject'" }; if ($null -eq $engHtml) { $missingArticles += "'$engSubject'" }
     if ($missingArticles.Count) { Stop-Prepare 'incomplete' "The routing table wasn't found: no article titled $($missingArticles -join ' or ') in CloudRadial company $companyId. Nothing was assigned."; return }
@@ -85,7 +96,7 @@ try {
     $sk = Split-RoutingSections (ConvertFrom-ArticleBody $skillsHtml)
     $en = Split-RoutingSections (ConvertFrom-ArticleBody $engHtml)
     # Skills come from the skills article; engineers and settings from the other. A section in the wrong article still counts.
-    $skillLines = if (@(Select-FromHeader @($sk.Skills) 'Skill').Count) { @($sk.Skills) } else { @($en.Skills) }
+    $skillLines = if (Test-HasSkills @($sk.Skills)) { @($sk.Skills) } else { @($en.Skills) }
     $engLines = if ($en.Engineers.Count) { @($en.Engineers) } else { @($sk.Engineers) }
     $setLines = @($en.Settings) + @($sk.Settings)
     $where = 'the KB articles'

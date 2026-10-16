@@ -36,6 +36,7 @@ function Split-RoutingSections {
     foreach ($l in $Lines) {
         if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); $marked = $true; continue }
         if (-not $marked) {
+            if (Test-SkillBlockLine $l) { $s.Skills += $l; continue }
             if ($l -match '^\s*"?Engineer"?\s*,') { $cur = 'Engineers' }
             elseif ($l -match '^\s*"?Skill"?\s*,') { $cur = 'Skills' }
             elseif ($l -match '^\s*"?(tieBreak|respectMaxOpen|noMatch|fallbackEngineer|minConfidence|liveAssign)"?\s*[:=]') { $s.Settings += $l; continue }
@@ -53,9 +54,38 @@ function Select-FromHeader {
     return @()
 }
 
+# The compact skills format (one block per skill, as ConvertTo-SkillDocuments writes it):
+#   Skill: <name> / Covers: <description> / Roles: ... / Engineers for <name> / <role>: <name>; <name>
+# About a third of the size of the CSV, so a large table fits in KB articles.
+function Test-SkillBlockLine { param([string]$l) return ($l -match '^\s*(#\s|Skill:|Covers:|Roles:|Engineers for\s)') }
+# True when lines hold a skills table in either form: a CSV with its header, or compact blocks.
+function Test-HasSkills { param([string[]]$Lines) return ([bool]@(Select-FromHeader @($Lines) 'Skill').Count -or [bool]@(@($Lines) | Where-Object { $_ -match '^\s*Engineers for\s' }).Count) }
+function ConvertFrom-SkillBlocks {
+    param([string[]]$Lines)
+    $rows = @(); $skill = ''; $desc = ''
+    foreach ($l in $Lines) {
+        $x = $l.Trim()
+        if ($x -match '^Skill:\s*(.+)$') { $skill = $Matches[1].Trim(); $desc = ''; continue }
+        if ($x -match '^Covers:\s*(.*)$') { $desc = $Matches[1].Trim(); continue }
+        if ($x -notmatch '^Engineers for\s') { continue }
+        # Role names can contain " / " (Documentation / Knowledge Base), so take the skill from its Skill: line.
+        $rest = $null
+        if ($skill -and $x.StartsWith("Engineers for $skill / ")) { $rest = $x.Substring("Engineers for $skill / ".Length) }
+        elseif ($x -match '^Engineers for (.+?) / (.+)$') { $skill = $Matches[1].Trim(); $rest = $Matches[2] }
+        if ($null -eq $rest) { continue }
+        $i = $rest.IndexOf(':'); if ($i -lt 0) { continue }
+        $role = $rest.Substring(0, $i).Trim()
+        foreach ($n in @($rest.Substring($i + 1) -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+            $rows += [pscustomobject]@{ Skill = $skill; Role = $role; Engineer = $n; Description = $desc }
+        }
+    }
+    return $rows
+}
+
 function Read-RoutingTable {
     param([string[]]$SkillLines, [string[]]$EngineerLines, [string[]]$SettingLines)
-    $SkillLines = @(Select-FromHeader @($SkillLines) 'Skill')
+    $blockRows = @(ConvertFrom-SkillBlocks @(@($SkillLines) | Where-Object { Test-SkillBlockLine $_ }))
+    $SkillLines = @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill')
     $EngineerLines = @(Select-FromHeader @($EngineerLines) 'Engineer')
     $clean = { param($v) $x = ([string]$v).Trim(); if ($x -eq '#N/A') { '' } else { $x } }
     # Names are matched across the two tables, so tidy spacing: "Hildebrand , Caleb" -> "Hildebrand, Caleb".
@@ -69,6 +99,7 @@ function Read-RoutingTable {
             }
         }
     }
+    foreach ($r in $blockRows) { $skills += [pscustomobject]@{ Skill = & $clean $r.Skill; Role = & $clean $r.Role; Engineer = & $name $r.Engineer; Description = & $clean $r.Description } }
     $engineers = @()
     if ($EngineerLines.Count) {
         foreach ($r in @($EngineerLines | ConvertFrom-Csv)) {

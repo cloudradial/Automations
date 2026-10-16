@@ -85,6 +85,7 @@ function Invoke-RestMethod { param($Method = 'GET', $Uri, $Headers, $Body, $Cont
         return $null
     }
     # CloudRadial
+    if ($u -match '^https://cr\.test/v2/odata/article.*startswith\(subject,''(.+?)''\)') { $p = $Matches[1] -replace "''", "'"; $keys = @($global:Articles.Keys); return J @{ value = @($keys | Where-Object { $_.StartsWith($p) } | ForEach-Object { J @{ articleId = [array]::IndexOf($keys, $_) + 1; subject = $_ } }) } }
     if ($u -match '^https://cr\.test/v2/odata/article.*subject eq ''(.+?)''') { $s = $Matches[1] -replace "''", "'"; if ($global:Articles.Contains($s)) { return J @{ value = @(J @{ articleId = [array]::IndexOf(@($global:Articles.Keys), $s) + 1; subject = $s }) } }; return J @{ value = @() } }
     if ($u -match '^https://cr\.test/v2/article/(\d+)$') { return J @{ body = $global:Articles[@($global:Articles.Keys)[[int]$Matches[1] - 1]] } }
     $a = $global:Assigned
@@ -124,7 +125,7 @@ $global:Pass = 0; $global:Fail = 0
 function Check { param([string]$Name, [bool]$Ok, [string]$Detail = '') if ($Ok) { $global:Pass++ } else { $global:Fail++; Write-Host "  FAIL $Name $Detail" -ForegroundColor Red } }
 function Invoke-Routing {
     param($Body, [string]$Psa = 'connectwise', $Ai = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @(); confidence = 0.9; reason = 'The ticket asks for a FortiGate VPN tunnel.' },
-        [string[]]$Settings = @(), [hashtable]$Engineers = @{}, [string]$Source = 'inline', [string]$Form = 'pasted', [switch]$Wrap, [switch]$NoSecretPsa)
+        [string[]]$Settings = @(), [hashtable]$Engineers = @{}, [string]$Source = 'inline', [string]$Form = 'pasted', [switch]$Wrap, [switch]$NoSecretPsa, $SkillArticles = $null)
     $global:Writes.Clear(); $global:NodeOut = $null
     $global:Secrets = @{ 'CloudRadial-BaseUrl' = 'https://cr.test'; 'CloudRadial-PublicKey' = 'p'; 'CloudRadial-PrivateKey' = 's'; 'Routing-CompanyId' = '9' } + $mockSecrets[$Psa]
     if (-not $NoSecretPsa) { $global:Secrets['PSA-Type'] = $Psa }
@@ -134,6 +135,7 @@ function Invoke-Routing {
     $sk = @('Ticket routing skills for Contoso (example)', '[Skills]') + $skillsCsv
     $conv = if ($Form -eq 'table') { 'ConvertTo-TableHtml' } else { 'ConvertTo-PastedHtml' }
     $global:Articles = [ordered]@{ 'Ticket Routing: Skills' = (& $conv $sk); 'Ticket Routing: Engineers and Settings' = (& $conv $eng) }
+    if ($SkillArticles) { $global:Articles.Remove('Ticket Routing: Skills'); foreach ($k in $SkillArticles.Keys) { $global:Articles[$k] = $SkillArticles[$k] } }
     # Step 1, the Routing table step as shipped, with this test's blocks pasted in. Node I/O goes through JSON, as on the runner.
     $tableOut = $null
     if ($Source -ne 'none') {
@@ -350,6 +352,19 @@ Check 'export: one document per skill, Role only left out' ($files.Count -eq 3 -
 Check 'export: every engineer per role, renamed' ($forti -match '(?m)^Engineers for Network Firewall Fortinet / Tickets: Engineer \d\d; Engineer \d\d$' -and $forti -match '(?m)^Engineers for Network Firewall Fortinet / Install: Engineer \d\d$' -and $forti -notmatch 'Patel|Okafor') $forti
 $pcsv = Get-Content -Raw (Join-Path $kdir 'engineers-placeholder.csv')
 Check 'export: placeholder engineers CSV, no real names or ids' ($pcsv -match '"Engineer 01",engineer01@example.com,,,Yes,' -and $pcsv -notmatch 'Patel|Lee|101') $pcsv
+
+# A table too big for one KB article: compact blocks split across "Ticket Routing: Skills 1", "Skills 2", ...
+$adir = Join-Path $tmp 'articles'
+$v = & pwsh -NoProfile -File $validator -SkillsPath (Join-Path $tmp 'skills.csv') -EngineersPath (Join-Path $tmp 'engineers.csv') -ExportArticleDir $adir -MaxArticleChars 220 2>&1
+$parts = @(Get-ChildItem $adir -Filter 'Ticket Routing - Skills *.txt' | Sort-Object Name)
+Check 'article export: split into several skills articles' ($parts.Count -ge 2 -and (Test-Path (Join-Path $adir 'Ticket Routing - Engineers and Settings.txt'))) (($parts.Name -join ', ') + ' / ' + ($v -join ' / '))
+Check 'article export: compact blocks, no CSV rows' ((Get-Content -Raw $parts[0].FullName) -match '(?m)^Engineers for .+ / .+: ' -and (Get-Content -Raw $parts[0].FullName) -notmatch 'Skill,Role')
+$v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath $((@($parts.FullName) + (Join-Path $adir 'Ticket Routing - Engineers and Settings.txt') | ForEach-Object { "'$_'" }) -join ',') -Psa connectwise; exit `$LASTEXITCODE" 2>&1
+Check 'article export: reads back to the same table' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Skills rows:\s+7 \(7 matchable' -and ($v -join "`n") -match 'Skills:\s+3' -and ($v -join "`n") -match 'engineers table: 5') ($v -join ' / ')
+$split = [ordered]@{}
+foreach ($p in ($parts | Sort-Object Name -Descending)) { $split[($p.BaseName -replace '^Ticket Routing - ', 'Ticket Routing: ')] = (Get-Content $p.FullName | ForEach-Object { "<p>$([System.Net.WebUtility]::HtmlEncode($_))</p>" }) -join '' }
+$x = Invoke-Routing $body -Source ucp -SkillArticles $split
+Check 'ucp: skills split across several articles' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and @($x.prep.actions | Where-Object { $_ -match "Read $($parts.Count) articles" }).Count -eq 1) "$($x.r.status): $($x.r.message) / $($x.prep.actions -join '; ')"
 
 $kb = Join-Path $here '..\kb-articles'
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $kb 'ticket-routing-engineers-and-settings.txt')','$(Join-Path $kb 'ticket-routing-skills.txt')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1

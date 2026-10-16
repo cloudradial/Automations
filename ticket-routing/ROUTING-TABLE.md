@@ -107,7 +107,19 @@ Workflow scripts can't read AutomationAI Knowledge, which is why the engineers a
 
 ### ucp: publish it as KB articles
 
-For CloudRadial UCP partners. Set `$TableSource = 'ucp'`, add the `CloudRadial-*` and `Routing-CompanyId` secrets, then create two KB articles in **your own (MSP) company** in CloudRadial. The quickest start is to paste the two files in [`kb-articles/`](https://github.com/cloudradial/Automations/tree/main/ticket-routing/kb-articles) and edit them. They look like this:
+For CloudRadial UCP partners. Set `$TableSource = 'ucp'` and add the `CloudRadial-*` and `Routing-CompanyId` secrets.
+
+**A large table:** KB articles have a size limit, and a 1,200-row skills CSV (about 155 KB) is over it. Export the skills in a compact form instead: one block per skill, listing the engineers per role. That's about 45 KB for 66 skills, split across numbered articles:
+
+```
+./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportArticleDir .\articles
+```
+
+It writes `Ticket Routing - Skills 1.txt`, `Ticket Routing - Skills 2.txt` and so on, each under 30,000 characters (change it with `-MaxArticleChars`), plus `Ticket Routing - Engineers and Settings.txt`. Create each as a KB article with the subject `Ticket Routing: Skills 1`, `Ticket Routing: Skills 2` and so on, and paste the text in. The workflow reads every article whose subject is `Ticket Routing: Skills` or `Ticket Routing: Skills <number>`, in number order.
+
+Cells pasted straight from Excel work too, with or without `[Settings]`, `[Engineers]` and `[Skills]` heading lines.
+
+**A small table:** create two KB articles in **your own (MSP) company** in CloudRadial. The quickest start is to paste the two files in [`kb-articles/`](https://github.com/cloudradial/Automations/tree/main/ticket-routing/kb-articles) and edit them. They look like this:
 
 **Ticket Routing: Engineers and Settings**
 

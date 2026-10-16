@@ -72,10 +72,10 @@ function Read-RoutingTable {
 
 # Everything the workflow would trip on. Errors stop the workflow; warnings don't.
 function Test-RoutingData {
-    param($Table, [string]$Psa = '')
+    param($Table, [string]$Psa = '', [switch]$NoSkills)   # NoSkills: the skills table lives in AutomationAI Knowledge, not here
     $errors = @(); $warnings = @()
     $t = $Table
-    if (-not $t.Skills.Count) { $errors += 'No skills rows were found. The first line must be the header: Skill,Role,Engineer,Skill Description' }
+    if (-not $NoSkills -and -not $t.Skills.Count) { $errors += 'No skills rows were found. The first line must be the header: Skill,Role,Engineer,Skill Description' }
     $missingCols = @($t.Skills | Where-Object { -not $_.Skill -or -not $_.Role -or -not $_.Engineer })
     if ($missingCols.Count) { $errors += "$($missingCols.Count) skills rows are missing a Skill, Role or Engineer." }
     $dupes = @($t.Skills | Group-Object { "$($_.Skill)|$($_.Role)|$($_.Engineer)" } | Where-Object Count -gt 1)

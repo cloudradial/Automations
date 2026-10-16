@@ -5,6 +5,17 @@ function Secret { param($n) Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME 
 function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Get-Path { param($o, [string]$path) foreach ($n in $path -split '\.') { $o = Get-Prop $o $n; if ($null -eq $o) { return $null } }; return $o }
 function Test-Blank { param($v) return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -eq '0') }
+function ConvertFrom-MaybeJson { param($v)
+    if ($v -is [string]) { $s = $v.Trim() -replace '^```(json)?\s*', '' -replace '\s*```$', ''; if ($s -match '^[\[{]') { try { return ($s | ConvertFrom-Json) } catch { } } }
+    return $v
+}
+function Get-Param { param([string]$n)
+    # Parameters may arrive as a variable, as a property of the node input, or via Get-NodeInput -Name.
+    $v = Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -eq $v) { $all = $null; try { $all = ConvertFrom-MaybeJson (Get-NodeInput) } catch { }; $v = Get-Prop $all $n }
+    if ($null -eq $v) { try { $v = ConvertFrom-MaybeJson (Get-NodeInput -Name $n) } catch { }; $inner = Get-Prop $v $n; if ($null -ne $inner) { $v = $inner } }
+    return (ConvertFrom-MaybeJson $v)
+}
 
 $script:PsaSecrets = @{
     connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')

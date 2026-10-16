@@ -10,6 +10,18 @@ $extract = "const y=(()=>{try{return require('js-yaml')}catch{return require(pro
 Push-Location $here; try { node -e $extract (Join-Path $here '..\ticket-routing.yml') $tmp } finally { Pop-Location }
 $prepareScript = Join-Path $tmp 'node-prepare.ps1'
 $routeScript = Join-Path $tmp 'node-route.ps1'
+$tableScriptText = Get-Content -Raw (Join-Path $tmp 'node-table.ps1')
+# The runner runs each step in a child scope, not as a script file (CLAUDE.md rule 7), so the harness does too.
+function Invoke-Step { param([string]$Text) & ([scriptblock]::Create($Text)) }
+# The shipped Routing table step with its three blocks and TableSource swapped for a test's own.
+function New-TableStep { param([string]$Source, [string[]]$SettingLines, [string[]]$EngineerLines, [string[]]$SkillLines)
+    $t = $tableScriptText -replace "(?m)^\`$TableSource = '[a-z]*'", "`$TableSource = '$Source'"
+    foreach ($p in @(@('Settings', $SettingLines), @('Engineers', $EngineerLines), @('Skills', $SkillLines))) {
+        $body = (@($p[1]) -join "`n")
+        $t = [regex]::Replace($t, "(?s)(\`$$($p[0]) = @'\r?\n).*?(\r?\n'@)", { param($m) $m.Groups[1].Value + $body + $m.Groups[2].Value })
+    }
+    return $t
+}
 
 # ---------- placeholder data (Contoso) ----------
 $skillsCsv = @'
@@ -111,23 +123,35 @@ function Invoke-RestMethod { param($Method = 'GET', $Uri, $Headers, $Body, $Cont
 $global:Pass = 0; $global:Fail = 0
 function Check { param([string]$Name, [bool]$Ok, [string]$Detail = '') if ($Ok) { $global:Pass++ } else { $global:Fail++; Write-Host "  FAIL $Name $Detail" -ForegroundColor Red } }
 function Invoke-Routing {
-    param($Body, [string]$Psa = 'connectwise', $Ai = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; confidence = 0.9; reason = 'The ticket asks for a FortiGate VPN tunnel.' },
-        [string[]]$Settings = @(), [hashtable]$Engineers = @{}, [string]$Form = 'pasted', [switch]$Wrap, [switch]$NoSecretPsa)
+    param($Body, [string]$Psa = 'connectwise', $Ai = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @(); confidence = 0.9; reason = 'The ticket asks for a FortiGate VPN tunnel.' },
+        [string[]]$Settings = @(), [hashtable]$Engineers = @{}, [string]$Source = 'inline', [string]$Form = 'pasted', [switch]$Wrap, [switch]$NoSecretPsa)
     $global:Writes.Clear(); $global:NodeOut = $null
     $global:Secrets = @{ 'CloudRadial-BaseUrl' = 'https://cr.test'; 'CloudRadial-PublicKey' = 'p'; 'CloudRadial-PrivateKey' = 's'; 'Routing-CompanyId' = '9' } + $mockSecrets[$Psa]
     if (-not $NoSecretPsa) { $global:Secrets['PSA-Type'] = $Psa }
-    $eng = @('[Settings]') + $Settings + @('', '[Engineers]') + (New-EngineersCsv $Engineers)
+    $engLines = @(New-EngineersCsv $Engineers)
+    # ucp: the table is in the two CloudRadial articles (and the Routing table step says so).
+    $eng = @('[Settings]') + $Settings + @('', '[Engineers]') + $engLines
     $sk = @('Ticket routing skills for Contoso (example)', '[Skills]') + $skillsCsv
     $conv = if ($Form -eq 'table') { 'ConvertTo-TableHtml' } else { 'ConvertTo-PastedHtml' }
     $global:Articles = [ordered]@{ 'Ticket Routing: Skills' = (& $conv $sk); 'Ticket Routing: Engineers and Settings' = (& $conv $eng) }
-    # Node I/O goes through JSON, as on the runner.
-    $global:NodeIn = if ($Wrap) { [pscustomobject]@{ trigger = ($Body | ConvertTo-Json -Depth 10 | ConvertFrom-Json) } } else { $Body | ConvertTo-Json -Depth 10 | ConvertFrom-Json }
-    & { Set-StrictMode -Version Latest; . $prepareScript }
+    # Step 1, the Routing table step as shipped, with this test's blocks pasted in. Node I/O goes through JSON, as on the runner.
+    $tableOut = $null
+    if ($Source -ne 'none') {
+        $global:NodeIn = $null
+        Invoke-Step (New-TableStep $Source @($Settings) $engLines $(if ($Source -eq 'knowledge') { @('') } else { $skillsCsv }))
+        $tableOut = $global:NodeOut | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    }
+    # Step 2. -Wrap: parameters arrive as one input bag {trigger, table}. Otherwise as variables, with the raw body as the node input.
+    $trig = $Body | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    $global:NodeOut = $null
+    if ($Wrap) { $global:NodeIn = [pscustomobject]@{ trigger = $trig; table = $tableOut } }
+    else { $global:NodeIn = $trig; Set-Variable -Scope Global -Name trigger -Value $trig; Set-Variable -Scope Global -Name table -Value $tableOut }
+    try { Invoke-Step (Get-Content -Raw $prepareScript) } finally { Remove-Variable -Scope Global -Name trigger, table -ErrorAction SilentlyContinue }
     $prep = $global:NodeOut | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-    $aiOut = if ((Get-Prop2 $prep 'skip') -eq $true) { @{ skill = ''; role = ''; confidence = 0; reason = 'Skipped by the workflow.' } } else { $Ai }
+    $aiOut = if ((Get-Prop2 $prep 'skip') -eq $true) { @{ skill = ''; role = ''; engineers = @(); confidence = 0; reason = 'Skipped by the workflow.' } } else { $Ai }
     $global:NodeIn = [pscustomobject]@{ prep = $prep; ai = ($aiOut | ConvertTo-Json -Depth 5 | ConvertFrom-Json) }
     $global:NodeOut = $null
-    & { Set-StrictMode -Version Latest; . $routeScript }
+    Invoke-Step (Get-Content -Raw $routeScript)
     $r = $global:NodeOut | ConvertTo-Json -Depth 20 | ConvertFrom-Json
     if ($ShowNotes) { Write-Host "    [$($r.status)] $($r.message)`n      $($r.internal_note -replace "`n", "`n      ")" -ForegroundColor DarkGray }
     return [pscustomobject]@{ prep = $prep; r = $r; writes = @($global:Writes) }
@@ -250,8 +274,38 @@ $x = Invoke-Routing @{ ticket = @{ id = 12345 }; confirm = 'true' }
 Check 'nested ticket.id' ($x.r.status -eq 'success')
 $x = Invoke-Routing @{ ticketId = '{{ticket.id}}'; confirm = 'true' }
 Check 'unreplaced placeholder is missing' ($x.r.status -eq 'incomplete')
-$x = Invoke-Routing $body -Form table
-Check 'article in table form' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source ucp -Form table
+Check 'ucp: article in table form' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source ucp
+Check 'ucp: pasted articles' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and $x.prep.tableSource -eq 'ucp') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source none
+Check 'no Routing table step falls back to ucp' ($x.r.status -eq 'success' -and $x.prep.tableSource -eq 'ucp') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source sharepoint
+Check 'unknown TableSource stops' ($x.r.status -eq 'incomplete' -and $x.r.message -match "TableSource 'sharepoint'") $x.r.message
+$x = Invoke-Routing $body -Wrap
+Check 'inline, parameters as an input bag' ($x.r.status -eq 'success' -and $x.prep.tableSource -eq 'inline') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body
+Check 'inline, parameters as variables' ($x.r.status -eq 'success' -and $x.prep.tableSource -eq 'inline' -and $x.prep.useKnowledge -eq $false) "$($x.r.status): $($x.r.message)"
+
+Write-Host 'Knowledge: skills from AutomationAI Knowledge, engineers from the step'
+$kAi = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @('Patel , Riya', 'Okafor, Chidi', 'Ghost, Casper'); confidence = 0.9; reason = 'FortiGate VPN work.' }
+$x = Invoke-Routing $body -Source knowledge -Ai $kAi
+Check 'knowledge: prep asks the agent to use Knowledge' ($x.prep.useKnowledge -eq $true -and $x.prep.skillList -eq '' -and $x.prep.status -eq 'ok') "$($x.prep.status) $($x.prep.message)"
+Check 'knowledge: assigns least busy of the listed engineers' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+Check 'knowledge: a name not in the engineers table is skipped' (@($x.r.candidates | Where-Object { $_.name -eq 'Ghost, Casper' -and $_.skipped -eq 'not in the engineers table' }).Count -eq 1) (($x.r.candidates | ConvertTo-Json -Compress))
+Check 'knowledge: warns the skill was not table-checked' (@($x.r.warnings | Where-Object { $_ -match 'Knowledge mode' }).Count -eq 1)
+$x = Invoke-Routing $body -Source knowledge -Ai @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @('Ghost, Casper'); confidence = 0.9; reason = 'x' }
+Check 'knowledge: only unknown names is no match, nothing assigned' ($x.r.status -eq 'incomplete' -and $x.writes.Count -eq 1 -and $x.r.message -match 'inactive or at their limit|no engineer') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source knowledge -Ai @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @(); confidence = 0.9; reason = 'x' }
+Check 'knowledge: no engineers listed is no match' ($x.r.status -eq 'incomplete' -and $x.r.message -match 'listed no engineers') $x.r.message
+$x = Invoke-Routing $body -Source knowledge -Settings @('tieBreak: busiest')
+Check 'knowledge: settings are still validated' ($x.r.status -eq 'incomplete' -and $x.r.internal_note -match "tieBreak 'busiest'") $x.r.internal_note
+
+Write-Host 'The Routing table step as shipped'
+$global:NodeIn = $null; $global:NodeOut = $null
+Invoke-Step $tableScriptText
+$shipped = $global:NodeOut | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+Check 'shipped step: inline, with settings, engineers and skills' ($shipped.tableSource -eq 'inline' -and @($shipped.settings).Count -eq 6 -and @($shipped.engineers).Count -eq 4 -and @($shipped.skills).Count -eq 7) (($shipped | ConvertTo-Json -Compress))
 $global:FailAssign = $true
 $x = Invoke-Routing $body
 Check 'assign rejected is an error, no note' ($x.r.status -eq 'error' -and $x.writes.Count -eq 1) "$($x.r.status) $($x.writes.Count)"

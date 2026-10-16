@@ -1853,7 +1853,8 @@ definition:
         $q = if ($f.search) { "&search=$(ConvertTo-PsaQuery $f.search)" } else { '' }
         for ($p = 1; $p -le 40; $p++) {
             $r = Invoke-PsaRead "/Template?pageinate=true&page_size=50&page_no=$p$q" 'read the ticket templates' $need
-            $rows = @(Get-PsaListReply $r @('templates', 'records', 'data'))
+            # Verified 2026-10-16: Halo answers {page_no, page_size, record_count, stdrequests} (templates are "standard requests").
+            $rows = @(Get-PsaListReply $r @('stdrequests', 'templates', 'records', 'data'))
             foreach ($t in $rows) { $null = $all.Add($t) }
             $total = Get-Prop $r 'record_count'
             if ($rows.Count -lt 50 -or ($null -ne $total -and $all.Count -ge [int]$total)) { break }
@@ -1875,7 +1876,8 @@ definition:
                 continue
             }
             if ($f.templateIds.Count -and $f.templateIds -notcontains [int]$tid) { continue }
-            if (-not $f.includeInactive -and (Get-Prop $t 'inactive') -eq $true) { $null = $skipped.Add([ordered]@{ templateId = [int]$tid; template = $name; action = 'skipped'; catalogId = 0; questions = 0; note = 'Inactive in HaloPSA.' }); continue }
+            # Verified 2026-10-16: Halo marks a switched-off template with "disabled".
+            if (-not $f.includeInactive -and ((Get-Prop $t 'disabled') -eq $true -or (Get-Prop $t 'inactive') -eq $true)) { $null = $skipped.Add([ordered]@{ templateId = [int]$tid; template = $name; action = 'skipped'; catalogId = 0; questions = 0; note = 'Inactive in HaloPSA.' }); continue }
             if ($moved.ContainsKey($tid)) { $null = $skipped.Add([ordered]@{ templateId = [int]$tid; template = $name; action = 'skipped'; catalogId = $moved[$tid]; questions = 0; note = 'Already moved.' }); continue }
             if ($subjects.ContainsKey($name.ToLowerInvariant())) { $null = $skipped.Add([ordered]@{ templateId = [int]$tid; template = $name; action = 'skipped'; catalogId = $subjects[$name.ToLowerInvariant()]; questions = 0; note = 'A form with this name already exists in the company, so it was left alone.' }); continue }
             $null = $todo.Add(@{ id = $tid; name = $name })
@@ -1914,11 +1916,36 @@ definition:
             if (-not $lookups.types.ContainsKey($TypeId)) { $lookups.types[$TypeId] = Invoke-PsaRead "/TicketType/$($TypeId)?includedetails=true" 'read a ticket type' $need }
             return $lookups.types[$TypeId]
         }
+        # A ticket type's field row can point at a whole field group (fieldid 0, groupid N). Unverified: /FieldGroup/{id}
+        # and where it lists its fields; when it can't be read, the warning says what came back.
+        $groupNotes = @{}
+        function Get-HaloGroupFields {
+            param([string]$GroupId)
+            if (-not $lookups.Contains('groups')) { $lookups.groups = @{} }
+            if (-not $lookups.groups.ContainsKey($GroupId)) {
+                $rows = @()
+                try {
+                    $g = Invoke-PsaRead "/FieldGroup/$($GroupId)?includedetails=true" 'read a field group' $need
+                    $rows = @(Get-PsaListReply (Get-First $g @('fields', 'field_list', 'fieldgroup_fields', 'fieldlist')) @('fields'))
+                    if (-not $rows.Count) { $groupNotes[$GroupId] = "field group $GroupId listed no fields (its properties: $((@($g.PSObject.Properties | ForEach-Object { $_.Name } | Select-Object -First 30)) -join ', '))" }
+                }
+                catch { $groupNotes[$GroupId] = "field group $GroupId couldn't be read: $($_.Exception.Message)" }
+                $lookups.groups[$GroupId] = $rows
+            }
+            return @($lookups.groups[$GroupId])
+        }
         function Get-HaloField {
             param([string]$FieldId)
             if (-not $lookups.fields.ContainsKey($FieldId)) {
                 $lookups.fields[$FieldId] = $null
-                try { $lookups.fields[$FieldId] = Invoke-PsaRead "/Field/$($FieldId)?includedetails=true" 'read a custom field' $need } catch { $null = $warnings.Add("HaloPSA field $FieldId couldn't be read, so it became a text question: $($_.Exception.Message)") }
+                # Custom fields are read from /FieldInfo (HaloAPI Get-HaloCustomField); /Field answers "Field kind must be
+                # specified" without a kind (verified 2026-10-16), so it is only the fallback.
+                try { $lookups.fields[$FieldId] = Invoke-PsaRead "/FieldInfo/$($FieldId)?includedetails=true" 'read a custom field' $need }
+                catch {
+                    $first = [string]$_.Exception.Message
+                    try { $lookups.fields[$FieldId] = Invoke-PsaRead "/Field/$($FieldId)?includedetails=true" 'read a custom field' $need }
+                    catch { $null = $warnings.Add("HaloPSA field $FieldId couldn't be read, so it was left out: $first") }
+                }
             }
             return $lookups.fields[$FieldId]
         }
@@ -1990,27 +2017,60 @@ definition:
             }
             $fields = New-Object System.Collections.ArrayList
             $typeFields = if ($null -ne $type) { @(Get-PsaListReply (Get-First $type @('fields', 'field_list')) @('fields')) } else { @() }
+            # Verified 2026-10-16: a ticket type's field rows are links ({id, fieldid, seq, endusernew, technew, ...}) with no
+            # name, label or type; those come from /Field/{fieldid}. endusernew says whether an end user sees the field on a
+            # new ticket. Unverified: its values (0 hidden is assumed; 2 is read as mandatory).
+            $seenNames = New-Object System.Collections.ArrayList
+            # Expand field-group rows into the group's own fields; they inherit the row's end-user setting.
+            $expanded = New-Object System.Collections.ArrayList
             foreach ($tf in $typeFields) {
+                $rowFid = [string](Get-First $tf @('fieldid', 'field_id')); $gid = [string](Get-Prop $tf 'groupid')
+                if ((-not $rowFid -or $rowFid -eq '0') -and $gid -and $gid -ne '0') {
+                    $gf = @(Get-HaloGroupFields $gid)
+                    foreach ($x in $gf) { $null = $expanded.Add(@{ row = $x; eu = (Get-Prop $tf 'endusernew') }) }
+                    if (-not $gf.Count) { $null = $seenNames.Add("field group $gid (no fields read)") }
+                }
+                else { $null = $expanded.Add(@{ row = $tf; eu = $null }) }
+            }
+            foreach ($ex in $expanded) {
+                $tf = $ex.row
                 if ($fields.Count -ge 30) { $null = $warnings.Add("Template '$($b.name)': only the first 30 fields were offered as questions."); break }
-                $fid = [string](Get-First $tf @('fieldid', 'field_id', 'id'))
-                $fname = [string](Get-First $tf @('name', 'fieldname'))
+                $fid = [string](Get-First $tf @('fieldid', 'field_id')); if (-not $fid -or $fid -eq '0') { $fid = [string](Get-First $tf @('id')) }
+                $eu = Get-Prop $tf 'endusernew'; if ($null -eq $eu) { $eu = $ex.eu }
+                $euText = ([string]$eu).ToLowerInvariant()
                 $inner = Get-Prop $tf 'field'
+                $fname = [string](Get-First $tf @('name', 'fieldname'))
                 if (-not $fname -and $null -ne $inner) { $fname = [string](Get-First $inner @('name')) }
+                if ($null -ne $eu -and @('0', 'false') -contains $euText) { $null = $seenNames.Add("$(if ($fname) { $fname } else { "field $fid" }) (hidden from end users)"); continue }
+                $def = $inner
+                if (-not $fname -and $fid) { $def = Get-HaloField $fid; if ($null -ne $def) { $fname = [string](Get-First $def @('name', 'fieldname')) } }
+                $null = $seenNames.Add($(if ($fname) { $fname } else { "field $fid (no name)" }))
                 if (-not $fid -or -not $fname) { continue }
                 $lname = $fname.ToLowerInvariant()
                 # Only custom fields (Halo names them CF...), never the built-in ones or the ones the template fixes.
                 if ($systemFields -contains $lname -or $lname -notmatch '^cf' -or $fixed.ContainsKey($lname)) { continue }
                 if ((Get-Prop $tf 'visible') -eq $false -or (Get-Prop $tf 'hidden') -eq $true -or (Get-Prop $tf 'usercanedit') -eq $false) { continue }
-                $def = $inner
                 $kind = Get-FieldKind $tf $def
                 $opts = @(Get-FieldOptions $tf $def)
                 if (-not $kind -or (($kind -eq 'choice' -or $kind -eq 'multi') -and -not $opts.Count)) { $def = Get-HaloField $fid; if ($null -ne $def) { if (-not $kind) { $kind = Get-FieldKind $tf $def }; if (-not $opts.Count) { $opts = @(Get-FieldOptions $tf $def) } } }
                 if (-not $kind) { $kind = 'text'; $null = $warnings.Add("Template '$($b.name)': field '$fname' has a type this workflow doesn't know, so it became a text question.") }
                 if (($kind -eq 'choice' -or $kind -eq 'multi') -and -not $opts.Count) { $kind = 'text'; $null = $warnings.Add("Template '$($b.name)': field '$fname' is a list with no values, so it became a text question.") }
                 $label = [string](Get-First $tf @('label', 'display_name', 'displayname')); if (-not $label -and $null -ne $def) { $label = [string](Get-First $def @('label', 'display_name')) }; if (-not $label) { $label = $fname }
-                $null = $fields.Add([ordered]@{ id = $fid; name = $fname; label = $label.Trim(); kind = $kind; options = @($opts); required = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true) })
+                $null = $fields.Add([ordered]@{ id = $fid; name = $fname; label = $label.Trim(); kind = $kind; options = @($opts); required = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '2') })
             }
 
+            if (-not $fields.Count) {
+                # Say why there are no questions, naming what Halo sent, so a field-name mismatch is easy to spot.
+                $names = { param($o) if ($null -eq $o -or $o -is [string]) { return '' }; if ($o -is [System.Collections.IDictionary]) { return (@($o.Keys) -join ', ') }; return (@($o.PSObject.Properties | ForEach-Object { $_.Name } | Select-Object -First 40) -join ', ') }
+                $why = if ($null -eq $type) { 'its ticket type could not be read' }
+                elseif (-not $typeFields.Count) { "its ticket type '$typeName' sent no field list (ticket type properties: $(& $names $type))" }
+                else {
+                    $firstDef = $null; foreach ($k in @($lookups.fields.Keys)) { if ($null -ne $lookups.fields[$k]) { $firstDef = $lookups.fields[$k]; break } }
+                    "none of the $($typeFields.Count) fields on ticket type '$typeName' is a custom field (CF...) an end user fills in (fields: $((@($seenNames) | Select-Object -First 15) -join ', ')$(if ($null -ne $firstDef) { "; a field's properties: $(& $names $firstDef)" }))"
+                }
+                if ($groupNotes.Count) { $why += " ($(@($groupNotes.Values) -join '; '))" }
+                $null = $warnings.Add("Template '$($b.name)' has no questions besides the free-text box: $why.")
+            }
             $details = [string](Get-First $t @('details_html', 'details'))
             $key = "t$($b.id)"
             $null = $plan.Add([ordered]@{

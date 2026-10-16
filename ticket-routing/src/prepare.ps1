@@ -1,7 +1,11 @@
-# Reads the request, the routing table (two CloudRadial KB articles) and the ticket.
+# Reads the request, the routing table (from the "Routing table" step, or two CloudRadial KB
+# articles when that step says tableSource 'ucp') and the ticket.
 # Writes nothing. Its output feeds the classifier and the Assign step.
-$in = Get-NodeInput
-$t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+# The routing table step's output; it has a tableSource. Anything else (no step, or the whole input bag) doesn't count.
+$tableIn = Get-Param 'table'; if ($null -eq (Get-Prop $tableIn 'tableSource')) { $tableIn = $null }
+$in = Get-Param 'trigger'
+if ($null -eq $in -or $null -ne (Get-Prop $in 'tableSource')) { $in = Get-NodeInput }
+$t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = ConvertFrom-MaybeJson $t }
 $b = Get-Prop $in 'body'; if ($null -ne $b -and ($b -is [string] -or $null -ne (Get-Prop $b 'ticketId') -or $null -ne (Get-Prop $b 'id'))) { $in = $b }
 if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { $in = $null } }
 
@@ -9,7 +13,7 @@ $warnings = New-Object System.Collections.ArrayList; $actions = New-Object Syste
 $out = [ordered]@{
     status = 'ok'; message = ''; internal_note = ''; skip = $false
     ticketId = ''; psa = ''; confirm = $false; reassign = $false; triggerSource = ''
-    summary = ''; description = ''; currentAssignee = ''; skillList = ''; roles = ''
+    summary = ''; description = ''; currentAssignee = ''; skillList = ''; roles = ''; tableSource = ''; useKnowledge = $false
     table = $null; warnings = @(); actions = @()
 }
 function Stop-Prepare { param([string]$Status, [string]$Msg)
@@ -46,6 +50,15 @@ try {
     if (-not $script:PsaSecrets.ContainsKey($psa)) { Stop-Prepare 'incomplete' "psa '$psa' isn't one of: connectwise, autotask, halopsa, kaseyabms, syncro, zendesk."; return }
 
     # ---------- 2. the routing table ----------
+    $source = if ($tableIn) { [string](Get-Prop $tableIn 'tableSource') } else { 'ucp' }
+    if (@('inline', 'knowledge', 'ucp') -notcontains $source) { Stop-Prepare 'incomplete' "TableSource '$source' in the Routing table step isn't 'inline', 'knowledge' or 'ucp'. Nothing was assigned."; return }
+    $out.tableSource = $source
+    if ($source -ne 'ucp') {
+        # knowledge: the skills table is a CSV in AutomationAI Knowledge, which only the classifier can read.
+        $skillLines = if ($source -eq 'inline') { @(Get-Prop $tableIn 'skills' | Where-Object { $_ }) } else { @() }
+        $engLines = @(Get-Prop $tableIn 'engineers' | Where-Object { $_ }); $setLines = @(Get-Prop $tableIn 'settings' | Where-Object { $_ })
+        $where = 'the Routing table step'
+    } else {
     $companyId = Get-In @('routingCompanyId'); if (-not $companyId) { $companyId = ([string](Secret 'Routing-CompanyId')).Trim() }
     if ($companyId -notmatch '^\d+$') { Stop-Prepare 'incomplete' 'No routing company was given. Set the Routing-CompanyId secret to the CloudRadial company id that holds the routing articles.'; return }
     $skillsSubject = Get-In @('skillsArticle'); if (-not $skillsSubject) { $skillsSubject = 'Ticket Routing: Skills' }
@@ -55,16 +68,32 @@ try {
     if (-not $crBase -or -not $crPub -or -not $crPriv) { Stop-Prepare 'error' 'Add these secrets to the runner Key Vault: CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey'; return }
     $crHeaders = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)")); Accept = 'application/json' }
     $crBase = $crBase.TrimEnd('/')
-    function Get-Article { param([string]$Subject)
-        $f = "companyId eq $companyId and subject eq '$($Subject -replace "'", "''")'"
+    # -Parts: a table too big for one article can be split across "<Subject> 1", "<Subject> 2", ...
+    # (KB articles have a size limit). They're read in number order and joined.
+    # Subjects match with ':' or '-' after the first word group ("Ticket Routing - Skills 1" is "Ticket Routing: Skills 1"),
+    # because the exported files can't have ':' in their names.
+    $normSubject = { param($x) (([string]$x).Trim() -replace '^(.+?)\s*[:\-–—]\s+', '$1: ' -replace '\s{2,}', ' ') }
+    function Get-Article { param([string]$Subject, [switch]$Parts)
+        $want = & $normSubject $Subject
+        $root = (($want -split ':')[0]).Trim() -replace "'", "''"
+        $f = "companyId eq $companyId and startswith(subject,'$root')"
         $list = @(Get-Prop (Invoke-RestMethod -Method GET -Uri "$crBase/v2/odata/article?`$filter=$([uri]::EscapeDataString($f))&`$select=articleId,subject" -Headers $crHeaders) 'value' | Where-Object { $null -ne $_ })
+        if (-not $Parts) { $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -eq $want }) }
+        if ($Parts) {
+            $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -match ('^' + [regex]::Escape($want) + '(\s+(\d+))?$') } |
+                Sort-Object { $m = [regex]::Match(([string](Get-Prop $_ 'subject')).Trim(), '\s(\d+)$'); if ($m.Success) { [int]$m.Groups[1].Value } else { 0 } })
+        }
         if (-not $list.Count) { return $null }
-        if ($list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used.") }
-        $a = Invoke-RestMethod -Method GET -Uri "$crBase/v2/article/$(Get-Prop $list[0] 'articleId')" -Headers $crHeaders
-        $body = Get-Prop $a 'body'; if ($null -eq $body) { $body = Get-Path $a 'data.body' }
-        return [string]$body
+        if (-not $Parts -and $list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used."); $list = @($list[0]) }
+        $bodies = foreach ($item in $list) {
+            $a = Invoke-RestMethod -Method GET -Uri "$crBase/v2/article/$(Get-Prop $item 'articleId')" -Headers $crHeaders
+            $body = Get-Prop $a 'body'; if ($null -eq $body) { $body = Get-Path $a 'data.body' }
+            [string]$body
+        }
+        if ($list.Count -gt 1) { $null = $actions.Add("Read $($list.Count) articles for '$Subject'") }
+        return (@($bodies) -join "`n")
     }
-    $skillsHtml = Get-Article $skillsSubject
+    $skillsHtml = Get-Article $skillsSubject -Parts
     $engHtml = Get-Article $engSubject
     $missingArticles = @(); if ($null -eq $skillsHtml) { $missingArticles += "'$skillsSubject'" }; if ($null -eq $engHtml) { $missingArticles += "'$engSubject'" }
     if ($missingArticles.Count) { Stop-Prepare 'incomplete' "The routing table wasn't found: no article titled $($missingArticles -join ' or ') in CloudRadial company $companyId. Nothing was assigned."; return }
@@ -72,13 +101,15 @@ try {
     $sk = Split-RoutingSections (ConvertFrom-ArticleBody $skillsHtml)
     $en = Split-RoutingSections (ConvertFrom-ArticleBody $engHtml)
     # Skills come from the skills article; engineers and settings from the other. A section in the wrong article still counts.
-    $skillLines = if (@(Select-FromHeader @($sk.Skills) 'Skill').Count) { @($sk.Skills) } else { @($en.Skills) }
+    $skillLines = if (Test-HasSkills @($sk.Skills)) { @($sk.Skills) } else { @($en.Skills) }
     $engLines = if ($en.Engineers.Count) { @($en.Engineers) } else { @($sk.Engineers) }
     $setLines = @($en.Settings) + @($sk.Settings)
+    $where = 'the KB articles'
+    }
     $table = Read-RoutingTable $skillLines $engLines $setLines
-    $check = Test-RoutingData $table $psa
+    $check = Test-RoutingData $table $psa -NoSkills:($source -eq 'knowledge')
     foreach ($w in @($check.Warnings)) { $null = $warnings.Add($w) }
-    if ($check.Errors.Count) { Stop-Prepare 'incomplete' ("The routing table has errors, so nothing was assigned. Fix them in the KB articles (Test-RoutingTable.ps1 shows the same list):`n- " + ($check.Errors -join "`n- ")); return }
+    if ($check.Errors.Count) { Stop-Prepare 'incomplete' ("The routing table has errors, so nothing was assigned. Fix them in $where (Test-RoutingTable.ps1 shows the same list):`n- " + ($check.Errors -join "`n- ")); return }
     $null = $actions.Add("Read the routing table: $(@($table.Skills).Count) skills rows, $(@($table.Engineers).Count) engineers")
     # A Triage Action may post the raw PSA ticket with no confirm field, so the table can switch live assignment on.
     if ($confirmIn -eq '') { $out.confirm = Test-Yes ([string]$table.Settings.liveAssign) }
@@ -99,6 +130,7 @@ try {
         rows = @($table.Skills | Where-Object { $_.Skill -and $_.Skill -ne 'Role only' } | ForEach-Object { [ordered]@{ s = $_.Skill; r = $_.Role; e = $_.Engineer } })
     }
     $out.skillList = Get-ClassifierSkillList $table
+    $out.useKnowledge = ($source -eq 'knowledge')
     $out.roles = (@($table.Skills | ForEach-Object { $_.Role } | Where-Object { $_ } | Select-Object -Unique) -join ', ')
 
     if ($ticket.assigneeId -and -not $out.reassign) {

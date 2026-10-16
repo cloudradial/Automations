@@ -4,7 +4,7 @@
 # See README.md for the routing table, secrets and the ServiceAI Action.
 automationsWorkflow: 1
 name: Send Every Ticket to the Right Engineer
-description: Assigns a new ticket to an engineer who has the right skill, chosen by your rule (least busy, round robin, listed order or random), and adds an internal note saying why. The routing table lives in two CloudRadial KB articles. Run from a ServiceAI Triage Action. Preview only until confirm is true.
+description: Assigns a new ticket to an engineer who has the right skill, chosen by your rule (least busy, round robin, listed order or random), and adds an internal note saying why. Paste your routing table into the Routing table step (or keep the skills in AutomationAI Knowledge, or in CloudRadial KB articles). Run from a ServiceAI Triage Action. Preview only until liveAssign is yes.
 definition:
   schemaVersion: 1
   activities:
@@ -16,19 +16,85 @@ definition:
         'y': 120
       properties:
         webhookEnabled: false
+    - id: node-table
+      name: Routing table (edit me)
+      type: powershell-script
+      position:
+        x: 260
+        'y': 120
+      properties:
+        script: |
+          # =====================================================================
+          #  EDIT THIS STEP: your routing table.
+          #  Paste your own settings, engineers and skills between the @' and '@
+          #  lines below, then Publish and Deploy. Keep the '@ lines at the very
+          #  start of their line. Check the table first with Test-RoutingTable.ps1
+          #  (see ROUTING-TABLE.md for every column and setting).
+          #
+          #  TableSource:
+          #    'inline' (default)  use the three blocks below. No portal needed.
+          #    'knowledge'         use Settings and Engineers below, but read the
+          #                        skills from a CSV in AutomationAI Knowledge.
+          #                        Ground the "Pick the skill" node on that folder.
+          #    'ucp'               ignore all three and read the two CloudRadial KB
+          #                        articles instead (UCP partners only).
+          # =====================================================================
+          $TableSource = 'inline'
+
+          $Settings = @'
+          tieBreak: least-open-tickets
+          respectMaxOpen: yes
+          noMatch: leave-unassigned
+          fallbackEngineer:
+          minConfidence: 0.7
+          liveAssign: no
+          '@
+
+          $Engineers = @'
+          Engineer,Email,PSA User Id,PSA Role Id,Active,Max Open Tickets
+          "Lee, Jordan",jordan.lee@example.com,jlee,,Yes,25
+          "Patel, Riya",riya.patel@example.com,rpatel,,Yes,20
+          "Okafor, Chidi",chidi.okafor@example.com,cokafor,,Yes,
+          '@
+
+          $Skills = @'
+          Skill,Role,Engineer,Skill Description
+          Network Firewall Basic L1 (General),Tickets,"Lee, Jordan","Basic firewall changes: single rules, NAT for one host, viewing logs"
+          Network Firewall Basic L1 (General),Tickets,"Patel, Riya","Basic firewall changes: single rules, NAT for one host, viewing logs"
+          Network Firewall Fortinet,Tickets,"Patel, Riya","FortiGate policy, VPN and SD-WAN changes"
+          Network Firewall Fortinet,Install,"Okafor, Chidi","FortiGate policy, VPN and SD-WAN changes"
+          Microsoft 365 Administration L2 (General),Tickets,"Lee, Jordan","Mailbox permissions, shared mailboxes, licensing, Entra groups"
+          Role only,Escalation Coordination,"Okafor, Chidi",
+          '@
+
+          # ---------- nothing to edit below this line ----------
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $lines = { param($t) @(([string]$t) -split "`r?`n" | ForEach-Object { ($_ -replace [char]0xFEFF, '').Trim() } | Where-Object { $_ -ne '' }) }
+          Set-NodeOutput ([ordered]@{
+              tableSource = ([string]$TableSource).Trim().ToLowerInvariant()
+              settings    = @(& $lines $Settings)
+              engineers   = @(& $lines $Engineers)
+              skills      = @(& $lines $Skills)
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
     - id: node-prepare
       name: Read the request, routing table and ticket
       type: powershell-script
       position:
-        x: 300
+        x: 460
         'y': 120
       properties:
         script: |
           # =====================================================================
           #  Send Every Ticket to the Right Engineer - Read the request, routing table and ticket
-          #  Writes nothing. Reads the two routing KB articles from CloudRadial and the ticket from the PSA.
-          #  Secrets: CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey, Routing-CompanyId,
-          #  PSA-Type, and the PSA's own secrets (the same names as its catalog extension).
+          #  Writes nothing. Reads the routing table from the Routing table step (or, with tableSource ucp, two
+          #  CloudRadial KB articles) and the ticket from the PSA. Secrets: PSA-Type and the PSA's own secrets
+          #  (the same names as its catalog extension); for ucp also CloudRadial-BaseUrl, -PublicKey, -PrivateKey
+          #  and Routing-CompanyId.
           #  Generated from ticket-routing/src. Edit the source, then run build.js.
           # =====================================================================
           $ErrorActionPreference = 'Stop'
@@ -41,6 +107,12 @@ definition:
           function ConvertFrom-ArticleBody {
               param([string]$Html)
               $t = $Html -replace '\r', ''
+              # A cell pasted from Excel can span blank neighbours (colspan="3"): count it as that many columns.
+              $t = [regex]::Replace($t, '(?is)<t([dh])([^>]*)\bcolspan\s*=\s*"?(\d+)"?([^>]*)>(.*?)</t[dh]>', [System.Text.RegularExpressions.MatchEvaluator]{
+                  param($m) "<t$($m.Groups[1].Value)$($m.Groups[2].Value)$($m.Groups[4].Value)>$($m.Groups[5].Value)</t$($m.Groups[1].Value)>" + ('<td></td>' * ([Math]::Max(1, [int]$m.Groups[3].Value) - 1)) })
+              # A line break or paragraph inside a cell (an empty pasted cell holds <br>) must not split the row.
+              $t = [regex]::Replace($t, '(?is)(<t[dh][^>]*>)(.*?)(</t[dh]>)', [System.Text.RegularExpressions.MatchEvaluator]{
+                  param($m) $m.Groups[1].Value + (($m.Groups[2].Value -replace '(?i)<br\s*/?>|</(p|div)>', ' ').Trim()) + $m.Groups[3].Value })
               $t = $t -replace '(?i)<br\s*/?>', "`n"
               $t = $t -replace '(?i)</(p|div|tr|li|h[1-6]|pre)>', "`n"
               # Table cells become quoted CSV fields so commas inside a cell survive.
@@ -57,12 +129,20 @@ definition:
 
           # Splits lines into [Settings], [Engineers] and [Skills] sections. Lines before
           # any marker count as [Skills], so a plain skills CSV works on its own.
+          # Without markers (a table pasted straight from Excel), a header row starting
+          # Engineer or Skill starts that section, and a known setting line is a setting.
           function Split-RoutingSections {
               param([string[]]$Lines)
               $s = @{ Settings = @(); Engineers = @(); Skills = @() }
-              $cur = 'Skills'
+              $cur = 'Skills'; $marked = $false
               foreach ($l in $Lines) {
-                  if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); continue }
+                  if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); $marked = $true; continue }
+                  if (-not $marked) {
+                      if (Test-SkillBlockLine $l) { $s.Skills += $l; continue }
+                      if ($l -match '^\s*"?Engineer"?\s*,') { $cur = 'Engineers' }
+                      elseif ($l -match '^\s*"?Skill"?\s*,') { $cur = 'Skills' }
+                      elseif ($l -match '^\s*"?(tieBreak|respectMaxOpen|noMatch|fallbackEngineer|minConfidence|liveAssign)"?\s*[:=]') { $s.Settings += $l; continue }
+                  }
                   $s[$cur] += $l
               }
               return $s
@@ -76,9 +156,38 @@ definition:
               return @()
           }
 
+          # The compact skills format (one block per skill, as ConvertTo-SkillDocuments writes it):
+          #   Skill: <name> / Covers: <description> / Roles: ... / Engineers for <name> / <role>: <name>; <name>
+          # About a third of the size of the CSV, so a large table fits in KB articles.
+          function Test-SkillBlockLine { param([string]$l) return ($l -match '^\s*(#\s|Skill:|Covers:|Roles:|Engineers for\s)') }
+          # True when lines hold a skills table in either form: a CSV with its header, or compact blocks.
+          function Test-HasSkills { param([string[]]$Lines) return ([bool]@(Select-FromHeader @($Lines) 'Skill').Count -or [bool]@(@($Lines) | Where-Object { $_ -match '^\s*Engineers for\s' }).Count) }
+          function ConvertFrom-SkillBlocks {
+              param([string[]]$Lines)
+              $rows = @(); $skill = ''; $desc = ''
+              foreach ($l in $Lines) {
+                  $x = $l.Trim()
+                  if ($x -match '^Skill:\s*(.+)$') { $skill = $Matches[1].Trim(); $desc = ''; continue }
+                  if ($x -match '^Covers:\s*(.*)$') { $desc = $Matches[1].Trim(); continue }
+                  if ($x -notmatch '^Engineers for\s') { continue }
+                  # Role names can contain " / " (Documentation / Knowledge Base), so take the skill from its Skill: line.
+                  $rest = $null
+                  if ($skill -and $x.StartsWith("Engineers for $skill / ")) { $rest = $x.Substring("Engineers for $skill / ".Length) }
+                  elseif ($x -match '^Engineers for (.+?) / (.+)$') { $skill = $Matches[1].Trim(); $rest = $Matches[2] }
+                  if ($null -eq $rest) { continue }
+                  $i = $rest.IndexOf(':'); if ($i -lt 0) { continue }
+                  $role = $rest.Substring(0, $i).Trim()
+                  foreach ($n in @($rest.Substring($i + 1) -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+                      $rows += [pscustomobject]@{ Skill = $skill; Role = $role; Engineer = $n; Description = $desc }
+                  }
+              }
+              return $rows
+          }
+
           function Read-RoutingTable {
               param([string[]]$SkillLines, [string[]]$EngineerLines, [string[]]$SettingLines)
-              $SkillLines = @(Select-FromHeader @($SkillLines) 'Skill')
+              $blockRows = @(ConvertFrom-SkillBlocks @(@($SkillLines) | Where-Object { Test-SkillBlockLine $_ }))
+              $SkillLines = @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill')
               $EngineerLines = @(Select-FromHeader @($EngineerLines) 'Engineer')
               $clean = { param($v) $x = ([string]$v).Trim(); if ($x -eq '#N/A') { '' } else { $x } }
               # Names are matched across the two tables, so tidy spacing: "Hildebrand , Caleb" -> "Hildebrand, Caleb".
@@ -92,6 +201,7 @@ definition:
                       }
                   }
               }
+              foreach ($r in $blockRows) { $skills += [pscustomobject]@{ Skill = & $clean $r.Skill; Role = & $clean $r.Role; Engineer = & $name $r.Engineer; Description = & $clean $r.Description } }
               $engineers = @()
               if ($EngineerLines.Count) {
                   foreach ($r in @($EngineerLines | ConvertFrom-Csv)) {
@@ -108,10 +218,10 @@ definition:
 
           # Everything the workflow would trip on. Errors stop the workflow; warnings don't.
           function Test-RoutingData {
-              param($Table, [string]$Psa = '')
+              param($Table, [string]$Psa = '', [switch]$NoSkills)   # NoSkills: the skills table lives in AutomationAI Knowledge, not here
               $errors = @(); $warnings = @()
               $t = $Table
-              if (-not $t.Skills.Count) { $errors += 'No skills rows were found. The first line must be the header: Skill,Role,Engineer,Skill Description' }
+              if (-not $NoSkills -and -not $t.Skills.Count) { $errors += 'No skills rows were found. The first line must be the header: Skill,Role,Engineer,Skill Description' }
               $missingCols = @($t.Skills | Where-Object { -not $_.Skill -or -not $_.Role -or -not $_.Engineer })
               if ($missingCols.Count) { $errors += "$($missingCols.Count) skills rows are missing a Skill, Role or Engineer." }
               $dupes = @($t.Skills | Group-Object { "$($_.Skill)|$($_.Role)|$($_.Engineer)" } | Where-Object Count -gt 1)
@@ -148,6 +258,33 @@ definition:
               return [pscustomobject]@{ Errors = $errors; Warnings = $warnings }
           }
 
+          # For TableSource 'knowledge': one small Markdown document per skill, so a single Knowledge search
+          # hit returns the whole skill (description, roles and every engineer per role) in one chunk.
+          # Returns an ordered dictionary of file name -> document text, in the table's order.
+          function ConvertTo-SkillDocuments {
+              param($Table)
+              $docs = [ordered]@{}
+              $used = @{}
+              foreach ($g in @($Table.Skills | Where-Object { $_.Skill -and $_.Skill -ne 'Role only' } | Group-Object Skill)) {
+                  $d = @($g.Group | ForEach-Object { $_.Description } | Where-Object { $_ } | Select-Object -First 1)
+                  $roles = @($g.Group | ForEach-Object { $_.Role } | Where-Object { $_ } | Select-Object -Unique)
+                  $lines = @("# $($g.Name)", '', "Skill: $($g.Name)")
+                  if ($d.Count) { $lines += "Covers: $($d[0])" }
+                  $lines += "Roles: $($roles -join ', ')"
+                  $lines += ''
+                  foreach ($r in $roles) {
+                      $names = @($g.Group | Where-Object { $_.Role -eq $r -and $_.Engineer } | ForEach-Object { $_.Engineer } | Select-Object -Unique)
+                      $lines += "Engineers for $($g.Name) / $($r): $($names -join '; ')"
+                  }
+                  $base = (($g.Name -replace '[^A-Za-z0-9]+', '-').Trim('-')).ToLowerInvariant()
+                  if (-not $base) { $base = 'skill' }
+                  $name = $base; $n = 2; while ($used.ContainsKey($name)) { $name = "$base-$n"; $n++ }
+                  $used[$name] = $true
+                  $docs["$name.md"] = ($lines -join "`n") + "`n"
+              }
+              return $docs
+          }
+
           # The only part of the table the AI sees: one line per skill with its description and roles.
           function Get-ClassifierSkillList {
               param($Table)
@@ -166,6 +303,17 @@ definition:
           function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
           function Get-Path { param($o, [string]$path) foreach ($n in $path -split '\.') { $o = Get-Prop $o $n; if ($null -eq $o) { return $null } }; return $o }
           function Test-Blank { param($v) return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -eq '0') }
+          function ConvertFrom-MaybeJson { param($v)
+              if ($v -is [string]) { $s = $v.Trim() -replace '^```(json)?\s*', '' -replace '\s*```$', ''; if ($s -match '^[\[{]') { try { return ($s | ConvertFrom-Json) } catch { } } }
+              return $v
+          }
+          function Get-Param { param([string]$n)
+              # Parameters may arrive as a variable, as a property of the node input, or via Get-NodeInput -Name.
+              $v = Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue
+              if ($null -eq $v) { $all = $null; try { $all = ConvertFrom-MaybeJson (Get-NodeInput) } catch { }; $v = Get-Prop $all $n }
+              if ($null -eq $v) { try { $v = ConvertFrom-MaybeJson (Get-NodeInput -Name $n) } catch { }; $inner = Get-Prop $v $n; if ($null -ne $inner) { $v = $inner } }
+              return (ConvertFrom-MaybeJson $v)
+          }
 
           $script:PsaSecrets = @{
               connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')
@@ -405,10 +553,14 @@ definition:
           }
 
           # ---------- this step ----------
-          # Reads the request, the routing table (two CloudRadial KB articles) and the ticket.
+          # Reads the request, the routing table (from the "Routing table" step, or two CloudRadial KB
+          # articles when that step says tableSource 'ucp') and the ticket.
           # Writes nothing. Its output feeds the classifier and the Assign step.
-          $in = Get-NodeInput
-          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          # The routing table step's output; it has a tableSource. Anything else (no step, or the whole input bag) doesn't count.
+          $tableIn = Get-Param 'table'; if ($null -eq (Get-Prop $tableIn 'tableSource')) { $tableIn = $null }
+          $in = Get-Param 'trigger'
+          if ($null -eq $in -or $null -ne (Get-Prop $in 'tableSource')) { $in = Get-NodeInput }
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = ConvertFrom-MaybeJson $t }
           $b = Get-Prop $in 'body'; if ($null -ne $b -and ($b -is [string] -or $null -ne (Get-Prop $b 'ticketId') -or $null -ne (Get-Prop $b 'id'))) { $in = $b }
           if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { $in = $null } }
 
@@ -416,7 +568,7 @@ definition:
           $out = [ordered]@{
               status = 'ok'; message = ''; internal_note = ''; skip = $false
               ticketId = ''; psa = ''; confirm = $false; reassign = $false; triggerSource = ''
-              summary = ''; description = ''; currentAssignee = ''; skillList = ''; roles = ''
+              summary = ''; description = ''; currentAssignee = ''; skillList = ''; roles = ''; tableSource = ''; useKnowledge = $false
               table = $null; warnings = @(); actions = @()
           }
           function Stop-Prepare { param([string]$Status, [string]$Msg)
@@ -453,6 +605,15 @@ definition:
               if (-not $script:PsaSecrets.ContainsKey($psa)) { Stop-Prepare 'incomplete' "psa '$psa' isn't one of: connectwise, autotask, halopsa, kaseyabms, syncro, zendesk."; return }
 
               # ---------- 2. the routing table ----------
+              $source = if ($tableIn) { [string](Get-Prop $tableIn 'tableSource') } else { 'ucp' }
+              if (@('inline', 'knowledge', 'ucp') -notcontains $source) { Stop-Prepare 'incomplete' "TableSource '$source' in the Routing table step isn't 'inline', 'knowledge' or 'ucp'. Nothing was assigned."; return }
+              $out.tableSource = $source
+              if ($source -ne 'ucp') {
+                  # knowledge: the skills table is a CSV in AutomationAI Knowledge, which only the classifier can read.
+                  $skillLines = if ($source -eq 'inline') { @(Get-Prop $tableIn 'skills' | Where-Object { $_ }) } else { @() }
+                  $engLines = @(Get-Prop $tableIn 'engineers' | Where-Object { $_ }); $setLines = @(Get-Prop $tableIn 'settings' | Where-Object { $_ })
+                  $where = 'the Routing table step'
+              } else {
               $companyId = Get-In @('routingCompanyId'); if (-not $companyId) { $companyId = ([string](Secret 'Routing-CompanyId')).Trim() }
               if ($companyId -notmatch '^\d+$') { Stop-Prepare 'incomplete' 'No routing company was given. Set the Routing-CompanyId secret to the CloudRadial company id that holds the routing articles.'; return }
               $skillsSubject = Get-In @('skillsArticle'); if (-not $skillsSubject) { $skillsSubject = 'Ticket Routing: Skills' }
@@ -462,16 +623,32 @@ definition:
               if (-not $crBase -or -not $crPub -or -not $crPriv) { Stop-Prepare 'error' 'Add these secrets to the runner Key Vault: CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey'; return }
               $crHeaders = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)")); Accept = 'application/json' }
               $crBase = $crBase.TrimEnd('/')
-              function Get-Article { param([string]$Subject)
-                  $f = "companyId eq $companyId and subject eq '$($Subject -replace "'", "''")'"
+              # -Parts: a table too big for one article can be split across "<Subject> 1", "<Subject> 2", ...
+              # (KB articles have a size limit). They're read in number order and joined.
+              # Subjects match with ':' or '-' after the first word group ("Ticket Routing - Skills 1" is "Ticket Routing: Skills 1"),
+              # because the exported files can't have ':' in their names.
+              $normSubject = { param($x) (([string]$x).Trim() -replace '^(.+?)\s*[:\-–—]\s+', '$1: ' -replace '\s{2,}', ' ') }
+              function Get-Article { param([string]$Subject, [switch]$Parts)
+                  $want = & $normSubject $Subject
+                  $root = (($want -split ':')[0]).Trim() -replace "'", "''"
+                  $f = "companyId eq $companyId and startswith(subject,'$root')"
                   $list = @(Get-Prop (Invoke-RestMethod -Method GET -Uri "$crBase/v2/odata/article?`$filter=$([uri]::EscapeDataString($f))&`$select=articleId,subject" -Headers $crHeaders) 'value' | Where-Object { $null -ne $_ })
+                  if (-not $Parts) { $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -eq $want }) }
+                  if ($Parts) {
+                      $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -match ('^' + [regex]::Escape($want) + '(\s+(\d+))?$') } |
+                          Sort-Object { $m = [regex]::Match(([string](Get-Prop $_ 'subject')).Trim(), '\s(\d+)$'); if ($m.Success) { [int]$m.Groups[1].Value } else { 0 } })
+                  }
                   if (-not $list.Count) { return $null }
-                  if ($list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used.") }
-                  $a = Invoke-RestMethod -Method GET -Uri "$crBase/v2/article/$(Get-Prop $list[0] 'articleId')" -Headers $crHeaders
-                  $body = Get-Prop $a 'body'; if ($null -eq $body) { $body = Get-Path $a 'data.body' }
-                  return [string]$body
+                  if (-not $Parts -and $list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used."); $list = @($list[0]) }
+                  $bodies = foreach ($item in $list) {
+                      $a = Invoke-RestMethod -Method GET -Uri "$crBase/v2/article/$(Get-Prop $item 'articleId')" -Headers $crHeaders
+                      $body = Get-Prop $a 'body'; if ($null -eq $body) { $body = Get-Path $a 'data.body' }
+                      [string]$body
+                  }
+                  if ($list.Count -gt 1) { $null = $actions.Add("Read $($list.Count) articles for '$Subject'") }
+                  return (@($bodies) -join "`n")
               }
-              $skillsHtml = Get-Article $skillsSubject
+              $skillsHtml = Get-Article $skillsSubject -Parts
               $engHtml = Get-Article $engSubject
               $missingArticles = @(); if ($null -eq $skillsHtml) { $missingArticles += "'$skillsSubject'" }; if ($null -eq $engHtml) { $missingArticles += "'$engSubject'" }
               if ($missingArticles.Count) { Stop-Prepare 'incomplete' "The routing table wasn't found: no article titled $($missingArticles -join ' or ') in CloudRadial company $companyId. Nothing was assigned."; return }
@@ -479,13 +656,15 @@ definition:
               $sk = Split-RoutingSections (ConvertFrom-ArticleBody $skillsHtml)
               $en = Split-RoutingSections (ConvertFrom-ArticleBody $engHtml)
               # Skills come from the skills article; engineers and settings from the other. A section in the wrong article still counts.
-              $skillLines = if (@(Select-FromHeader @($sk.Skills) 'Skill').Count) { @($sk.Skills) } else { @($en.Skills) }
+              $skillLines = if (Test-HasSkills @($sk.Skills)) { @($sk.Skills) } else { @($en.Skills) }
               $engLines = if ($en.Engineers.Count) { @($en.Engineers) } else { @($sk.Engineers) }
               $setLines = @($en.Settings) + @($sk.Settings)
+              $where = 'the KB articles'
+              }
               $table = Read-RoutingTable $skillLines $engLines $setLines
-              $check = Test-RoutingData $table $psa
+              $check = Test-RoutingData $table $psa -NoSkills:($source -eq 'knowledge')
               foreach ($w in @($check.Warnings)) { $null = $warnings.Add($w) }
-              if ($check.Errors.Count) { Stop-Prepare 'incomplete' ("The routing table has errors, so nothing was assigned. Fix them in the KB articles (Test-RoutingTable.ps1 shows the same list):`n- " + ($check.Errors -join "`n- ")); return }
+              if ($check.Errors.Count) { Stop-Prepare 'incomplete' ("The routing table has errors, so nothing was assigned. Fix them in $where (Test-RoutingTable.ps1 shows the same list):`n- " + ($check.Errors -join "`n- ")); return }
               $null = $actions.Add("Read the routing table: $(@($table.Skills).Count) skills rows, $(@($table.Engineers).Count) engineers")
               # A Triage Action may post the raw PSA ticket with no confirm field, so the table can switch live assignment on.
               if ($confirmIn -eq '') { $out.confirm = Test-Yes ([string]$table.Settings.liveAssign) }
@@ -506,6 +685,7 @@ definition:
                   rows = @($table.Skills | Where-Object { $_.Skill -and $_.Skill -ne 'Role only' } | ForEach-Object { [ordered]@{ s = $_.Skill; r = $_.Role; e = $_.Engineer } })
               }
               $out.skillList = Get-ClassifierSkillList $table
+              $out.useKnowledge = ($source -eq 'knowledge')
               $out.roles = (@($table.Skills | ForEach-Object { $_.Role } | Where-Object { $_ } | Select-Object -Unique) -join ', ')
 
               if ($ticket.assigneeId -and -not $out.reassign) {
@@ -526,6 +706,8 @@ definition:
         parameters:
           - name: trigger
             expression: '{{ nodes.trigger.output }}'
+          - name: table
+            expression: '{{ nodes.node-table.output }}'
         aiExtensions: []
         testInput: |-
           {
@@ -538,29 +720,29 @@ definition:
       name: Pick the skill
       type: agent
       position:
-        x: 540
+        x: 660
         'y': 120
       properties:
-        goal: 'Read the ticket summary and description in your input and pick the one skill from skillList that an engineer needs to work it, and the role for that skill. Copy the skill and role exactly as they are written in skillList. Return skill, role, confidence (0 to 1) and a one-sentence reason. If nothing in the list fits, return an empty skill and a confidence below 0.5. If skip is true, return an empty skill and confidence 0 straight away. This is read-only: you have no tools and change nothing.'
+        goal: 'Read the ticket summary and description in your input and pick the one skill from skillList that an engineer needs to work it, and the role for that skill. Copy the skill and role exactly as they are written in skillList. Return skill, role, confidence (0 to 1) and a one-sentence reason. If nothing in the list fits, return an empty skill and a confidence below 0.5. If skip is true, return an empty skill and confidence 0 straight away. If useKnowledge is true, skillList is empty: search the skills CSV in your Knowledge instead, and also return in engineers every Engineer the CSV lists for that skill and role, copied exactly. This is read-only: change nothing.'
         model: ''
         # Never leave this list empty: an empty list gives the agent every installed
         # extension (925 tools on 2026-10-14, over the model's 128-tool limit).
         # The agent calls no tools; the list only has to be short and non-empty.
         allowedExtensions:
           - cloudradial-v2-companies
-        timeoutSeconds: 120
+        timeoutSeconds: 300
         autoApprove: false
         agentSlug: ticket-skill-classifier
         inputSchema: |
-          {"type":"object","properties":{"summary":{"type":"string","description":"The ticket summary or subject."},"description":{"type":"string","description":"The ticket description or first note, as plain text."},"skillList":{"type":"string","description":"One line per skill: '<skill>: <description> [roles: ...]'. Pick only from this list."},"roles":{"type":"string","description":"Every role used in the table, comma separated."},"skip":{"type":"boolean","description":"True when the workflow has already decided not to route this ticket."}},"required":["skillList"]}
+          {"type":"object","properties":{"summary":{"type":"string","description":"The ticket summary or subject."},"description":{"type":"string","description":"The ticket description or first note, as plain text."},"skillList":{"type":"string","description":"One line per skill: '<skill>: <description> [roles: ...]'. Pick only from this list. Empty when useKnowledge is true."},"roles":{"type":"string","description":"Every role used in the table, comma separated. Empty when useKnowledge is true."},"useKnowledge":{"type":"boolean","description":"True when the skills table is a CSV in your Knowledge instead of skillList."},"skip":{"type":"boolean","description":"True when the workflow has already decided not to route this ticket."}}}
         outputSchema: |
-          {"type":"object","properties":{"skill":{"type":"string","description":"Copied exactly from skillList, or empty when nothing fits."},"role":{"type":"string","description":"One of the roles listed for that skill, or empty."},"confidence":{"type":"number","description":"0 to 1."},"reason":{"type":"string","description":"One sentence for the internal note."}},"required":["skill","role","confidence","reason"]}
-        inputBindingsJson: '{"summary":"{{ nodes.node-prepare.output.summary }}","description":"{{ nodes.node-prepare.output.description }}","skillList":"{{ nodes.node-prepare.output.skillList }}","roles":"{{ nodes.node-prepare.output.roles }}","skip":"{{ nodes.node-prepare.output.skip }}"}'
+          {"type":"object","properties":{"skill":{"type":"string","description":"Copied exactly from skillList or the Knowledge CSV, or empty when nothing fits."},"role":{"type":"string","description":"One of the roles listed for that skill, or empty."},"engineers":{"type":"array","items":{"type":"string"},"description":"Knowledge mode only: every Engineer the CSV lists for that skill and role, copied exactly. Empty otherwise."},"confidence":{"type":"number","description":"0 to 1."},"reason":{"type":"string","description":"One sentence for the internal note."}},"required":["skill","role","engineers","confidence","reason"]}
+        inputBindingsJson: '{"summary":"{{ nodes.node-prepare.output.summary }}","description":"{{ nodes.node-prepare.output.description }}","skillList":"{{ nodes.node-prepare.output.skillList }}","roles":"{{ nodes.node-prepare.output.roles }}","useKnowledge":"{{ nodes.node-prepare.output.useKnowledge }}","skip":"{{ nodes.node-prepare.output.skip }}"}'
     - id: node-route
       name: Find, pick, assign and note
       type: powershell-script
       position:
-        x: 780
+        x: 860
         'y': 120
       properties:
         script: |
@@ -579,6 +761,17 @@ definition:
           function Get-Prop { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
           function Get-Path { param($o, [string]$path) foreach ($n in $path -split '\.') { $o = Get-Prop $o $n; if ($null -eq $o) { return $null } }; return $o }
           function Test-Blank { param($v) return ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v) -or [string]$v -eq '0') }
+          function ConvertFrom-MaybeJson { param($v)
+              if ($v -is [string]) { $s = $v.Trim() -replace '^```(json)?\s*', '' -replace '\s*```$', ''; if ($s -match '^[\[{]') { try { return ($s | ConvertFrom-Json) } catch { } } }
+              return $v
+          }
+          function Get-Param { param([string]$n)
+              # Parameters may arrive as a variable, as a property of the node input, or via Get-NodeInput -Name.
+              $v = Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue
+              if ($null -eq $v) { $all = $null; try { $all = ConvertFrom-MaybeJson (Get-NodeInput) } catch { }; $v = Get-Prop $all $n }
+              if ($null -eq $v) { try { $v = ConvertFrom-MaybeJson (Get-NodeInput -Name $n) } catch { }; $inner = Get-Prop $v $n; if ($null -ne $inner) { $v = $inner } }
+              return (ConvertFrom-MaybeJson $v)
+          }
 
           $script:PsaSecrets = @{
               connectwise = @('CW-ApiUrl', 'CW-CompanyID', 'CW-PublicKey', 'CW-PrivateKey', 'CW-ClientId')
@@ -820,17 +1013,6 @@ definition:
           # ---------- this step ----------
           # Checks the classifier's pick against the routing table, finds every qualified engineer,
           # applies the tie-break, and (only when confirm is true) assigns the ticket and adds an internal note.
-          function ConvertFrom-MaybeJson { param($v)
-              if ($v -is [string]) { $s = $v.Trim() -replace '^```(json)?\s*', '' -replace '\s*```$', ''; if ($s -match '^[\[{]') { try { return ($s | ConvertFrom-Json) } catch { } } }
-              return $v
-          }
-          function Get-Param { param([string]$n)
-              # Parameters may arrive as a variable, as a property of the node input, or via Get-NodeInput -Name.
-              $v = Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue
-              if ($null -eq $v) { $all = $null; try { $all = ConvertFrom-MaybeJson (Get-NodeInput) } catch { }; $v = Get-Prop $all $n }
-              if ($null -eq $v) { try { $v = ConvertFrom-MaybeJson (Get-NodeInput -Name $n) } catch { }; $inner = Get-Prop $v $n; if ($null -ne $inner) { $v = $inner } }
-              return (ConvertFrom-MaybeJson $v)
-          }
           $prep = Get-Param 'prep'
           $ai = Get-Param 'ai'
           # The agent's answer may be wrapped (output / result / structuredOutput) or arrive as JSON text.
@@ -878,6 +1060,14 @@ definition:
               $reason = ([string](Get-Prop $ai 'reason')).Trim()
               if ($null -eq $ai) { $null = $warnings.Add('The classifier returned nothing, so this counts as no match.') }
               $out.confidence = $conf; $out.reason = $reason
+              # Knowledge mode: the skills table is in AutomationAI Knowledge, so the classifier also lists the engineers
+              # it found for its skill and role. Those become the rows; each name is still checked against the engineers table below.
+              $useKnowledge = (Get-Prop $prep 'useKnowledge') -eq $true
+              if ($useKnowledge) {
+                  $tidy = { param($v) (([string]$v).Trim() -replace '\s+,', ',' -replace ',(?=\S)', ', ' -replace '\s{2,}', ' ') }
+                  $rows = @(@(Get-Prop $ai 'engineers') | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ s = $aiSkill; r = $aiRole; e = (& $tidy $_) } })
+                  $null = $warnings.Add('Knowledge mode: the skill came from the AutomationAI Knowledge CSV, so it was not checked against a table here. Every engineer was checked against the engineers table.')
+              }
               # Only a skill that's in the table counts (case and spacing aside). The AI never invents one.
               $skill = @($rows | ForEach-Object { [string](Get-Prop $_ 's') } | Where-Object { $_.Trim() -ieq $aiSkill } | Select-Object -First 1)
               $skill = if ($skill.Count -and $aiSkill) { $skill[0] } else { '' }
@@ -890,6 +1080,7 @@ definition:
 
               $noMatchWhy = ''
               if (-not $aiSkill) { $noMatchWhy = 'the classifier found no skill in the table that fits this ticket' }
+              elseif (-not $skill -and $useKnowledge) { $noMatchWhy = "the classifier picked '$aiSkill' but listed no engineers for it from the Knowledge CSV" }
               elseif (-not $skill) { $noMatchWhy = "the classifier picked '$aiSkill', which isn't a skill in the routing table" }
               elseif ($conf -lt $minConf) { $noMatchWhy = "the classifier's confidence ($conf) is below minConfidence ($minConf)" }
 
@@ -996,10 +1187,13 @@ definition:
       name: End
       type: end
       position:
-        x: 1000
+        x: 1060
         'y': 120
   connections:
     - source: start
+      target: node-table
+      sourceHandle: null
+    - source: node-table
       target: node-prepare
       sourceHandle: null
     - source: node-prepare

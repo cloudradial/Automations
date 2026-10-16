@@ -1,16 +1,5 @@
 # Checks the classifier's pick against the routing table, finds every qualified engineer,
 # applies the tie-break, and (only when confirm is true) assigns the ticket and adds an internal note.
-function ConvertFrom-MaybeJson { param($v)
-    if ($v -is [string]) { $s = $v.Trim() -replace '^```(json)?\s*', '' -replace '\s*```$', ''; if ($s -match '^[\[{]') { try { return ($s | ConvertFrom-Json) } catch { } } }
-    return $v
-}
-function Get-Param { param([string]$n)
-    # Parameters may arrive as a variable, as a property of the node input, or via Get-NodeInput -Name.
-    $v = Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue
-    if ($null -eq $v) { $all = $null; try { $all = ConvertFrom-MaybeJson (Get-NodeInput) } catch { }; $v = Get-Prop $all $n }
-    if ($null -eq $v) { try { $v = ConvertFrom-MaybeJson (Get-NodeInput -Name $n) } catch { }; $inner = Get-Prop $v $n; if ($null -ne $inner) { $v = $inner } }
-    return (ConvertFrom-MaybeJson $v)
-}
 $prep = Get-Param 'prep'
 $ai = Get-Param 'ai'
 # The agent's answer may be wrapped (output / result / structuredOutput) or arrive as JSON text.
@@ -58,6 +47,14 @@ try {
     $reason = ([string](Get-Prop $ai 'reason')).Trim()
     if ($null -eq $ai) { $null = $warnings.Add('The classifier returned nothing, so this counts as no match.') }
     $out.confidence = $conf; $out.reason = $reason
+    # Knowledge mode: the skills table is in AutomationAI Knowledge, so the classifier also lists the engineers
+    # it found for its skill and role. Those become the rows; each name is still checked against the engineers table below.
+    $useKnowledge = (Get-Prop $prep 'useKnowledge') -eq $true
+    if ($useKnowledge) {
+        $tidy = { param($v) (([string]$v).Trim() -replace '\s+,', ',' -replace ',(?=\S)', ', ' -replace '\s{2,}', ' ') }
+        $rows = @(@(Get-Prop $ai 'engineers') | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ s = $aiSkill; r = $aiRole; e = (& $tidy $_) } })
+        $null = $warnings.Add('Knowledge mode: the skill came from the AutomationAI Knowledge CSV, so it was not checked against a table here. Every engineer was checked against the engineers table.')
+    }
     # Only a skill that's in the table counts (case and spacing aside). The AI never invents one.
     $skill = @($rows | ForEach-Object { [string](Get-Prop $_ 's') } | Where-Object { $_.Trim() -ieq $aiSkill } | Select-Object -First 1)
     $skill = if ($skill.Count -and $aiSkill) { $skill[0] } else { '' }
@@ -70,6 +67,7 @@ try {
 
     $noMatchWhy = ''
     if (-not $aiSkill) { $noMatchWhy = 'the classifier found no skill in the table that fits this ticket' }
+    elseif (-not $skill -and $useKnowledge) { $noMatchWhy = "the classifier picked '$aiSkill' but listed no engineers for it from the Knowledge CSV" }
     elseif (-not $skill) { $noMatchWhy = "the classifier picked '$aiSkill', which isn't a skill in the routing table" }
     elseif ($conf -lt $minConf) { $noMatchWhy = "the classifier's confidence ($conf) is below minConfidence ($minConf)" }
 

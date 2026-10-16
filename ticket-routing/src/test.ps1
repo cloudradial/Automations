@@ -10,6 +10,18 @@ $extract = "const y=(()=>{try{return require('js-yaml')}catch{return require(pro
 Push-Location $here; try { node -e $extract (Join-Path $here '..\ticket-routing.yml') $tmp } finally { Pop-Location }
 $prepareScript = Join-Path $tmp 'node-prepare.ps1'
 $routeScript = Join-Path $tmp 'node-route.ps1'
+$tableScriptText = Get-Content -Raw (Join-Path $tmp 'node-table.ps1')
+# The runner runs each step in a child scope, not as a script file (CLAUDE.md rule 7), so the harness does too.
+function Invoke-Step { param([string]$Text) & ([scriptblock]::Create($Text)) }
+# The shipped Routing table step with its three blocks and TableSource swapped for a test's own.
+function New-TableStep { param([string]$Source, [string[]]$SettingLines, [string[]]$EngineerLines, [string[]]$SkillLines)
+    $t = $tableScriptText -replace "(?m)^\`$TableSource = '[a-z]*'", "`$TableSource = '$Source'"
+    foreach ($p in @(@('Settings', $SettingLines), @('Engineers', $EngineerLines), @('Skills', $SkillLines))) {
+        $body = (@($p[1]) -join "`n")
+        $t = [regex]::Replace($t, "(?s)(\`$$($p[0]) = @'\r?\n).*?(\r?\n'@)", { param($m) $m.Groups[1].Value + $body + $m.Groups[2].Value })
+    }
+    return $t
+}
 
 # ---------- placeholder data (Contoso) ----------
 $skillsCsv = @'
@@ -73,6 +85,7 @@ function Invoke-RestMethod { param($Method = 'GET', $Uri, $Headers, $Body, $Cont
         return $null
     }
     # CloudRadial
+    if ($u -match '^https://cr\.test/v2/odata/article.*startswith\(subject,''(.+?)''\)') { $p = $Matches[1] -replace "''", "'"; $keys = @($global:Articles.Keys); return J @{ value = @($keys | Where-Object { $_.StartsWith($p) } | ForEach-Object { J @{ articleId = [array]::IndexOf($keys, $_) + 1; subject = $_ } }) } }
     if ($u -match '^https://cr\.test/v2/odata/article.*subject eq ''(.+?)''') { $s = $Matches[1] -replace "''", "'"; if ($global:Articles.Contains($s)) { return J @{ value = @(J @{ articleId = [array]::IndexOf(@($global:Articles.Keys), $s) + 1; subject = $s }) } }; return J @{ value = @() } }
     if ($u -match '^https://cr\.test/v2/article/(\d+)$') { return J @{ body = $global:Articles[@($global:Articles.Keys)[[int]$Matches[1] - 1]] } }
     $a = $global:Assigned
@@ -111,23 +124,36 @@ function Invoke-RestMethod { param($Method = 'GET', $Uri, $Headers, $Body, $Cont
 $global:Pass = 0; $global:Fail = 0
 function Check { param([string]$Name, [bool]$Ok, [string]$Detail = '') if ($Ok) { $global:Pass++ } else { $global:Fail++; Write-Host "  FAIL $Name $Detail" -ForegroundColor Red } }
 function Invoke-Routing {
-    param($Body, [string]$Psa = 'connectwise', $Ai = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; confidence = 0.9; reason = 'The ticket asks for a FortiGate VPN tunnel.' },
-        [string[]]$Settings = @(), [hashtable]$Engineers = @{}, [string]$Form = 'pasted', [switch]$Wrap, [switch]$NoSecretPsa)
+    param($Body, [string]$Psa = 'connectwise', $Ai = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @(); confidence = 0.9; reason = 'The ticket asks for a FortiGate VPN tunnel.' },
+        [string[]]$Settings = @(), [hashtable]$Engineers = @{}, [string]$Source = 'inline', [string]$Form = 'pasted', [switch]$Wrap, [switch]$NoSecretPsa, $SkillArticles = $null)
     $global:Writes.Clear(); $global:NodeOut = $null
     $global:Secrets = @{ 'CloudRadial-BaseUrl' = 'https://cr.test'; 'CloudRadial-PublicKey' = 'p'; 'CloudRadial-PrivateKey' = 's'; 'Routing-CompanyId' = '9' } + $mockSecrets[$Psa]
     if (-not $NoSecretPsa) { $global:Secrets['PSA-Type'] = $Psa }
-    $eng = @('[Settings]') + $Settings + @('', '[Engineers]') + (New-EngineersCsv $Engineers)
+    $engLines = @(New-EngineersCsv $Engineers)
+    # ucp: the table is in the two CloudRadial articles (and the Routing table step says so).
+    $eng = @('[Settings]') + $Settings + @('', '[Engineers]') + $engLines
     $sk = @('Ticket routing skills for Contoso (example)', '[Skills]') + $skillsCsv
     $conv = if ($Form -eq 'table') { 'ConvertTo-TableHtml' } else { 'ConvertTo-PastedHtml' }
     $global:Articles = [ordered]@{ 'Ticket Routing: Skills' = (& $conv $sk); 'Ticket Routing: Engineers and Settings' = (& $conv $eng) }
-    # Node I/O goes through JSON, as on the runner.
-    $global:NodeIn = if ($Wrap) { [pscustomobject]@{ trigger = ($Body | ConvertTo-Json -Depth 10 | ConvertFrom-Json) } } else { $Body | ConvertTo-Json -Depth 10 | ConvertFrom-Json }
-    & { Set-StrictMode -Version Latest; . $prepareScript }
+    if ($SkillArticles) { $global:Articles.Remove('Ticket Routing: Skills'); foreach ($k in $SkillArticles.Keys) { $global:Articles[$k] = $SkillArticles[$k] } }
+    # Step 1, the Routing table step as shipped, with this test's blocks pasted in. Node I/O goes through JSON, as on the runner.
+    $tableOut = $null
+    if ($Source -ne 'none') {
+        $global:NodeIn = $null
+        Invoke-Step (New-TableStep $Source @($Settings) $engLines $(if ($Source -eq 'knowledge') { @('') } else { $skillsCsv }))
+        $tableOut = $global:NodeOut | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    }
+    # Step 2. -Wrap: parameters arrive as one input bag {trigger, table}. Otherwise as variables, with the raw body as the node input.
+    $trig = $Body | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    $global:NodeOut = $null
+    if ($Wrap) { $global:NodeIn = [pscustomobject]@{ trigger = $trig; table = $tableOut } }
+    else { $global:NodeIn = $trig; Set-Variable -Scope Global -Name trigger -Value $trig; Set-Variable -Scope Global -Name table -Value $tableOut }
+    try { Invoke-Step (Get-Content -Raw $prepareScript) } finally { Remove-Variable -Scope Global -Name trigger, table -ErrorAction SilentlyContinue }
     $prep = $global:NodeOut | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-    $aiOut = if ((Get-Prop2 $prep 'skip') -eq $true) { @{ skill = ''; role = ''; confidence = 0; reason = 'Skipped by the workflow.' } } else { $Ai }
+    $aiOut = if ((Get-Prop2 $prep 'skip') -eq $true) { @{ skill = ''; role = ''; engineers = @(); confidence = 0; reason = 'Skipped by the workflow.' } } else { $Ai }
     $global:NodeIn = [pscustomobject]@{ prep = $prep; ai = ($aiOut | ConvertTo-Json -Depth 5 | ConvertFrom-Json) }
     $global:NodeOut = $null
-    & { Set-StrictMode -Version Latest; . $routeScript }
+    Invoke-Step (Get-Content -Raw $routeScript)
     $r = $global:NodeOut | ConvertTo-Json -Depth 20 | ConvertFrom-Json
     if ($ShowNotes) { Write-Host "    [$($r.status)] $($r.message)`n      $($r.internal_note -replace "`n", "`n      ")" -ForegroundColor DarkGray }
     return [pscustomobject]@{ prep = $prep; r = $r; writes = @($global:Writes) }
@@ -250,8 +276,38 @@ $x = Invoke-Routing @{ ticket = @{ id = 12345 }; confirm = 'true' }
 Check 'nested ticket.id' ($x.r.status -eq 'success')
 $x = Invoke-Routing @{ ticketId = '{{ticket.id}}'; confirm = 'true' }
 Check 'unreplaced placeholder is missing' ($x.r.status -eq 'incomplete')
-$x = Invoke-Routing $body -Form table
-Check 'article in table form' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source ucp -Form table
+Check 'ucp: article in table form' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source ucp
+Check 'ucp: pasted articles' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and $x.prep.tableSource -eq 'ucp') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source none
+Check 'no Routing table step falls back to ucp' ($x.r.status -eq 'success' -and $x.prep.tableSource -eq 'ucp') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source sharepoint
+Check 'unknown TableSource stops' ($x.r.status -eq 'incomplete' -and $x.r.message -match "TableSource 'sharepoint'") $x.r.message
+$x = Invoke-Routing $body -Wrap
+Check 'inline, parameters as an input bag' ($x.r.status -eq 'success' -and $x.prep.tableSource -eq 'inline') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body
+Check 'inline, parameters as variables' ($x.r.status -eq 'success' -and $x.prep.tableSource -eq 'inline' -and $x.prep.useKnowledge -eq $false) "$($x.r.status): $($x.r.message)"
+
+Write-Host 'Knowledge: skills from AutomationAI Knowledge, engineers from the step'
+$kAi = @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @('Patel , Riya', 'Okafor, Chidi', 'Ghost, Casper'); confidence = 0.9; reason = 'FortiGate VPN work.' }
+$x = Invoke-Routing $body -Source knowledge -Ai $kAi
+Check 'knowledge: prep asks the agent to use Knowledge' ($x.prep.useKnowledge -eq $true -and $x.prep.skillList -eq '' -and $x.prep.status -eq 'ok') "$($x.prep.status) $($x.prep.message)"
+Check 'knowledge: assigns least busy of the listed engineers' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+Check 'knowledge: a name not in the engineers table is skipped' (@($x.r.candidates | Where-Object { $_.name -eq 'Ghost, Casper' -and $_.skipped -eq 'not in the engineers table' }).Count -eq 1) (($x.r.candidates | ConvertTo-Json -Compress))
+Check 'knowledge: warns the skill was not table-checked' (@($x.r.warnings | Where-Object { $_ -match 'Knowledge mode' }).Count -eq 1)
+$x = Invoke-Routing $body -Source knowledge -Ai @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @('Ghost, Casper'); confidence = 0.9; reason = 'x' }
+Check 'knowledge: only unknown names is no match, nothing assigned' ($x.r.status -eq 'incomplete' -and $x.writes.Count -eq 1 -and $x.r.message -match 'inactive or at their limit|no engineer') "$($x.r.status): $($x.r.message)"
+$x = Invoke-Routing $body -Source knowledge -Ai @{ skill = 'Network Firewall Fortinet'; role = 'Tickets'; engineers = @(); confidence = 0.9; reason = 'x' }
+Check 'knowledge: no engineers listed is no match' ($x.r.status -eq 'incomplete' -and $x.r.message -match 'listed no engineers') $x.r.message
+$x = Invoke-Routing $body -Source knowledge -Settings @('tieBreak: busiest')
+Check 'knowledge: settings are still validated' ($x.r.status -eq 'incomplete' -and $x.r.internal_note -match "tieBreak 'busiest'") $x.r.internal_note
+
+Write-Host 'The Routing table step as shipped'
+$global:NodeIn = $null; $global:NodeOut = $null
+Invoke-Step $tableScriptText
+$shipped = $global:NodeOut | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+Check 'shipped step: inline, with settings, engineers and skills' ($shipped.tableSource -eq 'inline' -and @($shipped.settings).Count -eq 6 -and @($shipped.engineers).Count -eq 4 -and @($shipped.skills).Count -eq 7) (($shipped | ConvertTo-Json -Compress))
 $global:FailAssign = $true
 $x = Invoke-Routing $body
 Check 'assign rejected is an error, no note' ($x.r.status -eq 'error' -and $x.writes.Count -eq 1) "$($x.r.status) $($x.writes.Count)"
@@ -272,6 +328,49 @@ ConvertTo-TableHtml (@('[Settings]', 'tieBreak: busiest', '[Engineers]') + (New-
 ConvertTo-PastedHtml (@('[Skills]') + $skillsCsv) | Set-Content (Join-Path $tmp 'skills.html')
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $tmp 'eng.html')','$(Join-Path $tmp 'skills.html')'; exit `$LASTEXITCODE" 2>&1
 Check 'validator reads article HTML and fails a bad setting' ($LASTEXITCODE -eq 1 -and ($v -join "`n") -match "tieBreak 'busiest'" -and ($v -join "`n") -match 'Engineers named: 5; engineers table: 5') ($v -join ' / ')
+
+# The shape the CloudRadial KB editor stores when cells are pasted from Excel (article 5789, 2026-10-16):
+# blank neighbours merged into colspan, and <br> in an empty cell.
+$excelPaste = '<p>&nbsp;</p><table border="0" data-pasted="true"><tbody><tr><td height="19" style="width: 64px;">Engineer</td><td>Email</td><td>PSA User Id</td><td>PSA Role Id</td><td>Active</td><td>Max Open Tickets</td></tr>' +
+    '<tr><td height="19">Engineer 01</td><td colspan="3">engineer01@example.com</td><td>Yes</td><td><br></td></tr>' +
+    '<tr><td height="19">Engineer 02</td><td>engineer02@example.com</td><td colspan="2">102</td><td>No</td><td>20</td></tr></tbody></table>'
+$excelPaste | Set-Content (Join-Path $tmp 'excel-paste.html')
+$v = & pwsh -NoProfile -Command "`$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; . ([scriptblock]::Create((Get-Content -Raw '$(Join-Path $here 'routing-table.ps1')'))); `$s = Split-RoutingSections (ConvertFrom-ArticleBody (Get-Content -Raw '$(Join-Path $tmp 'excel-paste.html')')); `$t = Read-RoutingTable @() @(`$s.Engineers) @(); `$t.Engineers | ConvertTo-Json -Compress" 2>&1
+$pe = ($v -join '') | ConvertFrom-Json
+Check 'Excel paste: merged blank cells keep later columns in place' (@($pe).Count -eq 2 -and $pe[0].Email -eq 'engineer01@example.com' -and $pe[0].PsaUserId -eq '' -and $pe[0].Active -eq $true -and $pe[0].MaxOpen -eq '') ($v -join ' ')
+('<p>tieBreak: listed-order</p>' + (ConvertTo-TableHtml (New-EngineersCsv))) | Set-Content (Join-Path $tmp 'eng-noheading.html')
+ConvertTo-TableHtml $skillsCsv | Set-Content (Join-Path $tmp 'skills-noheading.html')
+$v = & pwsh -NoProfile -Command "& '$(Join-Path $here '..\Test-RoutingTable.ps1')' -ArticleHtmlPath '$(Join-Path $tmp 'eng-noheading.html')','$(Join-Path $tmp 'skills-noheading.html')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1
+Check 'pasted tables need no [Section] headings' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Engineers named: 5; engineers table: 5' -and ($v -join "`n") -match 'tieBreak=listed-order') ($v -join ' / ')
+Check 'Excel paste: a merged cell further along, and No for Active' ($pe[1].PsaUserId -eq '102' -and $pe[1].PsaRoleId -eq '' -and $pe[1].Active -eq $false -and $pe[1].MaxOpen -eq '20') ($v -join ' ')
+
+$kdir = Join-Path $tmp 'knowledge'
+$v = & pwsh -NoProfile -File $validator -SkillsPath (Join-Path $tmp 'skills.csv') -EngineersPath (Join-Path $tmp 'engineers.csv') -ExportKnowledgeDir $kdir -Placeholders 2>&1
+$files = @(Get-ChildItem $kdir -Filter *.md | Sort-Object Name)
+$forti = if (Test-Path (Join-Path $kdir 'network-firewall-fortinet.md')) { Get-Content -Raw (Join-Path $kdir 'network-firewall-fortinet.md') } else { '' }
+Check 'export: one document per skill, Role only left out' ($files.Count -eq 3 -and ($v -join "`n") -match 'Exported 3 skill documents') (($files.Name -join ', ') + ' / ' + ($v -join ' / '))
+Check 'export: every engineer per role, renamed' ($forti -match '(?m)^Engineers for Network Firewall Fortinet / Tickets: Engineer \d\d; Engineer \d\d$' -and $forti -match '(?m)^Engineers for Network Firewall Fortinet / Install: Engineer \d\d$' -and $forti -notmatch 'Patel|Okafor') $forti
+$pcsv = Get-Content -Raw (Join-Path $kdir 'engineers-placeholder.csv')
+Check 'export: placeholder engineers CSV, no real names or ids' ($pcsv -match '"Engineer 01",engineer01@example.com,,,Yes,' -and $pcsv -notmatch 'Patel|Lee|101') $pcsv
+
+# A table too big for one KB article: compact blocks split across "Ticket Routing: Skills 1", "Skills 2", ...
+$adir = Join-Path $tmp 'articles'
+$v = & pwsh -NoProfile -File $validator -SkillsPath (Join-Path $tmp 'skills.csv') -EngineersPath (Join-Path $tmp 'engineers.csv') -ExportArticleDir $adir -MaxArticleChars 220 2>&1
+$parts = @(Get-ChildItem $adir -Filter 'Ticket Routing - Skills *.txt' | Sort-Object Name)
+Check 'article export: split into several skills articles' ($parts.Count -ge 2 -and (Test-Path (Join-Path $adir 'Ticket Routing - Engineers and Settings.txt'))) (($parts.Name -join ', ') + ' / ' + ($v -join ' / '))
+Check 'article export: compact blocks, no CSV rows' ((Get-Content -Raw $parts[0].FullName) -match '(?m)^Engineers for .+ / .+: ' -and (Get-Content -Raw $parts[0].FullName) -notmatch 'Skill,Role')
+$v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath $((@($parts.FullName) + (Join-Path $adir 'Ticket Routing - Engineers and Settings.txt') | ForEach-Object { "'$_'" }) -join ',') -Psa connectwise; exit `$LASTEXITCODE" 2>&1
+Check 'article export: reads back to the same table' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Skills rows:\s+7 \(7 matchable' -and ($v -join "`n") -match 'Skills:\s+3' -and ($v -join "`n") -match 'engineers table: 5') ($v -join ' / ')
+$split = [ordered]@{}
+foreach ($p in ($parts | Sort-Object Name -Descending)) { $split[($p.BaseName -replace '^Ticket Routing - ', 'Ticket Routing: ')] = (Get-Content $p.FullName | ForEach-Object { "<p>$([System.Net.WebUtility]::HtmlEncode($_))</p>" }) -join '' }
+$x = Invoke-Routing $body -Source ucp -SkillArticles $split
+Check 'ucp: skills split across several articles' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and @($x.prep.actions | Where-Object { $_ -match "Read $($parts.Count) articles" }).Count -eq 1) "$($x.r.status): $($x.r.message) / $($x.prep.actions -join '; ')"
+
+$dashed = [ordered]@{}; $i = 0
+foreach ($p in $parts) { $i++; $dashed["Ticket Routing - Skills $i"] = (Get-Content $p.FullName | ForEach-Object { "<p>$([System.Net.WebUtility]::HtmlEncode($_))</p>" }) -join '' }
+$dashed['Ticket Routing - Skills notes'] = '<p>Skill: Should Not Be Read</p><p>Engineers for Should Not Be Read / Tickets: Ghost, Casper</p>'
+$x = Invoke-Routing $body -Source ucp -SkillArticles $dashed
+Check 'ucp: titles with " - " instead of ":" are found; other titles ignored' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and $x.prep.skillList -notmatch 'Should Not Be Read') "$($x.r.status): $($x.r.message)"
 
 $kb = Join-Path $here '..\kb-articles'
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $kb 'ticket-routing-engineers-and-settings.txt')','$(Join-Path $kb 'ticket-routing-skills.txt')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1

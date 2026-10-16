@@ -5,6 +5,12 @@
 function ConvertFrom-ArticleBody {
     param([string]$Html)
     $t = $Html -replace '\r', ''
+    # A cell pasted from Excel can span blank neighbours (colspan="3"): count it as that many columns.
+    $t = [regex]::Replace($t, '(?is)<t([dh])([^>]*)\bcolspan\s*=\s*"?(\d+)"?([^>]*)>(.*?)</t[dh]>', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m) "<t$($m.Groups[1].Value)$($m.Groups[2].Value)$($m.Groups[4].Value)>$($m.Groups[5].Value)</t$($m.Groups[1].Value)>" + ('<td></td>' * ([Math]::Max(1, [int]$m.Groups[3].Value) - 1)) })
+    # A line break or paragraph inside a cell (an empty pasted cell holds <br>) must not split the row.
+    $t = [regex]::Replace($t, '(?is)(<t[dh][^>]*>)(.*?)(</t[dh]>)', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m) $m.Groups[1].Value + (($m.Groups[2].Value -replace '(?i)<br\s*/?>|</(p|div)>', ' ').Trim()) + $m.Groups[3].Value })
     $t = $t -replace '(?i)<br\s*/?>', "`n"
     $t = $t -replace '(?i)</(p|div|tr|li|h[1-6]|pre)>', "`n"
     # Table cells become quoted CSV fields so commas inside a cell survive.
@@ -21,12 +27,20 @@ function ConvertFrom-ArticleBody {
 
 # Splits lines into [Settings], [Engineers] and [Skills] sections. Lines before
 # any marker count as [Skills], so a plain skills CSV works on its own.
+# Without markers (a table pasted straight from Excel), a header row starting
+# Engineer or Skill starts that section, and a known setting line is a setting.
 function Split-RoutingSections {
     param([string[]]$Lines)
     $s = @{ Settings = @(); Engineers = @(); Skills = @() }
-    $cur = 'Skills'
+    $cur = 'Skills'; $marked = $false
     foreach ($l in $Lines) {
-        if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); continue }
+        if ($l -match '^"?\[(Settings|Engineers|Skills)\]"?,?$') { $cur = (Get-Culture).TextInfo.ToTitleCase($Matches[1].ToLowerInvariant()); $marked = $true; continue }
+        if (-not $marked) {
+            if (Test-SkillBlockLine $l) { $s.Skills += $l; continue }
+            if ($l -match '^\s*"?Engineer"?\s*,') { $cur = 'Engineers' }
+            elseif ($l -match '^\s*"?Skill"?\s*,') { $cur = 'Skills' }
+            elseif ($l -match '^\s*"?(tieBreak|respectMaxOpen|noMatch|fallbackEngineer|minConfidence|liveAssign)"?\s*[:=]') { $s.Settings += $l; continue }
+        }
         $s[$cur] += $l
     }
     return $s
@@ -40,9 +54,38 @@ function Select-FromHeader {
     return @()
 }
 
+# The compact skills format (one block per skill, as ConvertTo-SkillDocuments writes it):
+#   Skill: <name> / Covers: <description> / Roles: ... / Engineers for <name> / <role>: <name>; <name>
+# About a third of the size of the CSV, so a large table fits in KB articles.
+function Test-SkillBlockLine { param([string]$l) return ($l -match '^\s*(#\s|Skill:|Covers:|Roles:|Engineers for\s)') }
+# True when lines hold a skills table in either form: a CSV with its header, or compact blocks.
+function Test-HasSkills { param([string[]]$Lines) return ([bool]@(Select-FromHeader @($Lines) 'Skill').Count -or [bool]@(@($Lines) | Where-Object { $_ -match '^\s*Engineers for\s' }).Count) }
+function ConvertFrom-SkillBlocks {
+    param([string[]]$Lines)
+    $rows = @(); $skill = ''; $desc = ''
+    foreach ($l in $Lines) {
+        $x = $l.Trim()
+        if ($x -match '^Skill:\s*(.+)$') { $skill = $Matches[1].Trim(); $desc = ''; continue }
+        if ($x -match '^Covers:\s*(.*)$') { $desc = $Matches[1].Trim(); continue }
+        if ($x -notmatch '^Engineers for\s') { continue }
+        # Role names can contain " / " (Documentation / Knowledge Base), so take the skill from its Skill: line.
+        $rest = $null
+        if ($skill -and $x.StartsWith("Engineers for $skill / ")) { $rest = $x.Substring("Engineers for $skill / ".Length) }
+        elseif ($x -match '^Engineers for (.+?) / (.+)$') { $skill = $Matches[1].Trim(); $rest = $Matches[2] }
+        if ($null -eq $rest) { continue }
+        $i = $rest.IndexOf(':'); if ($i -lt 0) { continue }
+        $role = $rest.Substring(0, $i).Trim()
+        foreach ($n in @($rest.Substring($i + 1) -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+            $rows += [pscustomobject]@{ Skill = $skill; Role = $role; Engineer = $n; Description = $desc }
+        }
+    }
+    return $rows
+}
+
 function Read-RoutingTable {
     param([string[]]$SkillLines, [string[]]$EngineerLines, [string[]]$SettingLines)
-    $SkillLines = @(Select-FromHeader @($SkillLines) 'Skill')
+    $blockRows = @(ConvertFrom-SkillBlocks @(@($SkillLines) | Where-Object { Test-SkillBlockLine $_ }))
+    $SkillLines = @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill')
     $EngineerLines = @(Select-FromHeader @($EngineerLines) 'Engineer')
     $clean = { param($v) $x = ([string]$v).Trim(); if ($x -eq '#N/A') { '' } else { $x } }
     # Names are matched across the two tables, so tidy spacing: "Hildebrand , Caleb" -> "Hildebrand, Caleb".
@@ -56,6 +99,7 @@ function Read-RoutingTable {
             }
         }
     }
+    foreach ($r in $blockRows) { $skills += [pscustomobject]@{ Skill = & $clean $r.Skill; Role = & $clean $r.Role; Engineer = & $name $r.Engineer; Description = & $clean $r.Description } }
     $engineers = @()
     if ($EngineerLines.Count) {
         foreach ($r in @($EngineerLines | ConvertFrom-Csv)) {
@@ -72,10 +116,10 @@ function Read-RoutingTable {
 
 # Everything the workflow would trip on. Errors stop the workflow; warnings don't.
 function Test-RoutingData {
-    param($Table, [string]$Psa = '')
+    param($Table, [string]$Psa = '', [switch]$NoSkills)   # NoSkills: the skills table lives in AutomationAI Knowledge, not here
     $errors = @(); $warnings = @()
     $t = $Table
-    if (-not $t.Skills.Count) { $errors += 'No skills rows were found. The first line must be the header: Skill,Role,Engineer,Skill Description' }
+    if (-not $NoSkills -and -not $t.Skills.Count) { $errors += 'No skills rows were found. The first line must be the header: Skill,Role,Engineer,Skill Description' }
     $missingCols = @($t.Skills | Where-Object { -not $_.Skill -or -not $_.Role -or -not $_.Engineer })
     if ($missingCols.Count) { $errors += "$($missingCols.Count) skills rows are missing a Skill, Role or Engineer." }
     $dupes = @($t.Skills | Group-Object { "$($_.Skill)|$($_.Role)|$($_.Engineer)" } | Where-Object Count -gt 1)
@@ -110,6 +154,33 @@ function Test-RoutingData {
     if ($s.liveAssign -notmatch '^(?i)(yes|no)$') { $errors += 'liveAssign must be yes or no.' }
     [double]$mc = 0; if (-not [double]::TryParse([string]$s.minConfidence, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$mc) -or $mc -lt 0 -or $mc -gt 1) { $errors += 'minConfidence must be a number from 0 to 1.' }
     return [pscustomobject]@{ Errors = $errors; Warnings = $warnings }
+}
+
+# For TableSource 'knowledge': one small Markdown document per skill, so a single Knowledge search
+# hit returns the whole skill (description, roles and every engineer per role) in one chunk.
+# Returns an ordered dictionary of file name -> document text, in the table's order.
+function ConvertTo-SkillDocuments {
+    param($Table)
+    $docs = [ordered]@{}
+    $used = @{}
+    foreach ($g in @($Table.Skills | Where-Object { $_.Skill -and $_.Skill -ne 'Role only' } | Group-Object Skill)) {
+        $d = @($g.Group | ForEach-Object { $_.Description } | Where-Object { $_ } | Select-Object -First 1)
+        $roles = @($g.Group | ForEach-Object { $_.Role } | Where-Object { $_ } | Select-Object -Unique)
+        $lines = @("# $($g.Name)", '', "Skill: $($g.Name)")
+        if ($d.Count) { $lines += "Covers: $($d[0])" }
+        $lines += "Roles: $($roles -join ', ')"
+        $lines += ''
+        foreach ($r in $roles) {
+            $names = @($g.Group | Where-Object { $_.Role -eq $r -and $_.Engineer } | ForEach-Object { $_.Engineer } | Select-Object -Unique)
+            $lines += "Engineers for $($g.Name) / $($r): $($names -join '; ')"
+        }
+        $base = (($g.Name -replace '[^A-Za-z0-9]+', '-').Trim('-')).ToLowerInvariant()
+        if (-not $base) { $base = 'skill' }
+        $name = $base; $n = 2; while ($used.ContainsKey($name)) { $name = "$base-$n"; $n++ }
+        $used[$name] = $true
+        $docs["$name.md"] = ($lines -join "`n") + "`n"
+    }
+    return $docs
 }
 
 # The only part of the table the AI sees: one line per skill with its description and roles.

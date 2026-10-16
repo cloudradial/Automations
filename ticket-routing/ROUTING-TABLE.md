@@ -1,11 +1,11 @@
 # Ticket routing table
 
-The routing table tells the workflow which engineers can take which kind of ticket, and how to choose between them. It lives in your CloudRadial portal as two KB articles, so you can change it without touching the workflow.
+The routing table tells the workflow which engineers can take which kind of ticket, and how to choose between them. It has three parts: **settings**, an **engineers** table and a **skills** table. By default all three are pasted into the workflow's **Routing table (edit me)** step. `$TableSource` at the top of that step can move the skills to AutomationAI Knowledge, or the whole table to CloudRadial KB articles (see [Where it lives](#where-it-lives)).
 
 ## How the workflow uses it
 
 1. ServiceAI triages the ticket and sets the board, type and priority, then runs the **Assign Engineer** Action.
-2. An AI step reads the ticket and picks one **Skill** and one **Role** from your table. It only sees the skill names, descriptions and roles, never the engineers.
+2. An AI step reads the ticket and picks one **Skill** and one **Role** from your table. It only sees the skill names, descriptions and roles, never the engineers' PSA ids. (With `knowledge`, it reads the skills CSV and also lists the engineers on that skill and role.)
 3. A script step finds every engineer listed for that skill and role, then uses your **tieBreak** setting to choose one.
 4. The script assigns the ticket in your PSA and adds an internal note saying who was chosen and why.
 
@@ -59,7 +59,7 @@ Which id goes in **PSA User Id**:
 
 ## Settings
 
-Put these at the top of the engineers article, one per line, under a `[Settings]` line. Anything you leave out uses the default.
+Put these one per line in the step's `$Settings` block (or, for `ucp`, at the top of the engineers article under a `[Settings]` line). Anything you leave out uses the default.
 
 | Setting | Default | Options |
 |---|---|---|
@@ -75,9 +75,51 @@ Put these at the top of the engineers article, one per line, under a `[Settings]
 - **Kaseya BMS** can't count open tickets or read the last assignment by assignee id, so on Kaseya BMS both of those tie-breaks fall back to `listed-order`, and Max Open Tickets isn't enforced. Each run says so in its warnings.
 - Ties are always broken by listed order.
 
-## Publishing it as KB articles
+## Where it lives
 
-Create two KB articles in **your own (MSP) company** in CloudRadial. The quickest start is to paste the two files in [`kb-articles/`](https://github.com/cloudradial/Automations/tree/main/ticket-routing/kb-articles) and edit them. They look like this:
+`$TableSource` at the top of the **Routing table (edit me)** step decides:
+
+| `TableSource` | Settings | Engineers | Skills |
+|---|---|---|---|
+| `inline` (default) | `$Settings` block | `$Engineers` block | `$Skills` block |
+| `knowledge` | `$Settings` block | `$Engineers` block | A CSV in AutomationAI Knowledge |
+| `ucp` | Engineers article | Engineers article | Skills article |
+
+### inline (default): paste it into the step
+
+Open the workflow in the Designer, select **Routing table (edit me)** and replace the sample lines between each `@'` and `'@` with your own: the settings, then your engineers CSV, then your skills CSV, header row included. Keep each `'@` at the very start of its line. Then Publish and redeploy. Every change to the table is a step edit and a redeploy.
+
+### knowledge: skills in AutomationAI Knowledge
+
+1. Paste your settings and engineers into the step as for `inline`, set `$TableSource = 'knowledge'`, and leave `$Skills` as it is (it's ignored).
+2. Turn your skills CSV into one small document per skill, then upload all of them to one folder in AutomationAI **Knowledge**, and wait until they show as embedded:
+
+   ```
+   ./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportKnowledgeDir .\knowledge-skills
+   ```
+
+   Agents read Knowledge through search, which returns excerpts, not whole files. One document per skill keeps each skill's description, roles and full engineer list together in one excerpt. (A single large CSV gets split, so a skill with many engineers comes back incomplete.) Add `-Placeholders` to rename every engineer "Engineer 01", "Engineer 02", ... for a test tenant.
+3. Select the **Pick the skill** node and ground it on that folder. Grounding is never part of an import, so do this after every import.
+
+The agent searches the CSV, picks the skill and role, and lists the engineers on those rows. The script only assigns someone who is also in the step's engineers table, so a misread or invented name is skipped, never assigned. The trade-off is that the skill itself can't be checked against a table, and an engineer the search doesn't return isn't considered for that ticket. Check a few previews before you set `liveAssign: yes`.
+
+Workflow scripts can't read AutomationAI Knowledge, which is why the engineers and settings stay in the step.
+
+### ucp: publish it as KB articles
+
+For CloudRadial UCP partners. Set `$TableSource = 'ucp'` and add the `CloudRadial-*` and `Routing-CompanyId` secrets.
+
+**A large table:** KB articles hold about 100,000 characters, and a 1,200-row skills CSV (about 155 KB) is over that. Export the skills in a compact form instead: one block per skill, listing the engineers per role. That's about 45 KB for 66 skills, split across numbered articles:
+
+```
+./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportArticleDir .\articles
+```
+
+It writes `Ticket Routing - Skills 1.txt`, `Ticket Routing - Skills 2.txt` and so on, each under 90,000 characters, which leaves room under the 100,000-character article limit (change it with `-MaxArticleChars`), plus `Ticket Routing - Engineers and Settings.txt`. Create each as a KB article with the subject `Ticket Routing: Skills 1`, `Ticket Routing: Skills 2` and so on, and paste the text in. The file names use "-" because Windows doesn't allow ":", and the workflow accepts either: `Ticket Routing - Skills 1` works too. The workflow reads every article whose subject is `Ticket Routing: Skills` or `Ticket Routing: Skills <number>`, in number order.
+
+Cells pasted straight from Excel work too, with or without `[Settings]`, `[Engineers]` and `[Skills]` heading lines.
+
+**A small table:** create two KB articles in **your own (MSP) company** in CloudRadial. The quickest start is to paste the two files in [`kb-articles/`](https://github.com/cloudradial/Automations/tree/main/ticket-routing/kb-articles) and edit them. They look like this:
 
 **Ticket Routing: Engineers and Settings**
 

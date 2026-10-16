@@ -31,7 +31,7 @@ Network Firewall Basic L1 (General),Tickets,"Patel, Riya","Basic firewall change
 Network Firewall Fortinet,Tickets,"Patel, Riya","FortiGate policy, VPN and SD-WAN changes"
 Network Firewall Fortinet,Tickets,"Okafor, Chidi","FortiGate policy, VPN and SD-WAN changes"
 Network Firewall Fortinet,Install,"Okafor, Chidi","FortiGate policy, VPN and SD-WAN changes"
-Microsoft 365 Exchange Online,Tickets,"Hildebrand , Caleb","Mailboxes, shared mailboxes, mail flow and transport rules"
+Microsoft 365 Exchange Online,Tickets,"Rivera , Sam","Mailboxes, shared mailboxes, mail flow and transport rules"
 Microsoft 365 Exchange Online,Tickets,"Lee, Jordan","Mailboxes, shared mailboxes, mail flow and transport rules"
 Role only,Service Manager,"Nguyen, Ava",#N/A
 '@ -split "`r?`n"
@@ -40,7 +40,7 @@ function New-EngineersCsv { param([hashtable]$Over = @{})
         'Lee, Jordan' = 'jordan.lee@example.com,101,29682833,Yes,25'
         'Patel, Riya' = 'riya.patel@example.com,102,29682833,Yes,20'
         'Okafor, Chidi' = 'chidi.okafor@example.com,103,29682833,Yes,'
-        'Hildebrand, Caleb' = 'caleb.hildebrand@example.com,104,29682833,Yes,'
+        'Rivera, Sam' = 'sam.rivera@example.com,104,29682833,Yes,'
         'Nguyen, Ava' = 'ava.nguyen@example.com,105,29682833,Yes,'
     }
     foreach ($k in $Over.Keys) { $rows[$k] = $Over[$k] }
@@ -232,9 +232,9 @@ $x = Invoke-Routing $body -Engineers @{ 'Patel, Riya' = 'riya.patel@example.com,
 Check 'engineer at max skipped' ($x.r.assignee.name -eq 'Okafor, Chidi' -and @($x.r.candidates | Where-Object { $_.skipped -match 'limit' }).Count -eq 1) "$($x.r.assignee.name)"
 $x = Invoke-Routing $body -Engineers @{ 'Patel, Riya' = 'riya.patel@example.com,102,29682833,Yes,4' } -Settings @('respectMaxOpen: no')
 Check 'respectMaxOpen no ignores the limit' ($x.r.assignee.name -eq 'Patel, Riya')
-$x = Invoke-Routing $body -Ai @{ skill = 'Microsoft 365 Exchange Online'; role = 'Tickets'; confidence = 0.9; reason = 'x' } -Engineers @{ 'Hildebrand, Caleb' = 'caleb.hildebrand@example.com,104,29682833,No,' } -Settings @('tieBreak: listed-order')
+$x = Invoke-Routing $body -Ai @{ skill = 'Microsoft 365 Exchange Online'; role = 'Tickets'; confidence = 0.9; reason = 'x' } -Engineers @{ 'Rivera, Sam' = 'sam.rivera@example.com,104,29682833,No,' } -Settings @('tieBreak: listed-order')
 Check 'inactive engineer skipped' ($x.r.assignee.name -eq 'Lee, Jordan' -and @($x.r.candidates | Where-Object { $_.skipped -eq 'inactive' }).Count -eq 1) "$($x.r.assignee.name)"
-Check 'spacing in names tidied' (@($x.r.candidates | Where-Object { $_.name -eq 'Hildebrand, Caleb' }).Count -eq 1)
+Check 'spacing in names tidied' (@($x.r.candidates | Where-Object { $_.name -eq 'Rivera, Sam' }).Count -eq 1)
 
 Write-Host 'Tie-breaks'
 foreach ($p in @('connectwise', 'autotask', 'halopsa', 'syncro', 'zendesk')) {

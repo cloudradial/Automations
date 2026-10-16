@@ -327,6 +327,15 @@ ConvertTo-PastedHtml (@('[Skills]') + $skillsCsv) | Set-Content (Join-Path $tmp 
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $tmp 'eng.html')','$(Join-Path $tmp 'skills.html')'; exit `$LASTEXITCODE" 2>&1
 Check 'validator reads article HTML and fails a bad setting' ($LASTEXITCODE -eq 1 -and ($v -join "`n") -match "tieBreak 'busiest'" -and ($v -join "`n") -match 'Engineers named: 5; engineers table: 5') ($v -join ' / ')
 
+$kdir = Join-Path $tmp 'knowledge'
+$v = & pwsh -NoProfile -File $validator -SkillsPath (Join-Path $tmp 'skills.csv') -EngineersPath (Join-Path $tmp 'engineers.csv') -ExportKnowledgeDir $kdir -Placeholders 2>&1
+$files = @(Get-ChildItem $kdir -Filter *.md | Sort-Object Name)
+$forti = if (Test-Path (Join-Path $kdir 'network-firewall-fortinet.md')) { Get-Content -Raw (Join-Path $kdir 'network-firewall-fortinet.md') } else { '' }
+Check 'export: one document per skill, Role only left out' ($files.Count -eq 3 -and ($v -join "`n") -match 'Exported 3 skill documents') (($files.Name -join ', ') + ' / ' + ($v -join ' / '))
+Check 'export: every engineer per role, renamed' ($forti -match '(?m)^Engineers for Network Firewall Fortinet / Tickets: Engineer \d\d; Engineer \d\d$' -and $forti -match '(?m)^Engineers for Network Firewall Fortinet / Install: Engineer \d\d$' -and $forti -notmatch 'Patel|Okafor') $forti
+$pcsv = Get-Content -Raw (Join-Path $kdir 'engineers-placeholder.csv')
+Check 'export: placeholder engineers CSV, no real names or ids' ($pcsv -match '"Engineer 01",engineer01@example.com,,,Yes,' -and $pcsv -notmatch 'Patel|Lee|101') $pcsv
+
 $kb = Join-Path $here '..\kb-articles'
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $kb 'ticket-routing-engineers-and-settings.txt')','$(Join-Path $kb 'ticket-routing-skills.txt')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1
 Check 'shipped KB article templates pass the validator' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Engineers named: 3; engineers table: 3' -and ($v -join "`n") -match 'liveAssign=no') ($v -join ' / ')

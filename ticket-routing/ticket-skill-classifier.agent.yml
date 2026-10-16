@@ -63,16 +63,20 @@ agent:
       line per skill:
         <skill name>: <what the skill covers> [roles: <role>, <role>]
       Use only that list. Call no tools. Return engineers as an empty list.
-    - If useKnowledge is true, skillList is empty. The MSP's skills table is a
-      CSV in your Knowledge with the columns Skill, Role, Engineer, Skill
-      Description, one row per skill, role and engineer. Search it for the
-      product or work the ticket names (search more than once if you need to,
-      and use few searches). Pick the skill and role from what it returns,
-      then make sure you have every row for that skill and role: search for
-      the skill's exact name. Return in engineers each Engineer value on those
-      rows, copied exactly (keep "Last, First" as written). Never add a name
-      that isn't on a row for that skill and role. If the search returns
-      nothing that fits, treat it as WHEN NOTHING FITS.
+    - If useKnowledge is true, skillList is empty and the MSP's skills are in
+      your Knowledge, usually as one document per skill:
+        Skill: <skill name>
+        Covers: <what the skill covers>
+        Roles: <role>, <role>
+        Engineers for <skill name> / <role>: <name>; <name>; ...
+      (It may instead be one CSV with the columns Skill, Role, Engineer, Skill
+      Description.) Search for the product or work the ticket names. Use at
+      most 4 searches in total, then decide with what you have. Pick the skill
+      and role from what the searches return. Return in engineers every name
+      on that skill's "Engineers for <skill> / <role>" line (or every Engineer
+      on the CSV rows for that skill and role), copied exactly, keeping
+      "Last, First" or "Engineer 07" as written. Never add a name that isn't
+      there. If no result fits, treat it as WHEN NOTHING FITS.
 
     RULES FOR THE PICK.
     - skill must be copied EXACTLY from the list or the CSV's Skill column:

@@ -15,6 +15,17 @@
 
 .EXAMPLE
   ./Test-RoutingTable.ps1 -ArticleHtmlPath engineers.html,skills.html -Psa autotask
+
+.EXAMPLE
+  ./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportKnowledgeDir .\knowledge-skills
+  Writes one Markdown file per skill for TableSource 'knowledge': upload the folder's
+  files to one AutomationAI Knowledge folder and ground the "Pick the skill" node on it.
+
+.EXAMPLE
+  ./Test-RoutingTable.ps1 -SkillsPath skills.csv -ExportKnowledgeDir .\test-skills -Placeholders
+  The same, with every engineer renamed "Engineer 01", "Engineer 02", ... so real staff
+  names never reach a test tenant. Also writes engineers-placeholder.csv to paste into
+  the Routing table step (fill in the PSA ids).
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +34,9 @@ param(
     [string]$SettingsPath,
     [string[]]$ArticleHtmlPath,
     [ValidateSet('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 'zendesk', '')]
-    [string]$Psa = ''
+    [string]$Psa = '',
+    [string]$ExportKnowledgeDir,
+    [switch]$Placeholders
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -142,6 +155,33 @@ function Test-RoutingData {
     return [pscustomobject]@{ Errors = $errors; Warnings = $warnings }
 }
 
+# For TableSource 'knowledge': one small Markdown document per skill, so a single Knowledge search
+# hit returns the whole skill (description, roles and every engineer per role) in one chunk.
+# Returns an ordered dictionary of file name -> document text, in the table's order.
+function ConvertTo-SkillDocuments {
+    param($Table)
+    $docs = [ordered]@{}
+    $used = @{}
+    foreach ($g in @($Table.Skills | Where-Object { $_.Skill -and $_.Skill -ne 'Role only' } | Group-Object Skill)) {
+        $d = @($g.Group | ForEach-Object { $_.Description } | Where-Object { $_ } | Select-Object -First 1)
+        $roles = @($g.Group | ForEach-Object { $_.Role } | Where-Object { $_ } | Select-Object -Unique)
+        $lines = @("# $($g.Name)", '', "Skill: $($g.Name)")
+        if ($d.Count) { $lines += "Covers: $($d[0])" }
+        $lines += "Roles: $($roles -join ', ')"
+        $lines += ''
+        foreach ($r in $roles) {
+            $names = @($g.Group | Where-Object { $_.Role -eq $r -and $_.Engineer } | ForEach-Object { $_.Engineer } | Select-Object -Unique)
+            $lines += "Engineers for $($g.Name) / $($r): $($names -join '; ')"
+        }
+        $base = (($g.Name -replace '[^A-Za-z0-9]+', '-').Trim('-')).ToLowerInvariant()
+        if (-not $base) { $base = 'skill' }
+        $name = $base; $n = 2; while ($used.ContainsKey($name)) { $name = "$base-$n"; $n++ }
+        $used[$name] = $true
+        $docs["$name.md"] = ($lines -join "`n") + "`n"
+    }
+    return $docs
+}
+
 # The only part of the table the AI sees: one line per skill with its description and roles.
 function Get-ClassifierSkillList {
     param($Table)
@@ -168,7 +208,31 @@ if ($SkillsPath) { $skillLines = & $readCsv $SkillsPath }
 if ($EngineersPath) { $engLines = & $readCsv $EngineersPath }
 if ($SettingsPath) { $setLines = & $readCsv $SettingsPath }
 $t = Read-RoutingTable $skillLines $engLines $setLines
+if ($Placeholders) {
+    # Rename every engineer, in order of first appearance, across both tables.
+    $map = [ordered]@{}
+    foreach ($n in @(@($t.Skills | ForEach-Object { $_.Engineer }) + @($t.Engineers | ForEach-Object { $_.Engineer }) | Where-Object { $_ })) {
+        if (-not $map.Contains($n)) { $map[$n] = 'Engineer {0:D2}' -f ($map.Count + 1) }
+    }
+    foreach ($r in $t.Skills) { if ($r.Engineer) { $r.Engineer = $map[$r.Engineer] } }
+    $t.Engineers = @($map.Keys | ForEach-Object {
+        $old = $_; $e = @($t.Engineers | Where-Object { $_.Engineer -eq $old }) | Select-Object -First 1
+        $num = ($map[$old] -replace '\D', '')
+        [pscustomobject]@{ Engineer = $map[$old]; Email = "engineer$num@example.com"; PsaUserId = ''; PsaRoleId = ''; Active = $(if ($e) { $e.Active } else { $true }); MaxOpen = $(if ($e) { $e.MaxOpen } else { '' }) }
+    })
+}
 $check = Test-RoutingData $t $Psa
+if ($ExportKnowledgeDir) {
+    $docs = ConvertTo-SkillDocuments $t
+    New-Item -ItemType Directory -Force -Path $ExportKnowledgeDir | Out-Null
+    foreach ($k in $docs.Keys) { [IO.File]::WriteAllText((Join-Path $ExportKnowledgeDir $k), $docs[$k], [Text.UTF8Encoding]::new($false)) }
+    if ($Placeholders) {
+        $csv = @('Engineer,Email,PSA User Id,PSA Role Id,Active,Max Open Tickets') + @($t.Engineers | ForEach-Object { "`"$($_.Engineer)`",$($_.Email),,,$(if ($_.Active) { 'Yes' } else { 'No' }),$($_.MaxOpen)" })
+        [IO.File]::WriteAllText((Join-Path $ExportKnowledgeDir 'engineers-placeholder.csv'), ($csv -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    }
+    "Exported $($docs.Count) skill documents to $ExportKnowledgeDir$(if ($Placeholders) { ', plus engineers-placeholder.csv (not for Knowledge: paste it into the Routing table step)' })."
+    ''
+}
 
 # ---------- report ----------
 

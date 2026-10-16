@@ -92,7 +92,13 @@ Open the workflow in the Designer, select **Routing table (edit me)** and replac
 ### knowledge: skills in AutomationAI Knowledge
 
 1. Paste your settings and engineers into the step as for `inline`, set `$TableSource = 'knowledge'`, and leave `$Skills` as it is (it's ignored).
-2. Upload your skills CSV to a folder in AutomationAI **Knowledge**, and wait until it shows as embedded.
+2. Turn your skills CSV into one small document per skill, then upload all of them to one folder in AutomationAI **Knowledge**, and wait until they show as embedded:
+
+   ```
+   ./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportKnowledgeDir .\knowledge-skills
+   ```
+
+   Agents read Knowledge through search, which returns excerpts, not whole files. One document per skill keeps each skill's description, roles and full engineer list together in one excerpt. (A single large CSV gets split, so a skill with many engineers comes back incomplete.) Add `-Placeholders` to rename every engineer "Engineer 01", "Engineer 02", ... for a test tenant.
 3. Select the **Pick the skill** node and ground it on that folder. Grounding is never part of an import, so do this after every import.
 
 The agent searches the CSV, picks the skill and role, and lists the engineers on those rows. The script only assigns someone who is also in the step's engineers table, so a misread or invented name is skipped, never assigned. The trade-off is that the skill itself can't be checked against a table, and an engineer the search doesn't return isn't considered for that ticket. Check a few previews before you set `liveAssign: yes`.

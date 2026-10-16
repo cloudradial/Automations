@@ -112,6 +112,33 @@ function Test-RoutingData {
     return [pscustomobject]@{ Errors = $errors; Warnings = $warnings }
 }
 
+# For TableSource 'knowledge': one small Markdown document per skill, so a single Knowledge search
+# hit returns the whole skill (description, roles and every engineer per role) in one chunk.
+# Returns an ordered dictionary of file name -> document text, in the table's order.
+function ConvertTo-SkillDocuments {
+    param($Table)
+    $docs = [ordered]@{}
+    $used = @{}
+    foreach ($g in @($Table.Skills | Where-Object { $_.Skill -and $_.Skill -ne 'Role only' } | Group-Object Skill)) {
+        $d = @($g.Group | ForEach-Object { $_.Description } | Where-Object { $_ } | Select-Object -First 1)
+        $roles = @($g.Group | ForEach-Object { $_.Role } | Where-Object { $_ } | Select-Object -Unique)
+        $lines = @("# $($g.Name)", '', "Skill: $($g.Name)")
+        if ($d.Count) { $lines += "Covers: $($d[0])" }
+        $lines += "Roles: $($roles -join ', ')"
+        $lines += ''
+        foreach ($r in $roles) {
+            $names = @($g.Group | Where-Object { $_.Role -eq $r -and $_.Engineer } | ForEach-Object { $_.Engineer } | Select-Object -Unique)
+            $lines += "Engineers for $($g.Name) / $($r): $($names -join '; ')"
+        }
+        $base = (($g.Name -replace '[^A-Za-z0-9]+', '-').Trim('-')).ToLowerInvariant()
+        if (-not $base) { $base = 'skill' }
+        $name = $base; $n = 2; while ($used.ContainsKey($name)) { $name = "$base-$n"; $n++ }
+        $used[$name] = $true
+        $docs["$name.md"] = ($lines -join "`n") + "`n"
+    }
+    return $docs
+}
+
 # The only part of the table the AI sees: one line per skill with its description and roles.
 function Get-ClassifierSkillList {
     param($Table)

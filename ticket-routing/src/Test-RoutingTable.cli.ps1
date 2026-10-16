@@ -15,6 +15,17 @@
 
 .EXAMPLE
   ./Test-RoutingTable.ps1 -ArticleHtmlPath engineers.html,skills.html -Psa autotask
+
+.EXAMPLE
+  ./Test-RoutingTable.ps1 -SkillsPath skills.csv -EngineersPath engineers.csv -ExportKnowledgeDir .\knowledge-skills
+  Writes one Markdown file per skill for TableSource 'knowledge': upload the folder's
+  files to one AutomationAI Knowledge folder and ground the "Pick the skill" node on it.
+
+.EXAMPLE
+  ./Test-RoutingTable.ps1 -SkillsPath skills.csv -ExportKnowledgeDir .\test-skills -Placeholders
+  The same, with every engineer renamed "Engineer 01", "Engineer 02", ... so real staff
+  names never reach a test tenant. Also writes engineers-placeholder.csv to paste into
+  the Routing table step (fill in the PSA ids).
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +34,9 @@ param(
     [string]$SettingsPath,
     [string[]]$ArticleHtmlPath,
     [ValidateSet('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 'zendesk', '')]
-    [string]$Psa = ''
+    [string]$Psa = '',
+    [string]$ExportKnowledgeDir,
+    [switch]$Placeholders
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -45,7 +58,31 @@ if ($SkillsPath) { $skillLines = & $readCsv $SkillsPath }
 if ($EngineersPath) { $engLines = & $readCsv $EngineersPath }
 if ($SettingsPath) { $setLines = & $readCsv $SettingsPath }
 $t = Read-RoutingTable $skillLines $engLines $setLines
+if ($Placeholders) {
+    # Rename every engineer, in order of first appearance, across both tables.
+    $map = [ordered]@{}
+    foreach ($n in @(@($t.Skills | ForEach-Object { $_.Engineer }) + @($t.Engineers | ForEach-Object { $_.Engineer }) | Where-Object { $_ })) {
+        if (-not $map.Contains($n)) { $map[$n] = 'Engineer {0:D2}' -f ($map.Count + 1) }
+    }
+    foreach ($r in $t.Skills) { if ($r.Engineer) { $r.Engineer = $map[$r.Engineer] } }
+    $t.Engineers = @($map.Keys | ForEach-Object {
+        $old = $_; $e = @($t.Engineers | Where-Object { $_.Engineer -eq $old }) | Select-Object -First 1
+        $num = ($map[$old] -replace '\D', '')
+        [pscustomobject]@{ Engineer = $map[$old]; Email = "engineer$num@example.com"; PsaUserId = ''; PsaRoleId = ''; Active = $(if ($e) { $e.Active } else { $true }); MaxOpen = $(if ($e) { $e.MaxOpen } else { '' }) }
+    })
+}
 $check = Test-RoutingData $t $Psa
+if ($ExportKnowledgeDir) {
+    $docs = ConvertTo-SkillDocuments $t
+    New-Item -ItemType Directory -Force -Path $ExportKnowledgeDir | Out-Null
+    foreach ($k in $docs.Keys) { [IO.File]::WriteAllText((Join-Path $ExportKnowledgeDir $k), $docs[$k], [Text.UTF8Encoding]::new($false)) }
+    if ($Placeholders) {
+        $csv = @('Engineer,Email,PSA User Id,PSA Role Id,Active,Max Open Tickets') + @($t.Engineers | ForEach-Object { "`"$($_.Engineer)`",$($_.Email),,,$(if ($_.Active) { 'Yes' } else { 'No' }),$($_.MaxOpen)" })
+        [IO.File]::WriteAllText((Join-Path $ExportKnowledgeDir 'engineers-placeholder.csv'), ($csv -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    }
+    "Exported $($docs.Count) skill documents to $ExportKnowledgeDir$(if ($Placeholders) { ', plus engineers-placeholder.csv (not for Knowledge: paste it into the Routing table step)' })."
+    ''
+}
 
 # ---------- report ----------
 

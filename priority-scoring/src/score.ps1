@@ -87,6 +87,16 @@ try { $null = Resolve-PsaTicketNames @($row) } catch { $null = $warnings.Add("Th
 $summary = $(if ($row.summary) { [string]$row.summary } else { [string]$t.summary })
 $desc = $(if ($t.description) { [string]$t.description } else { [string]$row.description })
 $companyName = [string]$row.companyName; $companyId = [string]$(if ($row.companyId) { $row.companyId } else { $t.companyId })
+# Autotask and Zendesk tickets carry only the contact's id, so the email is read from the contact (for VIP contacts).
+if (-not $row.contactEmail -and -not (Test-PsaBlank $row.contactId)) {
+    try {
+        switch ($f.psa) {
+            'autotask' { $row.contactEmail = [string](Get-PsaProp (Get-PsaProp (Invoke-PsaRead "/Contacts/$($row.contactId)" 'read the ticket''s contact' 'read contacts') 'item') 'emailAddress') }
+            'zendesk' { $row.contactEmail = [string](Get-PsaProp (Get-PsaProp (Invoke-PsaRead "/users/$($row.contactId)" 'read the ticket''s requester' 'read users') 'user') 'email') }
+        }
+    }
+    catch { $null = $warnings.Add("The ticket's contact couldn't be read, so a VIP contact can't be matched: $($_.Exception.Message)") }
+}
 $contact = ([string]$row.contactEmail).ToLowerInvariant()
 $null = $actions.Add("Read ticket $($f.ticketId) from $psaName.")
 

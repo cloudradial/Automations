@@ -150,7 +150,8 @@ $TA = @{ prio = 2 }
 $TAtRouter = {
     param($c, $n)
     $u = [uri]::UnescapeDataString($c.Uri)
-    if ($c.Method -eq 'GET' -and $u -eq "$TAT/Tickets/1001") { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; ticketNumber = 'T20261014.0001'; title = 'Cannot connect'; description = 'Unable to connect to the VPN.'; companyID = 42; priority = $TA.prio; status = 1 } } }
+    if ($c.Method -eq 'GET' -and $u -eq "$TAT/Tickets/1001") { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; ticketNumber = 'T20261014.0001'; title = 'Cannot connect'; description = 'Unable to connect to the VPN.'; companyID = 42; contactID = 5; priority = $TA.prio; status = 1 } } }
+    if ($u -like "$TAT/Contacts/5*") { return [pscustomobject]@{ item = [pscustomobject]@{ id = 5; firstName = 'Sam'; lastName = 'Lee'; emailAddress = 'sam.lee@contoso.com' } } }
     if ($u -eq "$TAT/Tickets/entityInformation/fields") { return [pscustomobject]@{ fields = @(
                 [pscustomobject]@{ name = 'priority'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'High'; isActive = $true }, [pscustomobject]@{ value = '2'; label = 'Medium'; isActive = $true }, [pscustomobject]@{ value = '3'; label = 'Low'; isActive = $true }, [pscustomobject]@{ value = '4'; label = 'Critical'; isActive = $true }) },
                 [pscustomobject]@{ name = 'status'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'New'; isActive = $true }) }) } }
@@ -163,6 +164,11 @@ $TAtRouter = {
     return [pscustomobject]@{ items = @(); pageDetails = [pscustomobject]@{ nextPageUrl = $null } }
 }
 Reset-Mock @{ 'PSA-Type' = 'autotask'; 'Autotask-ApiUrl' = 'https://webservices5.autotask.example'; 'Autotask-ApiIntegrationCode' = 'code'; 'Autotask-Username' = 'api@example.com'; 'Autotask-Secret' = 'sec' } $TAtRouter
+$r = Invoke-Flow ($TBody + @{ confirm = $true; vip_list = 'Contoso'; company_tiers = 'Contoso=premium' })
+$TA.prio = 2
+$r = Invoke-Flow ($TBody + @{ vip_list = 'sam.lee@contoso.com' })
+Check 'autotask: a VIP contact is matched through the contact read' ($r.out.internal_note -like '*VIP (sam.lee@contoso.com is on the VIP list)*') $r.out.internal_note
+$TA.prio = 2
 $r = Invoke-Flow ($TBody + @{ confirm = $true; vip_list = 'Contoso'; company_tiers = 'Contoso=premium' })
 Check 'autotask: medium raised to the High picklist value' ($TA.prio -eq 1 -and $r.out.counts.prioritySet -eq 1) "$($r.error) $($r.out.score) $($r.out.message) $(Show-Calls)"
 

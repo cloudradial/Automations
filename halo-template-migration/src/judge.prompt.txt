@@ -1,0 +1,7 @@
+Turn each ticket template below into a request form. Reply with one JSON object in this shape:
+{"forms": [{"key": "<the form's key>", "shortDescription": "<one sentence>", "description": "<two or three sentences>", "questions": [{"fieldId": "<an id from that form's fields>", "label": "<friendly label>", "info": "<optional hint, or empty>", "required": true}]}]}
+
+Include every form in the same order, with its questions in the order a user would answer them.
+
+Templates (JSON):
+{{ nodes.read.output.facts_json }}

@@ -39,7 +39,7 @@ If the AI isn't confident enough, or no engineer matches, the **noMatch** settin
 
 | Column | Required | What to put in it |
 |---|---|---|
-| Engineer | Yes | Exactly as in the skills table. Extra spaces around the comma are tidied, so `Hildebrand , Caleb` matches `Hildebrand, Caleb`. |
+| Engineer | Yes | Exactly as in the skills table. Extra spaces around the comma are tidied, so `Rivera , Sam` matches `Rivera, Sam`. |
 | Email | Recommended | Shown in the run output. |
 | PSA User Id | Yes | The engineer's id in your PSA. See the table below. |
 | PSA Role Id | Autotask only | Autotask assigns a resource and a role together, and rejects a resource sent on its own. |

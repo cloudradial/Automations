@@ -190,7 +190,7 @@ definition:
               $SkillLines = @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill')
               $EngineerLines = @(Select-FromHeader @($EngineerLines) 'Engineer')
               $clean = { param($v) $x = ([string]$v).Trim(); if ($x -eq '#N/A') { '' } else { $x } }
-              # Names are matched across the two tables, so tidy spacing: "Hildebrand , Caleb" -> "Hildebrand, Caleb".
+              # Names are matched across the two tables, so tidy spacing: "Rivera , Sam" -> "Rivera, Sam".
               $name = { param($v) ((& $clean $v) -replace '\s+,', ',' -replace ',(?=\S)', ', ' -replace '\s{2,}', ' ') }
               $col = { param($r, $n) if ($r.PSObject.Properties[$n]) { & $clean $r.$n } else { '' } }
               $skills = @()

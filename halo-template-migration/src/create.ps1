@@ -118,11 +118,32 @@ foreach ($p in $plan) {
     }
     try {
         $r = Invoke-CrApi -Path '/v2/catalog' -Method POST -Body $body
-        $cid = Get-CrId $r @('companyCatalogId', 'data.companyCatalogId', 'id')
+        # The reply may be wrapped in {data: ...}.
+        $data = Get-CrProp $r 'data'; if ($null -eq $data) { $data = $r }
+        $cid = Get-CrId $data @('companyCatalogId', 'id')
         $row.catalogId = $cid; $row.action = 'created'; $created++
-        $back = @(Get-CrProp $r 'questions'); if (-not $back.Count) { $back = @(Get-CrProp (Get-CrProp $r 'data') 'questions') }
-        if ($back.Count -and $back.Count -lt $questions.Count) { $row.action = 'incomplete'; $row.note = "CloudRadial saved $($back.Count) of $($questions.Count) questions. Check form $cid."; $null = $warnings.Add("'$name' (form $cid) saved only $($back.Count) of $($questions.Count) questions.") }
-        $qCreated += $(if ($back.Count) { $back.Count } else { $questions.Count })
+        $back = @(@(Get-CrProp $data 'questions') | Where-Object { $null -ne $_ })
+        # Verified 2026-10-16: the inline create keeps only each question's label, type and order. Options, hint,
+        # required, the description flag, jsonId and customFieldName are set afterwards with one PATCH per question.
+        $fixFailed = 0; $missing = 0
+        foreach ($q in $questions) {
+            $ops = New-Object System.Collections.ArrayList
+            foreach ($k in @('info', 'options', 'jsonId', 'customFieldName')) { if ([string]$q[$k]) { $null = $ops.Add([ordered]@{ op = 'replace'; path = "/$k"; value = [string]$q[$k] }) } }
+            if ($q.isRequired) { $null = $ops.Add([ordered]@{ op = 'replace'; path = '/isRequired'; value = $true }) }
+            if ($q.isDescription) { $null = $ops.Add([ordered]@{ op = 'replace'; path = '/isDescription'; value = $true }) }
+            if (-not $ops.Count) { continue }
+            $match = $null; foreach ($bq in $back) { if ([int](Get-CrProp $bq 'order') -eq [int]$q.order) { $match = $bq; break } }
+            $qid = Get-CrId $match @('companyCatalogQuestionId', 'id')
+            if (-not $qid) { $missing++; continue }
+            try { $null = Invoke-CrApi -Path "/v2/catalogquestion/$($qid)?companyId=$companyId" -Method PATCH -Body (ConvertTo-Json -InputObject @($ops) -Depth 5 -Compress) }
+            catch { $fixFailed++; $null = $warnings.Add("'$name' (form $cid): the details of question '$($q.label)' weren't saved: $($_.Exception.Message)") }
+        }
+        if ($back.Count -lt $questions.Count -or $missing -or $fixFailed) {
+            $row.action = 'incomplete'
+            $row.note = "CloudRadial saved $($back.Count) of $($questions.Count) questions$(if ($missing -or $fixFailed) { "; $($missing + $fixFailed) question(s) are missing their options or settings" }). Check form $cid."
+            $null = $warnings.Add("'$name' (form $cid): $($row.note)")
+        }
+        $qCreated += $back.Count
         $null = $actions.Add("Created form '$name' ($cid) with $($questions.Count) question(s).")
     }
     catch {

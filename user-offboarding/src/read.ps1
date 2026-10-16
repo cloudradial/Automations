@@ -225,6 +225,9 @@ try {
         if ([string](Get-GraphProp $target 'id') -eq $uid) { $null = $warnings.Add('The forwarding target is the departing user, so mail won''t be forwarded.') }
         elseif ((Get-GraphProp $target 'accountEnabled') -eq $false) { $null = $warnings.Add("The forwarding target $tUpn is blocked from signing in, so mail won't be forwarded.") }
         elseif ($ex.mailbox -eq 'none') { $null = $warnings.Add("$realUpn has no mailbox, so there is nothing to forward.") }
+        # Exchange only forwards to one of its own recipients (Set-Mailbox -ForwardingAddress), so a target
+        # without a mailbox would fail halfway through the run and leave the licences in place.
+        elseif ($exOk -and $null -eq (Get-OfRecipient $(if ($tMail) { $tMail } else { $tUpn }))) { $null = $warnings.Add("The forwarding target $tUpn has no mailbox in Exchange Online, so mail won't be forwarded. Give them a mailbox, or send forward_to with someone who has one.") }
         else { $ex.forward_to = $(if ($tMail) { $tMail } else { $tUpn }); $ex.forward_name = [string](Get-GraphProp $target 'displayName') }
     }
     if ($ex.current_forwarding -and -not $ex.forward_to) { $null = $warnings.Add("The mailbox already forwards to $($ex.current_forwarding). Check that this is still wanted.") }

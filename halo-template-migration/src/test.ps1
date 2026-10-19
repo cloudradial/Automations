@@ -48,10 +48,10 @@ function Invoke-Flow {
 $THalo = 'https://halo.example.com'
 $TCr = 'https://api.example.com'
 $TSecrets = @{ 'Halo-ApiUrl' = $THalo; 'Halo-ClientId' = 'cid'; 'Halo-ClientSecret' = 'csecret'; 'CloudRadial-BaseUrl' = $TCr; 'CloudRadial-PublicKey' = 'pub'; 'CloudRadial-PrivateKey' = 'priv' }
-$TH = @{ existing = @(); listFail = ''; postFail = ''; posts = (New-Object System.Collections.ArrayList) }
+$TH = @{ existing = @(); listFail = ''; postFail = ''; patchFail = ''; posts = (New-Object System.Collections.ArrayList); patches = @{} }
 $TTemplates = @(
     @{ id = 12; name = 'New starter setup' }, @{ id = 15; name = 'Printer not working' },
-    @{ id = 20; name = 'Old VPN request'; inactive = $true }, @{ id = 21; name = 'Laptop request' }
+    @{ id = 20; name = 'Old VPN request'; disabled = $true }, @{ id = 21; name = 'Laptop request' }
 )
 $TDetail = @{
     '12' = @{ id = 12; name = 'New starter setup'; tickettype_id = 3; priority_id = 4; status_id = 1; team = 'Service Desk'; category_1 = 'Accounts'; summary = 'New starter for Contoso'; details = '<p>Set up a new starter.</p><script>alert(1)</script><a href="javascript:void(0)" onclick="x()">link</a>'; customfields = @(@{ id = 103; name = 'CFCostCentre'; value = 'FIN-01' }) }
@@ -59,16 +59,18 @@ $TDetail = @{
     '21' = @{ id = 21; name = 'Laptop request'; tickettype_id = 3 }
 }
 $TTypes = @{
+    # Halo's real shape (verified 2026-10-16): link rows with no name, label or type; those are in /Field/{fieldid}.
     '3' = @{ id = 3; name = 'Service Request'; fields = @(
-            @{ fieldid = 101; name = 'CFStartDate'; label = 'Start date'; type = 4; mandatory = $true },
-            @{ fieldid = 102; name = 'CFLicence'; label = 'Licence'; type = 2; values = @(@{ name = 'Business Basic' }, @{ name = 'Business Premium, annual' }) },
-            @{ fieldid = 103; name = 'CFCostCentre'; label = 'Cost centre'; type = 0 },
-            @{ fieldid = 104; name = 'CFAssetTag'; label = 'Asset tag'; type = 0 },
-            @{ fieldid = 1; name = 'summary'; label = 'Summary'; type = 0 },
-            @{ fieldid = 105; name = 'CFMystery'; label = 'Mystery'; type = 77 }) }
+            @{ id = 9001; rtid = 3; fieldid = 101; seq = 1; endusernew = 2; technew = 1 },
+            @{ id = 9002; rtid = 3; fieldid = 102; seq = 2; endusernew = 1; technew = 1 },
+            @{ id = 9003; rtid = 3; fieldid = 103; seq = 3; endusernew = 1; technew = 1 },
+            @{ id = 9004; rtid = 3; fieldid = 104; seq = 4; endusernew = 1; technew = 1 },
+            @{ id = 9005; rtid = 3; fieldid = 1; seq = 5; endusernew = 1; technew = 1 },
+            @{ id = 9006; rtid = 3; fieldid = 105; seq = 6; endusernew = 1; technew = 1 },
+            @{ id = 9007; rtid = 3; fieldid = 106; seq = 7; endusernew = 0; technew = 1 }) }
+    # A field-group row (fieldid 0, groupid 14), as Halo sends it; the group lists the fields.
     '1' = @{ id = 1; name = 'Incident'; fields = @(
-            @{ fieldid = 201; name = 'CFPrinterLocation'; label = 'Printer location'; type = 0 },
-            @{ fieldid = 202; name = 'CFDept'; label = 'Department'; type = 2 }) }
+            @{ id = 9101; rtid = 1; fieldid = 0; groupid = 14; seq = 1; endusernew = 1; technew = 1 }) }
 }
 $TRouter = {
     param($c, $n)
@@ -78,11 +80,27 @@ $TRouter = {
         if ($TH.listFail -eq '403') { New-HttpError 403 '{"message":"Forbidden"}' }
         if ($TH.listFail -eq 'odd') { return [pscustomobject]@{ total = 1; ticket_templates = @([pscustomobject]@{ tid = 12; title = 'New starter setup' }) } }
         $rows = @($TTemplates | Where-Object { $u -notmatch 'search=' -or $_.name -like "*$(([regex]::Match($u, 'search=([^&]*)')).Groups[1].Value)*" })
-        return ([pscustomobject]@{ record_count = $rows.Count; templates = @($rows | ForEach-Object { [pscustomobject]$_ }) })
+        return ([pscustomobject]@{ page_no = 1; page_size = 50; record_count = $rows.Count; stdrequests = @($rows | ForEach-Object { [pscustomobject]$_ }) })
     }
     if ($c.Method -eq 'GET' -and $u -match "/api/Template/(\d+)\?") { return ($TDetail[$Matches[1]] | ConvertTo-Json -Depth 6 | ConvertFrom-Json) }
     if ($c.Method -eq 'GET' -and $u -match "/api/TicketType/(\d+)\?") { return ($TTypes[$Matches[1]] | ConvertTo-Json -Depth 6 | ConvertFrom-Json) }
-    if ($c.Method -eq 'GET' -and $u -match "/api/Field/202\?") { return [pscustomobject]@{ id = 202; name = 'CFDept'; type = 2; values = @([pscustomobject]@{ name = 'Finance' }, [pscustomobject]@{ name = 'Sales' }) } }
+    if ($c.Method -eq 'GET' -and $u -match "/api/FieldGroup/14\?") { return [pscustomobject]@{ id = 14; name = 'Printer details'; fields = @([pscustomobject]@{ id = 7001; fieldid = 201; seq = 1 }, [pscustomobject]@{ id = 7002; fieldid = 202; seq = 2 }) } }
+    if ($c.Method -eq 'GET' -and $u -match "/api/Field/(\d+)\?") { New-HttpError 400 '"Field kind must be specified"' }
+    if ($c.Method -eq 'GET' -and $u -match "/api/FieldInfo/(\d+)\?") {
+        $TDefs = @{
+            '1'   = @{ id = 1; name = 'summary'; label = 'Summary'; type = 0 }
+            '101' = @{ id = 101; name = 'CFStartDate'; label = 'Start date'; type = 4 }
+            '102' = @{ id = 102; name = 'CFLicence'; label = 'Licence'; type = 2; values = @(@{ name = 'Business Basic' }, @{ name = 'Business Premium, annual' }) }
+            '103' = @{ id = 103; name = 'CFCostCentre'; label = 'Cost centre'; type = 0 }
+            '104' = @{ id = 104; name = 'CFAssetTag'; label = 'Asset tag'; type = 0 }
+            '105' = @{ id = 105; name = 'CFMystery'; label = 'Mystery'; type = 77 }
+            '106' = @{ id = 106; name = 'CFInternalCode'; label = 'Internal code'; type = 0 }
+            '201' = @{ id = 201; name = 'CFPrinterLocation'; label = 'Printer location'; type = 0 }
+            '202' = @{ id = 202; name = 'CFDept'; type = 2; values = @(@{ name = 'Finance' }, @{ name = 'Sales' }) }
+        }
+        if ($TDefs.Contains($Matches[1])) { return ($TDefs[$Matches[1]] | ConvertTo-Json -Depth 5 | ConvertFrom-Json) }
+        New-HttpError 404 '{"message":"Not found"}'
+    }
     if ($c.Method -eq 'GET' -and $u -eq "$THalo/api/Priority") { return , @([pscustomobject]@{ priorityid = 2; name = 'High' }, [pscustomobject]@{ priorityid = 4; name = 'Low' }) }
     if ($c.Method -eq 'GET' -and $u -eq "$THalo/api/Status") { return , @([pscustomobject]@{ id = 1; name = 'New' }) }
     if ($c.Method -eq 'GET' -and $u -like "$TCr/v2/odata/company*") { if ($u -match 'companyId eq 1&') { return [pscustomobject]@{ value = @([pscustomobject]@{ companyId = 1; name = 'Example MSP' }) } }; return [pscustomobject]@{ value = @() } }
@@ -91,11 +109,20 @@ $TRouter = {
         $b = Read-Body $c
         if ($TH.postFail -and $b.subject -eq $TH.postFail) { New-HttpError 500 '{"message":"Error creating catalog item"}' }
         $null = $TH.posts.Add($b)
-        return [pscustomobject]@{ companyCatalogId = 500 + $TH.posts.Count; questions = @($b.questions) }
+        # As the real API answers (verified 2026-10-16): wrapped in data, and each question keeps only label, type and order.
+        $cid = 500 + $TH.posts.Count; $i = 0
+        $qs = @($b.questions | ForEach-Object { $i++; [pscustomobject]@{ companyCatalogQuestionId = $cid * 100 + $i; label = $_.label; type = $_.type; order = $_.order; options = ''; jsonId = ''; customFieldName = ''; isRequired = $false; isDescription = $false } })
+        return [pscustomobject]@{ data = [pscustomobject]@{ companyCatalogId = $cid; questions = $qs }; success = $true; message = '' }
+    }
+    if ($c.Method -eq 'PATCH' -and $u -match "$TCr/v2/catalogquestion/(\d+)\?companyId=1$") {
+        if ($TH.patchFail -and $Matches[1] -eq $TH.patchFail) { New-HttpError 400 '{"message":"Invalid patch document"}' }
+        $TH.patches[$Matches[1]] = @(Read-Body $c); return $null
     }
     return $null
 }
-function Reset-T { $TH.existing = @([pscustomobject]@{ companyCatalogId = 77; subject = 'Laptop request'; tags = 'halo-template:21' }); $TH.listFail = ''; $TH.postFail = ''; $TH.posts.Clear(); Reset-Mock $TSecrets $TRouter }
+function Reset-T { $TH.existing = @([pscustomobject]@{ companyCatalogId = 77; subject = 'Laptop request'; tags = 'halo-template:21' }); $TH.listFail = ''; $TH.postFail = ''; $TH.patchFail = ''; $TH.posts.Clear(); $TH.patches = @{}; Reset-Mock $TSecrets $TRouter }
+# The PATCH ops sent for one question, as {path: value}.
+function Get-TOps { param([string]$Qid) $o = @{}; if ($TH.patches.Contains($Qid)) { foreach ($op in @($TH.patches[$Qid])) { $o[$op.path] = $op.value } }; return $o }
 function Get-THaloWrites { return , @($Mock.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Uri -like "$THalo*" -and $_.Uri -notlike '*/auth/token' }) }
 function Get-TCrWrites { return , @($Mock.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Uri -like "$TCr*" }) }
 function Get-TRow { param($Out, [int]$Id) return @($Out.forms | Where-Object { $_.templateId -eq $Id })[0] }
@@ -129,6 +156,17 @@ Check 'live: invented field dropped with a warning' ([bool](@($r.out.warnings) -
 Check 'live: template HTML kept without script or handlers' ($b12.description -like '*Set up a new starter.*' -and $b12.description -notmatch '(?i)<script|onclick|javascript:') ($b12.description)
 Check 'live: problem report with defaults where Halo had none' ($b15.catalogUsage -eq 0 -and $b15.selectText -eq 'REPORT' -and $b15.psaPriority -eq 'High' -and $b15.psaBoard -eq '@DefaultBoard' -and $b15.psaStatus -eq '@DefaultStatus' -and $b15.description -like '*Report a printer fault.*' -and @($b15.questions).Count -eq 2) ($b15 | ConvertTo-Json -Depth 3 -Compress)
 Check 'live: never writes to Halo' (-not (Get-THaloWrites).Count) (Show-Calls)
+# Form 501 is the first one created. Its questions are 50101 (Which licence?), 50102 (First day), 50103 (free text).
+$TOpsLicence = Get-TOps '50101'; $TOpsDay = Get-TOps '50102'; $TOpsLast = Get-TOps '50103'
+Check 'live: options, jsonId and customFieldName set on each question after the create' ($TOpsLicence['/options'] -eq 'Business Basic,Business Premium annual' -and $TOpsLicence['/customFieldName'] -eq 'CFLicence' -and $TOpsLicence['/jsonId'] -eq 'CFLicence') ($TOpsLicence | ConvertTo-Json -Compress)
+Check 'live: required, hint and description flag set after the create' ($TOpsDay['/isRequired'] -eq $true -and $TOpsDay['/info'] -eq 'Their first working day.' -and $TOpsLast['/isDescription'] -eq $true) "$($TOpsDay | ConvertTo-Json -Compress) $($TOpsLast | ConvertTo-Json -Compress)"
+Check 'live: question count read from the wrapped reply' ((Get-TRow $r.out 12).action -eq 'created' -and $r.out.counts.questionsCreated -eq 5) "$($r.out.counts | ConvertTo-Json -Compress)"
+
+# 2b. A question's details fail to save: the form is incomplete and says so.
+Reset-T
+$TH.patchFail = '50101'
+$r = Invoke-Flow ($TBody + @{ confirm = $true; templateIds = @(12) }) $TAi
+Check 'patch fails: form incomplete, names the question' ($r.out.status -eq 'incomplete' -and (Get-TRow $r.out 12).action -eq 'incomplete' -and [bool](@($r.out.warnings) -match 'Which licence')) "$($r.out.status) $((Get-TRow $r.out 12).note)"
 
 # 3. No usable AI answer: every field is asked with Halo's labels.
 Reset-T

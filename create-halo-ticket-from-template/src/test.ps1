@@ -51,6 +51,8 @@ $TRouter = {
         if ($TDefs.Contains($Matches[1])) { return ($TDefs[$Matches[1]] | ConvertTo-Json -Depth 5 | ConvertFrom-Json) }
         New-HttpError 404 '{"message":"Not found"}'
     }
+    if ($c.Method -eq 'GET' -and $u -eq "$THalo/api/Team") { return , @([pscustomobject]@{ id = 4; name = 'Service Desk' }, [pscustomobject]@{ id = 5; name = '1st Line Support' }) }
+    if ($c.Method -eq 'GET' -and $u -match '/api/Users\?client_id=42&search=(.*)$') { $e = $Matches[1]; $rows = @(@([pscustomobject]@{ id = 9; name = 'Pat Example'; emailaddress = 'pat.example@contoso.com' }) | Where-Object { $_.emailaddress -eq $e }); return [pscustomobject]@{ record_count = $rows.Count; users = $rows } }
     if ($c.Method -eq 'POST' -and $u -eq "$THalo/api/Tickets") {
         if ($TH.postFail) { New-HttpError 400 '"First Name is mandatory\n"' }
         $null = $TH.posts.Add(@(Read-Body $c)[0]); return , @([pscustomobject]@{ id = 5001 })
@@ -70,7 +72,7 @@ Reset-T
 $r = Invoke-TRun (New-TForm $TFull)
 $b = if ($TH.posts.Count) { $TH.posts[0] } else { $null }
 Check 'form submission: success, ticket 5001' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '5001' -and $TH.posts.Count -eq 1) "$($r.error) $($r.out.message)"
-Check 'template values on the ticket' ($b.tickettype_id -eq 30 -and $b.priority_id -eq 3 -and $b.status_id -eq 1 -and $b.team -eq '1st Line Support' -and $b.client_id -eq 42 -and $b.user_id -eq 7 -and -not $b.PSObject.Properties['category_1']) ($b | ConvertTo-Json -Depth 4 -Compress)
+Check 'template values on the ticket, team as team_id' ($b.tickettype_id -eq 30 -and $b.priority_id -eq 3 -and $b.status_id -eq 1 -and $b.team -eq '1st Line Support' -and $b.team_id -eq 5 -and $b.client_id -eq 42 -and $b.user_id -eq 7 -and -not $b.PSObject.Properties['category_1']) ($b | ConvertTo-Json -Depth 4 -Compress)
 $TCf = @{}; foreach ($cf in @($b.customfields)) { $TCf[$cf.name] = $cf }
 Check 'custom fields: text, checkbox, multi-select ids, single-select id, date' ($TCf['CFfirstName'].value -eq 'Pat' -and $TCf['CFfirstName'].id -eq 101 -and $TCf['CFhardwareRequired'].value -eq $true -and $TCf['CFperipherals'].value -eq '11,12' -and $TCf['CFcostCentre'].value -eq '23' -and $TCf['CFstartingDate'].value -eq '2026-10-21') (@($b.customfields) | ConvertTo-Json -Depth 3 -Compress)
 Check 'a mandatory built-in field is a warning' ([bool](@($r.out.warnings) -match "built-in field 'Delivery Address'")) (@($r.out.warnings) -join ' | ')
@@ -78,10 +80,14 @@ Check 'a mandatory built-in field is a warning' ([bool](@($r.out.warnings) -matc
 # 2. A manual run (flat body) previews unless confirm is true.
 Reset-T
 $r = Invoke-TRun (@{ templateId = '1'; companyPsaId = '42'; userEmail = 'pat.example@contoso.com'; subject = 'New Starter Request'; fields = @{ CFfirstName = 'Pat'; CFcostCentre = 'COSTCENTRE1' } })
-Check 'manual run: preview, nothing posted' ($r.out.status -eq 'pending_confirmation' -and -not $TH.posts.Count -and $r.out.ticket.client_id -eq 42 -and $r.out.ticket.reportedby -eq 'pat.example@contoso.com') "$($r.error) $($r.out.message)"
+Check 'manual run: preview, nothing posted, user found by email' ($r.out.status -eq 'pending_confirmation' -and -not $TH.posts.Count -and $r.out.ticket.client_id -eq 42 -and $r.out.ticket.user_id -eq 9 -and -not $r.out.ticket.PSObject.Properties['reportedby']) "$($r.error) $($r.out.message)"
 Reset-T
 $r = Invoke-TRun (@{ templateId = '1'; companyPsaId = '42'; confirm = 'true'; fields = @{ CFfirstName = 'Pat'; CFcostCentre = 'COSTCENTRE1' } })
 Check 'manual run with confirm: created, summary from the template' ($r.out.status -eq 'success' -and $TH.posts[0].summary -eq 'New Starter Request' -and $TH.posts[0].details -like '*New starter*') "$($r.error) $($r.out.message)"
+
+Reset-T
+$r = Invoke-TRun (@{ templateId = '1'; companyPsaId = '42'; userEmail = 'nobody@contoso.com'; fields = @{ CFfirstName = 'Pat'; CFcostCentre = 'COSTCENTRE1' } })
+Check 'unknown email: reported by the email, with a warning' ($r.out.ticket.reportedby -eq 'nobody@contoso.com' -and -not $r.out.ticket.PSObject.Properties['user_id'] -and [bool](@($r.out.warnings) -match 'No single Halo user')) "$(@($r.out.warnings) -join ' | ')"
 
 # 3. Unfilled tokens and missing mandatory answers stop before anything is created.
 Reset-T

@@ -177,11 +177,36 @@ if ($missing.Count) { Stop-Run 'incomplete' "Halo requires $($missing -join ', '
 
 # ---- the ticket ----
 $ticket = [ordered]@{ summary = $(if ($subject) { $subject } else { $tplName }); details = $(if ($description) { $description } else { [string](Get-First $tpl @('details_html', 'details')) }); client_id = [long]$companyPsaId }
-if ($userPsaId -match '^\d+$' -and [long]$userPsaId -gt 0) { $ticket.user_id = [long]$userPsaId } elseif ($userEmail) { $ticket.reportedby = $userEmail }
-foreach ($pair in @(@('tickettype_id', @('tickettype_id', 'tickettypeid')), @('priority_id', @('priority_id', 'priorityid')), @('status_id', @('status_id', 'statusid')), @('team', @('team')), @('category_1', @('category_1')))) {
+# The end user: the submission's Halo user id, else the client's user with that email (verified 2026-10-19: with
+# neither, Halo files the ticket under its "General User").
+if ($userPsaId -match '^\d+$' -and [long]$userPsaId -gt 0) { $ticket.user_id = [long]$userPsaId }
+elseif ($userEmail) {
+    $match = @()
+    try {
+        $ur = Invoke-PsaRead "/Users?client_id=$($companyPsaId)&search=$(ConvertTo-PsaQuery $userEmail)" 'look up the user' $need
+        $match = @(Get-PsaListReply $ur @('users', 'records') | Where-Object { ([string](Get-First $_ @('emailaddress', 'email'))).Trim() -eq $userEmail })
+    }
+    catch { $null = $warnings.Add("The Halo user '$userEmail' couldn't be looked up: $($_.Exception.Message)") }
+    if ($match.Count -eq 1) { $ticket.user_id = [long](Get-First $match[0] @('id')); $null = $actions.Add("Found Halo user $($ticket.user_id) by email.") }
+    else { $ticket.reportedby = $userEmail; $null = $warnings.Add("No single Halo user under client $companyPsaId has the email '$userEmail', so the ticket is reported by that email and Halo files it under its general user.") }
+}
+foreach ($pair in @(@('tickettype_id', @('tickettype_id', 'tickettypeid')), @('priority_id', @('priority_id', 'priorityid')), @('status_id', @('status_id', 'statusid')), @('category_1', @('category_1')))) {
     $v = Get-First $tpl $pair[1]
     if ($null -ne $v -and [string]$v -and [string]$v -ne '0') { $ticket[$pair[0]] = $(if ([string]$v -match '^\d+$') { [long]$v } else { [string]$v }) }
 }
+# The team: Halo ignores a team name on a new ticket (verified 2026-10-19: "1st Line Support" became "New Team"),
+# so the template's team is sent as team_id from Halo's team list.
+$teamId = [string](Get-First $tpl @('team_id', 'teamid'))
+$teamName = [string](Get-First $tpl @('team', 'team_name'))
+if ((-not $teamId -or $teamId -eq '0') -and $teamName) {
+    try {
+        $teams = @(Get-PsaListReply (Invoke-PsaRead '/Team' 'read the teams' $need) @('teams', 'records'))
+        $hit = @($teams | Where-Object { ([string](Get-First $_ @('name'))).Trim() -eq $teamName.Trim() })
+        if ($hit.Count) { $teamId = [string](Get-First $hit[0] @('id')) } else { $null = $warnings.Add("Halo has no team named '$teamName', so Halo's default team was used.") }
+    }
+    catch { $null = $warnings.Add("Halo's teams couldn't be read, so Halo's default team was used: $($_.Exception.Message)") }
+}
+if ($teamId -match '^\d+$' -and [long]$teamId -gt 0) { $ticket.team_id = [long]$teamId; if ($teamName) { $ticket.team = $teamName } }
 if ($custom.Count) { $ticket.customfields = @($custom) }
 $plan = "Halo ticket '$($ticket.summary)' for client $companyPsaId from template $templateIdText ('$tplName'), with $($custom.Count) custom field(s): $((@($custom) | ForEach-Object { $_.name }) -join ', ')."
 if (-not $confirm) {

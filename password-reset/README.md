@@ -13,6 +13,7 @@ Each version is published as a release, with `password-reset.yml` attached. Down
 | Download `password-reset.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0) |
 | View the current source | [`password-reset.yml`](https://github.com/cloudradial/Automations/blob/main/password-reset/password-reset.yml) |
 | Test harness for the Parse & Validate step | [`src/test-parse.ps1`](https://github.com/cloudradial/Automations/blob/main/password-reset/src/test-parse.ps1) |
+| Test harness for the Finish step (notes on all six PSAs) | [`src/test-finish.ps1`](https://github.com/cloudradial/Automations/blob/main/password-reset/src/test-finish.ps1) |
 | All files in this automation | [password-reset](https://github.com/cloudradial/Automations/tree/main/password-reset) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/password-reset) |
 | Marketplace listing | [AAI-00027](https://automations.cloudradial.com/marketplace/AAI-00027) |
@@ -59,7 +60,8 @@ object), it is **never** a user-typed field.
 | `userOfficeId` | submitter's Entra object id (`@UserOfficeId`), enables an exact id match |
 | `companyTenantId` | requesting company's M365 tenant GUID, used for tenant scoping |
 | `revokeSessions` | optional, defaults **true** |
-| `ticketId` | for the note write-back |
+| `ticketId` | the ticket the notes go on |
+| `postNotes` | optional, `true` makes Finish post the notes to the ticket itself (see [Notes on the ticket](#notes-on-the-ticket)). Leave it unset when the caller posts the returned notes, so they aren't written twice. Always on for a form Action. |
 
 Handles both a flat `{key:value}` body and the nested `{trigger:{Ticket:{Questions:[{Id,Value}]},Company:{…}}}` shape.
 
@@ -70,6 +72,7 @@ On portals with Actions, add a question of type **Action** to the form and pick 
 - **The submitter** is the portal's `user.email`, **the ticket** is `ticket.id` (the ticket the form creates), and **the tenant** is `company.tenantId`. Set the company's Microsoft 365 tenant in the portal so the tenant-scope gate can check it.
 - **A form answer can't set** `submittedByUpn`, `userOfficeId`, `companyTenantId`, `ticketId` or `revokeSessions`. Answers with those Field IDs are ignored, and sessions are always revoked.
 - The Action doesn't send the submitter's Entra object id, so ownership is matched by email (the submitter's portal email against the target's UPN, mail or proxy addresses).
+- An Action doesn't post the returned notes to the ticket, so Finish posts them itself. This needs the PSA secrets below. See [Notes on the ticket](#notes-on-the-ticket).
 
 ## Gates (all fail-closed), in order
 
@@ -94,8 +97,24 @@ Emits the same contract as the original single-node version:
 The **temporary password appears only in `internal_note`** (never a top-level field, never in `public_note`).
 
 `status: success` and `passwordReset: true` are reported **only** when the Reset Password step confirms the reset. If Microsoft Graph refuses it (for example 403 because the app lacks a password-reset role), Finish returns `status: error` with "Something went wrong resetting your password. A technician will follow up shortly." and the run fails, so it shows in the run history. Resetting passwords as an app needs both a Graph application permission (`User-PasswordProfile.ReadWrite.All` or `User.ReadWrite.All`, admin-consented) and an Entra role on the app's service principal (Helpdesk Administrator for non-admin users).
-The workflow **returns** the notes; it does not post to the PSA itself, the caller (ServiceAI/CloudRadial)
-writes them to the ticket.
+### Notes on the ticket
+
+The workflow always **returns** both notes. Who writes them to the ticket depends on how it was started:
+
+| Started by | Who posts the notes |
+|---|---|
+| A CloudRadial form **Action** | **Finish**, because the portal doesn't post a workflow's notes. |
+| A webhook body with `"postNotes": true` | **Finish**. |
+| A legacy CloudRadial Automation or a ServiceAI Action (no `postNotes`) | The caller, from the returned notes, as before. Finish posts nothing, so the notes aren't written twice. |
+
+When Finish posts, it writes them on whichever of the six PSAs is set up (`PSA-Type` and that PSA's secrets, through `_shared/psa.ps1`), for every outcome (success, refusal or error), so the user always gets an answer on the ticket:
+
+- **The internal note** (technician-only) holds the details and, on success, **the temporary password**. That's the only place the password is written.
+- **The public note** is what the user sees, for example "Your password has been reset…" or "You can only reset your own account…". It never contains the password.
+- **A retried request** (for example Action Runs > Retry after a refusal) doesn't post the same notes twice.
+- **If a note can't be posted** (no PSA set up, no ticket number, or the PSA refuses), the run adds a warning (`notes_posted: none`) and keeps both notes in its output. A successful reset still reports success. Warnings never contain the password.
+
+The output adds `notes_posted`: `both`, `internal`, `public`, `none` or `not-requested`.
 
 ## Required Runner Key Vault secrets
 
@@ -104,11 +123,23 @@ extension app, preferred, already holds `User.ReadWrite.All`/`Directory.ReadWrit
 else `Graph-*`. App also needs `RoleManagement.Read.Directory` + `IdentityRiskyUser.Read.All` and a
 password-admin role, or the reset PATCH / gate reads return 403. `aiExtensions: microsoft-entra-id`.
 
+To post the notes (a form Action, or `postNotes: true`), also the PSA secrets, the same names as each PSA's catalog extension:
+
+| PSA | Secrets |
+|---|---|
+| All | `PSA-Type`: `connectwise`, `autotask`, `halopsa`, `kaseyabms`, `syncro` or `zendesk` (a runner with only the `CW-*` secrets is treated as ConnectWise) |
+| ConnectWise | `CW-ApiUrl` (the full `https://<host>/v4_6_release/apis/3.0`), `CW-CompanyID`, `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId` |
+| Autotask | `Autotask-ApiUrl`, `Autotask-ApiIntegrationCode`, `Autotask-Username`, `Autotask-Secret`. Optional: `Autotask-NotePublishId`, `Autotask-NotePublicPublishId`, `Autotask-NoteTypeId` |
+| HaloPSA | `Halo-ApiUrl`, `Halo-ClientId`, `Halo-ClientSecret`. Optional: `Halo-NoteOutcomeId`, `Halo-PublicNoteOutcomeId` |
+| Kaseya BMS | `KaseyaBMS-ApiUrl`, `KaseyaBMS-Username`, `KaseyaBMS-Password`, `KaseyaBMS-CompanyName`, `KaseyaBMS-NoteTypeId` |
+| Syncro | `Syncro-ApiUrl`, `Syncro-ApiKey` |
+| Zendesk | `Zendesk-BaseUrl`, `Zendesk-Email`, `Zendesk-ApiToken` |
+
 ## Import & test
 
 1. AutomationAI → import `password-reset.yml`; **Publish** and **deploy** to the runner holding the secrets.
 2. Wire the CloudRadial form to it: an Action question (see [Starting it from a form Action](#starting-it-from-a-form-action)), or a form Automation or ServiceAI Action pointed at the Start webhook's URL and secret.
-3. Run `pwsh -NoProfile -File password-reset/src/test-parse.ps1` after changing Parse & Validate. It checks every input shape in strict mode.
+3. After changing a step, run the strict-mode tests: `pwsh -NoProfile -File password-reset/src/test-parse.ps1` (every input shape) and `pwsh -NoProfile -File password-reset/src/test-finish.ps1` (the notes on all six PSAs). After editing `_shared/psa.ps1`, run `node _shared/inject.js password-reset` to refresh Finish's copy.
 4. Node 1's **Test Input** has `submittedByUpn` == the target, run it against a disposable account you own to see `status: success`; change `submittedByUpn` to a different address to see the ownership gate return `rejected`.
 
 > Webhook secrets are stripped from this export, the portal issues a new URL/secret on import. A `success`

@@ -2037,7 +2037,10 @@ definition:
             }
             # A field Halo makes mandatory must be on the form and answered, or Halo rejects the ticket (verified 2026-10-19:
             # "First Name is mandatory ... Address is mandatory"). Mandatory on the agent's new-ticket screen (technew) counts
-            # even when the field is hidden from end users. Unverified: 2 is read as mandatory for technew and endusernew.
+            # even when the field is hidden from end users. Halo's visibility choices, in order (Field Groups > Edit Field,
+            # 2026-10-19): Not Visible, Visible - Not Required, Visible - Warn if empty, Visible - Required, Visible - Read Only,
+            # read as 0..4, so 3 is required. A built-in field (no CF name, e.g. Address) can't be filled from a form, so a
+            # mandatory one gets a warning instead of a question.
             $mandatory = New-Object System.Collections.ArrayList
             foreach ($ex in $expanded) {
                 $tf = $ex.row
@@ -2046,7 +2049,7 @@ definition:
                 $eu = Get-Prop $tf 'endusernew'; if ($null -eq $eu) { $eu = $ex.eu }
                 $euText = ([string]$eu).ToLowerInvariant()
                 $tn = Get-Prop $tf 'technew'; if ($null -eq $tn) { $tn = $ex.tn }
-                $isMandatory = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '2' -or ([string]$tn) -eq '2')
+                $isMandatory = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '3' -or ([string]$tn) -eq '3')
                 $inner = Get-Prop $tf 'field'
                 $fname = [string](Get-First $tf @('name', 'fieldname'))
                 if (-not $fname -and $null -ne $inner) { $fname = [string](Get-First $inner @('name')) }
@@ -2056,6 +2059,10 @@ definition:
                 $null = $seenNames.Add($(if ($fname) { $fname } else { "field $fid (no name)" }))
                 if (-not $fid -or -not $fname) { continue }
                 $lname = $fname.ToLowerInvariant()
+                if ($isMandatory -and $lname -notmatch '^cf' -and -not $fixed.ContainsKey($lname)) {
+                    $shown = [string](Get-First $def @('label', 'display_name')); if (-not $shown) { $shown = $fname }
+                    $null = $warnings.Add("Template '$($b.name)': Halo makes its built-in field '$shown' mandatory on the new-ticket screen. A form can't fill a built-in field, so Halo will reject every ticket from this form until '$shown' is set to Visible - Not Required (Halo: Configuration > Tickets > Field Groups > the group > Field List > Edit).")
+                }
                 # Only custom fields (Halo names them CF...), never the built-in ones or the ones the template fixes.
                 if ($systemFields -contains $lname -or $lname -notmatch '^cf' -or $fixed.ContainsKey($lname)) { continue }
                 if ((Get-Prop $tf 'visible') -eq $false -or (Get-Prop $tf 'hidden') -eq $true -or (Get-Prop $tf 'usercanedit') -eq $false) { continue }

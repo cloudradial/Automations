@@ -61,14 +61,14 @@ $TDetail = @{
 $TTypes = @{
     # Halo's real shape (verified 2026-10-16): link rows with no name, label or type; those are in /Field/{fieldid}.
     '3' = @{ id = 3; name = 'Service Request'; fields = @(
-            @{ id = 9001; rtid = 3; fieldid = 101; seq = 1; endusernew = 2; technew = 1 },
-            @{ id = 9002; rtid = 3; fieldid = 102; seq = 2; endusernew = 1; technew = 1 },
+            @{ id = 9001; rtid = 3; fieldid = 101; seq = 1; endusernew = 3; technew = 1 },
+            @{ id = 9002; rtid = 3; fieldid = 102; seq = 2; endusernew = 2; technew = 1 },
             @{ id = 9003; rtid = 3; fieldid = 103; seq = 3; endusernew = 1; technew = 1 },
             @{ id = 9004; rtid = 3; fieldid = 104; seq = 4; endusernew = 1; technew = 1 },
             @{ id = 9005; rtid = 3; fieldid = 1; seq = 5; endusernew = 1; technew = 1 },
             @{ id = 9006; rtid = 3; fieldid = 105; seq = 6; endusernew = 1; technew = 1 },
             @{ id = 9007; rtid = 3; fieldid = 106; seq = 7; endusernew = 0; technew = 1 },
-            @{ id = 9008; rtid = 3; fieldid = 107; seq = 8; endusernew = 0; technew = 2 }) }
+            @{ id = 9008; rtid = 3; fieldid = 107; seq = 8; endusernew = 0; technew = 3 }) }
     # A field-group row (fieldid 0, groupid 14), as Halo sends it; the group lists the fields.
     '1' = @{ id = 1; name = 'Incident'; fields = @(
             @{ id = 9101; rtid = 1; fieldid = 0; groupid = 14; seq = 1; endusernew = 1; technew = 1 }) }
@@ -85,7 +85,7 @@ $TRouter = {
     }
     if ($c.Method -eq 'GET' -and $u -match "/api/Template/(\d+)\?") { return ($TDetail[$Matches[1]] | ConvertTo-Json -Depth 6 | ConvertFrom-Json) }
     if ($c.Method -eq 'GET' -and $u -match "/api/TicketType/(\d+)\?") { return ($TTypes[$Matches[1]] | ConvertTo-Json -Depth 6 | ConvertFrom-Json) }
-    if ($c.Method -eq 'GET' -and $u -match "/api/FieldGroup/14\?") { return [pscustomobject]@{ id = 14; name = 'Printer details'; fields = @([pscustomobject]@{ id = 7001; fieldid = 201; seq = 1 }, [pscustomobject]@{ id = 7002; fieldid = 202; seq = 2 }) } }
+    if ($c.Method -eq 'GET' -and $u -match "/api/FieldGroup/14\?") { return [pscustomobject]@{ id = 14; name = 'Printer details'; fields = @([pscustomobject]@{ id = 7001; fieldid = 201; seq = 1 }, [pscustomobject]@{ id = 7002; fieldid = 202; seq = 2 }, [pscustomobject]@{ id = 7003; fieldid = 150; seq = 3; endusernew = 3; technew = 3 }) } }
     if ($c.Method -eq 'GET' -and $u -match "/api/Field/(\d+)\?") { New-HttpError 400 '"Field kind must be specified"' }
     if ($c.Method -eq 'GET' -and $u -match "/api/FieldInfo/(\d+)\?") {
         $TDefs = @{
@@ -98,6 +98,7 @@ $TRouter = {
             '106' = @{ id = 106; name = 'CFInternalCode'; label = 'Internal code'; type = 0 }
             '107' = @{ id = 107; name = 'CFAddress'; label = 'Address'; type = 0 }
             '201' = @{ id = 201; name = 'CFPrinterLocation'; label = 'Printer location'; type = 0 }
+            '150' = @{ id = 150; name = 'address'; label = 'Address'; type = 0 }
             '202' = @{ id = 202; name = 'CFDept'; type = 2; values = @(@{ name = 'Finance' }, @{ name = 'Sales' }) }
         }
         if ($TDefs.Contains($Matches[1])) { return ($TDefs[$Matches[1]] | ConvertTo-Json -Depth 5 | ConvertFrom-Json) }
@@ -145,6 +146,7 @@ Check 'facts: custom fields only, the fixed, built-in and hidden ones left out, 
 Check 'facts: kinds mapped, unknown type becomes text with a warning' ((@($f12.fields | ForEach-Object { $_.kind }) -join ',') -eq 'date,choice,text,text,text' -and [bool](@($r.out.warnings) -match 'Mystery')) (@($f12.fields | ForEach-Object { $_.kind }) -join ',')
 Check 'facts: a comma inside an option becomes a space' ((@($f12.fields | Where-Object { $_.id -eq '102' })[0].options -join '|') -eq 'Business Basic|Business Premium annual') ''
 Check 'facts: list values read from /Field when the type has none' ((@($f15.fields | Where-Object { $_.id -eq '202' })[0].options -join '|') -eq 'Finance|Sales') ''
+Check 'facts: a mandatory built-in field is a warning, not a question; Warn if empty is not required' ([bool](@($r.out.warnings) -match "built-in field 'Address' mandatory") -and -not @($f15.fields | Where-Object { $_.id -eq '150' }).Count -and @($f12.fields | Where-Object { $_.id -eq '102' })[0].required -eq $false) (@($r.out.warnings) -join ' | ')
 Check 'facts: incident type becomes a problem report, details tags stripped' ($f15.kind -eq 'problem' -and $f12.kind -eq 'request' -and $f12.details -notlike '*<*' -and $f12.details -notlike '*alert*') "$($f15.kind) $($f12.details)"
 
 # 2. Live: two forms created, PSA values from Halo, AI wording kept, invented field dropped.

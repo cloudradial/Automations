@@ -92,10 +92,10 @@ Check 'unknown email: reported by the email, with a warning' ($r.out.ticket.repo
 # 3. Unfilled tokens and missing mandatory answers stop before anything is created.
 Reset-T
 $r = Invoke-TRun (New-TForm @{ haloTemplateId = '1'; CFfirstName = '@CFfirstName'; CFcostCentre = 'COSTCENTRE3' })
-Check 'unfilled token counts as missing: incomplete, names First Name, nothing posted' ($r.out.status -eq 'incomplete' -and $r.out.message -like '*First Name*' -and -not $TH.posts.Count) "$($r.out.status) $($r.out.message)"
+Check 'unfilled token counts as missing: not sent, a warning names First Name, Halo decides' (-not @($TH.posts[0].customfields | Where-Object { $_.name -eq 'CFfirstName' }).Count -and [bool](@($r.out.warnings) -match 'First Name') -and $r.out.status -eq 'success') "$($r.out.status) $(@($r.out.warnings) -join ' | ')"
 Reset-T
 $r = Invoke-TRun (New-TForm @{ haloTemplateId = '1'; CFfirstName = 'Pat'; CFcostCentre = 'COSTCENTRE9' })
-Check 'a list answer Halo does not have: warned, and a mandatory one stops' ($r.out.status -eq 'incomplete' -and $r.out.message -like '*Cost Centre*' -and [bool](@($r.out.warnings) -match 'COSTCENTRE9')) "$($r.out.message) | $(@($r.out.warnings) -join ' | ')"
+Check 'a list answer Halo does not have: warned and left out' (-not @($TH.posts[0].customfields | Where-Object { $_.name -eq 'CFcostCentre' }).Count -and [bool](@($r.out.warnings) -match 'COSTCENTRE9') -and [bool](@($r.out.warnings) -match 'Cost Centre')) "$($r.out.message) | $(@($r.out.warnings) -join ' | ')"
 
 # 4. No template id: the form's subject finds the template, longest name first.
 Reset-T

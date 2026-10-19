@@ -173,7 +173,10 @@ foreach ($f in $fields) {
     elseif ($ans -match '^(?i)(true|false)$' -and $f.type -in @('6', 'checkbox')) { $value = ($ans -eq 'true') }
     $null = $custom.Add([ordered]@{ id = [long]$f.id; name = $f.name; value = $value })
 }
-if ($missing.Count) { Stop-Run 'incomplete' "Halo requires $($missing -join ', '), and the form didn't answer them. Make those questions required on the form. No ticket was created." }
+# Only a warning: Halo marks some fields required that apply only after another answer (Access Type when Shared
+# Drive is Yes), and doesn't enforce them on a create (verified 2026-10-19). Halo itself rejects a ticket that is
+# really missing one, and its reason comes back in the error.
+if ($missing.Count) { $null = $warnings.Add("Halo marks $($missing -join ', ') as required, and the form didn't answer them. If Halo enforces any of them, it will reject the ticket and say which.") }
 
 # ---- the ticket ----
 $ticket = [ordered]@{ summary = $(if ($subject) { $subject } else { $tplName }); details = $(if ($description) { $description } else { [string](Get-First $tpl @('details_html', 'details')) }); client_id = [long]$companyPsaId }

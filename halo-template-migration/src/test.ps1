@@ -150,17 +150,26 @@ Reset-T
 $r = Invoke-Flow ($TBody + @{ confirm = $true }) $TAi
 Check 'live: success, two created' ($r.out.status -eq 'success' -and $r.out.counts.formsCreated -eq 2 -and $TH.posts.Count -eq 2 -and (Get-TRow $r.out 12).catalogId -eq 501) "$($r.r.error) $($r.out.message)"
 $b12 = @($TH.posts | Where-Object { $_.subject -eq 'New starter setup' })[0]; $b15 = @($TH.posts | Where-Object { $_.subject -eq 'Printer not working' })[0]
-Check 'live: request form with Halo PSA values and the marker tag' ($b12.companyId -eq 1 -and $b12.catalogUsage -eq 10 -and $b12.psaType -eq 'Service Request' -and $b12.psaPriority -eq 'Low' -and $b12.psaBoard -eq 'Service Desk' -and $b12.psaCategory -eq 'Accounts' -and $b12.psaStatus -eq 'New' -and $b12.tags[0].tag -eq 'halo-template:12' -and $b12.category -eq 'Service Request') ($b12 | ConvertTo-Json -Depth 3 -Compress)
-Check 'live: questions in the AI order with Halo types and options' ((@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';') -eq 'Which licence?/130/False;First day/40/True;Anything else we should know?/10/False' -and $b12.questions[0].options -eq 'Business Basic,Business Premium annual' -and $b12.questions[1].customFieldName -eq 'CFStartDate' -and $b12.questions[2].isDescription -eq $true) (@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';')
+Check 'live: request form with CloudRadial tokens (the default) and the marker tag' ($b12.companyId -eq 1 -and $b12.catalogUsage -eq 10 -and $b12.psaType -eq '' -and $b12.psaPriority -eq '@DefaultPriority' -and $b12.psaBoard -eq '@DefaultBoard' -and $b12.psaCategory -eq '' -and $b12.psaStatus -eq '@DefaultStatus' -and $b12.tags[0].tag -eq 'halo-template:12' -and $b12.category -eq 'Service Request') ($b12 | ConvertTo-Json -Depth 3 -Compress)
+Check 'live: questions in the AI order with Halo types and options' ((@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';') -eq 'Which licence?/130/False;First day/40/True;Anything else we should know?/10/False' -and $b12.questions[0].options -eq 'Business Basic,Business Premium annual' -and $b12.questions[1].customFieldName -eq '' -and $b12.questions[1].jsonId -eq 'CFStartDate' -and $b12.questions[2].isDescription -eq $true) (@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';')
 Check 'live: invented field dropped with a warning' ([bool](@($r.out.warnings) -match 'field 999')) ''
 Check 'live: template HTML kept without script or handlers' ($b12.description -like '*Set up a new starter.*' -and $b12.description -notmatch '(?i)<script|onclick|javascript:') ($b12.description)
-Check 'live: problem report with defaults where Halo had none' ($b15.catalogUsage -eq 0 -and $b15.selectText -eq 'REPORT' -and $b15.psaPriority -eq 'High' -and $b15.psaBoard -eq '@DefaultBoard' -and $b15.psaStatus -eq '@DefaultStatus' -and $b15.description -like '*Report a printer fault.*' -and @($b15.questions).Count -eq 2) ($b15 | ConvertTo-Json -Depth 3 -Compress)
+Check 'live: problem report, tokens' ($b15.catalogUsage -eq 0 -and $b15.selectText -eq 'REPORT' -and $b15.psaPriority -eq '@DefaultPriority' -and $b15.psaBoard -eq '@DefaultBoard' -and $b15.psaStatus -eq '@DefaultStatus' -and $b15.description -like '*Report a printer fault.*' -and @($b15.questions).Count -eq 2) ($b15 | ConvertTo-Json -Depth 3 -Compress)
 Check 'live: never writes to Halo' (-not (Get-THaloWrites).Count) (Show-Calls)
 # Form 501 is the first one created. Its questions are 50101 (Which licence?), 50102 (First day), 50103 (free text).
 $TOpsLicence = Get-TOps '50101'; $TOpsDay = Get-TOps '50102'; $TOpsLast = Get-TOps '50103'
-Check 'live: options, jsonId and customFieldName set on each question after the create' ($TOpsLicence['/options'] -eq 'Business Basic,Business Premium annual' -and $TOpsLicence['/customFieldName'] -eq 'CFLicence' -and $TOpsLicence['/jsonId'] -eq 'CFLicence') ($TOpsLicence | ConvertTo-Json -Compress)
+Check 'live: options and jsonId set after the create, no customFieldName with tokens' ($TOpsLicence['/options'] -eq 'Business Basic,Business Premium annual' -and -not $TOpsLicence.ContainsKey('/customFieldName') -and $TOpsLicence['/jsonId'] -eq 'CFLicence') ($TOpsLicence | ConvertTo-Json -Compress)
 Check 'live: required, hint and description flag set after the create' ($TOpsDay['/isRequired'] -eq $true -and $TOpsDay['/info'] -eq 'Their first working day.' -and $TOpsLast['/isDescription'] -eq $true) "$($TOpsDay | ConvertTo-Json -Compress) $($TOpsLast | ConvertTo-Json -Compress)"
 Check 'live: question count read from the wrapped reply' ((Get-TRow $r.out 12).action -eq 'created' -and $r.out.counts.questionsCreated -eq 5) "$($r.out.counts | ConvertTo-Json -Compress)"
+
+# 2c. psaValues halo: Halo's own names and the custom-field link, as before.
+Reset-T
+$r = Invoke-Flow ($TBody + @{ confirm = $true; templateIds = @(12); psaValues = 'halo' }) $TAi
+$b12 = $TH.posts[0]; $TOpsLicence = Get-TOps '50101'
+Check 'psaValues halo: Halo names and customFieldName' ($r.out.status -eq 'success' -and $b12.psaType -eq 'Service Request' -and $b12.psaPriority -eq 'Low' -and $b12.psaBoard -eq 'Service Desk' -and $b12.psaCategory -eq 'Accounts' -and $b12.psaStatus -eq 'New' -and $TOpsLicence['/customFieldName'] -eq 'CFLicence') ($b12 | ConvertTo-Json -Depth 3 -Compress)
+Reset-T
+$r = Invoke-Flow ($TBody + @{ psaValues = 'sometimes' }) $TAi
+Check 'bad psaValues: incomplete before reading' ($r.out.status -eq 'incomplete' -and $r.out.message -like '*psaValues must be*' -and -not @($Mock.Calls).Count) "$($r.out.message)"
 
 # 2b. A question's details fail to save: the form is incomplete and says so.
 Reset-T

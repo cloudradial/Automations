@@ -2,8 +2,8 @@
 #
 # Upload on Agents -> Custom. Uploading is keyed on the slug below.
 # Pair it with ticket-routing.yml. The agent reads one ticket and the MSP's
-# skills (a list the workflow passes in, or the skills CSV in AutomationAI
-# Knowledge), and picks one. It never touches the PSA; the workflow's script
+# skills (a list the workflow passes in, or one document per skill in
+# AutomationAI Knowledge), and picks one. It never touches the PSA; the workflow's script
 # steps check its pick, choose the engineer and assign.
 
 automationsAgent: 1
@@ -11,7 +11,7 @@ agent:
   slug: ticket-skill-classifier
   name: Ticket Skill Classifier
   vendor: CloudRadial
-  version: 0.2.0
+  version: 0.2.1
   description: Reads a ticket and picks the one skill and role from your routing table that fits it, with a confidence and a reason.
   category: Ticketing
   tags:
@@ -30,13 +30,16 @@ agent:
     - **inline or ucp:** the workflow passes the list of skills (one line per
       skill, with its description and roles). The agent never sees the
       engineers, and calls no tools.
-    - **knowledge:** the skills CSV lives in AutomationAI Knowledge. Ground the
-      workflow's **Pick the skill** node on that folder. The agent searches
-      it, picks the skill and role, and lists the engineers the CSV gives for
-      them.
+    - **knowledge:** the skills live in AutomationAI Knowledge as one small
+      document per skill (`Test-RoutingTable.ps1 -ExportKnowledgeDir` writes
+      them). Ground the workflow's **Pick the skill** node on that folder. The
+      agent searches it, picks the skill and role, and lists the engineers that
+      skill's document gives for that role.
 
     Either way, the workflow's script steps only assign an engineer who is in
-    the engineers table, apply your tie-break, and write the note.
+    the engineers table, apply your tie-break, and write the note. In
+    knowledge mode the workflow can't check the skill or the engineer list
+    against a table, so it relies on this agent copying them correctly.
 
     ## What it returns
 
@@ -59,11 +62,11 @@ agent:
     skill. Begin immediately. You change nothing.
 
     WHERE THE SKILLS ARE.
-    - If useKnowledge is false (or missing), your input has skillList, one
+    - If useKnowledge is false, "false" or missing, your input has skillList, one
       line per skill:
         <skill name>: <what the skill covers> [roles: <role>, <role>]
       Use only that list. Call no tools. Return engineers as an empty list.
-    - If useKnowledge is true, skillList is empty and the MSP's skills are in
+    - If useKnowledge is true or "true" (any case), skillList is empty and the MSP's skills are in
       your Knowledge, usually as one document per skill:
         Skill: <skill name>
         Covers: <what the skill covers>
@@ -97,7 +100,7 @@ agent:
     role "" and engineers [] with a confidence below 0.5, and say in reason
     what was missing.
 
-    WHEN SKIP IS TRUE. If the skip input is true, the workflow has already
+    WHEN SKIP IS TRUE. If the skip input is true or "true" (any case), the workflow has already
     decided not to route this ticket. Return skill "", role "", engineers [],
     confidence 0 and reason "Skipped by the workflow." straight away, with no
     tool calls.
@@ -121,7 +124,7 @@ agent:
   variablesJson: |
     []
   inputSchema: |
-    {"type":"object","properties":{"summary":{"type":"string","description":"The ticket summary or subject."},"description":{"type":"string","description":"The ticket description or first note, as plain text."},"skillList":{"type":"string","description":"One line per skill: '<skill>: <description> [roles: ...]'. Pick only from this list. Empty when useKnowledge is true."},"roles":{"type":"string","description":"Every role used in the table, comma separated. Empty when useKnowledge is true."},"useKnowledge":{"type":"boolean","description":"True when the skills table is a CSV in your Knowledge instead of skillList."},"skip":{"type":"boolean","description":"True when the workflow has already decided not to route this ticket."}}}
+    {"type":"object","properties":{"summary":{"type":"string","description":"The ticket summary or subject."},"description":{"type":"string","description":"The ticket description or first note, as plain text."},"skillList":{"type":"string","description":"One line per skill: '<skill>: <description> [roles: ...]'. Pick only from this list. Empty when useKnowledge is true."},"roles":{"type":"string","description":"Every role used in the table, comma separated. Empty when useKnowledge is true."},"useKnowledge":{"type":["boolean","string"],"description":"true (or the text \"true\") when the skills are in your Knowledge instead of skillList."},"skip":{"type":["boolean","string"],"description":"true (or the text \"true\") when the workflow has already decided not to route this ticket."}}}
   outputSchema: |
-    {"type":"object","properties":{"skill":{"type":"string","description":"Copied exactly from skillList or the Knowledge CSV, or empty when nothing fits."},"role":{"type":"string","description":"One of the roles listed for that skill, or empty."},"engineers":{"type":"array","items":{"type":"string"},"description":"Knowledge mode only: every Engineer the CSV lists for that skill and role, copied exactly. Empty otherwise."},"confidence":{"type":"number","description":"0 to 1."},"reason":{"type":"string","description":"One sentence for the internal note."}},"required":["skill","role","engineers","confidence","reason"]}
+    {"type":"object","properties":{"skill":{"type":"string","description":"Copied exactly from skillList or the Knowledge document, or empty when nothing fits."},"role":{"type":"string","description":"One of the roles listed for that skill, or empty."},"engineers":{"type":"array","items":{"type":"string"},"description":"Knowledge mode only: every engineer the skill's document lists for that role, copied exactly. Empty otherwise."},"confidence":{"type":"number","description":"0 to 1."},"reason":{"type":"string","description":"One sentence for the internal note."}},"required":["skill","role","engineers","confidence","reason"]}
   dryRunDefault: true

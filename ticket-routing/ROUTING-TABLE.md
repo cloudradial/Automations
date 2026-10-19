@@ -82,7 +82,7 @@ Put these one per line in the step's `$Settings` block (or, for `ucp`, at the to
 | `TableSource` | Settings | Engineers | Skills |
 |---|---|---|---|
 | `inline` (default) | `$Settings` block | `$Engineers` block | `$Skills` block |
-| `knowledge` | `$Settings` block | `$Engineers` block | A CSV in AutomationAI Knowledge |
+| `knowledge` | `$Settings` block | `$Engineers` block | AutomationAI Knowledge, one document per skill |
 | `ucp` | Engineers article | Engineers article | Skills article |
 
 ### inline (default): paste it into the step

@@ -372,6 +372,40 @@ $dashed['Ticket Routing - Skills notes'] = '<p>Skill: Should Not Be Read</p><p>E
 $x = Invoke-Routing $body -Source ucp -SkillArticles $dashed
 Check 'ucp: titles with " - " instead of ":" are found; other titles ignored' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya' -and $x.prep.skillList -notmatch 'Should Not Be Read') "$($x.r.status): $($x.r.message)"
 
+# An old unnumbered skills article next to numbered parts is an old copy: skipped, with a warning.
+$stale = [ordered]@{ 'Ticket Routing: Skills' = '<p>Skill,Role,Engineer,Skill Description</p><p>Network Firewall Fortinet,Tickets,"Lee, Jordan",old</p>' }
+foreach ($k in $split.Keys) { $stale[$k] = $split[$k] }
+$x = Invoke-Routing $body -Source ucp -SkillArticles $stale
+Check 'ucp: an unnumbered skills article is skipped when numbered parts exist' ($x.r.status -eq 'success' -and @($x.r.candidates | Where-Object { $_.name -eq 'Lee, Jordan' }).Count -eq 0 -and @($x.r.warnings | Where-Object { $_ -match 'treated as an old copy' }).Count -eq 1) "$($x.r.status) / $(($x.r.candidates | ForEach-Object { $_.name }) -join '; ') / $($x.r.warnings -join ' | ')"
+# Titles typed without a space after the separator.
+$nospace = [ordered]@{}; $i = 0
+foreach ($p in $parts) { $i++; $nospace["Ticket Routing:Skills $i"] = (Get-Content $p.FullName | ForEach-Object { "<p>$([System.Net.WebUtility]::HtmlEncode($_))</p>" }) -join '' }
+$x = Invoke-Routing $body -Source ucp -SkillArticles $nospace
+Check 'ucp: "Ticket Routing:Skills 1" (no space) is found' ($x.r.status -eq 'success' -and $x.r.assignee.name -eq 'Patel, Riya') "$($x.r.status): $($x.r.message)"
+
+# Spreadsheet shapes partners paste: merged cells across and down, a line break and quotes inside a cell.
+$lib = "`$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; . ([scriptblock]::Create((Get-Content -Raw '$(Join-Path $here 'routing-table.ps1')')))"
+$merged = '<table><tr><th>Skill</th><th>Role</th><th>Engineer</th><th>Skill Description</th></tr>' +
+    '<tr><td rowspan="3">Network Firewall Fortinet</td><td rowspan="2">Tickets</td><td>Patel, Riya</td><td rowspan="3">FortiGate policy<br>and VPN</td></tr>' +
+    '<tr><td>Okafor, Chidi</td></tr><tr><td>Install</td><td>Okafor, Chidi</td></tr>' +
+    '<tr><td>Microsoft 365 Exchange Online</td><td>Tickets</td><td>Lee, Jordan</td><td>Mailboxes &amp; "shared" ones</td></tr></table>' +
+    '<table><tr><td>Engineer</td><td>Email</td><td>PSA User Id</td><td>PSA Role Id</td><td>Active</td><td>Max Open Tickets</td></tr>' +
+    '<tr><td>Lee, Jordan</td><td>jordan.lee@example.com</td><td>101</td><td></td><td rowspan="2">No</td><td>25</td></tr>' +
+    '<tr><td>Patel, Riya</td><td>riya.patel@example.com</td><td>102</td><td></td><td>20</td></tr></table>'
+$merged | Set-Content (Join-Path $tmp 'merged.html')
+$v = & pwsh -NoProfile -Command "$lib; `$s = Split-RoutingSections (ConvertFrom-ArticleBody (Get-Content -Raw '$(Join-Path $tmp 'merged.html')')); `$t = Read-RoutingTable @(`$s.Skills) @(`$s.Engineers) @(); @{ skills = @(`$t.Skills); engineers = @(`$t.Engineers) } | ConvertTo-Json -Depth 4 -Compress" 2>&1
+$mt = ($v -join '') | ConvertFrom-Json
+$ms = @($mt.skills)
+Check 'merged down (rowspan): the skill and role repeat on every row they cover' ($ms.Count -eq 4 -and @($ms | Where-Object { $_.Skill -eq 'Network Firewall Fortinet' }).Count -eq 3 -and @($ms | Where-Object { $_.Role -eq 'Tickets' -and $_.Engineer -eq 'Okafor, Chidi' }).Count -eq 1 -and @($ms | Where-Object { $_.Role -eq 'Install' -and $_.Engineer -eq 'Okafor, Chidi' }).Count -eq 1) ($v -join ' ')
+Check 'a line break inside a cell, and quotes and & in a cell, survive' (@($ms | Where-Object { $_.Description -eq 'FortiGate policy and VPN' }).Count -eq 3 -and @($ms | Where-Object { $_.Description -eq 'Mailboxes & "shared" ones' }).Count -eq 1) ($v -join ' ')
+$me = @($mt.engineers)
+Check 'merged down in the engineers table keeps later columns in place' ($me.Count -eq 2 -and $me[1].Active -eq $false -and $me[1].MaxOpen -eq '20' -and $me[1].PsaUserId -eq '102') ($v -join ' ')
+$v = & pwsh -NoProfile -Command "$lib; `$lines = @('Skill,Role,Engineer,Skill Description', 'Network Firewall Fortinet,Tickets,""Patel, Riya"",""FortiGate policy', 'and VPN""', 'Network Firewall Fortinet,Install,""Okafor, Chidi"",x'); @(Read-RoutingTable `$lines @() @()).Skills | ConvertTo-Json -Compress" 2>&1
+$ml = @(($v -join '') | ConvertFrom-Json)
+Check 'a CSV cell with a line break (Alt+Enter) stays one row' ($ml.Count -eq 2 -and $ml[0].Description -eq 'FortiGate policy and VPN' -and $ml[1].Role -eq 'Install') ($v -join ' ')
+$v = & pwsh -NoProfile -Command "$lib; @('Rivera , Sam', ' Lee,Jordan ', '#N/A') | ForEach-Object { ConvertTo-EngineerName `$_ } | ConvertTo-Json -Compress" 2>&1
+Check 'one engineer-name tidy-up for every table and the classifier' (($v -join '') -eq '["Rivera, Sam","Lee, Jordan",""]') ($v -join ' ')
+
 $kb = Join-Path $here '..\kb-articles'
 $v = & pwsh -NoProfile -Command "& '$validator' -ArticleHtmlPath '$(Join-Path $kb 'ticket-routing-engineers-and-settings.txt')','$(Join-Path $kb 'ticket-routing-skills.txt')' -Psa connectwise; exit `$LASTEXITCODE" 2>&1
 Check 'shipped KB article templates pass the validator' ($LASTEXITCODE -eq 0 -and ($v -join "`n") -match 'Engineers named: 3; engineers table: 3' -and ($v -join "`n") -match 'liveAssign=no') ($v -join ' / ')

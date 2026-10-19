@@ -8,7 +8,8 @@
 #  TableSource:
 #    'inline' (default)  use the three blocks below. No portal needed.
 #    'knowledge'         use Settings and Engineers below, but read the
-#                        skills from a CSV in AutomationAI Knowledge.
+#                        skills from AutomationAI Knowledge (one document
+#                        per skill: Test-RoutingTable.ps1 -ExportKnowledgeDir).
 #                        Ground the "Pick the skill" node on that folder.
 #    'ucp'               ignore all three and read the two CloudRadial KB
 #                        articles instead (UCP partners only).

@@ -72,7 +72,9 @@ try {
     # (KB articles have a size limit). They're read in number order and joined.
     # Subjects match with ':' or '-' after the first word group ("Ticket Routing - Skills 1" is "Ticket Routing: Skills 1"),
     # because the exported files can't have ':' in their names.
-    $normSubject = { param($x) (([string]$x).Trim() -replace '^(.+?)\s*[:\-–—]\s+', '$1: ' -replace '\s{2,}', ' ') }
+    # The separator is a colon (any spacing) or a dash with a space on at least one side, so "Sign-in" stays one word.
+    $dash = "[-$([char]0x2013)$([char]0x2014)]"
+    $normSubject = { param($x) (([string]$x).Trim() -replace "^(.+?)\s*(?::|\s$dash|$dash\s)\s*", '$1: ' -replace '\s{2,}', ' ') }
     function Get-Article { param([string]$Subject, [switch]$Parts)
         $want = & $normSubject $Subject
         $root = (($want -split ':')[0]).Trim() -replace "'", "''"
@@ -82,6 +84,14 @@ try {
         if ($Parts) {
             $list = @($list | Where-Object { (& $normSubject (Get-Prop $_ 'subject')) -match ('^' + [regex]::Escape($want) + '(\s+(\d+))?$') } |
                 Sort-Object { $m = [regex]::Match(([string](Get-Prop $_ 'subject')).Trim(), '\s(\d+)$'); if ($m.Success) { [int]$m.Groups[1].Value } else { 0 } })
+            # Once there are numbered parts, an unnumbered article with the same title is an old copy: skip it,
+            # or engineers removed from the new parts would still route through it.
+            $numbered = @($list | Where-Object { ([string](Get-Prop $_ 'subject')).Trim() -match '\s\d+$' })
+            if ($numbered.Count -and $numbered.Count -lt $list.Count) {
+                $old = @($list | Where-Object { $numbered -notcontains $_ } | ForEach-Object { "'$((Get-Prop $_ 'subject'))' ($(Get-Prop $_ 'articleId'))" })
+                $null = $warnings.Add("Skipped $($old -join ', '): there are numbered '$Subject <n>' articles, so the unnumbered one was treated as an old copy. Delete it if it is.")
+                $list = $numbered
+            }
         }
         if (-not $list.Count) { return $null }
         if (-not $Parts -and $list.Count -gt 1) { $null = $warnings.Add("$($list.Count) articles in company $companyId are titled '$Subject'. The first one was used."); $list = @($list[0]) }

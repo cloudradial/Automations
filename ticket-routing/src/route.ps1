@@ -33,7 +33,7 @@ try {
     $tieBreak = & $set 'tieBreak' 'least-open-tickets'
     $respectMax = (& $set 'respectMaxOpen' 'yes') -match '^(?i)yes$'
     $noMatch = & $set 'noMatch' 'leave-unassigned'
-    $fallbackName = ((& $set 'fallbackEngineer' '') -replace '\s+,', ',' -replace ',(?=\S)', ', ').Trim()
+    $fallbackName = ConvertTo-EngineerName (& $set 'fallbackEngineer' '')
     $minConf = [double]::Parse((& $set 'minConfidence' '0.7'), [System.Globalization.CultureInfo]::InvariantCulture)
     $out.tieBreak = $tieBreak
     $engineers = @(Get-Prop $table 'engineers' | Where-Object { $null -ne $_ })
@@ -51,9 +51,9 @@ try {
     # it found for its skill and role. Those become the rows; each name is still checked against the engineers table below.
     $useKnowledge = (Get-Prop $prep 'useKnowledge') -eq $true
     if ($useKnowledge) {
-        $tidy = { param($v) (([string]$v).Trim() -replace '\s+,', ',' -replace ',(?=\S)', ', ' -replace '\s{2,}', ' ') }
+        $tidy = { param($v) ConvertTo-EngineerName $v }
         $rows = @(@(Get-Prop $ai 'engineers') | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ s = $aiSkill; r = $aiRole; e = (& $tidy $_) } })
-        $null = $warnings.Add('Knowledge mode: the skill came from the AutomationAI Knowledge CSV, so it was not checked against a table here. Every engineer was checked against the engineers table.')
+        $null = $warnings.Add('Knowledge mode: the skill and its engineers came from AutomationAI Knowledge, so they were not checked against a skills table here. Every engineer was checked against the engineers table, not against the skill.')
     }
     # Only a skill that's in the table counts (case and spacing aside). The AI never invents one.
     $skill = @($rows | ForEach-Object { [string](Get-Prop $_ 's') } | Where-Object { $_.Trim() -ieq $aiSkill } | Select-Object -First 1)
@@ -67,7 +67,7 @@ try {
 
     $noMatchWhy = ''
     if (-not $aiSkill) { $noMatchWhy = 'the classifier found no skill in the table that fits this ticket' }
-    elseif (-not $skill -and $useKnowledge) { $noMatchWhy = "the classifier picked '$aiSkill' but listed no engineers for it from the Knowledge CSV" }
+    elseif (-not $skill -and $useKnowledge) { $noMatchWhy = "the classifier picked '$aiSkill' but listed no engineers for it from Knowledge" }
     elseif (-not $skill) { $noMatchWhy = "the classifier picked '$aiSkill', which isn't a skill in the routing table" }
     elseif ($conf -lt $minConf) { $noMatchWhy = "the classifier's confidence ($conf) is below minConfidence ($minConf)" }
 

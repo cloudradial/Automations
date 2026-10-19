@@ -32,7 +32,7 @@ Three steps. Only step 2 uses AI, and it can't call any tools.
    - A field the AI names that the template doesn't have is dropped.
    - Required Halo fields are always asked.
    - The question types always come from Halo, never from the AI.
-   - **Ticket routing uses CloudRadial's tokens by default** (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type), so Halo always accepts the ticket. With Halo's names on the form, Halo can reject the ticket, and the submitter still sees "submitted" (see CloudRadial's [Troubleshooting: Service Ticket Failures in HaloPSA](https://support.cloudradial.com/hc/en-us/articles/22172314482068-Troubleshooting-Service-Ticket-Failures-in-HaloPSA)). Each answer keeps its Halo field name as its `jsonId`, so an AutomationAI automation can apply the template's ticket type, team, priority and custom fields after the ticket exists. Set `psaValues: "halo"` to put Halo's names on the form instead.
+   - **Ticket routing uses CloudRadial's tokens by default** (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type), so Halo always accepts the ticket. With Halo's names on the form, Halo can reject the ticket, and the submitter still sees "submitted" (see CloudRadial's [Troubleshooting: Service Ticket Failures in HaloPSA](https://support.cloudradial.com/hc/en-us/articles/22172314482068-Troubleshooting-Service-Ticket-Failures-in-HaloPSA)). Each answer is linked to its Halo custom field (`customFieldName`, and `jsonId` for automations), so Halo receives the answers. **Every field Halo makes mandatory is on the form and required**, including fields hidden from end users that are mandatory on Halo's agent new-ticket screen. Otherwise Halo rejects the ticket, for example "First Name is mandatory". An AutomationAI automation can apply the template's ticket type and team after the ticket exists. Set `psaValues: "halo"` to put Halo's names on the form instead.
 
    Every form ends with an "Anything else we should know?" box, which becomes the ticket description.
    - **`confirm` false (the default):** nothing is created. The run lists the planned forms and their questions (`status: pending_confirmation`).
@@ -45,7 +45,8 @@ Three steps. Only step 2 uses AI, and it can't call any tools.
 | Template details | Form description (scripts and event handlers removed) |
 | Incident-style ticket type | Problem Report; anything else is a Service Request (or set `usage`) |
 | Ticket type, priority, `category_1`, team, status | By default, CloudRadial's tokens (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type and category). With `psaValues: "halo"`, Halo's own names. |
-| Custom field name (for example `CFcostCentre`) | The question's `jsonId`. It's also the question's `customFieldName` only with `psaValues: "halo"`. |
+| Custom field name (for example `CFcostCentre`) | The question's `customFieldName` and `jsonId` |
+| Field mandatory in Halo (on the end-user or agent new-ticket screen) | A required question, even when Halo hides the field from end users |
 | Text, memo, date, checkbox and number fields | Text, memo, date, checkbox and number questions |
 | Single and multiple choice fields | Dropdown and multi-select questions, with the Halo values as options |
 

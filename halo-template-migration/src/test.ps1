@@ -67,7 +67,8 @@ $TTypes = @{
             @{ id = 9004; rtid = 3; fieldid = 104; seq = 4; endusernew = 1; technew = 1 },
             @{ id = 9005; rtid = 3; fieldid = 1; seq = 5; endusernew = 1; technew = 1 },
             @{ id = 9006; rtid = 3; fieldid = 105; seq = 6; endusernew = 1; technew = 1 },
-            @{ id = 9007; rtid = 3; fieldid = 106; seq = 7; endusernew = 0; technew = 1 }) }
+            @{ id = 9007; rtid = 3; fieldid = 106; seq = 7; endusernew = 0; technew = 1 },
+            @{ id = 9008; rtid = 3; fieldid = 107; seq = 8; endusernew = 0; technew = 2 }) }
     # A field-group row (fieldid 0, groupid 14), as Halo sends it; the group lists the fields.
     '1' = @{ id = 1; name = 'Incident'; fields = @(
             @{ id = 9101; rtid = 1; fieldid = 0; groupid = 14; seq = 1; endusernew = 1; technew = 1 }) }
@@ -95,6 +96,7 @@ $TRouter = {
             '104' = @{ id = 104; name = 'CFAssetTag'; label = 'Asset tag'; type = 0 }
             '105' = @{ id = 105; name = 'CFMystery'; label = 'Mystery'; type = 77 }
             '106' = @{ id = 106; name = 'CFInternalCode'; label = 'Internal code'; type = 0 }
+            '107' = @{ id = 107; name = 'CFAddress'; label = 'Address'; type = 0 }
             '201' = @{ id = 201; name = 'CFPrinterLocation'; label = 'Printer location'; type = 0 }
             '202' = @{ id = 202; name = 'CFDept'; type = 2; values = @(@{ name = 'Finance' }, @{ name = 'Sales' }) }
         }
@@ -139,8 +141,8 @@ Check 'preview: inactive and already-moved templates skipped' ((Get-TRow $r.out 
 Check 'preview: the planned questions are named' ((Get-TRow $r.out 12).note -like '*Which licence?*First day*Anything else*') ((Get-TRow $r.out 12).note)
 $facts = $r.read.facts_json | ConvertFrom-Json
 $f12 = @($facts.forms | Where-Object { $_.key -eq 't12' })[0]; $f15 = @($facts.forms | Where-Object { $_.key -eq 't15' })[0]
-Check 'facts: custom fields only, the fixed and built-in ones left out' ((@($f12.fields | ForEach-Object { $_.id }) -join ',') -eq '101,102,104,105') (@($f12.fields | ForEach-Object { $_.id }) -join ',')
-Check 'facts: kinds mapped, unknown type becomes text with a warning' ((@($f12.fields | ForEach-Object { $_.kind }) -join ',') -eq 'date,choice,text,text' -and [bool](@($r.out.warnings) -match 'Mystery')) (@($f12.fields | ForEach-Object { $_.kind }) -join ',')
+Check 'facts: custom fields only, the fixed, built-in and hidden ones left out, a hidden mandatory one kept' ((@($f12.fields | ForEach-Object { $_.id }) -join ',') -eq '101,102,104,105,107' -and @($f12.fields | Where-Object { $_.id -eq '107' })[0].required -eq $true -and @($f12.fields | Where-Object { $_.id -eq '101' })[0].required -eq $true) (@($f12.fields | ForEach-Object { $_.id }) -join ',')
+Check 'facts: kinds mapped, unknown type becomes text with a warning' ((@($f12.fields | ForEach-Object { $_.kind }) -join ',') -eq 'date,choice,text,text,text' -and [bool](@($r.out.warnings) -match 'Mystery')) (@($f12.fields | ForEach-Object { $_.kind }) -join ',')
 Check 'facts: a comma inside an option becomes a space' ((@($f12.fields | Where-Object { $_.id -eq '102' })[0].options -join '|') -eq 'Business Basic|Business Premium annual') ''
 Check 'facts: list values read from /Field when the type has none' ((@($f15.fields | Where-Object { $_.id -eq '202' })[0].options -join '|') -eq 'Finance|Sales') ''
 Check 'facts: incident type becomes a problem report, details tags stripped' ($f15.kind -eq 'problem' -and $f12.kind -eq 'request' -and $f12.details -notlike '*<*' -and $f12.details -notlike '*alert*') "$($f15.kind) $($f12.details)"
@@ -151,16 +153,16 @@ $r = Invoke-Flow ($TBody + @{ confirm = $true }) $TAi
 Check 'live: success, two created' ($r.out.status -eq 'success' -and $r.out.counts.formsCreated -eq 2 -and $TH.posts.Count -eq 2 -and (Get-TRow $r.out 12).catalogId -eq 501) "$($r.r.error) $($r.out.message)"
 $b12 = @($TH.posts | Where-Object { $_.subject -eq 'New starter setup' })[0]; $b15 = @($TH.posts | Where-Object { $_.subject -eq 'Printer not working' })[0]
 Check 'live: request form with CloudRadial tokens (the default) and the marker tag' ($b12.companyId -eq 1 -and $b12.catalogUsage -eq 10 -and $b12.psaType -eq '' -and $b12.psaPriority -eq '@DefaultPriority' -and $b12.psaBoard -eq '@DefaultBoard' -and $b12.psaCategory -eq '' -and $b12.psaStatus -eq '@DefaultStatus' -and $b12.tags[0].tag -eq 'halo-template:12' -and $b12.category -eq 'Service Request') ($b12 | ConvertTo-Json -Depth 3 -Compress)
-Check 'live: questions in the AI order with Halo types and options' ((@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';') -eq 'Which licence?/130/False;First day/40/True;Anything else we should know?/10/False' -and $b12.questions[0].options -eq 'Business Basic,Business Premium annual' -and $b12.questions[1].customFieldName -eq '' -and $b12.questions[1].jsonId -eq 'CFStartDate' -and $b12.questions[2].isDescription -eq $true) (@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';')
+Check 'live: questions in the AI order with Halo types and options' ((@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';') -eq 'Which licence?/130/False;First day/40/True;Address/0/True;Anything else we should know?/10/False' -and $b12.questions[0].options -eq 'Business Basic,Business Premium annual' -and $b12.questions[1].customFieldName -eq 'CFStartDate' -and $b12.questions[1].jsonId -eq 'CFStartDate' -and $b12.questions[3].isDescription -eq $true) (@($b12.questions | ForEach-Object { "$($_.label)/$($_.type)/$($_.isRequired)" }) -join ';')
 Check 'live: invented field dropped with a warning' ([bool](@($r.out.warnings) -match 'field 999')) ''
 Check 'live: template HTML kept without script or handlers' ($b12.description -like '*Set up a new starter.*' -and $b12.description -notmatch '(?i)<script|onclick|javascript:') ($b12.description)
 Check 'live: problem report, tokens' ($b15.catalogUsage -eq 0 -and $b15.selectText -eq 'REPORT' -and $b15.psaPriority -eq '@DefaultPriority' -and $b15.psaBoard -eq '@DefaultBoard' -and $b15.psaStatus -eq '@DefaultStatus' -and $b15.description -like '*Report a printer fault.*' -and @($b15.questions).Count -eq 2) ($b15 | ConvertTo-Json -Depth 3 -Compress)
 Check 'live: never writes to Halo' (-not (Get-THaloWrites).Count) (Show-Calls)
-# Form 501 is the first one created. Its questions are 50101 (Which licence?), 50102 (First day), 50103 (free text).
-$TOpsLicence = Get-TOps '50101'; $TOpsDay = Get-TOps '50102'; $TOpsLast = Get-TOps '50103'
-Check 'live: options and jsonId set after the create, no customFieldName with tokens' ($TOpsLicence['/options'] -eq 'Business Basic,Business Premium annual' -and -not $TOpsLicence.ContainsKey('/customFieldName') -and $TOpsLicence['/jsonId'] -eq 'CFLicence') ($TOpsLicence | ConvertTo-Json -Compress)
+# Form 501 is the first one created. Its questions are 50101 (Which licence?), 50102 (First day), 50103 (Address), 50104 (free text).
+$TOpsLicence = Get-TOps '50101'; $TOpsDay = Get-TOps '50102'; $TOpsAddress = Get-TOps '50103'; $TOpsLast = Get-TOps '50104'
+Check 'live: options, jsonId and customFieldName set after the create (also with tokens)' ($TOpsLicence['/options'] -eq 'Business Basic,Business Premium annual' -and $TOpsLicence['/customFieldName'] -eq 'CFLicence' -and $TOpsLicence['/jsonId'] -eq 'CFLicence' -and $TOpsAddress['/isRequired'] -eq $true -and $TOpsAddress['/customFieldName'] -eq 'CFAddress') ($TOpsLicence | ConvertTo-Json -Compress)
 Check 'live: required, hint and description flag set after the create' ($TOpsDay['/isRequired'] -eq $true -and $TOpsDay['/info'] -eq 'Their first working day.' -and $TOpsLast['/isDescription'] -eq $true) "$($TOpsDay | ConvertTo-Json -Compress) $($TOpsLast | ConvertTo-Json -Compress)"
-Check 'live: question count read from the wrapped reply' ((Get-TRow $r.out 12).action -eq 'created' -and $r.out.counts.questionsCreated -eq 5) "$($r.out.counts | ConvertTo-Json -Compress)"
+Check 'live: question count read from the wrapped reply' ((Get-TRow $r.out 12).action -eq 'created' -and $r.out.counts.questionsCreated -eq 6) "$($r.out.counts | ConvertTo-Json -Compress)"
 
 # 2c. psaValues halo: Halo's own names and the custom-field link, as before.
 Reset-T
@@ -181,7 +183,7 @@ Check 'patch fails: form incomplete, names the question' ($r.out.status -eq 'inc
 Reset-T
 $r = Invoke-Flow ($TBody + @{ confirm = $true; templateIds = @(12) }) 'Sorry, I cannot help with that.'
 $b = $TH.posts[0]
-Check 'no AI: Halo labels, every custom field asked' ($r.out.status -eq 'success' -and (@($b.questions | ForEach-Object { $_.label }) -join ';') -eq 'Start date;Licence;Asset tag;Mystery;Anything else we should know?' -and $b.shortDescription -eq 'New starter for Contoso' -and [bool](@($r.out.warnings) -match 'no usable answer')) "$($r.r.error) $(@($b.questions | ForEach-Object { $_.label }) -join ';')"
+Check 'no AI: Halo labels, every custom field asked' ($r.out.status -eq 'success' -and (@($b.questions | ForEach-Object { $_.label }) -join ';') -eq 'Start date;Licence;Asset tag;Mystery;Address;Anything else we should know?' -and $b.shortDescription -eq 'New starter for Contoso' -and [bool](@($r.out.warnings) -match 'no usable answer')) "$($r.r.error) $(@($b.questions | ForEach-Object { $_.label }) -join ';')"
 
 # 4. Rerun: everything already moved, nothing written.
 Reset-T

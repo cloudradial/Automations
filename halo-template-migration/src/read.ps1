@@ -286,21 +286,27 @@ foreach ($b in $batch) {
         $rowFid = [string](Get-First $tf @('fieldid', 'field_id')); $gid = [string](Get-Prop $tf 'groupid')
         if ((-not $rowFid -or $rowFid -eq '0') -and $gid -and $gid -ne '0') {
             $gf = @(Get-HaloGroupFields $gid)
-            foreach ($x in $gf) { $null = $expanded.Add(@{ row = $x; eu = (Get-Prop $tf 'endusernew') }) }
+            foreach ($x in $gf) { $null = $expanded.Add(@{ row = $x; eu = (Get-Prop $tf 'endusernew'); tn = (Get-Prop $tf 'technew') }) }
             if (-not $gf.Count) { $null = $seenNames.Add("field group $gid (no fields read)") }
         }
-        else { $null = $expanded.Add(@{ row = $tf; eu = $null }) }
+        else { $null = $expanded.Add(@{ row = $tf; eu = $null; tn = $null }) }
     }
+    # A field Halo makes mandatory must be on the form and answered, or Halo rejects the ticket (verified 2026-10-19:
+    # "First Name is mandatory ... Address is mandatory"). Mandatory on the agent's new-ticket screen (technew) counts
+    # even when the field is hidden from end users. Unverified: 2 is read as mandatory for technew and endusernew.
+    $mandatory = New-Object System.Collections.ArrayList
     foreach ($ex in $expanded) {
         $tf = $ex.row
         if ($fields.Count -ge 30) { $null = $warnings.Add("Template '$($b.name)': only the first 30 fields were offered as questions."); break }
         $fid = [string](Get-First $tf @('fieldid', 'field_id')); if (-not $fid -or $fid -eq '0') { $fid = [string](Get-First $tf @('id')) }
         $eu = Get-Prop $tf 'endusernew'; if ($null -eq $eu) { $eu = $ex.eu }
         $euText = ([string]$eu).ToLowerInvariant()
+        $tn = Get-Prop $tf 'technew'; if ($null -eq $tn) { $tn = $ex.tn }
+        $isMandatory = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '2' -or ([string]$tn) -eq '2')
         $inner = Get-Prop $tf 'field'
         $fname = [string](Get-First $tf @('name', 'fieldname'))
         if (-not $fname -and $null -ne $inner) { $fname = [string](Get-First $inner @('name')) }
-        if ($null -ne $eu -and @('0', 'false') -contains $euText) { $null = $seenNames.Add("$(if ($fname) { $fname } else { "field $fid" }) (hidden from end users)"); continue }
+        if (-not $isMandatory -and $null -ne $eu -and @('0', 'false') -contains $euText) { $null = $seenNames.Add("$(if ($fname) { $fname } else { "field $fid" }) (hidden from end users)"); continue }
         $def = $inner
         if (-not $fname -and $fid) { $def = Get-HaloField $fid; if ($null -ne $def) { $fname = [string](Get-First $def @('name', 'fieldname')) } }
         $null = $seenNames.Add($(if ($fname) { $fname } else { "field $fid (no name)" }))
@@ -315,8 +321,10 @@ foreach ($b in $batch) {
         if (-not $kind) { $kind = 'text'; $null = $warnings.Add("Template '$($b.name)': field '$fname' has a type this workflow doesn't know, so it became a text question.") }
         if (($kind -eq 'choice' -or $kind -eq 'multi') -and -not $opts.Count) { $kind = 'text'; $null = $warnings.Add("Template '$($b.name)': field '$fname' is a list with no values, so it became a text question.") }
         $label = [string](Get-First $tf @('label', 'display_name', 'displayname')); if (-not $label -and $null -ne $def) { $label = [string](Get-First $def @('label', 'display_name')) }; if (-not $label) { $label = $fname }
-        $null = $fields.Add([ordered]@{ id = $fid; name = $fname; label = $label.Trim(); kind = $kind; options = @($opts); required = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '2') })
+        $null = $fields.Add([ordered]@{ id = $fid; name = $fname; label = $label.Trim(); kind = $kind; options = @($opts); required = $isMandatory })
+        if ($isMandatory) { $null = $mandatory.Add($label.Trim()) }
     }
+    if ($mandatory.Count) { $null = $actions.Add("Template '$($b.name)': Halo requires $($mandatory -join ', '), so those questions are required on the form.") }
 
     if (-not $fields.Count) {
         # Say why there are no questions, naming what Halo sent, so a field-name mismatch is easy to spot.

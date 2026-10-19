@@ -2,16 +2,16 @@
 
 Tickets left in Resolved for 3 days get a short final notice to the client and are closed with an internal note, so the board only shows work that is really open.
 
-**Formerly:** Auto-Close Resolved (tracker 10.5) | **Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
+**Formerly:** Auto-Close Resolved (tracker 10.5) | **Marketplace ID:** AAI-00063 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/auto-close-resolved/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `auto-close-resolved.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/auto-close-resolved/auto-close-resolved.yml) |
-| Download `auto-close-resolved.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/auto-close-resolved/auto-close-resolved.yml) |
+| Download `auto-close-resolved.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/auto-close-resolved/v1.0.0) |
 | All files in this automation | [auto-close-resolved](https://github.com/cloudradial/Automations/tree/main/auto-close-resolved) |
 | Build source (`src/`) | [auto-close-resolved/src](https://github.com/cloudradial/Automations/tree/main/auto-close-resolved/src) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/auto-close-resolved) |
@@ -38,7 +38,7 @@ It only ever touches tickets whose status is exactly the resolved status, and it
 
 ## Download & import
 
-**Download the workflow:** [`auto-close-resolved.yml`](https://raw.githubusercontent.com/cloudradial/Automations/main/auto-close-resolved/auto-close-resolved.yml)
+**Download the workflow:** [`auto-close-resolved.yml`](https://github.com/cloudradial/Automations/releases/tag/auto-close-resolved/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), **Publish**, **Deploy** to the runner that holds the secrets, and attach a daily **Routine** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

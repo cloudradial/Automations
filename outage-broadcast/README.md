@@ -2,16 +2,16 @@
 
 When a service goes down, a technician tells ServiceAI what is down and what to say, and every affected client's portal shows the notice, with an optional email to each primary contact and a full record on the problem ticket.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI)
+**Marketplace ID:** AAI-00061 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `outage-broadcast.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0).
 
 | What | Link |
 |---|---|
-| View `outage-broadcast.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/outage-broadcast/outage-broadcast.yml) |
-| Download `outage-broadcast.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/outage-broadcast/outage-broadcast.yml) |
+| Download `outage-broadcast.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0) |
+| View the current source | [`outage-broadcast.yml`](https://github.com/cloudradial/Automations/blob/main/outage-broadcast/outage-broadcast.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/outage-broadcast/src) |
 | All files in this automation | [outage-broadcast](https://github.com/cloudradial/Automations/tree/main/outage-broadcast) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/outage-broadcast) |
@@ -41,7 +41,7 @@ Three PowerShell steps, no AI. It previews by default and changes nothing until 
 
 ## Download & import
 
-**Download the workflow:** [`outage-broadcast.yml`](https://github.com/cloudradial/Automations/blob/main/outage-broadcast/outage-broadcast.yml)
+**Download the workflow:** [`outage-broadcast.yml`](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the MSP's runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

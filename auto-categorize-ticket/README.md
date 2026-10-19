@@ -2,15 +2,15 @@
 
 New tickets arrive with their type and subtype already filled in from your PSA's own list, so they reach the right people and reports without a dispatcher sorting them by hand, and nothing a technician set is ever overwritten.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00057 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
 ## Files
 
-Each version is published as a release, with `auto-categorize-ticket.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=auto-categorize-ticket&expanded=true).
+Each version is published as a release, with `auto-categorize-ticket.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/auto-categorize-ticket/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `auto-categorize-ticket.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=auto-categorize-ticket&expanded=true) |
+| Download `auto-categorize-ticket.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/auto-categorize-ticket/v1.0.0) |
 | View the current source | [`auto-categorize-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/auto-categorize-ticket/auto-categorize-ticket.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/auto-categorize-ticket/src) |
 | All files in this automation | [auto-categorize-ticket](https://github.com/cloudradial/Automations/tree/main/auto-categorize-ticket) |
@@ -52,7 +52,7 @@ ServiceAI triage can already set a ticket's type and category. Use this workflow
 
 ## Download & import
 
-**Download the workflow:** [`auto-categorize-ticket.yml`](https://github.com/cloudradial/Automations/releases?q=auto-categorize-ticket&expanded=true)
+**Download the workflow:** [`auto-categorize-ticket.yml`](https://github.com/cloudradial/Automations/releases/tag/auto-categorize-ticket/v1.0.0)
 
 Then in AutomationAI:
 1. **Workflows → Import**, and upload the `.yml`.

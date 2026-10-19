@@ -35,7 +35,7 @@ const prepareScript = preamble('Read the request, routing table and ticket', [
 
 const routeScript = preamble('Find, pick, assign and note', [
   'Writes to the PSA only when confirm is true: sets the assignee, then adds an internal note.',
-]) + read('psa.ps1') + '\n# ---------- this step ----------\n' + read('route.ps1');
+]) + read('routing-table.ps1') + '\n' + read('psa.ps1') + '\n# ---------- this step ----------\n' + read('route.ps1');
 
 const wf = {
   automationsWorkflow: 1,

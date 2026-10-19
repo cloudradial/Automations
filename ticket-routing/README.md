@@ -54,7 +54,7 @@ Set `$TableSource` at the top of the **Routing table (edit me)** step:
 | `TableSource` | Settings and engineers | Skills | Use it when |
 |---|---|---|---|
 | `inline` (default) | In the step | In the step | Any partner. Exact matching on every row; a table change means editing the step and redeploying. |
-| `knowledge` | In the step | A CSV in AutomationAI **Knowledge**. Ground the **Pick the skill** node on that folder. | Your skills table changes often and you'd rather upload a file. The agent reads the CSV and lists the engineers for its pick; each name is still checked against the engineers in the step, so nobody outside that table is assigned. **Not yet proven live:** it depends on the agent getting every row for the skill from Knowledge search. |
+| `knowledge` | In the step | AutomationAI **Knowledge**, one document per skill (`Test-RoutingTable.ps1 -ExportKnowledgeDir` writes them). Ground the **Pick the skill** node on that folder. | Your skills table changes often and you'd rather upload files. The agent reads the skill's document and lists its engineers. Each name is still checked against the engineers in the step, so nobody outside that table is assigned. The skill itself isn't checked: an engineer the agent lists wrongly, who is in the engineers table, can be picked. **Not yet proven live:** it depends on the agent getting every row for the skill from Knowledge search. |
 | `ucp` | Two CloudRadial KB articles | The same articles | You're a CloudRadial UCP partner and want the table in your portal. Needs the `CloudRadial-*` and `Routing-CompanyId` secrets. |
 
 Workflow scripts can't read AutomationAI Knowledge, which is why the engineers and settings stay in the step in `knowledge` mode.
@@ -189,7 +189,7 @@ Plus:
 - Until `liveAssign` is `yes` (or the body sends `confirm` true) it writes nothing: no assignment and no note.
 - It never reassigns a ticket that already has an assignee unless `reassign` is true.
 - It never assigns anyone who isn't in the engineers table, is marked inactive, or (with `respectMaxOpen`) is at their limit.
-- It never trusts an invented skill. With `inline` or `ucp`, an AI answer that isn't in the table counts as no match. With `knowledge` the skill can't be checked against a table here, so the run says so in its warnings, and every engineer the agent lists must still be in the engineers table.
+- It never trusts an invented skill. With `inline` or `ucp`, an AI answer that isn't in the table counts as no match. With `knowledge` the skill and the engineers listed for it can't be checked against a skills table, so the run says so in its warnings. Every engineer the agent lists must still be in the engineers table, but nothing checks that they have the skill.
 - If the routing table fails its checks, nothing happens, and `internal_note` lists the errors.
 - If the assignment fails, no note is written and the run returns `error`.
 - The classifier's Agent node lists one extension (`cloudradial-v2-companies`) even though it calls no tools. Don't empty that list: an empty list gives the agent every installed extension, and with more than 128 tools the model call fails. The node also ships with `autoApprove` off, so if the classifier ever tries a tool call, it waits for approval in the Inbox instead of running.

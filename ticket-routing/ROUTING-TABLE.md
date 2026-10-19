@@ -39,7 +39,7 @@ If the AI isn't confident enough, or no engineer matches, the **noMatch** settin
 
 | Column | Required | What to put in it |
 |---|---|---|
-| Engineer | Yes | Exactly as in the skills table. Extra spaces around the comma are tidied, so `Hildebrand , Caleb` matches `Hildebrand, Caleb`. |
+| Engineer | Yes | Exactly as in the skills table. Extra spaces around the comma are tidied, so `Rivera , Sam` matches `Rivera, Sam`. |
 | Email | Recommended | Shown in the run output. |
 | PSA User Id | Yes | The engineer's id in your PSA. See the table below. |
 | PSA Role Id | Autotask only | Autotask assigns a resource and a role together, and rejects a resource sent on its own. |
@@ -82,7 +82,7 @@ Put these one per line in the step's `$Settings` block (or, for `ucp`, at the to
 | `TableSource` | Settings | Engineers | Skills |
 |---|---|---|---|
 | `inline` (default) | `$Settings` block | `$Engineers` block | `$Skills` block |
-| `knowledge` | `$Settings` block | `$Engineers` block | A CSV in AutomationAI Knowledge |
+| `knowledge` | `$Settings` block | `$Engineers` block | AutomationAI Knowledge, one document per skill |
 | `ucp` | Engineers article | Engineers article | Skills article |
 
 ### inline (default): paste it into the step

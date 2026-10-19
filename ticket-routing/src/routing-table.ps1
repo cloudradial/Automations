@@ -1,28 +1,80 @@
 # ---------- routing table: parse and check (shared by the workflow and Test-RoutingTable.ps1) ----------
 
+# Plain text from a fragment of HTML: tags stripped, entities decoded, smart quotes and
+# non-breaking spaces made plain (smart quotes from the editor break CSV quoting).
+function ConvertTo-PlainText {
+    param([string]$Html)
+    $t = [System.Net.WebUtility]::HtmlDecode(($Html -replace '<[^>]+>', ''))
+    $t = $t -replace [char]0x00A0, ' ' -replace [char]0xFEFF, ''
+    return ($t -replace "[$([char]0x201C)$([char]0x201D)]", '"' -replace "[$([char]0x2018)$([char]0x2019)]", "'")
+}
+
+# One HTML table as CSV lines. Cells merged across (colspan) or down (rowspan), as Excel pastes
+# merged cells, are filled in so every row keeps its columns: a merged Skill cell repeats on
+# each row it covers. A line break inside a cell becomes a space. Every field is quoted, with
+# its own quotes doubled.
+function ConvertFrom-HtmlTable {
+    param([string]$TableHtml)
+    $lines = @()
+    $carry = @{}   # column -> @{ Text; Left } for cells still spanning down
+    foreach ($tr in [regex]::Matches($TableHtml, '(?is)<tr\b[^>]*>(.*?)</tr>')) {
+        $cells = @(); $col = 0
+        foreach ($td in [regex]::Matches($tr.Groups[1].Value, '(?is)<t[dh]\b([^>]*)>(.*?)</t[dh]>')) {
+            while ($carry.ContainsKey($col)) { $cells += $carry[$col].Text; $carry[$col].Left--; if ($carry[$col].Left -le 0) { $carry.Remove($col) }; $col++ }
+            $attrs = $td.Groups[1].Value
+            $text = (ConvertTo-PlainText ($td.Groups[2].Value -replace '(?i)<br\s*/?>|</(p|div|li)>', ' ')) -replace '\s+', ' '
+            $text = $text.Trim()
+            $across = 1; if ($attrs -match '(?i)\bcolspan\s*=\s*"?(\d+)') { $across = [Math]::Max(1, [int]$Matches[1]) }
+            $down = 1; if ($attrs -match '(?i)\browspan\s*=\s*"?(\d+)') { $down = [Math]::Max(1, [int]$Matches[1]) }
+            for ($k = 0; $k -lt $across; $k++) {
+                # Merged across: Excel puts the text in the first column and leaves the rest blank.
+                $v = if ($k -eq 0) { $text } else { '' }
+                $cells += $v
+                if ($down -gt 1) { $carry[$col] = @{ Text = $v; Left = $down - 1 } }
+                $col++
+            }
+        }
+        while ($carry.ContainsKey($col)) { $cells += $carry[$col].Text; $carry[$col].Left--; if ($carry[$col].Left -le 0) { $carry.Remove($col) }; $col++ }
+        if (@($cells | Where-Object { $_ -ne '' }).Count) { $lines += (@($cells | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ',') }
+    }
+    return $lines
+}
+
 # Turns a KB article body into plain text lines. Handles text pasted as
 # paragraphs, line breaks, a code block, or an HTML table.
 function ConvertFrom-ArticleBody {
     param([string]$Html)
     $t = $Html -replace '\r', ''
-    # A cell pasted from Excel can span blank neighbours (colspan="3"): count it as that many columns.
-    $t = [regex]::Replace($t, '(?is)<t([dh])([^>]*)\bcolspan\s*=\s*"?(\d+)"?([^>]*)>(.*?)</t[dh]>', [System.Text.RegularExpressions.MatchEvaluator]{
-        param($m) "<t$($m.Groups[1].Value)$($m.Groups[2].Value)$($m.Groups[4].Value)>$($m.Groups[5].Value)</t$($m.Groups[1].Value)>" + ('<td></td>' * ([Math]::Max(1, [int]$m.Groups[3].Value) - 1)) })
-    # A line break or paragraph inside a cell (an empty pasted cell holds <br>) must not split the row.
-    $t = [regex]::Replace($t, '(?is)(<t[dh][^>]*>)(.*?)(</t[dh]>)', [System.Text.RegularExpressions.MatchEvaluator]{
-        param($m) $m.Groups[1].Value + (($m.Groups[2].Value -replace '(?i)<br\s*/?>|</(p|div)>', ' ').Trim()) + $m.Groups[3].Value })
+    # Tables first, so merged cells and line breaks inside cells are handled per cell.
+    # The CSV lines are HTML-encoded here and decoded with the rest of the text below.
+    $t = [regex]::Replace($t, '(?is)<table\b.*?</table>', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m) "`n" + ((@(ConvertFrom-HtmlTable $m.Value) | ForEach-Object { [System.Net.WebUtility]::HtmlEncode($_) }) -join "`n") + "`n" })
     $t = $t -replace '(?i)<br\s*/?>', "`n"
-    $t = $t -replace '(?i)</(p|div|tr|li|h[1-6]|pre)>', "`n"
-    # Table cells become quoted CSV fields so commas inside a cell survive.
-    $t = $t -replace '(?is)<t[dh][^>]*>(.*?)</t[dh]>', '"$1",'
-    $t = $t -replace '<[^>]+>', ''
-    $t = [System.Net.WebUtility]::HtmlDecode($t)
-    $t = $t -replace [char]0x00A0, ' ' -replace [char]0xFEFF, ''
-    # Smart quotes from the editor break CSV quoting.
-    $t = $t -replace "[$([char]0x201C)$([char]0x201D)]", '"' -replace "[$([char]0x2018)$([char]0x2019)]", "'"
-    # A table row ends with the trailing comma added above; drop it.
-    $t = $t -replace '(?m)",\s*$', '"'
+    $t = $t -replace '(?i)</(p|div|li|h[1-6]|pre)>', "`n"
+    $t = ConvertTo-PlainText $t
     return @($t -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+}
+
+# CSV lines put back together where a quoted field held a line break (Alt+Enter in an Excel
+# cell), so ConvertFrom-Csv sees one record per row. A record is complete when its quotes balance.
+function Join-CsvRecords {
+    param([string[]]$Lines)
+    $out = @(); $buf = $null
+    foreach ($l in @($Lines)) {
+        $buf = if ($null -eq $buf) { $l } else { "$buf $l" }
+        if ((([regex]::Matches($buf, '"')).Count % 2) -eq 0) { $out += $buf; $buf = $null }
+    }
+    if ($null -ne $buf) { $out += $buf }
+    return $out
+}
+
+# Engineer names are matched across the tables and the classifier's answer, so tidy them one way
+# everywhere: "Rivera , Sam" -> "Rivera, Sam"; "#N/A" (an Excel lookup miss) counts as empty.
+function ConvertTo-EngineerName {
+    param($Value)
+    $x = ([string]$Value).Trim()
+    if ($x -eq '#N/A') { return '' }
+    return ($x -replace '\s+,', ',' -replace ',(?=\S)', ', ' -replace '\s{2,}', ' ')
 }
 
 # Splits lines into [Settings], [Engineers] and [Skills] sections. Lines before
@@ -85,11 +137,10 @@ function ConvertFrom-SkillBlocks {
 function Read-RoutingTable {
     param([string[]]$SkillLines, [string[]]$EngineerLines, [string[]]$SettingLines)
     $blockRows = @(ConvertFrom-SkillBlocks @(@($SkillLines) | Where-Object { Test-SkillBlockLine $_ }))
-    $SkillLines = @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill')
-    $EngineerLines = @(Select-FromHeader @($EngineerLines) 'Engineer')
+    $SkillLines = @(Join-CsvRecords @(Select-FromHeader @(@($SkillLines) | Where-Object { -not (Test-SkillBlockLine $_) }) 'Skill'))
+    $EngineerLines = @(Join-CsvRecords @(Select-FromHeader @($EngineerLines) 'Engineer'))
     $clean = { param($v) $x = ([string]$v).Trim(); if ($x -eq '#N/A') { '' } else { $x } }
-    # Names are matched across the two tables, so tidy spacing: "Hildebrand , Caleb" -> "Hildebrand, Caleb".
-    $name = { param($v) ((& $clean $v) -replace '\s+,', ',' -replace ',(?=\S)', ', ' -replace '\s{2,}', ' ') }
+    $name = { param($v) ConvertTo-EngineerName $v }
     $col = { param($r, $n) if ($r.PSObject.Properties[$n]) { & $clean $r.$n } else { '' } }
     $skills = @()
     if ($SkillLines.Count) {
@@ -148,7 +199,7 @@ function Test-RoutingData {
     if (@('leave-unassigned', 'assign-fallback', 'recommend-only') -notcontains $s.noMatch) { $errors += "noMatch '$($s.noMatch)' isn't one of: leave-unassigned, assign-fallback, recommend-only." }
     if ($s.noMatch -eq 'assign-fallback') {
         if (-not $s.fallbackEngineer) { $errors += 'noMatch is assign-fallback but fallbackEngineer is empty.' }
-        elseif ($t.Engineers.Count -and @($t.Engineers | ForEach-Object { $_.Engineer }) -notcontains (($s.fallbackEngineer -replace '\s+,', ',' -replace ',(?=\S)', ', ').Trim())) { $errors += "fallbackEngineer '$($s.fallbackEngineer)' isn't in the engineers table." }
+        elseif ($t.Engineers.Count -and @($t.Engineers | ForEach-Object { $_.Engineer }) -notcontains (ConvertTo-EngineerName $s.fallbackEngineer)) { $errors += "fallbackEngineer '$($s.fallbackEngineer)' isn't in the engineers table." }
     }
     if ($s.respectMaxOpen -notmatch '^(?i)(yes|no)$') { $errors += 'respectMaxOpen must be yes or no.' }
     if ($s.liveAssign -notmatch '^(?i)(yes|no)$') { $errors += 'liveAssign must be yes or no.' }

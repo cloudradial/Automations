@@ -48,5 +48,13 @@ Check 'Action: no user.email -> no submitter, even if an answer names one (the o
 $r = Invoke-Parse (New-TPortal @{ userPrincipalName = $null })
 Check 'Action: no target -> incomplete, ticket kept for the note' ($r.out.status -eq 'incomplete' -and $r.out.ticket_id -eq '104901' -and $r.error -like '*userPrincipalName*') "$($r.out | ConvertTo-Json -Compress) / $($r.error)"
 
+# Who posts the notes: Finish does for an Action, and for a webhook body only when it asks (postNotes true).
+$r = Invoke-Parse (New-TPortal @{ postNotes = 'false' })
+Check 'Action: postNotes is always on, and a postNotes answer cannot turn it off' ($r.out.postNotes -eq $true) ($r.out | ConvertTo-Json -Compress)
+$r = Invoke-Parse ([ordered]@{ userPrincipalName = 'megan.bowen@contoso.com'; submittedByUpn = 'megan.bowen@contoso.com'; ticketId = '1001' })
+Check 'webhook body: postNotes off by default (the caller posts the returned notes)' ($r.out.postNotes -eq $false) ($r.out | ConvertTo-Json -Compress)
+$r = Invoke-Parse ([ordered]@{ userPrincipalName = 'megan.bowen@contoso.com'; submittedByUpn = 'megan.bowen@contoso.com'; ticketId = '1001'; postNotes = 'true' })
+Check 'webhook body: postNotes true turns it on' ($r.out.postNotes -eq $true) ($r.out | ConvertTo-Json -Compress)
+
 Write-Host "$pass passed, $fail failed"
 if ($fail) { exit 1 }

@@ -2,16 +2,16 @@
 
 Every 15 minutes, tickets nobody has touched for too long, or whose SLA is about to run out, get an internal note saying why, move up one tier, and the dispatcher gets an email. A ticket is escalated once and never bounced around, even when a run is retried. Users can also [escalate their own ticket](#let-users-escalate-their-own-ticket) from a portal form.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI), run every 15 minutes by a Routine
+**Marketplace ID:** AAI-00062 | **Type:** Workflow (PowerShell steps, no AI), run every 15 minutes by a Routine | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/auto-escalation/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `auto-escalation.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/auto-escalation/auto-escalation.yml) |
-| Download `auto-escalation.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/auto-escalation/auto-escalation.yml) |
+| Download `auto-escalation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/auto-escalation/v1.0.0) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/auto-escalation/src) |
 | Shared PSA and Postmark code | [`_shared/psa.ps1`, `psa-tickets.ps1` and `postmark.ps1`](https://github.com/cloudradial/Automations/tree/main/_shared) |
 | All files in this automation | [auto-escalation](https://github.com/cloudradial/Automations/tree/main/auto-escalation) |
@@ -91,7 +91,7 @@ A CloudRadial service-request form lets a user enter their **Ticket #** and a **
 
 ## Download & import
 
-**Download the workflow:** [`auto-escalation.yml`](https://github.com/cloudradial/Automations/blob/main/auto-escalation/auto-escalation.yml)
+**Download the workflow:** [`auto-escalation.yml`](https://github.com/cloudradial/Automations/releases/tag/auto-escalation/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, **Publish**, **Deploy**, run a preview, then attach a **Routine** every 15 minutes. Full steps are under [Import & test](#import--test).
 

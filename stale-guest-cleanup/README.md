@@ -2,17 +2,17 @@
 
 Every month, list the client's Microsoft 365 accounts and guests that haven't signed in for 90 days, and disable only the ones you approve.
 
-**Marketplace ID:** TBD | **Type:** Workflow (run monthly by a Routine, or by hand)
+**Marketplace ID:** AAI-00064 | **Type:** Workflow (run monthly by a Routine, or by hand) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `stale-guest-cleanup.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0).
 
 | What | Link |
 |---|---|
-| View `stale-guest-cleanup.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/stale-guest-cleanup/stale-guest-cleanup.yml) |
-| Download `stale-guest-cleanup.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/stale-guest-cleanup/stale-guest-cleanup.yml) |
-| Step source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/stale-guest-cleanup/src) |
+| Download `stale-guest-cleanup.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0) |
+| View the current source | [`stale-guest-cleanup.yml`](https://github.com/cloudradial/Automations/blob/main/stale-guest-cleanup/stale-guest-cleanup.yml) |
+| Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/stale-guest-cleanup/src) |
 | All files in this automation | [stale-guest-cleanup](https://github.com/cloudradial/Automations/tree/main/stale-guest-cleanup) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/stale-guest-cleanup) |
 
@@ -38,7 +38,7 @@ If the report or note can't be written, the run still finishes, says so in `warn
 
 ## Download & import
 
-**Download the workflow:** [`stale-guest-cleanup.yml`](https://github.com/cloudradial/Automations/blob/main/stale-guest-cleanup/stale-guest-cleanup.yml)
+**Download the workflow:** [`stale-guest-cleanup.yml`](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds that client's secrets. **Attach a monthly Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

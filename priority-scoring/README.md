@@ -2,15 +2,15 @@
 
 Outages, security incidents and tickets that block many people are raised to the right priority as soon as they arrive, with the reasoning on the ticket, while a possible P1 goes to a dispatcher to decide and no priority a technician set is ever lowered.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00058 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 
 ## Files
 
-Each version is published as a release, with `priority-scoring.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=priority-scoring&expanded=true).
+Each version is published as a release, with `priority-scoring.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/priority-scoring/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `priority-scoring.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=priority-scoring&expanded=true) |
+| Download `priority-scoring.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/priority-scoring/v1.0.0) |
 | View the current source | [`priority-scoring.yml`](https://github.com/cloudradial/Automations/blob/main/priority-scoring/priority-scoring.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/priority-scoring/src) |
 | All files in this automation | [priority-scoring](https://github.com/cloudradial/Automations/tree/main/priority-scoring) |
@@ -69,7 +69,7 @@ ServiceAI triage can already set a priority. Use this workflow when you want:
 
 ## Download & import
 
-**Download the workflow:** [`priority-scoring.yml`](https://github.com/cloudradial/Automations/releases?q=priority-scoring&expanded=true)
+**Download the workflow:** [`priority-scoring.yml`](https://github.com/cloudradial/Automations/releases/tag/priority-scoring/v1.0.0)
 
 Then in AutomationAI:
 1. **Workflows → Import**, and upload the `.yml`.

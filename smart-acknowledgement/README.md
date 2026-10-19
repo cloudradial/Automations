@@ -2,15 +2,15 @@
 
 The moment a ticket arrives, the client gets a short, personal acknowledgement with their ticket number, when to expect a response and, when one fits, a knowledge base article to try while they wait, without ever being promised a fix time.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00059 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
 ## Files
 
-Each version is published as a release, with `smart-acknowledgement.yml` attached. Download the latest from the [**releases page**](https://github.com/cloudradial/Automations/releases?q=smart-acknowledgement&expanded=true).
+Each version is published as a release, with `smart-acknowledgement.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0).
 
 | What | Link |
 |---|---|
-| Download `smart-acknowledgement.yml` (all versions) | [Releases](https://github.com/cloudradial/Automations/releases?q=smart-acknowledgement&expanded=true) |
+| Download `smart-acknowledgement.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0) |
 | View the current source | [`smart-acknowledgement.yml`](https://github.com/cloudradial/Automations/blob/main/smart-acknowledgement/smart-acknowledgement.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/smart-acknowledgement/src) |
 | All files in this automation | [smart-acknowledgement](https://github.com/cloudradial/Automations/tree/main/smart-acknowledgement) |
@@ -53,7 +53,7 @@ ServiceAI already posts a customer auto-response from its Auto-Response Template
 
 ## Download & import
 
-**Download the workflow:** [`smart-acknowledgement.yml`](https://github.com/cloudradial/Automations/releases?q=smart-acknowledgement&expanded=true)
+**Download the workflow:** [`smart-acknowledgement.yml`](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0)
 
 Then in AutomationAI:
 1. **Workflows → Import**, and upload the `.yml`.

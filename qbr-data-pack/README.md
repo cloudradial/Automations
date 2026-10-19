@@ -2,17 +2,17 @@
 
 Before a quarterly business review, one run gathers a client's device age and warranty picture, ticket trends from your PSA, Microsoft 365 licence usage, and expiring domains and certificates, and puts them on one internal CloudRadial Planner card for the vCIO. Nothing else is changed anywhere.
 
-**Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI, read-only except one internal Planner card)
+**Marketplace ID:** AAI-00065 | **Type:** Workflow (PowerShell, no AI, read-only except one internal Planner card) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `qbr-data-pack.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0).
 
 | What | Link |
 |---|---|
-| View `qbr-data-pack.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/qbr-data-pack/qbr-data-pack.yml) |
-| Download `qbr-data-pack.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/qbr-data-pack/qbr-data-pack.yml) |
-| Build source and test harness (`src/`) | [qbr-data-pack/src](https://github.com/cloudradial/Automations/tree/main/qbr-data-pack/src) |
+| Download `qbr-data-pack.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0) |
+| View the current source | [`qbr-data-pack.yml`](https://github.com/cloudradial/Automations/blob/main/qbr-data-pack/qbr-data-pack.yml) |
+| Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/qbr-data-pack/src) |
 | All files in this automation | [qbr-data-pack](https://github.com/cloudradial/Automations/tree/main/qbr-data-pack) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/qbr-data-pack) |
 
@@ -55,7 +55,7 @@ With neither, the run stops with a plain message and writes nothing.
 
 ## Download & import
 
-**Download the workflow:** [`qbr-data-pack.yml`](https://github.com/cloudradial/Automations/blob/main/qbr-data-pack/qbr-data-pack.yml)
+**Download the workflow:** [`qbr-data-pack.yml`](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **Deploy** it to the runner that holds them. To prepare every QBR automatically, attach a Routine (see [Import & test](#import--test)). A Routine isn't part of the export, so it has to be added after every fresh import.
 

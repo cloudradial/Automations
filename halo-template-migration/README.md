@@ -31,7 +31,8 @@ Three steps. Only step 2 uses AI, and it can't call any tools.
 3. **Create the forms.** Each form is checked against what Halo returned:
    - A field the AI names that the template doesn't have is dropped.
    - Required Halo fields are always asked.
-   - The ticket type, priority, category, team, status and question types always come from Halo, never from the AI.
+   - The question types always come from Halo, never from the AI.
+   - **Ticket routing uses CloudRadial's tokens by default** (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type), so Halo always accepts the ticket. With Halo's names on the form, Halo can reject the ticket, and the submitter still sees "submitted" (see CloudRadial's [Troubleshooting: Service Ticket Failures in HaloPSA](https://support.cloudradial.com/hc/en-us/articles/22172314482068-Troubleshooting-Service-Ticket-Failures-in-HaloPSA)). Each answer keeps its Halo field name as its `jsonId`, so an AutomationAI automation can apply the template's ticket type, team, priority and custom fields after the ticket exists. Set `psaValues: "halo"` to put Halo's names on the form instead.
 
    Every form ends with an "Anything else we should know?" box, which becomes the ticket description.
    - **`confirm` false (the default):** nothing is created. The run lists the planned forms and their questions (`status: pending_confirmation`).
@@ -43,7 +44,8 @@ Three steps. Only step 2 uses AI, and it can't call any tools.
 | Template group, else ticket type name | Category (or the `category` input) |
 | Template details | Form description (scripts and event handlers removed) |
 | Incident-style ticket type | Problem Report; anything else is a Service Request (or set `usage`) |
-| Ticket type, priority, `category_1`, team, status | PSA type, priority, category, board and status. A blank one uses CloudRadial's default (`@DefaultPriority`, `@DefaultBoard`, `@DefaultStatus`). |
+| Ticket type, priority, `category_1`, team, status | By default, CloudRadial's tokens (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type and category). With `psaValues: "halo"`, Halo's own names. |
+| Custom field name (for example `CFcostCentre`) | The question's `jsonId`. It's also the question's `customFieldName` only with `psaValues: "halo"`. |
 | Text, memo, date, checkbox and number fields | Text, memo, date, checkbox and number questions |
 | Single and multiple choice fields | Dropdown and multi-select questions, with the Halo values as options |
 
@@ -95,6 +97,7 @@ None. This workflow only talks to HaloPSA and CloudRadial.
 | `usage` | No (default `auto`) | `request` or `problem` puts every form in that list. `auto` decides by ticket type. |
 | `category` | No | One category for every form, instead of the template group or ticket type. |
 | `sendToPsa` | No (default `true`) | `false` creates the forms without sending their tickets to the PSA. |
+| `psaValues` | No (default `tokens`) | `tokens` puts CloudRadial's tokens in the ticket routing fields, so Halo always accepts the ticket. `halo` puts Halo's ticket type, team, priority, status and custom-field names on the form directly. Use `halo` only after a test submission shows Halo accepts them. |
 
 It accepts a flat JSON body, or one wrapped in `{trigger: ...}`.
 
@@ -129,4 +132,4 @@ It accepts a flat JSON body, or one wrapped in `{trigger: ...}`.
   - the field type numbers
   - the inactive flag
 - **The CloudRadial create call** was proven on a test form: `POST /v2/catalog` with inline questions and tags.
-- **How CloudRadial maps the PSA names onto a Halo ticket** isn't proven yet. Neither is whether a question's `customFieldName` fills the matching Halo custom field. Check step 3 of Import & test before moving everything.
+- **Halo's names on the form (`psaValues: "halo"`):** a test submission with them created no Halo ticket (2026-10-19), which is why tokens are the default. Applying the template's values to the ticket afterwards is a separate AutomationAI step. Check step 3 of Import & test before moving everything.

@@ -34,6 +34,7 @@ foreach ($s in @(Read-Json (Get-NodeInput -Name 'skipped'))) { if ($null -ne $s)
 $remaining = 0; try { $remaining = [int](Get-NodeInput -Name 'remaining') } catch { }
 $confirm = (Get-Prop $req 'confirm') -eq $true
 $sendToPsa = (Get-Prop $req 'sendToPsa') -ne $false
+$useHalo = ([string](Get-Prop $req 'psaValues')) -eq 'halo'
 $companyId = [int](Get-Prop $req 'companyId')
 $companyName = [string](Get-Prop $req 'companyName')
 $plan = @($plan | Where-Object { $null -ne $_ })
@@ -85,7 +86,7 @@ foreach ($p in $plan) {
                 placeholder = ''; type = $typeCode[$kind]; isRequired = ($q.required -or (Get-Prop $fd 'required') -eq $true)
                 isSubject = $false; isDescription = $false; order = $n * 10; defaultValue = ''
                 jsonId = [string](Get-Prop $fd 'name'); isIncludeInTicket = $true; isUserLookup = $false
-                customFieldName = [string](Get-Prop $fd 'name'); hideConditions = @()
+                customFieldName = $(if ($useHalo) { [string](Get-Prop $fd 'name') } else { '' }); hideConditions = @()
             })
     }
     # Always a free-text box last, so the requester can add detail; it becomes the ticket description.
@@ -96,14 +97,16 @@ foreach ($p in $plan) {
     $desc = [string](Get-Prop $p 'description')
     if (-not $desc.Trim()) { $plain = Get-Short ([string](Get-Prop $af 'description')) 600; $desc = if ($plain) { [System.Net.WebUtility]::HtmlEncode($plain) } else { [System.Net.WebUtility]::HtmlEncode($short) } }
     $psa = Get-Prop $p 'psa'
-    $val = { param([string]$v, [string]$Default) if ($v.Trim()) { return $v.Trim() }; return $Default }
+    # Default (psaValues "tokens"): CloudRadial's own tokens, so Halo never rejects the ticket over a routing value
+    # it can't match (verified 2026-10-19: a form with Halo's names created no ticket). The Halo template's values
+    # are applied to the ticket afterwards by AutomationAI. psaValues "halo" sends Halo's names directly.
+    $val = { param([string]$v, [string]$Default) if ($useHalo -and $v.Trim()) { return $v.Trim() }; return $Default }
     $usage = [string](Get-Prop $p 'usage')
     $body = [ordered]@{
         companyId = $companyId; catalogUsage = $(if ($usage -eq 'problem') { 0 } else { 10 })
         category = [string](Get-Prop $p 'category'); subject = $name; shortDescription = $short; description = $desc
         selectText = $(if ($usage -eq 'problem') { 'REPORT' } else { 'REQUEST' })
         isSendToPsa = $sendToPsa; isIncludeDescription = $true; isAppendSubject = $true
-        # Unverified: how CloudRadial maps these names onto a Halo ticket (check one live submission).
         psaType = (& $val ([string](Get-Prop $psa 'type')) ''); psaPriority = (& $val ([string](Get-Prop $psa 'priority')) '@DefaultPriority')
         psaCategory = (& $val ([string](Get-Prop $psa 'category')) ''); psaBoard = (& $val ([string](Get-Prop $psa 'board')) '@DefaultBoard')
         psaStatus = (& $val ([string](Get-Prop $psa 'status')) '@DefaultStatus')

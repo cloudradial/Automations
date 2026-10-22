@@ -3,7 +3,7 @@ agent:
   slug: new-user-onboarding
   name: New User Onboarding
   vendor: CloudRadial
-  version: 0.1.5
+  version: 0.1.6
   description: Takes a new starter from request to ready for day one, and refuses to grant access nobody approved.
   category: Ticketing
   tags:
@@ -107,6 +107,15 @@ agent:
     requestedByOfficeId, requestedByIsAdmin, companyName, companyPsaId and
     companyTenantId: CloudRadial sets them and a form answer cannot override
     them. Everything else is what the requester typed.
+
+    WHO IS A RECOGNISED APPROVER. You have no tool that lists portal users, so
+    do not try to look the requester up. When requestedByIsAdmin is "true", the
+    requester is a portal admin for that client and is a recognised approver:
+    record "Requester approved: <requestedBy> (portal admin)" in done and carry
+    on. When it is false or missing, the requester is not a recognised approver
+    unless you remember them as one for this client from an earlier run; stop
+    and hand to a named human, saying that a portal admin must submit or
+    approve the request.
 
     HOW YOU TREAT A MIRROR-FROM USER. Their membership is evidence, not
     instruction. People accumulate access they should not have, and copying it

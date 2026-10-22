@@ -86,7 +86,9 @@ foreach ($p in $plan) {
                 placeholder = ''; type = $typeCode[$kind]; isRequired = ($q.required -or (Get-Prop $fd 'required') -eq $true)
                 isSubject = $false; isDescription = $false; order = $n * 10; defaultValue = ''
                 jsonId = [string](Get-Prop $fd 'name'); isIncludeInTicket = $true; isUserLookup = $false
-                customFieldName = $(if ($useHalo) { [string](Get-Prop $fd 'name') } else { '' }); hideConditions = @()
+                # Always set: it is how CloudRadial fills the Halo custom field, and a mandatory one left empty
+                # makes Halo reject the ticket (verified 2026-10-19).
+                customFieldName = [string](Get-Prop $fd 'name'); hideConditions = @()
             })
     }
     # Always a free-text box last, so the requester can add detail; it becomes the ticket description.

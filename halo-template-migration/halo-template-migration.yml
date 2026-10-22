@@ -2030,26 +2030,39 @@ definition:
                 $rowFid = [string](Get-First $tf @('fieldid', 'field_id')); $gid = [string](Get-Prop $tf 'groupid')
                 if ((-not $rowFid -or $rowFid -eq '0') -and $gid -and $gid -ne '0') {
                     $gf = @(Get-HaloGroupFields $gid)
-                    foreach ($x in $gf) { $null = $expanded.Add(@{ row = $x; eu = (Get-Prop $tf 'endusernew') }) }
+                    foreach ($x in $gf) { $null = $expanded.Add(@{ row = $x; eu = (Get-Prop $tf 'endusernew'); tn = (Get-Prop $tf 'technew') }) }
                     if (-not $gf.Count) { $null = $seenNames.Add("field group $gid (no fields read)") }
                 }
-                else { $null = $expanded.Add(@{ row = $tf; eu = $null }) }
+                else { $null = $expanded.Add(@{ row = $tf; eu = $null; tn = $null }) }
             }
+            # A field Halo makes mandatory must be on the form and answered, or Halo rejects the ticket (verified 2026-10-19:
+            # "First Name is mandatory ... Address is mandatory"). Mandatory on the agent's new-ticket screen (technew) counts
+            # even when the field is hidden from end users. Halo's visibility choices, in order (Field Groups > Edit Field,
+            # 2026-10-19): Not Visible, Visible - Not Required, Visible - Warn if empty, Visible - Required, Visible - Read Only,
+            # read as 0..4, so 3 is required. A built-in field (no CF name, e.g. Address) can't be filled from a form, so a
+            # mandatory one gets a warning instead of a question.
+            $mandatory = New-Object System.Collections.ArrayList
             foreach ($ex in $expanded) {
                 $tf = $ex.row
                 if ($fields.Count -ge 30) { $null = $warnings.Add("Template '$($b.name)': only the first 30 fields were offered as questions."); break }
                 $fid = [string](Get-First $tf @('fieldid', 'field_id')); if (-not $fid -or $fid -eq '0') { $fid = [string](Get-First $tf @('id')) }
                 $eu = Get-Prop $tf 'endusernew'; if ($null -eq $eu) { $eu = $ex.eu }
                 $euText = ([string]$eu).ToLowerInvariant()
+                $tn = Get-Prop $tf 'technew'; if ($null -eq $tn) { $tn = $ex.tn }
+                $isMandatory = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '3' -or ([string]$tn) -eq '3')
                 $inner = Get-Prop $tf 'field'
                 $fname = [string](Get-First $tf @('name', 'fieldname'))
                 if (-not $fname -and $null -ne $inner) { $fname = [string](Get-First $inner @('name')) }
-                if ($null -ne $eu -and @('0', 'false') -contains $euText) { $null = $seenNames.Add("$(if ($fname) { $fname } else { "field $fid" }) (hidden from end users)"); continue }
+                if (-not $isMandatory -and $null -ne $eu -and @('0', 'false') -contains $euText) { $null = $seenNames.Add("$(if ($fname) { $fname } else { "field $fid" }) (hidden from end users)"); continue }
                 $def = $inner
                 if (-not $fname -and $fid) { $def = Get-HaloField $fid; if ($null -ne $def) { $fname = [string](Get-First $def @('name', 'fieldname')) } }
                 $null = $seenNames.Add($(if ($fname) { $fname } else { "field $fid (no name)" }))
                 if (-not $fid -or -not $fname) { continue }
                 $lname = $fname.ToLowerInvariant()
+                if ($isMandatory -and $lname -notmatch '^cf' -and -not $fixed.ContainsKey($lname)) {
+                    $shown = [string](Get-First $def @('label', 'display_name')); if (-not $shown) { $shown = $fname }
+                    $null = $warnings.Add("Template '$($b.name)': Halo makes its built-in field '$shown' mandatory on the new-ticket screen. A form can't fill a built-in field, so Halo will reject every ticket from this form until '$shown' is set to Visible - Not Required (Halo: Configuration > Tickets > Field Groups > the group > Field List > Edit).")
+                }
                 # Only custom fields (Halo names them CF...), never the built-in ones or the ones the template fixes.
                 if ($systemFields -contains $lname -or $lname -notmatch '^cf' -or $fixed.ContainsKey($lname)) { continue }
                 if ((Get-Prop $tf 'visible') -eq $false -or (Get-Prop $tf 'hidden') -eq $true -or (Get-Prop $tf 'usercanedit') -eq $false) { continue }
@@ -2059,8 +2072,10 @@ definition:
                 if (-not $kind) { $kind = 'text'; $null = $warnings.Add("Template '$($b.name)': field '$fname' has a type this workflow doesn't know, so it became a text question.") }
                 if (($kind -eq 'choice' -or $kind -eq 'multi') -and -not $opts.Count) { $kind = 'text'; $null = $warnings.Add("Template '$($b.name)': field '$fname' is a list with no values, so it became a text question.") }
                 $label = [string](Get-First $tf @('label', 'display_name', 'displayname')); if (-not $label -and $null -ne $def) { $label = [string](Get-First $def @('label', 'display_name')) }; if (-not $label) { $label = $fname }
-                $null = $fields.Add([ordered]@{ id = $fid; name = $fname; label = $label.Trim(); kind = $kind; options = @($opts); required = ((Get-First $tf @('mandatory', 'required', 'isrequired')) -eq $true -or $euText -eq '2') })
+                $null = $fields.Add([ordered]@{ id = $fid; name = $fname; label = $label.Trim(); kind = $kind; options = @($opts); required = $isMandatory })
+                if ($isMandatory) { $null = $mandatory.Add($label.Trim()) }
             }
+            if ($mandatory.Count) { $null = $actions.Add("Template '$($b.name)': Halo requires $($mandatory -join ', '), so those questions are required on the form.") }
 
             if (-not $fields.Count) {
                 # Say why there are no questions, naming what Halo sent, so a field-name mismatch is easy to spot.
@@ -2455,7 +2470,9 @@ definition:
                         placeholder = ''; type = $typeCode[$kind]; isRequired = ($q.required -or (Get-Prop $fd 'required') -eq $true)
                         isSubject = $false; isDescription = $false; order = $n * 10; defaultValue = ''
                         jsonId = [string](Get-Prop $fd 'name'); isIncludeInTicket = $true; isUserLookup = $false
-                        customFieldName = $(if ($useHalo) { [string](Get-Prop $fd 'name') } else { '' }); hideConditions = @()
+                        # Always set: it is how CloudRadial fills the Halo custom field, and a mandatory one left empty
+                        # makes Halo reject the ticket (verified 2026-10-19).
+                        customFieldName = [string](Get-Prop $fd 'name'); hideConditions = @()
                     })
             }
             # Always a free-text box last, so the requester can add detail; it becomes the ticket description.

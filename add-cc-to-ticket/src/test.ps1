@@ -241,9 +241,9 @@ Check 'allow_company_colleagues never crosses companies' ($r.out.status -eq 'rej
 # ---- 5. Missing requester or company ----
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TBody @{ requester_email = $null })
-Check 'no requester_email: rejected, no calls at all' ($r.out.status -eq 'rejected' -and $r.out.message -like "*didn't include requester_email*@UserEmail*" -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Check 'no requester_email: error (a setup problem fails the step), no calls at all' ($r.out.status -eq 'error' -and $r.error -and $r.out.message -like "*didn't include requester_email*@UserEmail*" -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
 $r = Invoke-Cc (New-TBody @{ company_psa_id = '' })
-Check 'blank company_psa_id: rejected, no calls' ($r.out.status -eq 'rejected' -and $r.out.message -like '*company_psa_id*' -and $Mock.Calls.Count -eq 0) $r.out.message
+Check 'blank company_psa_id: error, no calls' ($r.out.status -eq 'error' -and $r.error -and $r.out.message -like '*company_psa_id*' -and $Mock.Calls.Count -eq 0) $r.out.message
 # ---- 6. technician_run ----
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TBody @{ requester_email = $null; company_psa_id = $null; technician_run = $true })
@@ -272,9 +272,9 @@ Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TBody @{ ticketNumber = '1001; DROP' })
 Check 'bad ticket number: rejected, no calls' ($r.out.status -eq 'rejected' -and $Mock.Calls.Count -eq 0) $r.out.message
 $r = Invoke-Cc (New-TBody @{ ticketNumber = $null })
-Check 'no ticket number: rejected' ($r.out.status -eq 'rejected' -and $r.out.message -eq 'The request has no ticket number, so nothing was changed.') $r.out.message
+Check 'no ticket number: error that names the Field ID, and the step fails' ($r.out.status -eq 'error' -and $r.error -and $r.out.message -like 'The request has no ticket number, so nothing was changed.*ticketNumber*') $r.out.message
 $r = Invoke-Cc (New-TBody @{ ccEmail = $null })
-Check 'no address: rejected' ($r.out.status -eq 'rejected' -and $r.out.message -eq 'The request has no email address to add, so nothing was changed.') $r.out.message
+Check 'no address: error that names the Field ID, and the step fails' ($r.out.status -eq 'error' -and $r.error -and $r.out.message -like 'The request has no email address to add, so nothing was changed.*ccEmail*') $r.out.message
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TBody @{ ticketNumber = '#1001' })
 Check 'a leading # on the ticket number is fine' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '1001') $r.out.message
@@ -324,11 +324,11 @@ Check 'note sent but notes unreadable: success with a warning' ($r.out.status -e
 # ---- 12. Leftover @tokens and the CloudRadial shape ----
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TBody @{ requester_email = '@UserEmail' })
-Check 'literal @UserEmail counts as missing: rejected' ($r.out.status -eq 'rejected' -and $r.out.message -like '*requester_email*' -and $Mock.Calls.Count -eq 0) $r.out.message
+Check 'literal @UserEmail counts as missing: error' ($r.out.status -eq 'error' -and $r.out.message -like '*requester_email*' -and $Mock.Calls.Count -eq 0) $r.out.message
 $r = Invoke-Cc (New-TBody @{ company_psa_id = '@CompanyPsaId'; technician_run = '@technician_run' })
-Check 'literal @CompanyPsaId counts as missing, and a literal @token is not true' ($r.out.status -eq 'rejected' -and $r.out.message -like '*company_psa_id*') $r.out.message
+Check 'literal @CompanyPsaId counts as missing, and a literal @token is not true' ($r.out.status -eq 'error' -and $r.out.message -like '*company_psa_id*') $r.out.message
 $r = Invoke-Cc (New-TBody @{ ccEmail = '@ccEmail' })
-Check 'literal @ccEmail counts as missing' ($r.out.status -eq 'rejected' -and $r.out.message -like '*no email address*') $r.out.message
+Check 'literal @ccEmail counts as missing' ($r.out.status -eq 'error' -and $r.out.message -like '*no email address*') $r.out.message
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $TCr = @{ ticketNumber = '@ticketNumber'; ccEmail = '@ccEmail'; requester_email = 'megan.bowen@contoso.com'; company_psa_id = '42'
     Ticket = @{ TicketId = 2002; Questions = @(@{ Id = 'ticketNumber'; Answer = 'Ticket #1001' }, @{ Id = 'ccEmail'; Answer = 'alex.wilber@contoso.com' }, @{ Id = 'technician_run'; Answer = 'true' }) }
@@ -339,7 +339,7 @@ Check 'CloudRadial shape: Ticket.TicketId (the new ticket) is never the target' 
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $TCr = @{ Ticket = @{ TicketId = 2002; Questions = @(@{ Id = 'ticketNumber'; Value = '1001' }, @{ Id = 'ccEmail'; Value = 'alex.wilber@contoso.com' }, @{ Id = 'technician_run'; Answer = 'true' }, @{ Id = 'requester_email'; Answer = 'megan.bowen@contoso.com' }, @{ Id = 'company_psa_id'; Answer = '42' }) } }
 $r = Invoke-Cc $TCr
-Check 'ownership fields typed into form answers are ignored: rejected, no calls' ($r.out.status -eq 'rejected' -and $r.out.message -like '*requester_email and company_psa_id*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Check 'ownership fields typed into form answers are ignored: error, no calls' ($r.out.status -eq 'error' -and $r.out.message -like '*requester_email and company_psa_id*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $TCr = @{ Ticket = @{ TicketId = 2002; Questions = @(@{ Id = 'ticketNumber'; Value = '1001' }, @{ Id = 'ccEmail'; Value = 'alex.wilber@contoso.com' }) }; Company = @{ CompanyName = 'Contoso'; CompanyPsaId = 42 }; User = @{ Email = 'megan.bowen@contoso.com' } }
 $r = Invoke-Cc $TCr
@@ -348,7 +348,7 @@ Check 'CloudRadial shape: Company.CompanyPsaId and User.Email are read' ($r.out.
 # to the portal's own lowercase ticket, company and user objects, and no Questions. Placeholder data.
 function New-TPortal { param([hashtable]$Answers = @{}, $UserEmail = 'megan.bowen@contoso.com', $TicketId = 1001)
     $b = [ordered]@{ userPrincipalName = 'megan.bowen@contoso.com'; ccEmail = 'alex.wilber@contoso.com' }
-    foreach ($k in $Answers.Keys) { $b[$k] = $Answers[$k] }
+    foreach ($k in $Answers.Keys) { if ($null -eq $Answers[$k]) { $b.Remove($k) } else { $b[$k] = $Answers[$k] } }
     $b['ticket'] = [ordered]@{ id = $TicketId; reference = [string]$TicketId; subject = 'Reset Password'; description = ''; estimatedTime = 0; checklist = @() }
     $b['company'] = [ordered]@{ id = 7; name = 'Contoso'; psaId = 42; psaIdentifier = 'ConnectWise'; tenantId = '00000000-0000-0000-0000-000000000002' }
     $b['user'] = [ordered]@{ id = 'u-1'; name = 'Megan Bowen'; email = $UserEmail; psaId = 501; psaSiteId = 2 }
@@ -363,7 +363,7 @@ $r = Invoke-Cc (New-TPortal @{ ticketNumber = '#1001' } -TicketId 2002)
 Check 'Action: a ticket-number answer wins over the form''s own ticket' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '1001' -and @($Mock.Calls | Where-Object { $_.Uri -like '*2002*' }).Count -eq 0) "$($r.out.message) $(Show-Calls)"
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TPortal @{ requester_email = 'megan.bowen@contoso.com'; company_psa_id = '42'; technician_run = 'true' } -UserEmail $null)
-Check 'Action: requester, company and technician_run answers are ignored -> rejected, no calls' ($r.out.status -eq 'rejected' -and $r.out.message -like '*requester_email*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Check 'Action: requester, company and technician_run answers are ignored -> error, no calls' ($r.out.status -eq 'error' -and $r.out.message -like '*requester_email*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TPortal @{ requester_email = 'attacker@fabrikam.com'; preview = 'true'; notify_cc = 'false' })
 Check 'Action: a requester_email answer cannot replace user.email' ($r.out.status -eq 'success' -and ($TS.notes -join ' ') -notlike '*attacker@fabrikam.com*') "$($r.out.message) $($TS.notes -join ' | ')"
@@ -374,11 +374,33 @@ Check 'Action: the ownership check still runs on the form''s own ticket (a CC ca
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc (New-TPortal -UserEmail 'lee.gu@fabrikam.com')
 Check 'Action: someone who is not on the ticket is refused' ($r.out.status -eq 'rejected' -and @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) "$($r.out.message) $(Show-Calls)"
+# Field IDs the portal made from the question labels (seen on DV, 2026-10-26: ticketNumber plus emailAddressToAdd).
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; ticketNumber = '1001'; emailAddressToAdd = 'alex.wilber@contoso.com' } -TicketId 2002)
+Check 'Action: an email question with another Field ID is used (emailAddressToAdd)' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '1001' -and $r.out.cc_email -eq 'alex.wilber@contoso.com' -and (Test-CcInList 'alex.wilber@contoso.com' $TS.cc)) "$($r.out.message) $($r.error)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; whichTicket = '#1001'; emailToCopy = 'alex.wilber@contoso.com' } -TicketId 2002)
+Check 'Action: a ticket question with another Field ID wins over the form''s own ticket' ($r.out.status -eq 'success' -and $r.out.ticket_id -eq '1001' -and @($Mock.Calls | Where-Object { $_.Uri -like '*2002*' }).Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; managerEmail = 'alex.wilber@contoso.com'; backupEmail = 'adele.vance@contoso.com' })
+Check 'Action: two different email answers -> error naming both Field IDs, no calls, step fails' ($r.out.status -eq 'error' -and $r.error -and $r.out.message -like '*backupEmail, managerEmail*ccEmail*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; contactEmail2 = 'MEGAN.BOWEN@contoso.com' })
+Check 'Action: the requester''s own address in an email answer is not picked; own ticket, nobody named -> success, no writes' ($r.out.status -eq 'success' -and $r.out.added -eq $false -and $r.out.message -like 'Nobody was named*1001*' -and @(Get-WriteCalls).Count -eq 0 -and -not $r.error) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; userPrincipalName = 'alex.wilber@contoso.com' })
+Check 'Action: a userPrincipalName answer is never used as the address to add' ($r.out.status -eq 'success' -and $r.out.added -eq $false -and @(Get-WriteCalls).Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; ticketNumber = '1001' } -TicketId 2002)
+Check 'Action: an existing ticket with no address -> error (the form is set up wrong), step fails' ($r.out.status -eq 'error' -and $r.error -and $r.out.message -like '*no email address*' -and $Mock.Calls.Count -eq 0) "$($r.out.message) $(Show-Calls)"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TPortal @{ ccEmail = $null; ticketNumber = '1001'; notesEmail = 'not an address' } -TicketId 2002)
+Check 'Action: an email-named answer that isn''t an address is not picked' ($r.out.status -eq 'error' -and $r.out.message -like '*no email address*') $r.out.message
 Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
 $r = Invoke-Cc ((New-TBody) | ConvertTo-Json -Compress) -Raw
 Check 'a flat JSON string body works' ($r.out.status -eq 'success') "$($r.out.message) $($r.error)"
 $r = Invoke-Cc $null -Raw
-Check 'no input at all: rejected, plain message' ($r.out.status -eq 'rejected' -and (Test-Shape $r.out)) $r.out.message
+Check 'no input at all: error, plain message' ($r.out.status -eq 'error' -and (Test-Shape $r.out)) $r.out.message
 
 # ---- 13. psa input overrides PSA-Type ----
 Reset-T; Reset-Mock (Get-TSecrets 'zendesk' @{ 'PSA-Type' = 'connectwise' }) $Handler

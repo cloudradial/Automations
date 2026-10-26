@@ -60,6 +60,7 @@ function New-Scenario {
     $Sc.mailbox = 'UserMailbox'      # $null means no mailbox
     $Sc.hidden = $false; $Sc.fwd = $null; $Sc.lit = $false; $Sc.bytes = '2,254,857,830'
     $Sc.failConvert = $false; $Sc.convertNoop = $false
+    $Sc.noRecipient = @()            # addresses Exchange has no recipient for (Get-Recipient not found)
     $Sc.forbid = @()                 # Graph "METHOD path" regexes that answer 403
     $Sc.module = ($Exo -eq 'module')
     $Sc.exoLog = New-Object System.Collections.ArrayList
@@ -84,6 +85,7 @@ function Invoke-FakeExo {
     switch ($Name) {
         'Get-Mailbox' { if ($null -eq $Sc.mailbox) { throw "The operation couldn't be performed because object '$($P.Identity)' couldn't be found on 'EXAMPLE.PROD.OUTLOOK.COM'." }; return @(New-Mailbox) }
         'Get-MailboxStatistics' { return @(J @{ TotalItemSize = "2.1 GB ($($Sc.bytes) bytes)" }) }
+        'Get-Recipient' { if ($Sc.noRecipient -contains [string]$P.Identity) { throw "The operation couldn't be performed because object '$($P.Identity)' couldn't be found on 'EXAMPLE.PROD.OUTLOOK.COM'." }; return @(J @{ RecipientTypeDetails = 'UserMailbox'; PrimarySmtpAddress = [string]$P.Identity }) }
         'Set-Mailbox' {
             $keys = @(if ($P -is [System.Collections.IDictionary]) { $P.Keys } else { $P.PSObject.Properties.Name })
             $label = if ($keys -contains 'Type') { 'Type' } elseif ($keys -contains 'HiddenFromAddressListsEnabled') { 'Hidden' } elseif ($keys -contains 'ForwardingAddress') { 'Forward' } else { 'Other' }
@@ -176,6 +178,7 @@ function Import-Module { [CmdletBinding()] param([string]$Name) }
 function Connect-ExchangeOnline { [CmdletBinding()] param($AppId, $Organization, $CertificateThumbprint, $Certificate, [switch]$ShowBanner) $Sc.connected = "$AppId|$Organization|$CertificateThumbprint" }
 function Get-Mailbox { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-Mailbox' @{ Identity = $Identity } }
 function Get-MailboxStatistics { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-MailboxStatistics' @{ Identity = $Identity } }
+function Get-Recipient { [CmdletBinding()] param($Identity) Invoke-FakeExo 'Get-Recipient' @{ Identity = $Identity } }
 # _shared/exchange.ps1 runs every non-Get cmdlet with -Confirm:$false in module mode, so Set-Mailbox takes -Confirm.
 function Set-Mailbox { [CmdletBinding(SupportsShouldProcess)] param($Identity, $Type, $HiddenFromAddressListsEnabled, $ForwardingAddress, $DeliverToMailboxAndForward) $h = @{ Identity = $Identity }; foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Identity' -and $k -ne 'Confirm') { $h[$k] = $PSBoundParameters[$k] } }; Invoke-FakeExo 'Set-Mailbox' $h }
 
@@ -353,6 +356,11 @@ Check 'CloudRadial form shape: parsed, literal token ignored, preview' ($r.out.s
 New-Scenario 'connectwise' 'rest' @{ lit = $true }
 $r = Invoke-Offboard (New-Body)
 Check 'litigation hold: licences kept' (-not ($r.out.planned -match 'licences') -and $r.out.internal_note -match 'litigation hold') $r.out.internal_note
+
+# =================== forwarding target with no Exchange mailbox ===================
+New-Scenario 'connectwise' 'rest' @{ noRecipient = @('alex.kim@contoso.com') }
+$r = Invoke-Offboard (New-Body @{ confirm = 'true' })
+Check 'forward target without a mailbox: not planned, warned, licences still removed' (-not ($r.out.planned -match 'Forward') -and (@($r.out.warnings) -match 'has no mailbox in Exchange Online, so mail won''t be forwarded').Count -eq 1 -and ($Sc.exoLog -match 'ForwardingAddress').Count -eq 0 -and ($r.out.planned -match 'Remove the licences').Count -eq 1) "$(@($r.out.planned) -join ' | ') / $(@($r.out.warnings) -join ' | ')"
 
 # =================== rerun writes nothing twice (ServiceAI Action Runs Retry) ===================
 New-Scenario 'connectwise' 'rest'

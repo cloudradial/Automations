@@ -5,7 +5,8 @@
 # the ticket's contact or already on its CC list. allow_company_colleagues relaxes the second part to "same company".
 # preview=true says what would happen and changes nothing. Already on the list: success, no change, no note.
 # Status: success, rejected (nothing changed), error (nothing changed unless the message says so) or
-# pending_confirmation (a preview).
+# pending_confirmation (a preview). A setup problem (no ticket number, no address, no requester or company) is an
+# error, so the step fails and shows in the run history; a refusal that is the rule working stays rejected.
 $ccRun = @{ ticketId = ''; ccEmail = ''; done = $false }
 $ccWarnings = New-Object System.Collections.ArrayList
 $ccActions = New-Object System.Collections.ArrayList
@@ -23,6 +24,31 @@ function New-CcResult {
     }
 }
 
+# An address as typed: a mailto: prefix and angle brackets are dropped.
+function Get-CcAddress { param($v) return ((([string]$v) -replace '^(?i)mailto:', '').Trim().Trim('<', '>').Trim()) }
+# The one form answer that fits, when the question's Field ID isn't one of the expected names (the portal makes a
+# Field ID from the question's label, for example emailAddressToAdd). Answers whose Field ID matches KeyPattern and
+# whose value passes Test count. None: ''. One value: that value. Several different values: a setup error, since
+# guessing could change the wrong ticket or copy the wrong person. Who-is-asking Field IDs never count.
+function Find-CcAnswer {
+    param([hashtable]$Answers, [string]$KeyPattern, [scriptblock]$Test, [string]$What, [string]$FieldId)
+    $skip = @('requester_email', 'requesterEmail', 'UserEmail', 'userPrincipalName', 'upn', 'company_psa_id', 'companyPsaId', 'CompanyPsaId')
+    $hits = [ordered]@{}
+    foreach ($k in @($Answers.Keys | Sort-Object)) {
+        if ($skip -contains $k -or $k -notmatch $KeyPattern) { continue }
+        $v = Get-StepText $Answers[$k]
+        if (-not $v -or -not (& $Test $v)) { continue }
+        $key = $v.ToLowerInvariant(); if (-not $hits.Contains($key)) { $hits[$key] = @{ value = $v; ids = @() } }
+        $hits[$key].ids += $k
+    }
+    if ($hits.Count -eq 0) { return '' }
+    if ($hits.Count -gt 1) {
+        $ids = @($hits.Values | ForEach-Object { $_.ids }) -join ', '
+        throw "The form sent more than one $What ($ids), so it can't tell which to use and nothing was changed. Set the Field ID of the one to use to $FieldId."
+    }
+    return @($hits.Values)[0].value
+}
+
 function Invoke-CcMain {
     param($Raw)
     $in = Read-StepTrigger $Raw
@@ -30,10 +56,14 @@ function Invoke-CcMain {
     # Ticket and address: the webhook body first, then the form's answers.
     $ticketRef = Get-StepField $f @('ticket_number', 'ticketNumber', 'ticketId', 'ticket_id')
     if (-not $ticketRef) { $ticketRef = Get-StepField $q @('ticket_number', 'ticketNumber', 'ticketId', 'ticket_id') }
+    # A ticket-number question with another Field ID: the one answer whose Field ID mentions "ticket" and that looks
+    # like a ticket number. This comes before the form's own ticket, so a renamed question never sends the CC there.
+    if (-not $ticketRef) { $ticketRef = Find-CcAnswer $q '(?i)ticket' { param($v) (($v -replace '^(?i)\s*ticket\s*', '').Trim()) -match '^#?[A-Za-z0-9.-]{1,40}$' } 'ticket number' 'ticketNumber' }
     # From a CloudRadial Action with no ticket-number question, the target is the ticket the form itself created
     # (for example a Password Reset form that also asks who to copy). The ownership check below still applies, so the
     # requester must be that ticket's contact, which the person who submitted the form is.
-    if (-not $ticketRef -and $in.portal) { $ticketRef = Get-StepField $f @('Ticket.Id', 'Ticket.Reference') }
+    $ownTicket = $false
+    if (-not $ticketRef -and $in.portal) { $ticketRef = Get-StepField $f @('Ticket.Id', 'Ticket.Reference'); $ownTicket = [bool]$ticketRef }
     $ccIn = Get-StepField $f @('cc_email', 'ccEmail', 'cc', 'email', 'contactEmail')
     if (-not $ccIn) { $ccIn = Get-StepField $q @('cc_email', 'ccEmail', 'cc', 'email', 'contactEmail') }
     # Who is asking, and the rules: the webhook body only (CloudRadial fills @UserEmail and @CompanyPsaId at submit;
@@ -49,14 +79,21 @@ function Invoke-CcMain {
     $notifyIn = Get-StepField $f @('notify_cc', 'notifyCc')
     $notify = if ($notifyIn) { Test-StepTrue $notifyIn } else { $true }
     $psaIn = Get-StepField $f @('psa')
+    # An email question with another Field ID: the one answer whose Field ID mentions mail or cc, that is a single
+    # address, and that isn't the requester's own address.
+    if (-not $ccIn) { $ccIn = Find-CcAnswer $q '(?i)mail|cc' { param($v) $a = Get-CcAddress $v; (Test-CcEmail $a) -and $a -ine $requester } 'email address to add' 'ccEmail' }
 
     # ---- the request itself ----
     $ticketRef = ($ticketRef -replace '^(?i)\s*ticket\s*', '').Trim()
-    if (-not $ticketRef) { return (New-CcResult 'rejected' 'The request has no ticket number, so nothing was changed.') }
+    if (-not $ticketRef) { throw 'The request has no ticket number, so nothing was changed. Check the form has a ticket number question (Field ID ticketNumber).' }
     if ($ticketRef -notmatch '^#?[A-Za-z0-9.-]{1,40}$') { return (New-CcResult 'rejected' "'$ticketRef' isn't a ticket number, so nothing was changed.") }
     $ccRun.ticketId = $ticketRef.TrimStart('#')
-    $cc = ($ccIn -replace '^(?i)mailto:', '').Trim().Trim('<', '>').Trim()
-    if (-not $cc) { return (New-CcResult 'rejected' 'The request has no email address to add, so nothing was changed.') }
+    $cc = Get-CcAddress $ccIn
+    if (-not $cc) {
+        # On the form's own ticket the question is optional: left blank, nobody is added.
+        if ($ownTicket) { return (New-CcResult 'success' "Nobody was named to copy on ticket $($ccRun.ticketId), so nothing changed.") }
+        throw 'The request has no email address to add, so nothing was changed. Check the form has an Email question for the address to add (Field ID ccEmail).'
+    }
     if (-not (Test-CcEmail $cc)) { return (New-CcResult 'rejected' "'$cc' isn't a single email address, so nothing was changed.") }
     $ccRun.ccEmail = $cc
     $domains = @(Get-CcEmailList $domainsIn | ForEach-Object { $_.TrimStart('@').ToLowerInvariant() } | Where-Object { $_ })
@@ -68,7 +105,7 @@ function Invoke-CcMain {
     if ($companyPsa -and $companyPsa -notmatch '^[A-Za-z0-9-]{1,40}$') { return (New-CcResult 'rejected' "The company id '$companyPsa' isn't a PSA company id, so nothing was changed.") }
     $missing = @(); if (-not $requester) { $missing += 'requester_email' }; if (-not $companyPsa) { $missing += 'company_psa_id' }
     if ($missing.Count) {
-        if (-not $techRun) { return (New-CcResult 'rejected' "The request didn't include $($missing -join ' and ') (map requester_email to @UserEmail and company_psa_id to @CompanyPsaId in the webhook body), so nothing was changed." -Note "Add CC refused: the request had no $($missing -join ' or '), so it couldn't check that the ticket belongs to the requester.") }
+        if (-not $techRun) { throw "The request didn't include $($missing -join ' and ') (map requester_email to @UserEmail and company_psa_id to @CompanyPsaId in the webhook body), so nothing was changed." }
         Add-CcWarning "technician_run is set and the request had no $($missing -join ' or '), so only the checks the request had data for were made. Don't send technician_run from a client-facing form."
     }
 

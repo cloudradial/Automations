@@ -2,15 +2,15 @@
 
 A requester adds a coworker to the email updates on one of their own open tickets from the portal, with no technician needed, and the ticket records who was added and by whom.
 
-**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
+**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.0.0).
+Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `add-cc-to-ticket.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.0.0) |
+| Download `add-cc-to-ticket.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0) |
 | View the current source | [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket/src) |
 | All files in this automation | [add-cc-to-ticket](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket) |
@@ -56,13 +56,13 @@ The CC is added only when **both** hold:
 
 `"allow_company_colleagues": true` relaxes the second part to "anyone at the ticket's company". The first part always applies.
 
-If `requester_email` or `company_psa_id` is missing (or arrives as a literal `@UserEmail` because the token wasn't filled), the run is refused with `status: rejected` and nothing is called. A technician running it by hand in the designer can send `"technician_run": true` instead: the checks it has data for still run, and the output says which were skipped. Never put `technician_run` in a client-facing form's webhook body.
+If `requester_email` or `company_psa_id` is missing (or arrives as a literal `@UserEmail` because the token wasn't filled), the run stops with `status: error` (a setup problem, so the step fails and shows in the run history) and nothing is called. A technician running it by hand in the designer can send `"technician_run": true` instead: the checks it has data for still run, and the output says which were skipped. Never put `technician_run` in a client-facing form's webhook body.
 
 These fields are only read from the webhook body (or, on an Action, from the portal's own `user` and `company` objects), never from a form answer, so adding a question with the same Field ID can't override them. A refusal never says whose ticket it is: a ticket from another company gets "Ticket 1001 isn't one you can change, so nothing was changed."
 
 ## Download & import
 
-**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.0.0)
+**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 
@@ -107,7 +107,7 @@ The ticket number and address are read from the body first, then from the form's
 
 ## Output
 
-`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (the public note written to the new CC; empty when none was). An `error` also fails the step, so it shows in the run history.
+`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (the public note written to the new CC; empty when none was). An `error` also fails the step, so it shows in the run history. Setup problems are errors: no ticket number, no address to add, more than one possible answer, or no `requester_email` / `company_psa_id`. Each message says what to fix. A `rejected` run is the rules working (not their ticket, a bad address, a domain not allowed) and doesn't fail the step.
 
 ## Form setup
 
@@ -115,7 +115,9 @@ The ticket number and address are read from the body first, then from the form's
 
 Add a question of type **Action** at the end of the form and pick **Add CC to Ticket**. There's nothing to map. The portal sends each answer under its Field ID, plus its own `ticket`, `company` and `user` objects:
 
-- **Which ticket:** with a **Ticket number** question (Field ID `ticketNumber`), that ticket. Without one, the ticket the form itself creates. That suits a form like *Reset Password* that also asks who to copy, with an Email question whose Field ID is `ccEmail`.
+- **Which ticket:** with a **Ticket number** question, that ticket. Without one, the ticket the form itself creates. That suits a form like *Reset Password* that also asks who to copy.
+- **Field IDs don't have to match.** `ticketNumber` and `ccEmail` are read first. Failing those, the one answer whose Field ID mentions "ticket" and looks like a ticket number is the ticket, and the one answer whose Field ID mentions "mail" or "cc" and is a single email address (not the submitter's own, and never `userPrincipalName`) is the address. So the Field IDs the portal makes from the labels, such as `emailAddressToAdd`, work. Two different possible answers stop the run with an error naming both Field IDs.
+- **Left blank:** on the form's own ticket, the email question is optional. Left blank, the run succeeds and nobody is added. On an existing ticket (a ticket number question), a missing address is an error.
 - **Who's asking and their company:** only from the portal's `user.email` and `company.psaId`. The ownership rule applies as usual, so on the form's own ticket the requester is its contact.
 - **The switches** (`technician_run`, `allow_company_colleagues`, `allowed_domains`, `notify_cc`, `preview`, `psa`) can't be set from an Action, and a form answer with one of those Field IDs is ignored. An Action run uses the defaults: contact or CC only, any domain, public note on, live. If you need `allowed_domains`, use the Webhook activity below.
 
@@ -150,7 +152,7 @@ Don't use `@TicketId` for the target ticket: it's the **new** ticket the form it
 
 ## Tested
 
-Mocked PSAs only, in strict mode (`src/test.ps1`, 107 checks). Nothing here has run against a live PSA yet.
+Mocked PSAs, in strict mode (`src/test.ps1`, 130 checks), plus live runs on ConnectWise from a CloudRadial form Action on DV (2026-10-19, the form's own ticket).
 
 - Adding a CC on ConnectWise, Autotask, HaloPSA, Kaseya BMS and Zendesk, including each PSA's request shape, keeping the CCs already on the ticket, the read-back, the internal note and the public note to the new CC (on the Discussion tab in ConnectWise, a public comment in Zendesk), and `notify_cc: false`.
 - Syncro refused with a plain sentence and no calls.
@@ -162,7 +164,8 @@ Mocked PSAs only, in strict mode (`src/test.ps1`, 107 checks). Nothing here has 
 - PSA errors carry the PSA's own text and no secrets; a missing secret is named; a write the PSA accepts but doesn't keep (Zendesk CCs off) is an error; a write answered with a redirect is read back and never resent.
 - A refused note, or notes that can't be read back, become warnings.
 - Literal `@tokens` count as missing; the CloudRadial `Ticket.Questions` shape (`Answer` or `Value`); `Ticket.TicketId` is never used as the target; ownership fields typed into form answers are ignored.
+- Field IDs the portal makes from labels (`emailAddressToAdd`, `whichTicket`), two different email answers (an error naming both), the requester's own address and `userPrincipalName` never picked as the address, a blank optional question on the form's own ticket, and setup problems failing the step.
 
 ### Not yet proven live
 
-Every PSA call in `src/cc.ps1` (marked `Unverified`), in particular the ConnectWise CC fields, the Autotask additional-contacts write, the HaloPSA `emailcclist` update, the Kaseya BMS `Ccs` patch, and Zendesk `email_ccs`. Check the first run with `preview` and then on a test ticket.
+Every PSA call in `src/cc.ps1` except ConnectWise (marked `Unverified`), in particular the Autotask additional-contacts write, the HaloPSA `emailcclist` update, the Kaseya BMS `Ccs` patch, and Zendesk `email_ccs`. Check the first run with `preview` and then on a test ticket.

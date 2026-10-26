@@ -1,6 +1,68 @@
 # Let Users Add Colleagues to Ticket Updates
 
-A requester adds a coworker to the email updates on one of their own open tickets from the portal, with no technician needed, and the ticket records who was added and by whom.
+In your UCP portal, clients can copy a coworker on a ticket's email updates themselves. No call, no email to the help desk, no technician needed.
+
+## What your clients see in the portal
+
+**When they open a ticket.** Any request form can ask for "Email of a coworker to keep updated". The client types a coworker's address, and that person is copied on the new ticket from the start.
+
+**On a ticket that's already open.** An "Add someone to a ticket" form lets the client pick one of their tickets by number and add a coworker to it.
+
+Either way, the coworker gets a short email saying what the ticket is about, then every update after that.
+
+## What it protects
+
+- **Clients can only change their own tickets.** The ticket must belong to their company, and they must be its contact or already copied on it. Otherwise nothing changes.
+- **Only the copy list changes.** Status, owner and contact stay as they were.
+- **Your team can see what happened.** An internal note on the ticket says who was added and who asked.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS and Zendesk.
+
+- **Autotask:** the coworker must already be a contact at that company.
+- **Syncro:** not supported. Syncro has no way to copy someone on a ticket.
+
+## What you need
+
+- A UCP portal with **Actions** on your request forms
+- AutomationAI, with your PSA connected
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+
+**In your UCP portal, add the question to any request form:**
+
+1. Open the form, for example **Password Reset** or **New Hardware**.
+2. Add an **Email** question, "Email of a coworker to keep updated". Leave it optional.
+3. At the end of the form, add an **Action** question and pick **Add CC to Ticket**.
+4. Make sure the form still sends tickets to your PSA.
+
+If the client leaves the question blank, nobody is added. If the form already asks for another email address, such as a manager's, open this question's options and set its Field ID to `ccEmail`.
+
+**Optionally, add an "Add someone to a ticket" form:**
+
+1. Create a new request form called **Add someone to a ticket**.
+2. Add a **Text** question, "Ticket number".
+3. Add an **Email** question, "Email address to add".
+4. At the end of the form, add an **Action** question and pick **Add CC to Ticket**.
+
+Keep the word "ticket" in the ticket question and "email" in the email question. That's how the automation finds them.
+
+**Test it.** Submit each form once from the portal as a client user, then check the ticket in your PSA lists the coworker.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket#technical-details) cover how each PSA handles it, extra settings such as limiting which email domains can be added, and how it was tested.
+
+---
+
+## Technical details
 
 **Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 

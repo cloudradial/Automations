@@ -83,7 +83,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`ticket-routing/`](ticket-routing/) | Send Every Ticket to the Right Engineer | Agent + Workflow (ServiceAI Triage Action) | Not listed |
 | [`time-entry-review/`](time-entry-review/) | Catch Missing and Low-Detail Time Before It Costs You a Bill | Workflow (run daily by a Routine, or by hand) | [AAI-00051](https://automations.cloudradial.com/marketplace/AAI-00051) |
 | [`troubleshooting-article-delivery/`](troubleshooting-article-delivery/) | Send the Right Fix-It Article the Moment a Ticket Arrives | Workflow (PowerShell steps, no AI) | [AAI-00053](https://automations.cloudradial.com/marketplace/AAI-00053) |
-| [`user-offboarding/`](user-offboarding/) | Offboard a Departing Employee in One Reviewed Run | Workflow | Not listed |
+| [`user-offboarding/`](user-offboarding/) | Offboard a Departing Employee in One Reviewed Run | Workflow (two PowerShell steps, no AI) | Not listed |
 | [`vip-ticket-alert/`](vip-ticket-alert/) | Alert the Account Manager When a VIP Client Opens a Ticket | Workflow (PowerShell steps, no AI) | [AAI-00047](https://automations.cloudradial.com/marketplace/AAI-00047) |
 | [`waiting-on-client-nudge/`](waiting-on-client-nudge/) | Nudge Clients Who Haven't Replied, Then Close the Ticket | Workflow (PowerShell, no AI, runs on a schedule) | [AAI-00060](https://automations.cloudradial.com/marketplace/AAI-00060) |
 | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Get a Weekly List of Warranty and Ownership Gaps | Workflow (PowerShell audit + Deliver Result agent) | [AAI-00032](https://automations.cloudradial.com/marketplace/AAI-00032) |

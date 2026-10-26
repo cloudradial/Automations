@@ -37,6 +37,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`bulk-create-training-courses/`](bulk-create-training-courses/) | Add Many Training Courses at Once | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00026](https://automations.cloudradial.com/marketplace/AAI-00026) |
 | [`certificate-expiration-report/`](certificate-expiration-report/) | Renew SSL Certificates Before Browsers Warn | Workflow | [AAI-00024](https://automations.cloudradial.com/marketplace/AAI-00024) |
 | [`cloudradial-ucp/`](cloudradial-ucp/) | Run Portal Admin Tasks by Asking | Agent | [AAI-00031](https://automations.cloudradial.com/marketplace/AAI-00031) |
+| [`create-halo-ticket-from-template/`](create-halo-ticket-from-template/) | Create a Halo Ticket from a Template | Workflow (one PowerShell step, no AI) | Not listed |
 | [`deliver-result/`](deliver-result/) | Send Automation Results Wherever Your Team Works | Agent | [AAI-00039](https://automations.cloudradial.com/marketplace/AAI-00039) |
 | [`domain-expiration-report/`](domain-expiration-report/) | Never Let a Client Domain Expire | Workflow | [AAI-00023](https://automations.cloudradial.com/marketplace/AAI-00023) |
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Keep Every Client's Hardware Refresh Plan Current | Workflow (an optional AI agent version is included) | [AAI-00021](https://automations.cloudradial.com/marketplace/AAI-00021) |

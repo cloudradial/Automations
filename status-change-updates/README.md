@@ -1,6 +1,59 @@
 # Tell Requesters in Plain Language When Their Ticket Changes Status
 
-Every time a ticket moves to a status the client should know about, the requester gets a short, specific update in plain words, posted to the ticket so the PSA emails it, and internal-only statuses stay quiet.
+Every time a ticket moves to a status your client should know about, the requester gets a short, friendly update in plain words. Internal-only statuses stay quiet.
+
+## What happens
+
+**A ticket changes status.** AI writes two to four plain sentences for the requester: what the new status means for them and what happens next. It's posted to the ticket as a public note, so your PSA emails it to the requester as usual.
+
+For example, when a ticket moves to "Waiting on Client", the requester might read: "We need a little more information from you to keep ticket 1001 (Printer on floor 2 not printing) moving. Please reply to this ticket with any details you have, and we'll pick it straight back up."
+
+**Internal statuses stay internal.** Moves to statuses like "Waiting on Vendor", "Waiting on Parts" or "Internal Review" send nothing, and so does a status that didn't actually change.
+
+## What it protects
+
+- **Only client-visible facts.** The AI sees the ticket summary, the original request and recent public notes. Internal notes are never shared.
+- **No made-up promises.** The AI is told never to invent names, dates or commitments. If its answer isn't usable, a ready-written message for that status is sent instead.
+- **No double messages.** If the trigger fires twice, the requester still gets just one update.
+- **Nothing else changes.** It only adds the note. Status, owner and everything else on the ticket stay as they were.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Zendesk:** can't send the previous status, so only the new status is used.
+- **All PSAs:** whether the requester gets an email for the note depends on your PSA's notification settings. Check them before you go live.
+- **Triggers outside Zendesk:** not every PSA can send the old status or add a security header to its webhook. Check what yours can send; you may need a small relay (such as a Power Automate flow) in between.
+
+## What you need
+
+- AutomationAI, with your PSA connected and an AI provider set up in your tenant
+- A way for your PSA to call a webhook when a ticket's status changes
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/status-change-updates/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your PSA connection to the runner.
+4. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+
+**In your PSA:** set up a webhook that calls the workflow whenever a ticket's status changes.
+
+You can choose which statuses never notify the requester, and write your own message for any status.
+
+If you also run [Post-Close Feedback](https://github.com/cloudradial/Automations/tree/main/post-close-feedback), add your closed status to the quiet list, so the requester gets the survey instead of two messages at close.
+
+**Test it.** Move a test ticket where you are the contact to "Waiting on Client", and check that you get a clear, short update by email.
+
+## Need more detail?
+
+See the [technical details](https://github.com/cloudradial/Automations/tree/main/status-change-updates#technical-details) for the webhook body, every setting, the ready-written messages and what hasn't been proven live yet.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00054 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 

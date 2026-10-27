@@ -1,6 +1,62 @@
 # Ask Every Requester How It Went, and Hear About Bad Scores the Same Day
 
-When a ticket closes, the requester gets a one-click satisfaction survey from the ticket itself, and any low score lands in the service manager's inbox with the comment and a link, while every score is noted on the ticket.
+When a ticket closes, the requester gets a one-click satisfaction survey right on the ticket. Low scores reach your service manager by email the same day, with the comment and a link to the ticket.
+
+## What happens
+
+**A ticket closes.** The requester gets an email from your PSA asking "How did we do?", with one link per score from Excellent to Very poor. One click is all it takes.
+
+**The requester answers.** Every score is added to the ticket as an internal note, so your team sees it where they work. When the score is low (2 out of 5 or below, by default), your service manager also gets an email with the score, the requester's comment and a link to the ticket.
+
+If you use CloudRadial feedback, scores can be saved there too, and the companion [Feedback CSAT Report](https://github.com/cloudradial/Automations/tree/main/feedback-csat-report) turns them into a monthly summary per client.
+
+## What it protects
+
+- **One survey per ticket.** A ticket that already has a survey never gets a second one, even if the trigger fires twice.
+- **No surveys for junk.** Tickets closed as duplicate, spam, merged or cancelled are skipped.
+- **Only real answers count.** A score is accepted only for a ticket that was actually surveyed, and only the first answer is kept.
+- **Clients stay in their own lane.** When the answer comes from your portal, a client can't score another company's ticket.
+- **Nothing else changes.** It only adds notes and sends the low-score email. Ticket status and owner stay as they were.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Zendesk:** start it when a ticket is set to **Solved**, not Closed, because Zendesk won't add notes to a closed ticket.
+- **Kaseya BMS:** add your ticket link format in AutomationAI so the low-score email can link to the ticket.
+- **All PSAs:** whether the requester gets the survey email, and whether a note reopens a closed ticket, depends on your PSA's notification settings. Check them before you go live.
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- A page or form where the survey links land and send the answer back, such as a "Rate your support" form in your UCP portal, or a Microsoft Form with a Power Automate flow
+- Postmark, connected in AutomationAI, for the low-score email (without it, the ticket note asks your team to follow up instead)
+- Optional: your CloudRadial API connected, to save scores as CloudRadial feedback
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your survey page link, your service manager's email address and your PSA connection to the runner.
+4. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+
+**In your PSA:** set up a webhook that calls the workflow when a ticket closes (in Zendesk, when it's set to **Solved**).
+
+**For the answers:** build your "Rate your support" form with questions for the ticket number, the score and a comment, and have it send the answer back to the same workflow.
+
+You can change the low-score cutoff, the size of the scale (up to 10 points) and which closing reasons get no survey.
+
+**Test it.** Close a test ticket where you are the contact, click a low score in the email, and check that the note and the manager email arrive.
+
+## Need more detail?
+
+See the [technical details](https://github.com/cloudradial/Automations/tree/main/post-close-feedback#technical-details) for the webhook bodies, every setting, how the portal form is wired and what hasn't been proven live yet.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00056 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 

@@ -1,6 +1,58 @@
 # Nudge Clients Who Haven't Replied, Then Close the Ticket
 
-Tickets waiting on the client get a polite reminder on day 2 and day 4, then close with a notice on day 7, so stalled tickets stop piling up and nobody has to chase them by hand.
+Tickets waiting on a client reply get a polite reminder on day 2 and day 4, then close with a notice on day 7. Stalled tickets stop piling up, and nobody on your team has to chase them by hand.
+
+## What happens
+
+**Once a day, in the background.** The automation looks at every ticket in your "waiting on client" status and works out how long each one has been waiting.
+
+**Your clients get a short, friendly reminder.** On the reminder days, it adds a public note to the ticket, so your PSA emails the client. The reminder says the date the ticket will close if there's no reply.
+
+**Then the ticket closes with a notice.** On the close day, the client gets a closing notice and the ticket is closed.
+
+**Your team sees every step.** Each ticket it touches gets a technician-only note saying what was done, including anything it held back or couldn't do.
+
+## What it protects
+
+- **Urgent tickets are never closed automatically.** Critical and high priority (P1 and P2) tickets that reach the close day stay open, and a technician gets a note instead.
+- **A client reply stops the clock.** If the client wrote the newest note, nothing is sent, and the ticket is flagged in the run summary so someone can move it on.
+- **Clients never get the same reminder twice,** even if the automation runs again or two runs overlap.
+- **Only waiting tickets are touched.** Tickets in any other status are left alone.
+- **No notice, no close.** If the closing notice can't be posted, the ticket stays open.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Kaseya BMS:** you need to tell it which status to close tickets to. Kaseya BMS doesn't record who wrote a note, so a client reply restarts the wait instead of being flagged.
+- **All PSAs:** some of the PSA connections haven't been proven in a live run yet, so start with a preview run (step 4 below).
+
+## What you need
+
+- AutomationAI, with your PSA connected on your runner
+- A PSA login for the automation that can read tickets and notes, add public and internal notes, and change ticket status
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/waiting-on-client-nudge/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds your PSA connection.
+4. **Preview first.** Open **Test** and run it with preview turned on (the first step's test input already does this). It lists which tickets would get a reminder or be closed, and changes nothing.
+5. **Schedule it.** Attach a daily **Routine** to the workflow.
+
+**Optional settings.** You can change the reminder days and the close day, use your own "waiting" and "closed" status names, run it for one client only, or cap how many tickets it checks in one run. If the preview finds nothing, your waiting status probably has a different name in your PSA: set it to match.
+
+**Test it.** Run it live for one test client, check the ticket in your PSA has the public reminder and an internal note, then run it again straight away and confirm nothing new was written.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/waiting-on-client-nudge#technical-details) cover how the days are counted, every setting and its default, the PSA permissions, and what still needs checking in each PSA.
+
+---
+
+## Technical details
 
 **Formerly:** Waiting-on-Client Nudge (tracker 9.3) | **Marketplace ID:** AAI-00060 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
 

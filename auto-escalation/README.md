@@ -1,6 +1,63 @@
 # Escalate Forgotten Tickets Before They Breach
 
-Every 15 minutes, tickets nobody has touched for too long, or whose SLA is about to run out, get an internal note saying why, move up one tier, and the dispatcher gets an email. A ticket is escalated once and never bounced around, even when a run is retried. Users can also [escalate their own ticket](#let-users-escalate-their-own-ticket) from a portal form.
+Tickets that nobody has touched for too long, or that are about to miss their SLA, move up a tier and your dispatcher hears about them, before a client has to chase you.
+
+## What happens
+
+Every 15 minutes, the automation checks your open tickets.
+
+- **Forgotten tickets are spotted.** A ticket counts as forgotten when it has had no update for too long for its priority (15 minutes for critical, 1 hour for high, 4 hours for medium, 8 hours for low), or when most of its SLA time is used up.
+- **The ticket moves up one tier.** Your team sees an internal note explaining why, then the ticket moves to the next queue or person you chose.
+- **Your dispatcher gets one email** per run, listing each ticket, the company and what was done.
+- **Clients can ask too.** If you add a portal form, a client can enter their ticket number and a reason, and that ticket is escalated for them. They get a short note on the ticket saying a member of your team will be in touch.
+
+Tickets that are waiting, pending, on hold or scheduled are left alone.
+
+## What it protects
+
+- **Each ticket is escalated once.** Retries and overlapping runs never move a ticket twice or email about it twice.
+- **Busy technicians keep their tickets.** A ticket someone is actively working is noted, not taken away.
+- **Clients can only escalate their own tickets.** The ticket must be theirs and at their company. Nothing about another company's ticket is ever shown.
+- **Nothing moves without a record.** If the note can't be written, the ticket isn't moved.
+- **Clients see nothing from the sweep.** Notes are internal only.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Kaseya BMS:** name the next queue by its number, not its name.
+- **Syncro:** has no queues, so tickets move by issue type.
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- A PSA API account that can read and update tickets and add notes
+- Postmark connected, for the dispatcher email (without it, the note on each ticket is the only alert)
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/auto-escalation/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your escalation map (which queue moves up to which) and your dispatcher's email address to the runner settings. Without the map, tickets are only noted, never moved.
+4. Click **Publish**, then **Deploy**.
+5. **Preview it.** Run it once with preview turned on for one test client. It shows what it would move and email, and flags any queue in your map that doesn't exist. Nothing changes.
+6. **Schedule it.** Attach a **Routine** that runs every 15 minutes.
+
+You can change the time limits per priority, how much SLA time counts as "at risk", which statuses are skipped, and limit it to one client.
+
+**Optionally, let clients escalate from the portal:** create a request form with a **Ticket #** question and a **Reason** question, connect it to this workflow, and turn on the workflow's webhook. The exact form wiring is in the technical details.
+
+**Test it.** Escalate one test ticket, then run it again. The ticket must not move a second time.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/auto-escalation#technical-details) cover the escalation map, the portal form wiring, every setting, and how each PSA handles moves.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00062 | **Type:** Workflow (PowerShell steps, no AI), run every 15 minutes by a Routine | **Version:** 1.0.0
 

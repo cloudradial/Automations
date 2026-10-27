@@ -1,6 +1,69 @@
 # Spot Duplicate and Related Tickets as They Arrive
 
-When a new ticket comes in, the technician sees an internal note listing the same company's open tickets that describe the same issue, with links and a one-line reason for each, so duplicates get worked once and outages get spotted early.
+When a new ticket comes in, your technician sees a note listing the same client's open tickets that describe the same issue. Duplicates get worked once, and outages get spotted early.
+
+## What happens
+
+**A new ticket arrives.** ServiceAI calls the automation as part of triage, or a technician asks for it in ServiceAI.
+
+**It finds look-alike tickets.** It checks the same company's open tickets from the last week for shared words, contact and device, then AI picks the true matches.
+
+**Your technician gets one internal note** on the new ticket, listing each possible duplicate or related ticket with a link and a one-line reason. Your clients see nothing.
+
+**Tickets are linked only when a technician says yes** in ServiceAI. The other ticket also gets a short cross-reference note.
+
+## What it protects
+
+- **Clients stay separate.** Only the ticket's own company is checked, so another client's ticket never reaches the AI or the note.
+- **Nothing is merged, closed or changed in status.** For a duplicate, the note suggests your technician merge or close one ticket themselves.
+- **Triage never links tickets.** An automatic triage run only adds the note.
+- **The AI can't touch your PSA.** It only reads the shortlist, and uses your own AI provider.
+- **No double notes.** If the automation runs again on the same ticket, it doesn't write the same note twice.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk. How tickets are linked depends on the PSA:
+
+- **HaloPSA:** the newer ticket becomes a child of the older one.
+- **Autotask and Zendesk:** linked only when the older ticket is already a Problem ticket. Otherwise, notes on both tickets.
+- **ConnectWise PSA, Kaseya BMS and Syncro:** no ticket links in these PSAs, so notes on both tickets instead.
+- **Kaseya BMS:** the note has no ticket links unless you give the automation your PSA's ticket web address.
+- **All PSAs:** some of the PSA connections haven't been proven in a live run yet, so start with a preview run (step 4 below).
+
+## What you need
+
+- AutomationAI, with your PSA connected on your runner
+- ServiceAI, to call it from triage and technician chat
+- A PSA login for the automation that can read tickets and companies and add notes (and update tickets, to link them in HaloPSA, Autotask or Zendesk)
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/related-ticket-detection/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds your PSA connection.
+4. **Preview first.** In **Run**, try it on a real ticket with note writing and linking turned off. Nothing is changed.
+5. Turn on the webhook in **Properties**, then **Deploy** again. AutomationAI gives you a web address and a secret.
+
+**In ServiceAI:**
+
+1. Save the webhook secret in the **Secrets manager**.
+2. In **Settings > Actions**, create two Actions that call the webhook: **Link Related Tickets** (Use in AI) and **Link Related Tickets (Triage)** (Use in Triage).
+3. Add a triage rule in plain words, such as: "When a new ticket describes the same issue as another open ticket for the same company, call the Link Related Tickets action. Never merge or close tickets."
+4. Optionally, add a **Pod Quick Action** called **Link related**, so technicians can run it on any ticket.
+
+**Optional settings.** You can look further back than a week, make matching stricter or looser, or also write a note when nothing matched.
+
+**Test it.** Open a new ticket that repeats an existing open ticket for the same test company, and check the internal note lists the original.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/related-ticket-detection#technical-details) cover scoring, the exact ServiceAI Action setup, every setting, and what to check in each PSA.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00052 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 

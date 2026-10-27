@@ -1,6 +1,62 @@
 # Alert the Account Manager When a VIP Client Opens a Ticket
 
-The moment a VIP client's ticket lands, their account manager gets a short email with the summary and a link, and the ticket records that they were told, once per ticket.
+When one of your VIP clients opens a ticket, their account manager gets a short email right away, so your most important clients never wait unnoticed.
+
+## What happens
+
+ServiceAI triage spots a new ticket that looks like it's from a VIP and passes it to this automation. If the company or contact is on your VIP list:
+
+- the account manager gets an email with the company, ticket number, summary, priority, contact and a link to the ticket
+- the ticket gets an internal note saying who was alerted
+
+If the company isn't on your list, nothing happens. Your client doesn't see anything different. This is just for your team.
+
+## What it protects
+
+- **Your list decides, not the AI.** ServiceAI may suggest a ticket, but the automation checks your own VIP list before alerting anyone.
+- **One alert per ticket.** A retry or a second triage pass never sends the email twice.
+- **Clients see nothing.** It only writes internal notes and never changes status, priority or who the ticket is assigned to.
+- **No alert is lost.** If the email can't be sent, the full alert goes in the internal note and asks your team to tell the account manager.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Kaseya BMS:** you need to give it the link format for your tickets, so the email can link to them.
+- **ConnectWise PSA, Autotask, HaloPSA and Syncro:** the built-in ticket links haven't been tested live yet. If a link is wrong, set your own link format.
+- **Autotask and HaloPSA:** checking for an earlier alert note hasn't been tested live yet.
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- ServiceAI, with Actions and triage rules
+- Postmark connected in AutomationAI, to send the email (without it, the alert goes in an internal note instead)
+- Your VIP list: company names, PSA company numbers, contact emails or whole email domains, each with the account manager to alert
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/vip-ticket-alert/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your VIP list, and who to alert by default, to your runner's settings.
+4. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+
+**In ServiceAI:**
+
+1. Save the workflow's webhook secret in the **Secrets** manager.
+2. Go to **Settings > Actions > New**, name it **Notify VIP Ticket**, choose **Use in Triage**, and point it at the workflow's webhook.
+3. Add a triage rule in plain words, for example: "When a new ticket comes from a company or contact tagged VIP, call the Notify VIP Ticket action once per ticket."
+
+**Test it.** Use **Send test** in the Action editor with a company on your list, then check the email arrived and the ticket has the internal note.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/vip-ticket-alert#technical-details) cover the VIP list format, the exact Action settings, and what hasn't been tested live yet.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00047 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 

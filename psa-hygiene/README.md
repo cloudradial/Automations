@@ -1,8 +1,66 @@
 # Keep Your PSA Clean: Stale Tickets, Missing Contacts and Wrong Statuses
 
-Every week, email the service manager the open tickets that have gone quiet, have no contact, or sit in a status that contradicts them, and fill in missing contacts only where the answer is certain and you say so.
+Once a week, your service manager gets one email listing the open tickets that need tidying: ones that have gone quiet, ones with no contact, and ones whose status doesn't add up. If you choose, it can also fill in a missing contact when the right answer is certain.
+
+## What happens
+
+**Every week, one email** with three short lists:
+
+- **Stale tickets:** no update for two weeks or more.
+- **Missing contacts:** open tickets with nobody named as the contact.
+- **Wrong statuses:** tickets marked closed that are still open (often a reopened ticket nobody tidied), or open tickets with no technician assigned for over a day.
+
+Your team works through the list. Your clients don't see anything.
+
+**Optionally, a copy for your records.** The report can also be saved in the **PSA Hygiene** report archive of your own MSP company in CloudRadial, where only admins can see it. Never point it at a client company, because the report covers every client.
+
+## What it protects
+
+- **It only reports, unless you say otherwise.** A normal weekly run changes nothing.
+- **One fix only, and only when it's certain.** If you turn it on and confirm it, it sets a missing contact, but only when that client has exactly one primary contact. Anything less clear is left alone, with the reason in the report.
+- **Stale tickets and wrong statuses are never changed.** Those need a person to decide.
+- **You can preview first.** Without your confirmation, the report shows what the fix would change and nothing is written.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Syncro:** missing contacts aren't checked or fixed, because a Syncro ticket with no contact belongs to the customer record itself.
+- **Zendesk:** missing requesters are reported but not fixed, because Zendesk has no primary contact. The closed-but-open check doesn't apply either, only the unassigned check.
+- **Every PSA:** some PSA connections haven't been proven in a live run yet, so check the first report against your PSA before turning on any fixes.
+
+## What you need
+
+- AutomationAI, with your PSA connected (read access to tickets and contacts, plus edit access to tickets if you want the contact fix)
+- Postmark set up in AutomationAI to send the email, with a verified sender address
+- Your service manager's email address
+- Optional: CloudRadial connected in AutomationAI, for the archive copy
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/psa-hygiene/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+4. Save your service manager's email address in the runner's settings, and your own MSP company if you want the archive copy.
+5. Go to **Routines > New**, pick this workflow and a weekly schedule, for example Mondays at 7am. Add it again after every import, because the schedule isn't part of the file.
+
+**Optional settings.** You can change how many quiet days count as stale (14 by default), how long a ticket can sit unassigned (24 hours), or check one client only. To fix missing contacts, run it by hand with the contact fix turned on, preview the result, then run it again with your confirmation.
+
+**Test it.** Run the workflow by hand with your own email address, then check a few listed tickets in your PSA.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/psa-hygiene#technical-details) cover how each PSA finds the primary contact, every setting, and the full import and test steps.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00050 | **Type:** Workflow (run weekly by a Routine, or by hand) | **Version:** 1.0.0
+
+Every week, email the service manager the open tickets that have gone quiet, have no contact, or sit in a status that contradicts them, and fill in missing contacts only where the answer is certain and you say so.
 
 ## Files
 

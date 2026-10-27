@@ -1,8 +1,66 @@
 # Respond to Risky Microsoft 365 Sign-ins Within the Hour
 
-Every hour, find the users Microsoft flags as high risk, open a priority ticket, sign them out, require a new password and tell their manager. Accounts are blocked only when you confirm it.
+Every hour, this automation finds the people Microsoft flags as high risk in a client's Microsoft 365, opens a priority ticket, signs them out and makes them choose a new password. Your team stays in charge: no account is blocked unless you say so.
+
+## What happens
+
+**Every hour, in the background.** When Microsoft says a user's sign-ins look risky, your team gets a high-priority ticket in your PSA. If that user is an admin, the ticket is critical.
+
+**The user is secured right away.** They are signed out of every session and asked for a new password the next time they sign in.
+
+**Their manager hears about it.** The manager gets a short email saying Microsoft noticed unusual sign-in activity and what was done. It holds no technical detail.
+
+**Blocking is your call.** If a technician decides an account must be blocked, they run the automation again for that account. It blocks it only if Microsoft still sees it as risky.
+
+## What it protects
+
+- **One ticket per incident.** A user who already has an open ticket is left alone, so the hourly run never opens a second ticket or signs them out again.
+- **Risk details stay internal.** The location and sign-in detail go only into an internal ticket note, never into anything your client sees.
+- **One client at a time.** You run one copy per client, so one client's users never show up on another client's ticket.
+- **Safe to run again.** A repeated run doesn't write the same note twice.
+- **You can try it first.** A preview run shows what it would do and changes nothing.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Kaseya BMS:** it has no ticket search, so the automation lists the client's open tickets and checks them itself.
+- **If your PSA can't be searched:** the automation keeps a log in the client's admin-only report archive instead, so it still handles each user once.
+- **Admins:** Microsoft doesn't let an automation change an admin's password settings, so the ticket note asks your team to reset it by hand.
+- **Accounts synced from on-premises Active Directory, or signing in through another identity provider:** reset the password there. The automation can't.
+
+## What you need
+
+- Microsoft Entra ID P2 in the client's Microsoft 365 (included in Microsoft 365 E5, or as an add-on)
+- That Microsoft 365 connected in AutomationAI, with the permissions listed in the technical details
+- Your PSA and CloudRadial connected in AutomationAI
+- Optional: a mailbox in the client's tenant to send the manager emails from
+
+## Set it up
+
+**Once per client, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/risky-signin-response/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. If this client's Microsoft 365 connection is saved under the company in **Companies**, open the workflow and set **Company** to that client on the steps **Find risky users**, **Respond to new risky users** and **Block confirmed accounts**. Do this again after every import.
+4. Click **Publish**, then **Deploy** to the runner that holds this client's connections.
+5. Go to **Routines > New**, pick this workflow and an hourly schedule.
+
+You can also choose to include medium-risk users, or turn off the manager email.
+
+**Test it.** Run the workflow once by hand in preview, and check that it lists the users Microsoft has at risk and changes nothing.
+
+## Need more detail?
+
+See the [technical details](https://github.com/cloudradial/Automations/tree/main/risky-signin-response#technical-details) for the permissions, settings and how a block is confirmed.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00046 | **Type:** Workflow (run hourly by a Routine, or by hand) | **Version:** 1.0.0
+
+Every hour, find the users Microsoft flags as high risk, open a priority ticket, sign them out, require a new password and tell their manager. Accounts are blocked only when you confirm it.
 
 ## Files
 

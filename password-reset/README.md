@@ -1,6 +1,60 @@
 # Let Users Reset Their Own Password Safely
 
-End users reset their own Microsoft 365 password from the portal in seconds, and built-in checks stop anyone resetting another person's, an admin's or an at-risk account.
+Your clients reset their own Microsoft 365 password from the portal in seconds. Built-in checks stop anyone resetting someone else's password, an admin's, or an account that looks at risk.
+
+## What your clients see in the portal
+
+**A Password Reset form.** The client enters the email address of their own account and submits the form. A ticket is created, as with any other request.
+
+**An answer on the ticket.** In moments, the ticket gets a reply. If it worked, it says their password has been reset. If it was refused, it says why in plain words, for example "You can only reset your own account". If something went wrong, it says a technician will follow up shortly.
+
+At their next sign-in they use the temporary password and choose a new one. They're also signed out everywhere else.
+
+## What it protects
+
+- **People can only reset their own account.** The portal knows who is signed in, and that must match the account. A form answer can't change who the requester is.
+- **Admins are never reset this way.** Any account with an admin role goes through a technician.
+- **Disabled and at-risk accounts are refused.** A disabled account may be mid-offboarding, and an account Microsoft flags as at risk or compromised needs a person to look at it.
+- **The wrong client's tenant is refused.** The request must match the Microsoft 365 tenant your connection signs in to.
+- **The temporary password stays private.** It only goes in an internal note your technicians can see, never in the client's reply.
+- **Every outcome is recorded.** Success, refusal or error, the ticket gets notes, and a retried request doesn't post them twice.
+
+## Works with
+
+Microsoft 365 (Entra ID), for the password reset itself. The notes go on the ticket in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+
+## What you need
+
+- A UCP portal with **Actions** on your request forms
+- AutomationAI, with Microsoft 365 connected and allowed to reset passwords, read admin roles and check risky users
+- Your PSA connected in AutomationAI, so the notes reach the ticket
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+
+If a client's Microsoft 365 connection is saved under that company rather than shared, open the workflow, set **Company** to that client on the Microsoft 365 steps, then publish and deploy. Do this again after every import.
+
+**In your UCP portal:**
+
+1. Open or create a **Password Reset** request form.
+2. Add an **Email** question for the account to reset, and set its Field ID to `userPrincipalName`.
+3. At the end of the form, add an **Action** question and pick **Password Reset**.
+4. Make sure the company's Microsoft 365 tenant is set in the portal, so the tenant check can run.
+
+**Test it.** As a client user, submit the form for a spare test account you own and check the ticket notes. Then submit it for a different address and check it's refused. A successful test really does change that account's password.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/password-reset#technical-details) cover each safety check, the Microsoft permissions needed, other ways to start it, and how to test each step.
+
+---
+
+## Technical details
 
 **Formerly:** Password Reset (Self-Service) | **Marketplace ID:** AAI-00027 | **Type:** Workflow | **Version:** 1.0.0
 

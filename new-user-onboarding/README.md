@@ -1,6 +1,73 @@
 # Get New Hires Ready for Day One
 
-Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
+Your clients ask for a new starter in the portal, and AutomationAI takes it from request to ready for day one: account, access, quotes for equipment, portal login and training, with a note on the ticket that says what is done and what still needs your team.
+
+## What your clients see in the portal
+
+**They fill in the Add a New User form.** Name, start date, role, which coworker the new person should match, and any equipment or software they need.
+
+**They get a ticket, as usual.** Behind the scenes the request is checked and worked through in stages. Your technicians see the full result as an internal note on that same ticket.
+
+## What happens behind the scenes
+
+- **Checks the request.** A request with no start date stops here.
+- **Raises quotes, never buys.** Hardware, phones and software are listed as quote requests for your team.
+- **Plans access from a similar coworker.** Admin and other sensitive groups are never copied without approval.
+- **Sets up the account.** Microsoft 365 account, licence, mailbox and the approved access.
+- **Hands over the password safely.** Only through 1Password, never by email or chat.
+- **Adds portal access and training.** A UCP portal login and your onboarding courses.
+- **Double checks.** A final step looks at what really exists and reports each starter as ready or not.
+- **Can start your other workflows,** such as Split Request to raise the service ticket and the quote.
+
+## What it protects
+
+- **Nothing happens without you.** It starts in preview, and every change waits for approval in your AutomationAI Inbox.
+- **Existing users are never changed.**
+- **The requester can't be faked.** Who asked, and for which client, comes from the portal, never from a typed answer.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, for the ticket note.
+
+- **All PSAs:** the note hasn't been posted to a live PSA yet, so check the first one by hand.
+- **Kaseya BMS:** you also choose which note type to use.
+
+This automation is still in testing. Keep it in preview until a full run has been checked from start to finish.
+
+## What you need
+
+- Microsoft 365 and Microsoft Entra ID, connected in AutomationAI
+- CloudRadial, 1Password Business and Microsoft Teams, connected in AutomationAI
+- A 1Password vault for handing over new passwords
+- Your PSA connected on your AutomationAI runner, for the ticket note
+- A UCP portal with **Actions** on your request forms
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** both files from the [release page](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.1.0).
+2. Go to **Agents > Custom > Import** and upload the New User Onboarding agent first.
+3. In the agent's settings, pick your 1Password vault and your default licence.
+4. Go to **Workflows > Import** and upload the workflow.
+5. Click **Publish**, then **Deploy**.
+
+**In your UCP portal:**
+
+1. Open the **Add a New User** form.
+2. At the end of the form, add an **Action** question and pick **New User Onboarding**.
+
+**Test it.** Submit the form once as a client user and check the preview note on the ticket. Switch to live only once you trust the results.
+
+Prefer no AI? A simpler version creates the same accounts straight from the form, without quotes or access mirroring. It's in the same folder.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#technical-details) cover each stage, going live, the simpler no-AI version and every setting.
+
+---
+
+## Technical details
 
 **Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow | **Version:** 1.1.0
 

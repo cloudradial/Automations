@@ -1,6 +1,61 @@
 # Turn One Request into a Service Ticket and a Quote
 
-One portal form or triaged ticket becomes a service ticket written to your standards and, when something has to be bought, a linked quote request.
+When a client asks for something that needs both work and a purchase, like a new starter who needs a laptop, your team gets two linked tickets, both written to your own standards.
+
+## What your clients see in the portal
+
+**Nothing changes for them.** They fill in one request form as usual, for example **Add a New User**, and submit it once.
+**What your team gets.** A service ticket for the work, and a quote request linked to it when something has to be bought. If nothing needs buying, only the service ticket is made. The quote request lists anything your quoting standards need that the client didn't give, under "Still needed before this can be quoted".
+
+It also works on tickets being triaged in ServiceAI.
+
+## What happens behind the scenes
+
+- **An AI agent reads the request** and writes both tickets the way your team does, from three short standards documents you keep in AutomationAI Knowledge (service tickets, quote requests and your standard catalog).
+- **For your forms, a fixed rule decides whether a quote is needed.** If the AI disagrees, the rule wins and the tickets are flagged for review.
+- **If the AI isn't sure, or gives no answer,** the tickets use simple built-in templates, so the request is never lost.
+- **Every ticket gets an internal note** saying how it was split, what's missing, and "REVIEW REQUIRED" when a person needs to look.
+- **If the quote request fails,** the service ticket is kept and flagged so your team can raise the quote by hand.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **ConnectWise PSA:** the PSA it has been run against. Set a service board for the service ticket and one for the quote (the quote goes to a service board too).
+- **Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk:** supported, but not yet proven in a live run. Watch your first run.
+- **Ticket type and subtype:** ConnectWise only. Other PSAs get the priority as a level (critical, high, medium or low).
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- The board or queue each ticket should go to (PSAs other than ConnectWise use their default queue if you don't set one)
+- AutomationAI Knowledge for your standards (recommended: the tickets still work without it, but read better with it)
+- A UCP portal request form, or ServiceAI, to start it
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [files](https://github.com/cloudradial/Automations/releases/tag/split-request-two-tickets/v1.1.0).
+2. Import the **Split Request Classifier** agent first, on **Agents > Custom > Import**. The workflow can't find it otherwise.
+3. Edit the three standards documents to match how your team works (keep their headings), then upload them to a **Knowledge** folder such as **Ticket Standards**.
+4. Go to **Workflows > Import** and upload the **Split Request - Service + Quote** workflow.
+5. Open the **Classify the request** step, choose **Ground on knowledge**, and attach the three documents. Use **Preview recall** to check your sections come back.
+6. Add your PSA connection details, and the board or queue for the service ticket and for the quote.
+7. In the ticket step, match the list of form questions to your own forms. On the stock **Add a New User** form, set the computer question's Field ID to `deviceType`, or the hardware won't reach the quote.
+8. In **Properties**, turn on the webhook. Then click **Publish**, then **Deploy**.
+
+**In your UCP portal:** point the request form's automation at the workflow's webhook address, with its secret.
+
+**Test it.** Run it once with **Test draft** against a test company (it creates real tickets), then check your PSA for a service ticket, a quote request and a note on each.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/split-request-two-tickets#technical-details) cover how the pieces share the work, writing good Knowledge and the ServiceAI setup.
+
+---
+
+## Technical details
 
 **Formerly:** Split Request, Service + Quote | **Marketplace ID:** AAI-00034 | **Type:** Workflow + Agent | **Version:** 1.1.0
 

@@ -1,6 +1,59 @@
 # Resolve Password Reset Tickets Automatically
 
-Password reset tickets close on their own when the requester owns the account, and wait for a quick confirmation when someone else asked.
+Password reset tickets close on their own when the person asking owns the account, and wait for a quick confirmation when someone else asked.
+
+## What happens
+
+When a password reset ticket comes in, ServiceAI hands it to this automation during triage. It checks who signed in to send the request and whose account needs resetting.
+
+**When users ask for their own account.** Their Microsoft 365 password is reset to a temporary one and they're signed out everywhere. The ticket gets a friendly note telling them to sign in with the temporary password and choose a new one. The temporary password itself is shown only to your team.
+
+**When someone asks for another person's account.** Nothing changes. The ticket gets a note saying someone will reach out shortly to confirm, so your team can check before acting.
+
+**When the ticket doesn't say who asked.** Nothing happens, and the ticket stays with your team.
+
+## What it protects
+
+- **Admins are never reset from a ticket.** Accounts with an admin role are always left for a technician.
+- **Guest and disabled accounts are skipped.** Your team handles those by hand.
+- **Only the account owner gets an automatic reset.** A request for someone else always waits for a person to confirm.
+- **The temporary password stays private.** It appears only in the run logs your team can see, never in the client's note.
+
+## Works with
+
+- **Microsoft 365:** the accounts it resets.
+- **Your PSA:** tickets reach it through ServiceAI, which also posts the notes back. If your PSA names the ticket fields differently, a small change may be needed (see the technical details).
+
+## What you need
+
+- ServiceAI, connected to your PSA
+- AutomationAI, with Microsoft 365 connected for the clients you want covered
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/password-reset-triage/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. In **Properties**, turn on the webhook. Copy its URL and secret.
+4. Click **Publish**, then **Deploy** to the runner that holds your Microsoft 365 connection.
+
+**In ServiceAI:**
+
+1. Add an **Action** set to **Use in Triage**.
+2. Point it at the webhook URL you copied, and save the secret with it.
+
+If a client's Microsoft 365 connection is saved under that company in AutomationAI, set **Company** to that client on the two reset steps in the designer. Do this again after every import.
+
+**Test it.** Raise a password reset ticket for a spare test account, signed in as that account, and check it is reset. Then raise one as a different user and check nothing changes.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/password-reset-triage#technical-details) cover how it reads each ticket, the safety checks and the full test steps.
+
+---
+
+## Technical details
 
 **Formerly:** Password Reset (ServiceAI Triage) | **Marketplace ID:** AAI-00028 | **Type:** Workflow (ServiceAI Triage Action) | **Version:** 1.0.0
 

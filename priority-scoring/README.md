@@ -1,6 +1,64 @@
 # Raise Ticket Priority to Match Its Real Impact
 
-Outages, security incidents and tickets that block many people are raised to the right priority as soon as they arrive, with the reasoning on the ticket, while a possible P1 goes to a dispatcher to decide and no priority a technician set is ever lowered.
+Outages, security incidents and tickets that block many people are raised to the right priority as soon as they arrive, with the reasoning on the ticket. A possible P1 goes to a dispatcher to decide.
+
+## What happens
+
+When a new ticket comes in, the automation scores it using fixed rules, with no AI. It looks for words that mean something is down or compromised, that someone can't work, or that it's urgent. It counts how many people are affected, and checks whether the company or contact is on your VIP list and which service tier the company is on. Simple requests and questions score lower.
+
+The ticket's priority is then raised to match, and an internal note shows exactly how the score was worked out. The same ticket always gets the same score.
+
+If a ticket looks critical, it's set to high and flagged as a possible P1. Your dispatcher gets an email with the summary, a link and the reasons, and a person decides whether it's truly critical.
+
+## What it protects
+
+- **Priorities are only ever raised.** If a ticket is already at that level or higher, it's left alone.
+- **Never above high on its own.** Only a person makes a ticket critical.
+- **It starts in preview.** Until you turn on making changes, it only reports the score and what it would do.
+- **No repeats.** Running it again on the same ticket changes nothing and never emails the dispatcher twice.
+- **Your clients see nothing.** The note is internal.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk. It uses each PSA's own priority list.
+
+- **ConnectWise PSA:** if your PSA account can't list priorities, it sets impact and urgency instead and lets your board's priority matrix choose.
+- **HaloPSA:** expects the standard Critical to Low priorities.
+- **Syncro and Zendesk:** have only high, normal and low.
+- **ConnectWise, HaloPSA, Kaseya BMS and Syncro:** setting the priority hasn't been proven on a live PSA yet. Watch one run on your PSA before letting it make changes on its own.
+
+## What you need
+
+- AutomationAI, with your PSA's API details added to your runner
+- A PSA account that can read tickets, companies and notes, update tickets and add notes (on ConnectWise, also read priorities)
+- Postmark and a dispatcher email address, for the possible-P1 email
+- Optionally, a VIP list and a list of company tiers
+- Something to start it when a ticket is created: your PSA's ticket-created callback, or a ServiceAI Action
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/priority-scoring/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your PSA's API details, your Postmark details and your dispatcher's email address to your runner. You can also add your VIP list and company tiers (for example, Contoso is premium, Fabrikam is basic). The technical details list exactly what's needed.
+4. Turn on the webhook in **Properties**. AutomationAI gives you a URL and a secret.
+5. Click **Publish**, then **Deploy**.
+
+**Start it when a ticket is created:**
+
+1. In ServiceAI, go to **Settings > Actions** and add an action that calls the webhook with the ticket number. Or point your PSA's ticket-created callback at it.
+2. Leave it in preview at first. When you're happy with the scores, turn on making changes.
+
+**Test it.** Run it on a test ticket whose priority is too low, check the score, then run it again with changes turned on and confirm the priority went up with one internal note.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/priority-scoring#technical-details) cover the full scoring rules, how each PSA sets priority, the full setup and test steps, and what hasn't been proven live yet.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00058 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 

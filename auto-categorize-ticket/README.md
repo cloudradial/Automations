@@ -1,6 +1,63 @@
 # Categorize New Tickets Automatically
 
-New tickets arrive with their type and subtype already filled in from your PSA's own list, so they reach the right people and reports without a dispatcher sorting them by hand, and nothing a technician set is ever overwritten.
+New tickets arrive with their type and subtype already filled in from your PSA's own list. They reach the right people and the right reports without a dispatcher sorting them by hand.
+
+## What happens
+
+When a new ticket comes in, the automation reads its summary and description and picks the best type (and subtype, where your PSA has them) from the categories your PSA already allows for that ticket. Your clients don't see anything different. Your team sees a ticket that's already categorized, with a short internal note explaining why.
+
+If the automation isn't sure enough, it doesn't change the ticket. It leaves an internal note with its suggestion, so a technician can set it.
+
+## What it protects
+
+- **Nothing a technician set is ever overwritten.** Only blank or "not set yet" fields (such as Unclassified) are filled. The board is never changed.
+- **Only real categories are used.** Every pick is checked against your PSA's list before it's saved. Anything that isn't there is dropped.
+- **It starts in preview.** Until you turn on making changes, it only reports what it would set.
+- **One note per ticket.** Running it again on the same ticket never adds a second note.
+- **Your clients see nothing.** All notes are internal.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **ConnectWise PSA:** fills type, subtype and item, using your board's own combinations.
+- **Autotask and Kaseya BMS:** fills issue type and sub-issue type.
+- **HaloPSA:** fills the category. **Syncro:** fills the issue type. **Zendesk:** fills the ticket type.
+- **HaloPSA, Kaseya BMS and Syncro:** the category lookups haven't been proven on a live PSA yet, and parts of the ConnectWise lookup haven't either. Watch one run on your PSA before letting it make changes on its own.
+
+## What you need
+
+- AutomationAI, with your PSA's API details added to your runner
+- A PSA account that can read tickets and category lists, update tickets and add notes
+- An AI provider set up in AutomationAI (it uses your own)
+- Something to start it when a ticket is created: your PSA's ticket-created callback, or a ServiceAI Action
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/auto-categorize-ticket/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your PSA's API details to your runner. The technical details list exactly what's needed.
+4. Turn on the webhook in **Properties**. AutomationAI gives you a URL and a secret.
+5. Click **Publish**, then **Deploy**.
+
+**Start it when a ticket is created:**
+
+1. In ServiceAI, go to **Settings > Actions** and add an action that calls the webhook with the ticket number. Or point your PSA's ticket-created callback at it.
+2. Leave it in preview at first. When you're happy with its picks, turn on making changes.
+
+You can also choose how sure it has to be before it sets a category, and whether it adds the internal note.
+
+**Test it.** Run it on a ticket with a blank type, check what it would set, then run it again with changes turned on and confirm the ticket is categorized with one internal note.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/auto-categorize-ticket#technical-details) cover how each step works, every PSA's fields, the full setup and test steps, and what hasn't been proven live yet.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00057 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 

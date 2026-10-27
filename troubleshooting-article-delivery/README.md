@@ -1,6 +1,62 @@
 # Send the Right Fix-It Article the Moment a Ticket Arrives
 
-When ServiceAI triage matches a new ticket to a knowledge base article, the client gets the article straight away with a "Reply 'fixed' and we'll close this" line, and a clear "fixed" reply closes the ticket without a technician touching it.
+When a new ticket matches one of your knowledge base articles, your client gets that article right away. If it solves the problem and they reply "fixed", the ticket closes on its own, with no technician needed.
+
+## What happens
+
+**A ticket comes in.** ServiceAI triage spots that it matches a published article in your knowledge base. Your client gets an email update on the ticket with the article's title and link, plus "Reply 'fixed' and we'll close this ticket. If it doesn't help, just reply and a technician will carry on."
+
+**The client replies.** A clear "Fixed, thanks!" closes the ticket and adds a short note saying they can reply if the problem comes back. Anything less clear, such as "Still not working" or "It works now but Outlook is slow", leaves the ticket open for your team.
+
+**Your team always sees what happened.** Each decision, including when it chose not to send anything, is written as an internal note on the ticket, along with why.
+
+## What it protects
+
+- **Only confident matches go out.** If triage isn't sure enough about the article, nothing is sent.
+- **Clients only see their own articles.** The article must come from that client's own knowledge base or be one you share with every client. Another client's article is never sent.
+- **Only published articles.** Drafts and articles scheduled for later are never sent.
+- **No double emails.** If triage runs again on the same ticket, the client doesn't get the article twice.
+- **Careful closing.** Only a short, clear "it's fixed" from the person the article went to closes a ticket. Questions, "but", "still" or "not" keep it open.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Replies:** not yet confirmed live. Closing depends on ServiceAI triage running when a client replies, not only on new tickets.
+- **Autotask and HaloPSA:** some of the note and closing steps have not been tested live yet.
+
+## What you need
+
+- A CloudRadial knowledge base with published articles
+- ServiceAI, with triage turned on
+- AutomationAI, with your PSA and CloudRadial connected
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/troubleshooting-article-delivery/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+
+**In ServiceAI (Settings > Actions):**
+
+1. Save the workflow's webhook secret in the ServiceAI **Secrets** manager.
+2. Create an Action called **Send Troubleshooting Article**, set to **Use in Triage**, pointing at the workflow's webhook address.
+3. Add a triage rule in plain words: "When a new ticket matches a knowledge base article with high confidence, call the Send Troubleshooting Article action."
+4. Create a second Action, **Troubleshooting Article Reply**, also **Use in Triage**, with a rule that calls it when a client replies to a ticket that got an article.
+
+You can turn off automatic closing so a technician gets a note instead, or change how confident a match must be before it's sent.
+
+**Test it.** Open a test ticket that matches a published article, check the client gets the link, then reply "Fixed, thanks" and check the ticket closes.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/troubleshooting-article-delivery#technical-details) cover every check, what counts as "fixed", the exact Action setup, and what is still being tested.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00053 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 

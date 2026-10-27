@@ -1,6 +1,57 @@
 # Close Resolved Tickets Automatically After a Final Notice
 
-Tickets left in Resolved for 3 days get a short final notice to the client and are closed with an internal note, so the board only shows work that is really open.
+Tickets that sit in Resolved for a few days are closed for you, after the client gets one last friendly notice. Your board only shows work that is really still open.
+
+## What happens
+
+Once a day, the automation looks for tickets that have been in your Resolved status, untouched, for 3 days.
+
+- **Your client gets a final notice.** A short email on the ticket says it is being closed, and that they can reply if the problem isn't fixed.
+- **The ticket closes.** Your team sees an internal note on the ticket saying it was closed automatically.
+- **Replies are respected.** If the client replied after the ticket was resolved, the ticket is left open and listed for your team.
+
+## What it protects
+
+- **One notice per ticket, ever.** Running it again, or retrying a run, never emails the client a second time.
+- **Old tickets are left alone.** Tickets resolved more than 30 days ago are skipped, so the first run doesn't email clients about work from months back.
+- **Only resolved tickets are touched.** Open, waiting and closed tickets never change.
+- **Nothing is half done.** If the notice can't be sent, the ticket stays resolved. If the close fails, your team gets a note saying so.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Autotask and Syncro:** their built-in "resolved" status is already a closed status, so use your own "waiting to close" status (for example Pending Close).
+- **Kaseya BMS:** it can't tell who wrote a note, so a client reply restarts the clock instead of stopping the close.
+- **All PSAs:** some parts are not yet proven in a live run. Do a preview run first in each PSA.
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- A PSA API account that can read tickets, add notes and change ticket status
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/auto-close-resolved/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+4. **Preview it.** Run it once from **Test** with preview turned on (the test input is already set). It lists what it would do and changes nothing. If it finds nothing, set the status name to the exact name your team uses.
+5. **Try one client.** Run it for one test client and check those tickets in your PSA: a notice the client was emailed, an internal note, and the ticket closed.
+6. **Schedule it.** Attach a daily **Routine**.
+
+You can change the number of days a ticket waits, the oldest tickets it will close, the status names, and limit it to one client.
+
+**Test it.** Run it again straight away. Nothing new should be written.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/auto-close-resolved#technical-details) cover every setting, how each PSA handles it, and what is still being checked.
+
+---
+
+## Technical details
 
 **Formerly:** Auto-Close Resolved (tracker 10.5) | **Marketplace ID:** AAI-00063 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
 

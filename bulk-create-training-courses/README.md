@@ -1,6 +1,56 @@
 # Add Many Training Courses at Once
 
-Give it a list of courses and lessons and they're created in the client's portal, ready to assign, with any that already exist skipped.
+Give it a list of training courses and their lessons, and they're created in a client's portal, ready to assign. Courses that already exist are skipped, so nothing is duplicated.
+
+## What happens
+
+You run it from AutomationAI with a company name and your list of courses. For each course, the CloudRadial UCP Assistant checks whether a course with that name is already in the portal. If it is, it skips it and tells you. If not, it creates the course, then adds its lessons in order.
+
+When it finishes, you get a short summary for each course: created (with how many lessons), skipped, or failed. Your clients just see the new courses in their portal, ready for you to assign.
+
+## What it protects
+
+- **Nothing changes without your approval.** Each course and lesson it creates waits for you to approve it first. A course with many lessons means several approvals.
+- **No duplicates.** It looks for each course by name first, so running the same list twice won't create copies.
+- **Nothing is made up.** It only creates the courses and lessons you gave it, with the text you gave it.
+- **The right company.** If the company name matches more than one company, it lists them and stops instead of guessing.
+
+## Works with
+
+CloudRadial only. No PSA is needed.
+
+## What you need
+
+- AutomationAI
+- The **CloudRadial UCP Assistant** agent, from [Run Portal Admin Tasks by Asking](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp)
+- The CloudRadial training extension, installed and connected in AutomationAI
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. If you don't have it yet, import the [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) on **Agents > Custom > Import**. The workflow can't find the agent until it's there.
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/bulk-create-training-courses/v1.0.0).
+3. Go to **Workflows > Import** and upload it.
+4. Click **Publish**, then **Deploy**.
+
+**Each time you want to add courses:**
+
+1. Open the workflow and go to **Test**.
+2. Enter the company name and your list of courses. Each course needs a name. A short description, category, estimated time and lessons are optional. Each lesson needs a title and its text.
+3. Run it, then approve each create as it comes up.
+
+The assistant ships in preview mode. In preview it tells you what it would create but changes nothing. When you're ready to create courses for real, take the assistant out of preview (the [assistant's page](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp#dry-run-and-going-live) shows how).
+
+**Test it.** Run it with one short course for a test company, then check the course and its lessons appear in that company's portal.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/bulk-create-training-courses#technical-details) show the exact list format, an example, and how the workflow is built.
+
+---
+
+## Technical details
 
 **Formerly:** Course Bulk Import script | **Marketplace ID:** AAI-00026 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 

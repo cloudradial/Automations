@@ -1,6 +1,55 @@
 # Load Your Request Forms into Any Portal
 
-Give it a list of service request forms and their questions and they're created in the client's portal, with forms that already exist skipped.
+Give AutomationAI a list of service request forms and their questions, and it builds them in a client's portal for you. Forms that already exist are skipped, and nothing is created until you approve it.
+
+## What happens
+
+Someone on your team runs the workflow with the client company's name and the forms you want, for example "New Laptop Request" under Hardware, with questions like "Preferred model" and "Justification". The CloudRadial UCP Assistant checks each form by name. If the client's portal already has it, it's skipped. If not, the assistant asks for your approval, creates the form, then adds its questions in order.
+
+Once it's done, your clients see the new request forms in their portal's service catalog, ready to use.
+
+## What it protects
+
+- **No duplicates.** Each form is looked up by name first, so running the same list twice is safe.
+- **You approve every change.** Each form and each question waits in your AutomationAI **Inbox** until you say yes, so a form with many questions means several approvals.
+- **Nothing made up.** Only the forms and questions in your list are created.
+
+## Works with
+
+CloudRadial only. No PSA is needed.
+
+You can also use it to **copy** forms from one portal to another: read the forms from the first portal, then feed that list in here.
+
+## What you need
+
+- AutomationAI
+- The **CloudRadial UCP Assistant** agent, imported into AutomationAI
+- The CloudRadial content extension, installed and connected
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. If you don't have it yet, import the [CloudRadial UCP Assistant agent](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) on **Agents > Custom > Import**.
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/import-service-catalog/v1.0.0).
+3. Go to **Workflows > Import** and upload it.
+4. Click **Publish**, then **Deploy**.
+
+**Each time you want to load forms:**
+
+1. Open the workflow and click **Test**.
+2. Enter the client company, then each form with its name, category and questions. Descriptions, answer choices and placeholder text are optional (the technical details show the format).
+3. Approve each form and question in your **Inbox**.
+
+**Test it.** Load one simple form into a test company such as Contoso, approve it, and check it shows up in that portal's service catalog.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/import-service-catalog#technical-details) show the full list format and how the workflow and agent fit together.
+
+---
+
+## Technical details
 
 **Formerly:** Service Catalog export/import script | **Marketplace ID:** AAI-00003 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 

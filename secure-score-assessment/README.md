@@ -1,6 +1,55 @@
 # Turn Microsoft Secure Score into a Client Assessment
 
-Reads a client's Microsoft Secure Score and builds it into a CloudRadial assessment, one question per control with its current status, so security gaps are ready to review with the client.
+Turn a client's Microsoft Secure Score into a CloudRadial assessment in one run. Every security control becomes a question with its current status, so the gaps are ready to walk through with the client.
+
+## What happens
+
+Your team runs it for one client at a time. When it finishes, a new assessment appears under that client in CloudRadial, named with the date it was taken.
+
+- Each Microsoft Secure Score control is one question, grouped by category.
+- Controls that are fully in place are marked **Compliant**. The rest are marked **Not compliant** and flagged, so they stand out for review.
+- The assessment summary shows how many controls are compliant and the client's overall score.
+
+## What happens behind the scenes
+
+- **It only reads from Microsoft 365.** Nothing in the client's tenant is changed.
+- **No duplicates.** If an assessment with the same name and date already exists for that client, it's skipped.
+- **Retired controls are left out.** Microsoft's deprecated controls don't clutter the assessment.
+- **Preview first if you like.** You can do a dry run that shows the counts without creating anything.
+
+## Works with
+
+Microsoft 365 and CloudRadial. No PSA is needed.
+
+## What you need
+
+- AutomationAI, with your CloudRadial API connected
+- A Microsoft app registration that can read Secure Score, approved in each client tenant you run it against
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+4. If a client's Microsoft 365 connection is saved under that company in AutomationAI, open the workflow and set **Company** to that client on the **Import Secure Score** step. Do this again after every import.
+
+**Each time you want an assessment:**
+
+1. Open the workflow and run it from **Test**.
+2. Tell it which CloudRadial company to create the assessment under and which Microsoft 365 tenant to read.
+3. Optionally give the assessment a different name. Use a new name when you want a fresh snapshot on the same day.
+
+**Test it.** Run it once for a test client, then open that client's assessments in CloudRadial and check the new one lists the controls.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment#technical-details) cover the exact inputs, the Microsoft permission it needs, and how the assessment is built.
+
+---
+
+## Technical details
 
 **Formerly:** Secure Score Assessment script | **Marketplace ID:** AAI-00001 | **Type:** Workflow | **Version:** 1.0.0
 

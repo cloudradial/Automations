@@ -1,6 +1,54 @@
 # See Each Client's Satisfaction Score in Their Planner
 
-Turns portal feedback into a CSAT score and summary for each client on a Planner card, updated every run.
+Turn the feedback your clients leave in the portal into a satisfaction (CSAT) score and short summary, on one Planner card per client, refreshed every time it runs.
+
+## What happens
+
+On each run, every client that has left feedback gets a **Feedback & CSAT Report** card in their Planner. It's a handy thing to have ready before a quarterly review.
+
+The card says, in plain sentences:
+
+- how many feedback responses came in
+- what share of them were positive
+- the average rating
+- up to three recent comments
+
+## What happens behind the scenes
+
+- **No duplicate cards.** Each run updates the client's existing card instead of adding another.
+- **Clients without feedback are left alone.** No empty cards are created.
+- **It only reads feedback.** Nothing about the feedback itself changes.
+- **Cards land in the Efficiency category** of the Planner by default.
+
+## Works with
+
+CloudRadial only. No PSA is needed.
+
+## What you need
+
+- AutomationAI, with your CloudRadial API connected
+- An **Efficiency** category in your Planner (or another category you choose)
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/feedback-csat-report/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+4. Attach a schedule (a **Routine**) so it runs on its own, for example monthly ahead of your quarterly reviews. You can also run it on demand.
+
+Optionally, limit it to recent feedback, such as the last 90 days. By default it uses all feedback. If your Planner uses a different category than **Efficiency**, change it in the workflow before you publish.
+
+**Test it.** Run it once, then open the Planner for a client that has left feedback and check for the **Feedback & CSAT Report** card.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/feedback-csat-report#technical-details) cover how the score is worked out, the settings to confirm in your tenant, and what each run reports.
+
+---
+
+## Technical details
 
 **Formerly:** Feedback & CSAT Report | **Marketplace ID:** AAI-00022 | **Type:** Workflow | **Version:** 1.0.0
 

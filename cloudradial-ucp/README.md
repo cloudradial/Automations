@@ -1,6 +1,54 @@
 # Run Portal Admin Tasks by Asking
 
-Look up, audit and update companies, users, devices, services and tokens in plain English, with every change previewed and approved first.
+Ask about your clients' portals in plain English, and get answers, audits and reports back. When you ask for a change, it shows you exactly what will change and waits for your approval first.
+
+## What happens
+
+This is the **CloudRadial UCP Assistant**, an AI agent in AutomationAI that works across your CloudRadial portal. Your team asks it questions in the **AI Playground**, and other automations run it behind the scenes. Your clients only notice once an approved change shows up in their portal.
+
+Things you can ask it to do:
+
+- **Look up and brief.** "Give me an overview of Contoso." Company overviews, user lookups, device inventory and warranty status, installed services, flexible assets, and a quick snapshot before a client meeting.
+- **Audit.** "Which companies have no account manager?" Companies missing an account manager or branding, users who are stale or have never signed in, devices out of warranty or getting old, and services no one is using.
+- **Report.** "How many users does each company have?" Counts and totals across your companies, in plain language.
+- **Make changes, when you ask.** Create or update companies, users, devices, services, tokens and flexible assets. It removes a flexible asset type only when you name that exact type and no company has anything in it.
+
+Eight automations run it for you, such as Add Many Training Courses at Once and Walk Into Every Client Call Prepared. The [technical details](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp#technical-details) list them all.
+
+## What it protects
+
+- **Every change needs your approval.** It says exactly what will change before it makes any create, update or delete.
+- **No guessing.** It finds each company, user or device by name first. If more than one matches, it asks which one you mean.
+- **Preview by default.** Out of the box it describes changes but doesn't make them.
+
+## Works with
+
+CloudRadial: companies, users, devices, services, tokens, and compliance and flexible assets. No PSA is needed.
+
+- **Articles, courses and feedback:** not covered out of the box. You can add them once those CloudRadial extensions are installed (see the technical details).
+
+## What you need
+
+- AutomationAI
+- These CloudRadial extensions, installed and connected in AutomationAI: companies (which includes users), endpoints, services, tokens and compliance
+
+## Set it up
+
+1. **Download** the [agent file](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v1.0.0).
+2. In AutomationAI, go to **Agents > Custom > Import** and upload it. Importing it again later replaces the one you have.
+3. Open the **AI Playground**, or import one of the automations above that runs it.
+
+It starts in preview mode. When you're ready for it to make changes, the [technical details](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp#dry-run-and-going-live) show how to switch it over. That switch applies to every automation that uses it.
+
+**Test it.** In the **AI Playground**, ask it for an overview of one of your companies and check the answer matches your portal.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp#technical-details) cover the extensions it uses, how preview mode works, and how to widen what it can reach.
+
+---
+
+## Technical details
 
 **Formerly:** CloudRadial UCP Assistant | **Marketplace ID:** AAI-00031 | **Type:** Agent | **Version:** 1.0.0
 

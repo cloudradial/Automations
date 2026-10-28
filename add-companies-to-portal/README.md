@@ -1,6 +1,53 @@
 # Add Many Client Companies at Once
 
-Give it a list of client companies and they're added to CloudRadial, with any that already exist skipped and each addition approved first.
+Give AutomationAI a list of client companies and it adds them to CloudRadial for you. Companies that are already there are skipped, and nothing is created until you approve it.
+
+## What happens
+
+Someone on your team runs the workflow with a list of company names. For each name, the CloudRadial UCP Assistant checks whether the company already exists in CloudRadial. If it does, it's skipped. If not, the assistant asks for your approval and then creates it, filling in only the details you gave, such as account manager or city.
+
+At the end you get a short result for every company: added, or skipped because it already exists.
+
+## What it protects
+
+- **No duplicates.** Each company is looked up by name first, so running the same list twice is safe.
+- **You approve every company.** Each one waits in your AutomationAI **Inbox** until you say yes.
+- **Nothing made up.** Only the details in your list are filled in.
+
+## Works with
+
+CloudRadial only. No PSA is needed.
+
+## What you need
+
+- AutomationAI
+- The **CloudRadial UCP Assistant** agent, imported into AutomationAI
+- The CloudRadial companies extension, installed and connected
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. If you don't have it yet, import the [CloudRadial UCP Assistant agent](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) on **Agents > Custom > Import**.
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/add-companies-to-portal/v1.0.0).
+3. Go to **Workflows > Import** and upload it.
+4. Click **Publish**, then **Deploy**.
+
+**Each time you have companies to add:**
+
+1. Open the workflow and click **Test**.
+2. Paste your list of company names, one per line. You can also give an account manager, city, territory or PSA identifier for each company (the technical details show the format).
+3. Approve each company in your **Inbox**.
+
+**Test it.** Run it with one made-up name, such as "Contoso Test", approve it, and check it appears under your companies in CloudRadial.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/add-companies-to-portal#technical-details) show the full list format and how the workflow and agent fit together.
+
+---
+
+## Technical details
 
 **Formerly:** Company Management bulk-add script | **Marketplace ID:** AAI-00002 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 

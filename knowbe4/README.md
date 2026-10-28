@@ -1,6 +1,56 @@
 # Chase Overdue Security Training Automatically
 
-Shows which users are behind on KnowBe4 training in the client's portal and opens one follow-up ticket per company, ready as compliance evidence.
+See who is behind on KnowBe4 security training right in your client's CloudRadial portal, and get one follow-up ticket per company listing them. It doubles as compliance evidence.
+
+## What happens
+
+The automation runs on a schedule you choose, or whenever your team starts it.
+
+- **In CloudRadial,** each user with unfinished KnowBe4 training gets a record under **KnowBe4 Incomplete Training**, showing their name, email and how many courses they still owe.
+- **In your PSA,** if anyone is overdue, your team gets one service ticket for the company that lists who still needs to finish. No ticket is opened when everyone is up to date.
+
+## What happens behind the scenes
+
+- **It only reads from KnowBe4.** Nothing changes in KnowBe4.
+- **Set up once.** The first run creates the **KnowBe4 Incomplete Training** record type in CloudRadial for you.
+- **One bad record won't stop the run.** If one user can't be saved, the rest still are.
+- **A ticket problem won't fail the run.** If the ticket can't be opened, the training records are still saved and the run reports a warning.
+
+## Works with
+
+KnowBe4, CloudRadial and ConnectWise PSA.
+
+- **One company per setup:** each copy of the workflow covers one KnowBe4 account and one CloudRadial company.
+- **Other PSAs:** not supported. The ticket step is built for ConnectWise only.
+
+## What you need
+
+- A KnowBe4 account with API access
+- AutomationAI, with CloudRadial and ConnectWise PSA connected
+- A ConnectWise service board for the tickets
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your KnowBe4 API details, your CloudRadial and ConnectWise connections, and the service board to your runner's secure settings.
+4. Open the workflow and choose the CloudRadial client the records belong to. The workflow handles one client, so import a copy for each client you run it for.
+5. Click **Publish**, then **Deploy**.
+6. Run it on demand, or attach a schedule (a **Routine**) so it runs on its own.
+
+Optionally, add your KnowBe4 admin's email address so the ticket lists them as the contact.
+
+**Test it.** Run it once, then check the client's **KnowBe4 Incomplete Training** records in CloudRadial and the new ticket on your ConnectWise board.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/knowbe4#technical-details) cover each step, the settings it reads, what to check after the first run, and what it reports back.
+
+---
+
+## Technical details
 
 **Formerly:** KnowBe4 Training Sync | **Marketplace ID:** AAI-00029 | **Type:** Workflow | **Version:** 1.0.0
 

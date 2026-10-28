@@ -1,6 +1,59 @@
 # Bring IT Glue Documentation into the Portal
 
-Copies an IT Glue flexible asset type and its records into a client's portal as flexible assets, so documentation lives where clients and technicians already look.
+Copy a type of IT Glue documentation, such as SSL Certificates, into a client's portal as flexible assets. Your documentation then lives where your clients and technicians already look.
+
+## What happens
+
+Someone on your team runs the workflow with three things: the client company in CloudRadial, the matching organization in IT Glue, and the IT Glue asset type to copy. The CloudRadial UCP Assistant reads that asset type's fields from IT Glue, makes a matching flexible asset type in CloudRadial if there isn't one yet, then copies each record across.
+
+If a record is already in the portal, it's updated when something changed instead of being added twice. The documentation then shows under flexible assets in that client's portal.
+
+## What it protects
+
+- **Passwords stay in IT Glue.** Password values are never shown or copied, only their details.
+- **No duplicates.** Records are matched by name (or another field you choose), so running it again updates instead of duplicating.
+- **You approve every change.** Each create or update waits in your AutomationAI **Inbox** until you say yes.
+- **No guessing.** Field names are read from IT Glue, never made up.
+
+## Works with
+
+IT Glue and CloudRadial. No PSA is needed.
+
+- **One asset type per run.** Run it again for each type you want to copy.
+- **Very large estates:** a scripted sync would scale better than this assistant-driven one.
+
+## What you need
+
+- AutomationAI
+- The **CloudRadial UCP Assistant** agent, imported into AutomationAI
+- IT Glue, connected in AutomationAI through the IT Glue extension
+- The CloudRadial compliance extension, installed and connected
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. If you don't have it yet, import the [CloudRadial UCP Assistant agent](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) on **Agents > Custom > Import**.
+2. Install and connect the IT Glue and CloudRadial compliance extensions.
+3. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/itglue-to-flexible-assets/v1.0.0).
+4. Go to **Workflows > Import** and upload it.
+5. Click **Publish**, then **Deploy**.
+
+**Each time you want to copy documentation:**
+
+1. Open the workflow and click **Test**.
+2. Enter the client company, the IT Glue organization and the asset type name. Optionally, choose which field to match records on (it uses the name if you don't).
+3. Approve each change in your **Inbox**.
+
+**Test it.** Copy one small asset type for a test company such as Contoso, approve it, and check the records appear under flexible assets in that portal.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/itglue-to-flexible-assets#technical-details) show the exact input, the step-by-step sync, and the extension setup.
+
+---
+
+## Technical details
 
 **Formerly:** Flexible Assets / IT Glue sync script | **Marketplace ID:** AAI-00004 | **Type:** Workflow (runs the CloudRadial UCP Assistant agent) | **Version:** 1.0.0
 

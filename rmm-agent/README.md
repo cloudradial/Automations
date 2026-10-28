@@ -2,11 +2,11 @@
 
 The shared engine behind the device fix and patch compliance automations. It works through Datto RMM, matches sites to clients, and never acts without approval.
 
-**Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** AAI-00037 | **Type:** Agent | **Version:** 1.0.0
+**Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** AAI-00037 | **Type:** Agent | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/rmm-agent/v1.0.0).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/rmm-agent/v1.1.0).
 
 **Import** [`rmm-agent.agent.yml`](https://github.com/cloudradial/Automations/blob/main/rmm-agent/rmm-agent.agent.yml) on **Agents → Custom → Import**. An agent only runs from a workflow that gives it a goal; these automations run this one:
 
@@ -16,7 +16,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `rmm-agent.agent.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/rmm-agent/rmm-agent.agent.yml) |
-| Download `rmm-agent.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/rmm-agent/v1.0.0) |
+| Download `rmm-agent.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/rmm-agent/v1.1.0) |
 | Used by | [Show Every Client's Patch Compliance in Their Planner](https://github.com/cloudradial/Automations/tree/main/patch-compliance) |
 | Used by | [Fix Common Workstation Alerts Without a Technician](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation) |
 | All files in this automation | [rmm-agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) |
@@ -34,12 +34,20 @@ This build uses the **Datto RMM** extension (`datto-rmm`). To support another RM
 its extension slug to the agent's `requiredExtensionSlugs` and the workflow node's
 `allowedExtensions`, and adjust the tool names in the system prompt.
 
+**Tickets work with all six PSAs.** The agent has no PSA extension and never opens a
+ticket itself. When something needs a person it returns `escalate: true` with
+`ticketSummary`, `ticketDescription`, `ticketNote` (technical detail, internal only),
+`ticketPriority`, `siteName` and `cloudradialCompanyId`, and the workflow's PowerShell step
+opens the ticket in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk
+(`_shared/psa.ps1`). Up to agent 0.4.3 it needed the ConnectWise extension
+(`connectwise-manage`); 0.5.0 dropped it.
+
 ## Pieces
 
 | File | Type | Role |
 |---|---|---|
-| [`rmm-agent.agent.yml`](https://github.com/cloudradial/Automations/blob/main/rmm-agent/rmm-agent.agent.yml) | `automationsAgent` | The brain. Safety-first system prompt, knows the Datto tools, matches sites→CloudRadial companies, upserts Planner cards. Publish it → slug `rmm-agent`. |
-| [`../rmm-auto-remediation/rmm-auto-remediation.yml`](https://github.com/cloudradial/Automations/blob/main/rmm-auto-remediation/rmm-auto-remediation.yml) | `automationsWorkflow` | **Command: remediate.** Webhook-triggered by a Datto alert; one agent node, `autoApprove: false` (you approve the fix). |
+| [`rmm-agent.agent.yml`](https://github.com/cloudradial/Automations/blob/main/rmm-agent/rmm-agent.agent.yml) | `automationsAgent` | The brain. Safety-first system prompt, knows the Datto tools, matches sites→CloudRadial companies, upserts Planner cards, and returns ticket text for escalations. Publish it → slug `rmm-agent`. |
+| [`../rmm-auto-remediation/rmm-auto-remediation.yml`](https://github.com/cloudradial/Automations/blob/main/rmm-auto-remediation/rmm-auto-remediation.yml) | `automationsWorkflow` | **Command: remediate.** Webhook-triggered by a Datto alert; an agent node, `autoApprove: false` (you approve the fix), then a PowerShell step that opens any escalation ticket in your PSA. |
 | [`../patch-compliance/patch-compliance.yml`](https://github.com/cloudradial/Automations/blob/main/patch-compliance/patch-compliance.yml) | `automationsWorkflow` | **Command: patch compliance.** Scheduled; one agent node that sweeps patch status and upserts one Planner card per client. |
 
 The **Datto RMM extension already exists in AutomationAI** (`datto-rmm`, MSPTechPro), these reference it, they don't redefine it. Its tools auth via OAuth2 (handled by the
@@ -57,11 +65,11 @@ extension); secrets are `Datto-ApiUrl` / `Datto-ApiKey` / `Datto-ApiSecret`.
 ## Confirm in your tenant
 
 - Extension slugs: `datto-rmm` (confirmed), `cloudradial-v2-companies` /
-  `cloudradial-v2-services` (confirmed from the migration workflow), and your PSA
-  extension slug (`connectwise-manage`, the certified ConnectWise extension; swap it for `autotask-psa`, `halo-psa` or `syncro` if you use a different PSA).
+  `cloudradial-v2-services` (confirmed from the migration workflow). No PSA extension: tickets
+  are opened by the remediation workflow's PowerShell step, with the runner's PSA secrets.
 - The agent runs **dry-run by default**, see [Dry run and going live](#dry-run-and-going-live).
-- Remediation keeps `autoApprove: false` so the cleanup job and any ticket need your
-  approval. Patch compliance uses `autoApprove: true` (card upserts only).
+- Remediation keeps `autoApprove: false` so the cleanup job needs your approval; the
+  escalation ticket is opened by the workflow's PowerShell step. Patch compliance uses `autoApprove: true` (card upserts only).
 
 ## Dry run and going live
 

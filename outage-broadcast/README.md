@@ -1,8 +1,73 @@
 # Tell Every Affected Client About an Outage in One Step
 
-When a service goes down, a technician tells ServiceAI what is down and what to say, and every affected client's portal shows the notice, with an optional email to each primary contact and a full record on the problem ticket.
+When a service goes down, a technician tells ServiceAI what is down and what to say. Every affected client then sees the notice in their portal, without your team updating each portal one at a time.
+
+## What happens
+
+**Your technician asks once.** They tell ServiceAI which service is down and the message for clients. First they see a preview listing every client it will reach, and nothing changes until they say yes.
+
+**Your clients see it in their portal.** Each affected client's home page banner shows the notice, and a pinned **Service status** article on their portal holds the full message. A later update replaces the article instead of adding another.
+
+**Primary contacts can get an email.** If you turn it on, each client's primary contact gets their own email with the notice.
+
+**When it's fixed, tell them in one step too.** A "resolved" run clears the banner, marks the article resolved and unpins it.
+
+## What it protects
+
+- **Nothing changes until your technician confirms.** Every run starts as a preview.
+- **Clients never see each other.** Each client gets the same message, but only on its own portal and in its own email.
+- **No double emails.** A client whose banner already shows this notice is skipped, so a retry doesn't email anyone twice.
+- **Other outages are left alone.** Resolving one service only clears notices about that service.
+- **A full record for your team.** If the technician gives a problem ticket, it gets an internal note listing every client and what changed.
+- **A safety limit.** If more than 50 clients match, it stops and asks before going ahead.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, for the problem ticket note and the primary contacts.
+
+- **Zendesk:** nobody is emailed, because Zendesk has no primary contact for a company.
+- **Primary contact emails:** not yet proven live on every PSA, so test them on yours first.
+- **Portal banner:** setting and clearing each client's banner hasn't been proven in a live run yet, so broadcast to one test company first.
+
+## What you need
+
+- AutomationAI, with your CloudRadial account and your PSA connected
+- ServiceAI, to give technicians the **Outage Broadcast** action
+- Optional: a Postmark account with a verified sender, to email primary contacts
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+
+**In ServiceAI:**
+
+1. Save the workflow's webhook secret in the **Secrets** manager.
+2. In **Settings > Actions**, create an action called **Outage Broadcast**, turn on **Use in AI**, and point it at the workflow's webhook address.
+
+**In your UCP portal, once:**
+
+1. In **Partner > Portal settings**, add `@ServiceStatus` to your home page banner or announcement. Each client's portal then shows its own outage notice there, and nothing when there is no outage.
+2. Optionally, create a **Service Status** knowledge base category so the articles get their own menu entry.
+
+You can choose which clients to reach (by name, by company group, or everyone with the service installed), and turn the email on or off.
+
+**Test it.** Run it for one test client and a test ticket, check the banner, the article and the ticket note, then run it again as resolved.
+
+## Need more detail?
+
+See the [technical details](https://github.com/cloudradial/Automations/tree/main/outage-broadcast#technical-details) for the full action setup, every setting and what has been tested.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00061 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
+
+When a service goes down, a technician tells ServiceAI what is down and what to say, and every affected client's portal shows the notice, with an optional email to each primary contact and a full record on the problem ticket.
 
 ## Files
 

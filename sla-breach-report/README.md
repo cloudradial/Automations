@@ -1,8 +1,62 @@
 # See Every SLA Breach Before Your Clients Do
 
-Every week the service manager gets one email listing the open tickets that have breached their SLA or are about to, grouped by company and technician, read straight from the PSA and without changing a single ticket.
+Once a week, your service manager gets one email listing every open ticket that has missed its SLA or is about to. Your team can catch up on late work before a client has to chase it.
+
+## What happens
+
+**Every week, one email.** It lists the late and nearly late tickets, grouped by client and then by technician, with the late ones first.
+
+**Each row is easy to read.** It shows the ticket, its summary, priority and status, when it was due, and where it stands, for example "Breached, 1h 10m over" or "Near breach: 85% of the time used, 2h left".
+
+**Quiet weeks still get an email.** If nothing is late, a short all-clear arrives instead.
+
+Your clients don't see anything. The email goes only to your own service manager.
+
+## What it protects
+
+- **It never changes a ticket.** It only reads your PSA and sends a report.
+- **It uses your own SLA rules where your PSA has them.** Otherwise it uses sensible default times by priority (4 hours for critical, 8 for high, 24 for medium, 72 for low).
+- **Paused tickets are left out.** Tickets waiting on the client, pending, on hold or scheduled usually have their clock stopped, so they don't clutter the list.
+- **Nothing reaches your clients.** No portal, ticket or client email is touched.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **ConnectWise PSA:** due times are approximate, because ConnectWise counts business hours and this report doesn't.
+- **Zendesk:** your Zendesk plan needs SLA policies to use Zendesk's own SLA times.
+
+## What you need
+
+- AutomationAI, with your PSA connected (read access to tickets is enough)
+- Postmark set up in AutomationAI to send the email, with a verified sender address
+- Your service manager's email address
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/sla-breach-report/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+4. Save your service manager's email address in the runner's settings, so the weekly run knows who to send to.
+5. Add a **Routine** that runs the workflow weekly, for example Mondays at 7am. Add it again after every import, because the schedule isn't part of the file.
+
+**Optional settings.** You can report on one client only, change how close to the deadline counts as "near breach" (80% by default), change the default hours per priority, or ignore your PSA's SLA times and use the default hours for everything.
+
+**Test it.** Run the workflow by hand with your own email address and one test client, then check a few tickets against your PSA's own SLA view.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/sla-breach-report#technical-details) cover how each PSA's SLA times are read, every setting, and the full import and test steps.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00049 | **Type:** Workflow (PowerShell steps, no AI), run weekly by a Routine | **Version:** 1.0.0
+
+Every week the service manager gets one email listing the open tickets that have breached their SLA or are about to, grouped by company and technician, read straight from the PSA and without changing a single ticket.
 
 ## Files
 

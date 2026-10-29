@@ -161,7 +161,7 @@ definition:
                 }
                 switch ($status) { 'expired' {$counts.expired++} 'expiring' {$counts.expiring++} 'active' {$counts.active++} 'unknown' {$counts.unknown++} }
 
-                $rec = [pscustomobject]@{ companyId=$companyId; company=(if($companyName.ContainsKey($companyId)){$companyName[$companyId]}else{"Company $companyId"}); certificate=$name; url=$url; issuer=$issuer; expires=$endText; daysLeft=$daysLeft; status=$status }
+                $rec = [pscustomobject]@{ companyId=$companyId; company=$(if($companyName.ContainsKey($companyId)){$companyName[$companyId]}else{"Company $companyId"}); certificate=$name; url=$url; issuer=$issuer; expires=$endText; daysLeft=$daysLeft; status=$status }
                 [void]$allRows.Add($rec)
                 if ($status -in @('expired','expiring')) {
                     if (-not $flaggedByCompany.ContainsKey($companyId)) { $flaggedByCompany[$companyId] = [System.Collections.Generic.List[object]]::new() }

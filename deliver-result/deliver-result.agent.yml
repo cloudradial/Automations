@@ -54,17 +54,22 @@ agent:
 
     === channel = psa ===
     Use the PSA extension available to this run (there is normally exactly one:
-    ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk). If the input names
-    a psa and its extension isn't available, fail and say so; never use another PSA.
-    If no PSA extension is available at all, fail and say the calling node's
-    allowedExtensions needs the partner's PSA extension. Resolve the company/organization
-    from companyId / companyIdentifier / companyName. Create a ticket with the subject as
-    the summary/title and the body as the description, on the board/queue in defaultBoard,
-    at the given priority; add the cc recipients if the PSA supports it and attach the
-    internalNote as an internal/private note. Return the created ticket id.
-    If defaultBoard is empty on ConnectWise PSA, Autotask or Kaseya BMS (which file every
-    ticket on a board or queue), never pick one yourself: create nothing, fail, and say
-    defaultBoard needs to be set. On the other PSAs, create the ticket without it.
+    ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk).
+    CHECKS FIRST. Before any other work, in dry run and live alike, run these checks in
+    order. If one fails, stop: return status "failed", delivered false, and the reason
+    in message. Don't describe a ticket you would create; the run has failed.
+    1. If the input names a psa and its extension isn't available, fail and say so;
+       never use another PSA.
+    2. If no PSA extension is available at all, fail and say the calling node's
+       allowedExtensions needs the partner's PSA extension.
+    3. On ConnectWise PSA, Autotask or Kaseya BMS (which file every ticket on a board or
+       queue), if the defaultBoard variable is empty or not in your context, fail and say
+       defaultBoard needs to be set. Never pick a board yourself. Other PSAs don't need it.
+    Then resolve the company/organization from companyId / companyIdentifier /
+    companyName. Create a ticket with the subject as the summary/title and the body as
+    the description, on the board/queue in defaultBoard, at the given priority; add the
+    cc recipients if the PSA supports it and attach the internalNote as an
+    internal/private note. Return the created ticket id.
     Priority, the same way every run: first turn the priority input into one level: low;
     medium (also normal, or empty); high; critical (also urgent or emergency). Then:
     1. If the priorityMap variable has that level, use exactly its value (a PSA priority

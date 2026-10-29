@@ -3,8 +3,8 @@ agent:
   slug: deliver-result
   name: Deliver Result
   vendor: Azurative
-  version: 0.1.2
-  description: Pluggable delivery step — turn a generic result into a PSA ticket (any connected PSA), a Postmark email, or a ServiceAI return-contract, chosen by a channel.
+  version: 0.2.0
+  description: Pluggable delivery step. Turns a generic result into a PSA ticket (ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk), a Postmark email, or a ServiceAI return contract, chosen by a channel.
   category: Utility
   tags:
     - psa
@@ -17,17 +17,20 @@ agent:
     A reusable delivery step other automations call (as a workflow **agent node**) so
     they never hardcode one PSA. Give it a generic result and a `channel`:
 
-    - **`psa`** — create a ticket in whichever **PSA extension is available to this run**
-      (ConnectWise / Autotask / Syncro / HaloPSA / Zendesk). Set the run's
-      `allowedExtensions` on the calling node to the partner's connected PSA — the agent
-      uses that extension's create-ticket / note tools; you don't rebuild per PSA.
-    - **`email`** — send via the **Postmark** extension to the named recipients.
-    - **`serviceai`** — create nothing; return the ServiceAI contract
+    - **`psa`**: create a ticket in whichever **PSA extension is available to this run**
+      (ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk). Set
+      `allowedExtensions` on the calling node to the partner's PSA extension (plus
+      `postmark` if the run also emails). The agent uses that extension's create-ticket
+      and note tools, so nothing is rebuilt per PSA, and no PSA extension is required to
+      install the agent.
+    - **`email`**: send via the **Postmark** extension to the named recipients.
+    - **`serviceai`**: create nothing; return the ServiceAI contract
       (`status` / `public_note` / `internal_note` / `ticket_id`) so a **Triage Action**
       posts it. Use this when the automation was triggered by ServiceAI.
 
     Set `fromEmail` (a verified Postmark sender) and, for PSA, `defaultBoard` (the board /
-    queue / group for new tickets). Runs **dry-run by default**.
+    queue / group for new tickets). On Kaseya BMS also set `noteTypeId` (the tenant's
+    note type id for internal notes). Runs **dry-run by default**.
   systemPrompt: |
     Every message you send must contain at least one short plain sentence of text,
     including messages that only call tools: before each tool call, write one sentence
@@ -37,7 +40,7 @@ agent:
 
     YOUR GOAL: deliver the result you are given through the requested channel. Read the
     `channel` input: "psa", "email", or "serviceai". Do only what that channel needs.
-    Honor dry-run — when previewing, describe the exact call without making it.
+    Honor dry-run: when previewing, describe the exact call without making it.
 
     Inputs you receive: channel; subject; body (may be HTML or plain); optional cc (array
     of emails); priority; internalNote; and routing hints (companyId / companyIdentifier /
@@ -45,18 +48,27 @@ agent:
     are available).
 
     === channel = psa ===
-    Use the PSA extension available to this run (there is normally exactly one connected —
-    ConnectWise, Autotask, Syncro, HaloPSA, or Zendesk). Resolve the company/organization
+    Use the PSA extension available to this run (there is normally exactly one:
+    ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk). If the input names
+    a psa and its extension isn't available, fail and say so; never use another PSA.
+    If no PSA extension is available at all, fail and say the calling node's
+    allowedExtensions needs the partner's PSA extension. Resolve the company/organization
     from companyId / companyIdentifier / companyName. Create a ticket with the subject as
     the summary/title and the body as the description, on the board/queue in defaultBoard,
     at the given priority; add the cc recipients if the PSA supports it and attach the
     internalNote as an internal/private note. Return the created ticket id.
+    Kaseya BMS: kaseya_bms_create_ticket needs the numeric accountId (find it with
+    kaseya_bms_list_accounts) and takes numeric queueId, priorityId and statusId; resolve
+    those with kaseya_bms_lookup (defaultBoard may be a queue name or id). Internal notes
+    use kaseya_bms_add_ticket_note with isInternal true, today's noteDate and the
+    noteTypeId variable as typeId. If noteTypeId is empty, don't guess one: create the
+    ticket, skip the note, and say the note needs noteTypeId.
 
     === channel = email ===
     Send via the Postmark extension (postmark_send_email): From = fromEmail, To = the
     toEmail recipients (comma-joined), Cc = cc, Subject = subject, HtmlBody = body.
     Confirm the response ErrorCode is 0; a non-zero code (e.g. unverified sender) is a
-    failure — report it. Return the MessageID.
+    failure; report it. Return the MessageID.
 
     === channel = serviceai ===
     Do NOT create a ticket or send email. Return the contract for the calling ServiceAI
@@ -64,17 +76,19 @@ agent:
     (may hold technical detail), and ticket_id if one was supplied in the input.
 
     Never put secrets, temporary passwords, or sensitive detail in a client-visible field
-    (public_note / email body) — those go only in internalNote / internal_note.
+    (public_note / email body); those go only in internalNote / internal_note.
   model: ""   # blank = the tenant's own model (OpenAI or Anthropic); pinning a model name fails on other providers
+  # Only Postmark is required. The PSA extension comes from the calling node's allowedExtensions, so the
+  # agent installs and runs with any of the six PSAs (up to 0.1.2 it required connectwise-manage).
   requiredExtensionSlugs:
     - postmark
-    - connectwise-manage
   requiredSecretNames: []
   variablesJson: |
     [
       {"name":"fromEmail","label":"From address for Postmark email (verified sender)","type":"string","default":"","required":false},
       {"name":"defaultBoard","label":"PSA board / queue / group for new tickets","type":"string","default":"","required":false},
-      {"name":"messageStream","label":"Postmark message stream","type":"string","default":"outbound","required":false}
+      {"name":"messageStream","label":"Postmark message stream","type":"string","default":"outbound","required":false},
+      {"name":"noteTypeId","label":"Kaseya BMS note type id for internal notes (Kaseya BMS only)","type":"string","default":"","required":false}
     ]
   inputSchema: |
     {"type":"object","properties":{"channel":{"type":"string","enum":["psa","email","serviceai"],"default":"psa"},"subject":{"type":"string"},"body":{"type":"string"},"cc":{"type":"array","items":{"type":"string"}},"priority":{"type":"string"},"internalNote":{"type":"string"},"companyId":{"type":"string"},"companyIdentifier":{"type":"string"},"companyName":{"type":"string"},"toEmail":{"type":"array","items":{"type":"string"}},"psa":{"type":"string"},"ticketId":{"type":"string"}},"required":["channel","subject","body"]}

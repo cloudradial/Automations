@@ -1,5 +1,5 @@
-# Strict-mode harness for the two steps of knowbe4.yml built from src/: "Pick the CloudRadial company" and
-# "Summarize assets & open PSA ticket". Runs each step exactly as it is in the .yml (extracted by
+# Strict-mode harness for the three steps of knowbe4.yml built from src/: "Pick the CloudRadial company",
+# "Create or update CloudRadial records" and "Summarize assets & open PSA ticket". Runs each step exactly as it is in the .yml (extracted by
 # build.js --extract) under Set-StrictMode -Version Latest, on all six PSAs, with the shared mocks
 # (_shared/tests/mock.ps1). Placeholder data only (Contoso, Example MSP).
 # Usage: pwsh -NoProfile -File knowbe4/src/test.ps1
@@ -11,7 +11,7 @@ $tmp = Join-Path ([IO.Path]::GetTempPath()) ("kb4-test-" + [guid]::NewGuid().ToS
 if ($LASTEXITCODE -ne 0) { throw 'knowbe4.yml is out of date. Run node build.js first.' }
 & node (Join-Path $PSScriptRoot 'build.js') --extract $tmp | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not extract the steps.' }
-$Steps = @{ company = Get-Content -Raw (Join-Path $tmp 'resolve-company.ps1'); ticket = Get-Content -Raw (Join-Path $tmp 'summarize-and-ticket.ps1') }
+$Steps = @{ company = Get-Content -Raw (Join-Path $tmp 'resolve-company.ps1'); records = Get-Content -Raw (Join-Path $tmp 'create-assets.ps1'); ticket = Get-Content -Raw (Join-Path $tmp 'summarize-and-ticket.ps1') }
 Remove-Item -Recurse -Force $tmp
 
 function Get-NodeInput { param([string]$Name) if ($Name) { return $global:NodeIn[$Name] }; return $global:NodeIn }
@@ -95,8 +95,8 @@ Check 'company: a name instead of an id stops the run' ($r.err -match 'not a num
 
 # ---- Summarize and open the ticket ----
 $Results = @(
-    [pscustomobject]@{ status = 'success'; assetId = 1; assetName = 'sam.doe@contoso.com'; userId = 'u1'; email = 'sam.doe@contoso.com'; courseCount = 2; companyId = 12; flexibleAssetTypeId = 9 },
-    [pscustomobject]@{ status = 'success'; assetId = 2; assetName = 'Alex Kim'; userId = 'u2'; email = ''; courseCount = 1; companyId = 12; flexibleAssetTypeId = 9 },
+    [pscustomobject]@{ status = 'success'; action = 'created'; worse = $true; previousCount = $null; assetId = 1; assetName = 'sam.doe@contoso.com'; userId = 'u1'; email = 'sam.doe@contoso.com'; courseCount = 2; companyId = 12; flexibleAssetTypeId = 9 },
+    [pscustomobject]@{ status = 'success'; action = 'unchanged'; worse = $false; previousCount = 1; assetId = 2; assetName = 'Alex Kim'; userId = 'u2'; email = ''; courseCount = 1; companyId = 12; flexibleAssetTypeId = 9 },
     [pscustomobject]@{ status = 'error'; message = 'boom'; assetName = 'x'; userId = 'u3'; email = ''; courseCount = 1; companyId = 12 }
 )
 $In = @{ results = $Results; companyId = 12; companyName = 'Contoso' }
@@ -109,7 +109,8 @@ foreach ($psa in @('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 
     Check "$($psa): ticket on PSA company 42, matched by name" ($r.out.psaCompanyId -eq '42') $r.out.psaCompanyId
     $body = (Get-CreateCall $psa | Select-Object -First 1).Body
     Check "$($psa): the ticket lists the overdue users" ($body -match 'sam.doe@contoso.com' -and $body -match 'Alex Kim' -and $body -match '2 incomplete') $body
-    Check "$($psa): created and failed counts" ($r.out.createdCount -eq 2 -and $r.out.failedCount -eq 1) "$($r.out.createdCount)/$($r.out.failedCount)"
+    Check "$($psa): overdue, created and failed counts" ($r.out.overdueCount -eq 2 -and $r.out.createdCount -eq 1 -and $r.out.failedCount -eq 1) "$($r.out.overdueCount)/$($r.out.createdCount)/$($r.out.failedCount)"
+    Check "$($psa): the new user is marked new" ($body -match 'sam.doe@contoso.com - 2 incomplete course\(s\) \(new\)' -and $body -notmatch 'Alex Kim - 1 incomplete course\(s\) \(') $body
 }
 
 Reset-Mock (@{ 'PSA-Type' = 'connectwise'; 'CW-ServiceBoard' = 'Help Desk'; 'KnowBe4-AdminEmail' = 'it.admin@contoso.com' } + $S['connectwise']) $Handler
@@ -139,5 +140,65 @@ $r = Invoke-Step ticket @{ results = @($Results[2]); companyId = 12; companyName
 Check 'nobody overdue: no PSA calls, no ticket' (-not $r.err -and $Mock.Calls.Count -eq 0 -and -not $r.out.ticketId -and $r.out.createdCount -eq 0) (Show-Calls)
 $r = Invoke-Step ticket @{ results = $null; companyId = 12; companyName = 'Contoso' }
 Check 'no results at all: no failure' (-not $r.err -and $r.out.createdCount -eq 0) $r.err
+
+# ---- No duplicate tickets: only when something got worse ----
+Reset-Mock (@{ 'PSA-Type' = 'connectwise' } + $S['connectwise']) $Handler
+$same = @([pscustomobject]@{ status = 'success'; action = 'unchanged'; worse = $false; previousCount = 2; assetId = 1; assetName = 'sam.doe@contoso.com'; userId = 'u1'; email = 'sam.doe@contoso.com'; courseCount = 2; companyId = 12; flexibleAssetTypeId = 9 },
+    [pscustomobject]@{ status = 'success'; action = 'updated'; worse = $false; previousCount = 3; assetId = 2; assetName = 'Alex Kim'; userId = 'u2'; email = ''; courseCount = 1; companyId = 12; flexibleAssetTypeId = 9 },
+    [pscustomobject]@{ status = 'success'; action = 'completed'; worse = $false; previousCount = 2; assetId = 3; assetName = 'pat.lee@contoso.com'; userId = ''; email = 'pat.lee@contoso.com'; courseCount = 0; companyId = 12; flexibleAssetTypeId = 9 })
+$r = Invoke-Step ticket @{ results = $same; companyId = 12; companyName = 'Contoso' }
+Check 'nothing got worse: no ticket, no PSA calls, says why' (-not $r.err -and $Mock.Calls.Count -eq 0 -and -not $r.out.ticketId -and $r.out.ticketSkipped -match 'newly overdue' -and $r.out.overdueCount -eq 2 -and $r.out.completedCount -eq 1) "$(Show-Calls) / $(if ($r.out) { $r.out.message })"
+$more = @($same[0], $same[1], $same[2]) | ForEach-Object { $_.PSObject.Copy() }; $more[1].worse = $true; $more[1].previousCount = 0
+$r = Invoke-Step ticket @{ results = $more; companyId = 12; companyName = 'Contoso' }
+$body = (Get-CreateCall 'connectwise' | Select-Object -First 1).Body
+Check 'someone owes more: one ticket, marked, caught-up user left out' ($r.out.ticketId -eq '501' -and $body -match 'Alex Kim - 1 incomplete course\(s\) \(up from 0\)' -and $body -notmatch 'pat.lee') $body
+
+# ---- Create or update CloudRadial records ----
+$Assets = @()
+$RecHandler = {
+    param($c, $n)
+    $k = "$($c.Method) $($c.Uri)"
+    switch -Wildcard -CaseSensitive ($k) {
+        "GET $CR/v2/odata/flexibleasset*" { if ($c.Uri -match 'skip=0') { return [pscustomobject]@{ value = @($script:Assets) } }; return [pscustomobject]@{ value = @() } }
+        "POST $CR/v2/flexible-asset" { return [pscustomobject]@{ flexibleAssetId = 700 } }
+        "PATCH $CR/v2/flexible-asset/*" { return $null }
+    }
+    return $null
+}
+function Asset { param($id, $traits) [pscustomobject]@{ flexibleAssetId = $id; companyId = 12; flexibleAssetTypeId = 9; traitsJson = ($traits | ConvertTo-Json -Compress) } }
+$Users = @(
+    [pscustomobject]@{ userId = 'u1'; userName = 'Sam Doe'; email = 'Sam.Doe@contoso.com'; assetName = 'Sam.Doe@contoso.com'; courseCount = 2; coursesText = 'Phishing 101; Passwords' },
+    [pscustomobject]@{ userId = 'u2'; userName = 'Alex Kim'; email = ''; assetName = 'Alex Kim'; courseCount = 3; coursesText = 'A; B; C' },
+    [pscustomobject]@{ userId = 'u4'; userName = 'Jo New'; email = 'jo.new@contoso.com'; assetName = 'jo.new@contoso.com'; courseCount = 1; coursesText = 'Phishing 101' }
+)
+$script:Assets = @(
+    (Asset 10 @{ user = 'Sam Doe'; email = 'sam.doe@contoso.com'; 'incomplete-courses' = 2; 'course-list' = 'Phishing 101; Passwords'; updated = '2026-10-01' }),
+    (Asset 8 @{ user = 'Sam Doe'; email = 'sam.doe@contoso.com'; 'incomplete-courses' = 2; 'course-list' = 'Phishing 101; Passwords'; updated = '2026-09-24' }),
+    (Asset 11 @{ 'User' = 'Alex Kim'; 'Email' = ''; 'Incomplete Courses' = '1'; 'Course List' = 'A'; 'Updated' = '2026-10-01' }),
+    (Asset 12 @{ user = 'Pat Lee'; email = 'pat.lee@contoso.com'; 'incomplete-courses' = 2; 'course-list' = 'X; Y'; updated = '2026-10-01' }),
+    (Asset 13 @{ user = 'Done Already'; email = 'done@contoso.com'; 'incomplete-courses' = 0; 'course-list' = 'All assigned training complete'; updated = '2026-09-01' })
+)
+Reset-Mock $CrSecrets $RecHandler
+$r = Invoke-Step records @{ users = $Users; companyId = 12; flexibleAssetTypeId = 9 }
+$it = @{}; foreach ($x in @($r.out.items)) { $it[[string]$x.assetName] = $x }
+$posts = @($Mock.Calls | Where-Object { $_.Method -eq 'POST' }); $patches = @($Mock.Calls | Where-Object { $_.Method -eq 'PATCH' })
+Check 'records: step finishes without error' (-not $r.err) $r.err
+Check 'records: same courses, matched by email in any case, left unchanged' ($it['Sam.Doe@contoso.com'].action -eq 'unchanged' -and $it['Sam.Doe@contoso.com'].assetId -eq '10' -and -not $it['Sam.Doe@contoso.com'].worse) ($it['Sam.Doe@contoso.com'] | ConvertTo-Json -Compress)
+Check 'records: matched by name when there is no email, portal-style trait names read, update and worse' ($it['Alex Kim'].action -eq 'updated' -and $it['Alex Kim'].worse -and $it['Alex Kim'].previousCount -eq 1) ($it['Alex Kim'] | ConvertTo-Json -Compress)
+Check 'records: a new user gets one new record' ($it['jo.new@contoso.com'].action -eq 'created' -and $it['jo.new@contoso.com'].worse -and $posts.Count -eq 1) (Show-Calls)
+Check 'records: a user who caught up is set to 0, not deleted' ($it['pat.lee@contoso.com'].action -eq 'completed' -and @($patches | Where-Object { $_.Uri -match '/12$' -and $_.Body -match 'All assigned training complete' }).Count -eq 1 -and @($Mock.Calls | Where-Object { $_.Method -eq 'DELETE' }).Count -eq 0) (Show-Calls)
+Check 'records: an already-complete record is left alone' (-not $it.ContainsKey('done@contoso.com') -and @($patches | Where-Object { $_.Uri -match '/13$' }).Count -eq 0) (Show-Calls)
+Check 'records: exactly two updates (Alex and Pat)' ($patches.Count -eq 2) (Show-Calls)
+Check 'records: the older duplicate is reported, not deleted' (@($r.out.duplicates) -contains '8' -and $r.out.message -match '1 older duplicate') $r.out.message
+
+$script:Assets = @()
+Reset-Mock $CrSecrets $RecHandler
+$r = Invoke-Step records @{ users = $Users; companyId = 12; flexibleAssetTypeId = 9 }
+Check 'records: first run creates one record per user' (@($Mock.Calls | Where-Object { $_.Method -eq 'POST' }).Count -eq 3 -and @($r.out.items | Where-Object { $_.action -eq 'created' }).Count -eq 3) (Show-Calls)
+
+$FailRead = { param($c, $n) if ($c.Method -eq 'GET') { throw 'HTTP 500' }; return $null }
+Reset-Mock $CrSecrets $FailRead
+$r = Invoke-Step records @{ users = $Users; companyId = 12; flexibleAssetTypeId = 9 }
+Check "records: can't read existing records, so nothing is written" ($r.err -match 'avoid duplicates' -and @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) $r.err
 
 Complete-Test

@@ -8,13 +8,14 @@ In your UCP portal, clients can copy a coworker on a ticket's email updates them
 
 **On a ticket that's already open.** An "Add someone to a ticket" form lets the client pick one of their tickets by number and add a coworker to it.
 
-Either way, the coworker gets a short email saying what the ticket is about, then every update after that.
+Either way, the coworker gets an email with the ticket's details, then every update after that. The email says who asked for them to be added and what the ticket is about, and reminds them that IT will never ask for a password by email.
 
 ## What it protects
 
 - **Clients can only change their own tickets.** The ticket must belong to their company, and they must be its contact or already copied on it. Otherwise nothing changes.
 - **Only the copy list changes.** Status, owner and contact stay as they were.
-- **Your team can see what happened.** An internal note on the ticket says who was added and who asked.
+- **Your team can see what happened.** An internal note on the ticket says who was added, who asked, and whether the coworker was emailed.
+- **The email only shows what the client already sees.** Never internal notes or anything about another ticket.
 
 ## Works with
 
@@ -27,14 +28,16 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS and Zendesk.
 
 - A UCP portal with **Actions** on your request forms
 - AutomationAI, with your PSA connected
+- A way to send the email: Postmark, or a Microsoft 365 mailbox. Without one, your PSA sends the coworker a short note about the ticket instead.
 
 ## Set it up
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.2.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
+4. To send the email, add your Postmark or Microsoft 365 mailbox details to your AutomationAI runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket#sending-the-email-to-the-coworker) list exactly what to add.
 
 **In your UCP portal, add the question to any request form:**
 
@@ -64,15 +67,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/add
 
 ## Technical details
 
-**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
+**Formerly:** Add CC to Ticket | **Marketplace ID:** AAI-00038 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.2.0
 
 ## Files
 
-Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0).
+Each version is published as a release, with `add-cc-to-ticket.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.2.0).
 
 | What | Link |
 |---|---|
-| Download `add-cc-to-ticket.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0) |
+| Download `add-cc-to-ticket.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.2.0) |
 | View the current source | [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/blob/main/add-cc-to-ticket/add-cc-to-ticket.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket/src) |
 | All files in this automation | [add-cc-to-ticket](https://github.com/cloudradial/Automations/tree/main/add-cc-to-ticket) |
@@ -83,13 +86,53 @@ Each version is published as a release, with `add-cc-to-ticket.yml` attached. Do
 A CloudRadial service-request form asks for a ticket number and an email address, and its Automation Webhook posts them to this workflow together with who submitted the form. One step, **Add CC to ticket**, then:
 
 1. **Checks the request.** It needs a ticket number and exactly one email address. With `allowed_domains` set, the address must be in one of those domains. Nothing is called until these pass.
-2. **Reads the ticket** through the shared six-PSA adapter (`_shared/psa.ps1`): its company, its contact's email address and its current CC list.
+2. **Reads the ticket** through the shared six-PSA adapter (`_shared/psa.ps1`): its company, its contact's email address, its current CC list, and the client-facing details the email uses.
 3. **Checks the ticket belongs to the requester** (see [The ownership rule](#the-ownership-rule)). If it doesn't, the run ends with `status: rejected` and nothing changes.
-4. **Adds the address** to the ticket's CC list, then reads the ticket again to confirm the address is there. If it was already on the list (or is the ticket's contact), the run ends with `success`, "nothing changed", and no note.
-5. **Leaves an internal note**, for example "Added alex.wilber@contoso.com to the email CC list at the request of megan.bowen@contoso.com (self-service form).", and reads the notes back to confirm it saved. A note that fails becomes a warning; the CC is already added.
-6. **Tells the new CC what the ticket is about** with one public note, for example "alex.wilber@contoso.com has been copied on ticket 1001, "Printer offline" at the request of megan.bowen@contoso.com, and will now receive email updates on it. To add information, reply to any update email." The PSA emails it to the ticket's contact and CC list, so the person just added learns why they are getting updates. It never includes internal notes. Send `"notify_cc": false` to skip it. A public note that fails becomes a warning.
+4. **Adds the address** to the ticket's CC list, then reads the ticket again to confirm the address is there. If it was already on the list (or is the ticket's contact), the run ends with `success`, "nothing changed", no note and no email.
+5. **Emails the new CC the ticket's details** directly, through Postmark or a Microsoft 365 mailbox (see [Sending the email to the coworker](#sending-the-email-to-the-coworker)). The email is sent before the internal note so that one note records both the change and whether the email went. A failed email becomes a warning, never a failed run; the CC is already added.
+6. **Leaves an internal note**, for example "Added alex.wilber@contoso.com to the email CC list at the request of megan.bowen@contoso.com (self-service form). Emailed alex.wilber@contoso.com the ticket's details through Postmark.", and reads the notes back to confirm it saved. A note that fails becomes a warning.
+7. **Falls back to a public note** only when no email went (no email transport is set up, or the email failed): "alex.wilber@contoso.com has been copied on ticket 1001, "Printer offline" at the request of megan.bowen@contoso.com, and will now receive email updates on it. To add information, reply to any update email." The PSA emails it to the ticket's contact and CC list. Posting it only when no direct email went means a PSA that emails CCs on public notes doesn't send the coworker two emails. A public note that fails becomes a warning.
 
-It never changes the ticket's status, owner, contact or anything else, and the only client-visible note it writes is the one telling the new CC what the ticket is about. `"preview": true` returns what it would do (`status: pending_confirmation`) and changes nothing.
+`"notify_cc": false` turns off both the email and the public note. It never changes the ticket's status, owner, contact or anything else. `"preview": true` returns what it would do (`status: pending_confirmation`), including the email it would send, and changes and sends nothing.
+
+### Sending the email to the coworker
+
+The email goes to the one address just added, from the first of these that is set up:
+
+1. **Postmark**, when the `Postmark-ServerToken` and `Postmark-FromEmail` secrets are set (optional `Postmark-ApiUrl`). Your MSP sends it, whatever the client's Microsoft 365 setup. It is tagged `add-cc` in Postmark.
+2. **Microsoft 365 (Graph)**, when the `AddCc-NotifySender` secret names a mailbox. It is sent with Graph `sendMail` from that mailbox, using the `M365-TenantId`, `M365-ClientId` and `M365-ClientSecret` secrets (the `Entra-*` and `Graph-*` names work too). The app needs the `Mail.Send` application permission. This is the same pattern as `Onboarding-NotifySender` in New User Onboarding.
+3. **Neither:** no email, and the public note above is used as before.
+
+The email, as the harness sends it (placeholder data):
+
+```text
+Subject: You've been copied on ticket 1001: Printer offline
+
+Hello,
+
+megan.bowen@contoso.com asked for you to be kept up to date on this ticket.
+
+Ticket: 1001
+Subject: Printer offline
+Status: In Progress
+Priority: Medium
+Contact: Megan Bowen
+Company: Contoso Ltd
+Opened: 27 October 2026
+
+The original request:
+The printer on the second floor shows offline for everyone since this morning. We tried turning it off and on.
+
+You'll now get an email each time the ticket is updated. To add information, reply to any of those update emails.
+
+Our IT team will never ask for your password by email.
+```
+
+It is sent as plain text and simple HTML. With no summary, the subject is "You've been copied on ticket 1001". Any detail the PSA doesn't give is left out, never an error. Where each one comes from:
+
+- **Status, priority, contact, company and date opened:** the ticket itself, read with `ConvertTo-PsaTicketRow` (`_shared/psa-tickets.ps1`). Autotask shows its ticket number (for example `T20261027.0001`) and its picklist labels, and its contact and company names come from the contact and company records. Zendesk's company name comes from the organization. A HaloPSA status known only by its id is left out.
+- **The original request:** the ticket's description (ConnectWise: its first note, used only when that note isn't internal), with HTML stripped and cut to about 1,500 characters with "..." when longer. `"email_include_description": false` leaves it out.
+- **Never included:** internal notes, technician-only fields, the assignee, or anything about another ticket or client.
 
 ### What each PSA supports
 
@@ -124,7 +167,7 @@ These fields are only read from the webhook body (or, on an Action, from the por
 
 ## Download & import
 
-**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.1.0)
+**Download the workflow:** [`add-cc-to-ticket.yml`](https://github.com/cloudradial/Automations/releases/tag/add-cc-to-ticket/v1.2.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 
@@ -141,12 +184,14 @@ By name only. The names are the same as the PSA catalog extensions, so one set s
 | Kaseya BMS: `KaseyaBMS-ApiUrl`, `KaseyaBMS-Username`, `KaseyaBMS-Password`, `KaseyaBMS-CompanyName`, `KaseyaBMS-NoteTypeId` | |
 | Syncro: `Syncro-ApiUrl`, `Syncro-ApiKey` | Not needed: Syncro isn't supported. |
 | Zendesk: `Zendesk-BaseUrl`, `Zendesk-Email`, `Zendesk-ApiToken` | |
+| Optional, the email by Postmark: `Postmark-ServerToken`, `Postmark-FromEmail` (a verified sender), `Postmark-ApiUrl` (default `https://api.postmarkapp.com`) | The same names as the Postmark catalog extension. Used first when the first two are set. |
+| Optional, the email by Microsoft 365: `AddCc-NotifySender` (the mailbox to send from), `M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` | Used when Postmark isn't set up. The `Entra-*` and `Graph-*` names work for the three app secrets. |
 
-A missing secret stops the run with a sentence naming it.
+A missing PSA secret stops the run with a sentence naming it. A missing or wrong email secret only becomes a warning, and the public note is used instead.
 
 ## Required Graph permissions
 
-None. This workflow doesn't call Microsoft Graph.
+None, unless you send the email through Microsoft 365. Then the app registration in the `M365-*` secrets needs the `Mail.Send` application permission, with admin consent, for the `AddCc-NotifySender` mailbox. Graph is never called when Postmark is set up or neither is. If Graph refuses, the warning names `Mail.Send`.
 
 The PSA API user needs to read tickets, contacts (users in HaloPSA and Zendesk) and notes, update tickets (Autotask: create ticket additional contacts) and add notes. If the PSA refuses a call, the run stops with its own error text, for example "ConnectWise PATCH /service/tickets/1001 failed (HTTP 403): ...". Secrets and auth headers are never in the output.
 
@@ -161,7 +206,8 @@ The PSA API user needs to read tickets, contacts (users in HaloPSA and Zendesk) 
 | `allow_company_colleagues` | No (default `false`) | `true` lets anyone at the ticket's company add a CC, not only its contact and CCs. |
 | `allowed_domains` | No | Comma-separated domains the new address must be in, for example `contoso.com, contoso.co.uk`. |
 | `technician_run` | No (default `false`) | For a technician running it by hand: allows a run without `requester_email` or `company_psa_id`. |
-| `notify_cc` | No (default `true`) | Adds the public note that tells the new CC what the ticket is about. `false` adds the CC with the internal note only. |
+| `notify_cc` | No (default `true`) | Tells the new CC what the ticket is about: by email, or by the public note when no email went. `false` adds the CC with the internal note only, with no email and no public note. |
+| `email_include_description` | No (default `true`) | Puts the ticket's original request (up to about 1,500 characters) in the email. `false` leaves it out. `emailIncludeDescription` works too. |
 | `preview` | No (default `false`) | `true` returns what would happen and changes nothing. `dryRun` works too. |
 | `psa` | No | Overrides the `PSA-Type` secret. |
 
@@ -169,7 +215,7 @@ The ticket number and address are read from the body first, then from the form's
 
 ## Output
 
-`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was) and `public_note` (the public note written to the new CC; empty when none was). An `error` also fails the step, so it shows in the run history. Setup problems are errors: no ticket number, no address to add, more than one possible answer, or no `requester_email` / `company_psa_id`. Each message says what to fix. A `rejected` run is the rules working (not their ticket, a bad address, a domain not allowed) and doesn't fail the step.
+`status` (`success`, `rejected`, `error` or `pending_confirmation`), `message` (one plain sentence), `ticket_id`, `cc_email`, `added`, `cc_list` (the CC list after the change; empty when the request was refused), `actions`, `warnings`, `internal_note` (the note written, or why nothing was), `public_note` (the public note written to the new CC; empty when none was), `emailed` (`true` when the email to the new CC was sent), `email_transport` (`postmark`, `graph` or empty: the transport used, or that a preview would use; a failed send keeps it, with `emailed` false), and `email_subject` and `email_body` (the plain-text email sent, or that a preview would send; empty when there was none). An `error` also fails the step, so it shows in the run history. Setup problems are errors: no ticket number, no address to add, more than one possible answer, or no `requester_email` / `company_psa_id`. Each message says what to fix. A `rejected` run is the rules working (not their ticket, a bad address, a domain not allowed) and doesn't fail the step.
 
 ## Form setup
 
@@ -181,7 +227,7 @@ Add a question of type **Action** at the end of the form and pick **Add CC to Ti
 - **Field IDs don't have to match.** `ticketNumber` and `ccEmail` are read first. Failing those, the one answer whose Field ID mentions "ticket" and looks like a ticket number is the ticket, and the one answer whose Field ID mentions "mail" or "cc" and is a single email address (not the submitter's own, and never `userPrincipalName`) is the address. So the Field IDs the portal makes from the labels, such as `emailAddressToAdd`, work. Two different possible answers stop the run with an error naming both Field IDs.
 - **Left blank:** on the form's own ticket, the email question is optional. Left blank, the run succeeds and nobody is added. On an existing ticket (a ticket number question), a missing address is an error.
 - **Who's asking and their company:** only from the portal's `user.email` and `company.psaId`. The ownership rule applies as usual, so on the form's own ticket the requester is its contact.
-- **The switches** (`technician_run`, `allow_company_colleagues`, `allowed_domains`, `notify_cc`, `preview`, `psa`) can't be set from an Action, and a form answer with one of those Field IDs is ignored. An Action run uses the defaults: contact or CC only, any domain, public note on, live. If you need `allowed_domains`, use the Webhook activity below.
+- **The switches** (`technician_run`, `allow_company_colleagues`, `allowed_domains`, `notify_cc`, `preview`, `psa`) can't be set from an Action, and a form answer with one of those Field IDs is ignored. An Action run uses the defaults: contact or CC only, any domain, the email (or public note) on with the original request, live. If you need `allowed_domains`, use the Webhook activity below.
 
 ### With a Webhook activity
 
@@ -205,16 +251,16 @@ Don't use `@TicketId` for the target ticket: it's the **new** ticket the form it
 ## Import & test
 
 1. Import `add-cc-to-ticket.yml`, add the secrets above to the runner vault, then **Publish** and **Deploy** to that runner.
-2. **Preview first.** In **Run**, use the step's Test Input with a real ticket number, its company's PSA id, the ticket contact's email as `requester_email`, and your own address as `ccEmail`. Keep `"preview": true`. Expect `status: pending_confirmation` and nothing changed on the ticket.
+2. **Preview first.** In **Run**, use the step's Test Input with a real ticket number, its company's PSA id, the ticket contact's email as `requester_email`, and your own address as `ccEmail`. Keep `"preview": true`. Expect `status: pending_confirmation` and nothing changed on the ticket. With an email transport set up, check `email_transport`, `email_subject` and `email_body` show the email it would send.
 3. **Refusals.** Change `company_psa_id` to another company: expect `rejected` and "isn't one you can change". Change `requester_email` to someone who isn't on the ticket: expect `rejected`.
-4. **Add.** Remove `preview`. Expect `success`, your address on the ticket's CC list in the PSA, an internal note, and a public note naming the ticket (you get it by email as the new CC). Run it again: expect "already on the CC list" and no second note.
+4. **Add.** Remove `preview`. Expect `success`, your address on the ticket's CC list in the PSA, and an internal note. With an email transport set up, expect `emailed: true`, one email in your inbox with the ticket's details, and no public note. Without one, expect a public note naming the ticket instead (you get it by email as the new CC). Run it again: expect "already on the CC list", no second note and no second email.
 5. **Wire the form.** Enable the webhook in **Properties** (AutomationAI issues the URL and secret), redeploy, and set up the form as above. Submit it from the portal as the ticket's contact, then check the run history and the ticket.
 
-> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `step.ps1` (reading the body), `cc.ps1` (each PSA's contact and CC calls) or `add-cc.ps1` (the step), run `node src/build.js` (it pastes in `_shared/psa.ps1`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
+> Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The step logic lives in `src/`: edit `step.ps1` (reading the body), `cc.ps1` (each PSA's contact and CC calls), `email.ps1` (the email to the new CC) or `add-cc.ps1` (the step), run `node src/build.js` (it pastes in `_shared/psa.ps1`, `psa-tickets.ps1`, `postmark.ps1` and `graph.ps1`), then `pwsh -NoProfile -File src/test.ps1` (strict mode, mocked PSAs). Never edit the `.yml` by hand.
 
 ## Tested
 
-Mocked PSAs, in strict mode (`src/test.ps1`, 130 checks), plus live runs on ConnectWise from a CloudRadial form Action on DV (2026-10-19, the form's own ticket).
+Mocked PSAs, Postmark and Graph, in strict mode (`src/test.ps1`, 163 checks), plus live runs on ConnectWise from a CloudRadial form Action on DV (2026-10-19, the form's own ticket).
 
 - Adding a CC on ConnectWise, Autotask, HaloPSA, Kaseya BMS and Zendesk, including each PSA's request shape, keeping the CCs already on the ticket, the read-back, the internal note and the public note to the new CC (on the Discussion tab in ConnectWise, a public comment in Zendesk), and `notify_cc: false`.
 - Syncro refused with a plain sentence and no calls.
@@ -225,9 +271,16 @@ Mocked PSAs, in strict mode (`src/test.ps1`, 130 checks), plus live runs on Conn
 - Autotask refuses an address that isn't a company contact.
 - PSA errors carry the PSA's own text and no secrets; a missing secret is named; a write the PSA accepts but doesn't keep (Zendesk CCs off) is an error; a write answered with a redirect is read back and never resent.
 - A refused note, or notes that can't be read back, become warnings.
+- The email to the new CC: through Postmark (subject, every detail, the original request, the closing lines, the HTML part, tag `add-cc`, and no public note), through Graph from `AddCc-NotifySender` (one `sendMail`, HTML), Postmark winning when both are set, no transport (the public note as before), Postmark refusing and Graph refusing with 403 or missing its `M365-*` secrets (a warning and the public note instead), `notify_cc: false` (neither), preview (the email returned, nothing sent, no Graph sign-in), already on the list or the contact (no email), a ConnectWise internal first note left out, HTML stripped and the request cut to 1,500 characters on HaloPSA, `email_include_description: false`, a ticket with no summary or optional details, and Autotask's ticket number, picklist labels, contact and company names.
 - Literal `@tokens` count as missing; the CloudRadial `Ticket.Questions` shape (`Answer` or `Value`); `Ticket.TicketId` is never used as the target; ownership fields typed into form answers are ignored.
 - Field IDs the portal makes from labels (`emailAddressToAdd`, `whichTicket`), two different email answers (an error naming both), the requester's own address and `userPrincipalName` never picked as the address, a blank optional question on the form's own ticket, and setup problems failing the step.
 
 ### Not yet proven live
 
 Every PSA call in `src/cc.ps1` except ConnectWise (marked `Unverified`), in particular the Autotask additional-contacts write, the HaloPSA `emailcclist` update, the Kaseya BMS `Ccs` patch, and Zendesk `email_ccs`. Check the first run with `preview` and then on a test ticket.
+
+The direct email to the new CC (1.2.0) has only run against mocks. Not yet proven live:
+
+- Sending through Postmark and through Graph `sendMail` from the `AddCc-NotifySender` mailbox, and how each looks in a real inbox.
+- The extra reads the email makes: each PSA's status, priority, contact and company names and date opened, the Autotask `/Companies/{id}` and Zendesk `/organizations/{id}` reads, and on ConnectWise that the first note is the original request with its flags as expected.
+- Whether a PSA also emails the new CC on its own when they are added, which would mean two emails. Check this on the first live run.

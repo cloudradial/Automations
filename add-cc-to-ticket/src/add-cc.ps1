@@ -7,7 +7,10 @@
 # Status: success, rejected (nothing changed), error (nothing changed unless the message says so) or
 # pending_confirmation (a preview). A setup problem (no ticket number, no address, no requester or company) is an
 # error, so the step fails and shows in the run history; a refusal that is the rule working stays rejected.
-$ccRun = @{ ticketId = ''; ccEmail = ''; done = $false }
+# Once added, the new CC is emailed the ticket's details directly (src/email.ps1: Postmark, else Graph from the
+# AddCc-NotifySender mailbox). Only when no email went (none set up, or it failed) is the public note added instead,
+# so a PSA that emails CCs on public notes doesn't send them two emails. notify_cc=false turns both off.
+$ccRun = @{ ticketId = ''; ccEmail = ''; done = $false; emailed = $false; transport = ''; subject = ''; body = '' }
 $ccWarnings = New-Object System.Collections.ArrayList
 $ccActions = New-Object System.Collections.ArrayList
 
@@ -21,6 +24,7 @@ function New-CcResult {
         status = $Status; message = (& $clean $Message); ticket_id = $ccRun.ticketId; cc_email = $ccRun.ccEmail; added = $Added
         cc_list = @($CcList); actions = @($ccActions | ForEach-Object { & $clean $_ }); warnings = @($ccWarnings | ForEach-Object { & $clean $_ })
         internal_note = (& $clean $Note); public_note = (& $clean $PublicNote)
+        emailed = [bool]$ccRun.emailed; email_transport = $ccRun.transport; email_subject = (& $clean $ccRun.subject); email_body = (& $clean $ccRun.body)
     }
 }
 
@@ -75,9 +79,12 @@ function Invoke-CcMain {
     $colleagues = Test-StepTrue (Get-StepField $f @('allow_company_colleagues', 'allowCompanyColleagues'))
     $domainsIn = Get-StepField $f @('allowed_domains', 'allowedDomains')
     $preview = Test-StepTrue (Get-StepField $f @('preview', 'dryRun', 'dry_run'))
-    # A public note tells the new CC (and the contact) what the ticket is about. On unless notify_cc is false.
+    # The new CC is told what the ticket is about: by email, else by a public note. On unless notify_cc is false.
     $notifyIn = Get-StepField $f @('notify_cc', 'notifyCc')
     $notify = if ($notifyIn) { Test-StepTrue $notifyIn } else { $true }
+    # The email carries the ticket's original request unless email_include_description is false.
+    $descIn = Get-StepField $f @('email_include_description', 'emailIncludeDescription')
+    $withDesc = if ($descIn) { Test-StepTrue $descIn } else { $true }
     $psaIn = Get-StepField $f @('psa')
     # An email question with another Field ID: the one answer whose Field ID mentions mail or cc, that is a single
     # address, and that isn't the requester's own address.
@@ -154,10 +161,23 @@ function Invoke-CcMain {
     $asker = if ($requester) { $requester } else { 'our service desk' }
     $publicNote = ''
     if ($notify) { $publicNote = "$cc has been copied on $about at the request of $asker, and will now receive email updates on it. To add information, reply to any update email." }
+    # The email to the new CC, built from the ticket's own client-facing fields (reads only).
+    $transport = if ($notify) { Get-CcTransport } else { '' }
+    $mail = $null
+    if ($transport) {
+        try {
+            $mail = New-CcEmail (Get-CcEmailDetails $info) $requester $withDesc
+            $ccRun.transport = $transport; $ccRun.subject = $mail.subject; $ccRun.body = $mail.text
+        }
+        catch { Add-CcWarning "The email to $cc couldn't be put together, so a public note tells them instead: $($_.Exception.Message)"; $transport = '' }
+    }
     if ($preview) {
-        $then = if ($notify) { 'add an internal note and a public note telling them what the ticket is about' } else { 'add an internal note' }
+        $then = if (-not $notify) { 'add an internal note' }
+        elseif ($transport) { "email $cc the ticket's details through $(Get-CcTransportName $transport) and add an internal note" }
+        else { 'add an internal note and a public note telling them what the ticket is about (no email transport is set up)' }
         $null = $ccActions.Add("Would $($plan.detail) on ticket $id, then $then.")
-        return (New-CcResult 'pending_confirmation' "Preview: $cc would be added to the CC list on ticket $id; run again without preview to add it." -CcList $plan.list -Note $note -PublicNote $publicNote)
+        $previewPublic = if ($transport) { '' } else { $publicNote }
+        return (New-CcResult 'pending_confirmation' "Preview: $cc would be added to the CC list on ticket $id; run again without preview to add it." -CcList $plan.list -Note $note -PublicNote $previewPublic)
     }
     $PsaState.LastWriteRedirect = $null
     $saved = $null
@@ -174,6 +194,22 @@ function Invoke-CcMain {
     if (-not $saved.ok) { throw "$(Get-PsaName) accepted the CC change on ticket $id, but reading the ticket back shows $cc isn't on its CC list, so check the ticket's CC settings in $(Get-PsaName)." }
     $null = $ccActions.Add("Added $cc to the CC list on ticket $id.")
 
+    # ---- the email to the new CC (a failure is a warning: the CC is already added, and the public note stands in) ----
+    # Sent before the internal note so that one note records both the change and whether the email went.
+    if ($transport) {
+        $how = Get-CcTransportName $transport
+        $sent = Send-CcEmail $transport $cc $mail
+        if ($sent.sent) {
+            $ccRun.emailed = $true
+            $null = $ccActions.Add("Emailed $cc the ticket's details through $how.")
+            $note += " Emailed $cc the ticket's details through $how."
+        }
+        else {
+            Add-CcWarning "$cc was added, but the email with the ticket's details couldn't be sent through ${how}: $($sent.reason) A public note on the ticket tells them instead."
+            $note += " The email to $cc through $how failed, so a public note tells them instead."
+        }
+    }
+
     # ---- the internal note (a failure is a warning: the CC is already added) ----
     try {
         Add-PsaNote -Id $id -Text $note -Title 'CC added'
@@ -183,9 +219,9 @@ function Invoke-CcMain {
     }
     catch { Add-CcWarning "$cc was added, but the internal note on ticket $id couldn't be added: $($_.Exception.Message)" }
 
-    # ---- the public note to the new CC (a failure is a warning) ----
+    # ---- the public note to the new CC, only when no email went (a failure is a warning) ----
     $sentPublic = ''
-    if ($notify) {
+    if ($notify -and -not $ccRun.emailed) {
         try {
             Add-PsaNote -Id $id -Text $publicNote -Title 'You have been copied on this ticket' -Public
             $null = $ccActions.Add("Added a public note to ticket $id telling $cc what the ticket is about.")

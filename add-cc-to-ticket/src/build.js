@@ -1,8 +1,8 @@
-// Builds add-cc-to-ticket.yml from the step sources in this folder, then pastes the shared PSA library into it
-// (_shared/inject.js).
+// Builds add-cc-to-ticket.yml from the step sources in this folder, then pastes the shared libraries into it
+// (_shared/inject.js): psa.ps1, psa-tickets.ps1, postmark.ps1 and graph.ps1.
 // Usage: node build.js          rewrite the .yml
 //        node build.js --check  exit 1 if the .yml is out of date
-// Edit step.ps1, cc.ps1 and add-cc.ps1 (or _shared/psa.ps1), never the .yml.
+// Edit step.ps1, cc.ps1, email.ps1 and add-cc.ps1 (or the _shared files), never the .yml.
 // Needs js-yaml: set JS_YAML_PATH (or NODE_PATH) to an existing copy, or npm install in _shared.
 const fs = require('fs');
 const path = require('path');
@@ -34,11 +34,11 @@ const testInput = JSON.stringify({
   preview: true,
 }, null, 2);
 
-const body = script(['psa.ps1'], ['step.ps1', 'cc.ps1'], 'add-cc.ps1');
+const body = script(['psa.ps1', 'psa-tickets.ps1', 'postmark.ps1', 'graph.ps1'], ['step.ps1', 'cc.ps1', 'email.ps1'], 'add-cc.ps1');
 const yml = `automationsWorkflow: 1
 name: Add CC to Ticket
 description: From a CloudRadial service-request form, add a colleague's email address to the CC list of an existing
-  ticket the requester already owns, then leave an internal note. Works with ConnectWise, Autotask, HaloPSA,
+  ticket the requester already owns, email the colleague the ticket's details, then leave an internal note. Works with ConnectWise, Autotask, HaloPSA,
   Kaseya BMS and Zendesk (Syncro's API has no ticket CC). Checks that the ticket belongs to the requester's company
   and that the requester is its contact or already copied on it. Changes nothing else on the ticket.
 definition:

@@ -47,14 +47,17 @@ function Get-CcCwContactEmail {
 }
 
 # A ticket's company, contact email and CC list:
-#   @{ id; companyId; companyKeys; contactEmail; cc = @(emails); ccEnabled; raw; extra = @{ ...PSA-specific... } }
+#   @{ id; summary; description; companyId; companyKeys; contactEmail; contactName; cc = @(emails); ccEnabled; raw; extra = @{ ...PSA-specific... } }
+# contactName is filled only where the contact record is read anyway (Autotask, Zendesk); the email reads the rest
+# from the ticket itself. description is Get-PsaTicket's (on ConnectWise the first note, which may be internal, so
+# the email re-checks it).
 # ccEnabled is $false only on ConnectWise when the ticket's "CC" checkbox (automaticEmailCcFlag) is off.
 function Get-CcTicket {
     param([string]$Id)
     $c = Get-PsaConn
     $t = Get-PsaTicket $Id
     $raw = $t.raw
-    $info = @{ id = $Id; summary = ([string]$t.summary).Trim(); companyId = ([string]$t.companyId).Trim(); companyKeys = @(); contactEmail = ''; cc = @(); ccEnabled = $true; raw = $raw; extra = @{} }
+    $info = @{ id = $Id; summary = ([string]$t.summary).Trim(); description = [string]$t.description; contactName = ''; companyId = ([string]$t.companyId).Trim(); companyKeys = @(); contactEmail = ''; cc = @(); ccEnabled = $true; raw = $raw; extra = @{} }
     switch ($c.Psa) {
         'connectwise' {
             # Unverified: contactEmailAddress, automaticEmailCc and automaticEmailCcFlag on GET /service/tickets/{id} (CW swagger Ticket model).
@@ -69,7 +72,11 @@ function Get-CcTicket {
         'autotask' {
             # Unverified: the ticket's contactID read through GET /Contacts/{id}, and the TicketAdditionalContacts query by ticketID.
             $cid = Get-PsaProp $raw 'contactID'
-            if (-not (Test-PsaBlank $cid)) { $info.contactEmail = [string](Get-PsaPath (Invoke-PsaRead "/Contacts/$cid" 'read contacts' 'read contacts') 'item.emailAddress') }
+            if (-not (Test-PsaBlank $cid)) {
+                $ct = Get-PsaProp (Invoke-PsaRead "/Contacts/$cid" 'read contacts' 'read contacts') 'item'
+                $info.contactEmail = [string](Get-PsaProp $ct 'emailAddress')
+                $info.contactName = ("$(Get-PsaProp $ct 'firstName') $(Get-PsaProp $ct 'lastName')").Trim()
+            }
             $rows = @(Invoke-PsaAtQuery 'TicketAdditionalContacts' @([ordered]@{ op = 'eq'; field = 'ticketID'; value = [long]$Id }) @() 100 'read the ticket''s additional contacts')
             $ids = @($rows | ForEach-Object { [string](Get-PsaProp $_ 'contactID') } | Where-Object { -not (Test-PsaBlank $_) })
             $info.extra.additionalIds = $ids
@@ -101,7 +108,11 @@ function Get-CcTicket {
             $mail = @{}
             if ($ids.Count) {
                 $r = Invoke-PsaRead "/users/show_many?ids=$($ids -join ',')" 'read users' 'read users'
-                foreach ($u in @(Get-PsaProp $r 'users' | Where-Object { $null -ne $_ })) { $mail[[string](Get-PsaProp $u 'id')] = [string](Get-PsaProp $u 'email') }
+                foreach ($u in @(Get-PsaProp $r 'users' | Where-Object { $null -ne $_ })) {
+                    $uid = [string](Get-PsaProp $u 'id')
+                    $mail[$uid] = [string](Get-PsaProp $u 'email')
+                    if ($uid -eq $req) { $info.contactName = [string](Get-PsaProp $u 'name') }
+                }
             }
             if ($req -and $mail.ContainsKey($req)) { $info.contactEmail = $mail[$req] }
             $info.cc = @($ccIds | Where-Object { $mail.ContainsKey($_) -and $mail[$_] } | ForEach-Object { $mail[$_] })
@@ -109,6 +120,7 @@ function Get-CcTicket {
         default { throw "$(Get-PsaName) can't add a CC to a ticket." }
     }
     $info.contactEmail = $info.contactEmail.Trim()
+    $info.contactName = ([string]$info.contactName).Trim()
     $info.companyKeys = @(@($info.companyId) + @($info.companyKeys) | Where-Object { -not (Test-PsaBlank $_) })
     return $info
 }

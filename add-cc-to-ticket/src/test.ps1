@@ -69,6 +69,18 @@ function Reset-T {
     $TS.company = 42; $TS.contact = 'megan.bowen@contoso.com'; $TS.cc = @('adele.vance@contoso.com'); $TS.flag = $true; $TS.contactBlank = $false
     $TS.notes = New-Object System.Collections.ArrayList
     $TS.noteFail = 0; $TS.writeFail = 0; $TS.ignoreWrite = $false; $TS.writeRedirect = $false; $TS.notesReadFail = 0
+    # For the email to the new CC: the ticket's summary, its original request (ConnectWise: the first note, internal
+    # when descInternal), rich = status, priority, contact and company names and the date opened on the ticket, and
+    # mailFail = the HTTP status Postmark or Graph answers the send with.
+    $TS.summary = 'Printer offline'; $TS.desc = ''; $TS.descInternal = $false; $TS.rich = $false; $TS.mailFail = 0
+}
+function Get-TRich { param($Value) if ($TS.rich) { return $Value }; return $null }
+# The ConnectWise notes: the original request first (when set), then the notes the step wrote.
+function Get-TCwNotes {
+    $all = @(); $i = 0
+    if ($TS.desc) { $i++; $all += [pscustomobject]@{ id = $i; text = $TS.desc; internalAnalysisFlag = $TS.descInternal; detailDescriptionFlag = (-not $TS.descInternal); resolutionFlag = $false } }
+    foreach ($n in $TS.notes) { $i++; $all += [pscustomobject]@{ id = $i; text = $n; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false } }
+    return , $all
 }
 function Add-TNote { param([string]$Text) if ($TS.noteFail) { New-HttpError $TS.noteFail '{"message":"Insufficient security level to add notes"}' }; $null = $TS.notes.Add($Text) }
 function Set-TCc { param($List) if (-not $TS.ignoreWrite) { $TS.cc = @($List | Where-Object { $_ }) } }
@@ -82,14 +94,19 @@ $Handler = {
     if ($TS.notesReadFail -and $c.Method -eq 'GET' -and $c.Uri -match '(?i)/notes|/Actions\?|/comments|TicketNotes/query') { New-HttpError $TS.notesReadFail '{"message":"Forbidden"}' }
     switch -Wildcard -CaseSensitive ($k) {
         # ConnectWise
-        "GET $TCW/service/tickets/1001/notes*" { return , @($TS.notes | ForEach-Object -Begin { $i = 0 } -Process { $i++; [pscustomobject]@{ id = $i; text = $_; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false } }) }
-        "GET $TCW/service/tickets/1001" { return [pscustomobject]@{ id = 1001; summary = 'Printer offline'; company = [pscustomobject]@{ id = $TS.company; identifier = $(if ($TS.company -eq 42) { 'ContosoLtd' } else { 'FabrikamInc' }) }; contact = [pscustomobject]@{ id = 55 }; contactEmailAddress = $(if ($TS.contactBlank) { '' } else { $TS.contact }); automaticEmailCc = ($TS.cc -join ';'); automaticEmailCcFlag = $TS.flag } }
+        "GET $TCW/service/tickets/1001/notes*" { return (Get-TCwNotes) }
+        "GET $TCW/service/tickets/1001" { return [pscustomobject]@{ id = 1001; summary = $TS.summary; company = [pscustomobject]@{ id = $TS.company; identifier = $(if ($TS.company -eq 42) { 'ContosoLtd' } else { 'FabrikamInc' }); name = (Get-TRich 'Contoso Ltd') }; contact = [pscustomobject]@{ id = 55 }; contactEmailAddress = $(if ($TS.contactBlank) { '' } else { $TS.contact }); automaticEmailCc = ($TS.cc -join ';'); automaticEmailCcFlag = $TS.flag
+                status = (Get-TRich ([pscustomobject]@{ name = 'In Progress' })); priority = (Get-TRich ([pscustomobject]@{ name = 'Medium' })); contactName = (Get-TRich 'Megan Bowen'); dateEntered = (Get-TRich '2026-10-27T14:05:00Z') } }
         "GET $TCW/company/contacts/55" { return [pscustomobject]@{ id = 55; communicationItems = @([pscustomobject]@{ communicationType = 'Phone'; value = '555-0100'; defaultFlag = $true }, [pscustomobject]@{ communicationType = 'Email'; value = $TS.contact; defaultFlag = $true }) } }
         "PATCH $TCW/service/tickets/1001" { Invoke-TWrite { $ops = Read-Body $c; foreach ($o in @($ops)) { if ($o.path -eq 'automaticEmailCc') { Set-TCc ($o.value -split ';') }; if ($o.path -eq 'automaticEmailCcFlag' -and -not $TS.ignoreWrite) { $TS.flag = [bool]$o.value } } }; return [pscustomobject]@{ id = 1001 } }
         "POST $TCW/service/tickets/1001/notes" { Add-TNote (Read-Body $c).text; return [pscustomobject]@{ id = 9001 } }
         # Autotask
-        "GET $TAT/Tickets/1001" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; title = 'Printer offline'; companyID = $TS.company; contactID = 501; status = 1 } } }
-        "GET $TAT/Contacts/501" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 501; emailAddress = $TS.contact } } }
+        "GET $TAT/Tickets/1001" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 1001; title = $TS.summary; description = $TS.desc; companyID = $TS.company; contactID = 501; status = $(if ($TS.rich) { 8 } else { 1 }); priority = (Get-TRich 2); ticketNumber = (Get-TRich 'T20261027.0001'); createDate = (Get-TRich '2026-10-27T14:05:00Z') } } }
+        "GET $TAT/Contacts/501" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 501; emailAddress = $TS.contact; firstName = 'Megan'; lastName = 'Bowen' } } }
+        "GET $TAT/Tickets/entityInformation/fields" { return [pscustomobject]@{ fields = @(
+                    [pscustomobject]@{ name = 'status'; picklistValues = @([pscustomobject]@{ value = '1'; label = 'New'; isActive = $true }, [pscustomobject]@{ value = '5'; label = 'Complete'; isActive = $true }, [pscustomobject]@{ value = '8'; label = 'In Progress'; isActive = $true }) },
+                    [pscustomobject]@{ name = 'priority'; picklistValues = @([pscustomobject]@{ value = '2'; label = 'Medium'; isActive = $true }) }) } }
+        "GET $TAT/Companies/42" { return [pscustomobject]@{ item = [pscustomobject]@{ id = 42; companyName = 'Contoso Ltd' } } }
         "GET $TAT/TicketAdditionalContacts/query*" { return [pscustomobject]@{ items = @($TS.cc | ForEach-Object { [pscustomobject]@{ id = 1; ticketID = 1001; contactID = (Get-TId $_) } }); pageDetails = [pscustomobject]@{ nextPageUrl = $null } } }
         "GET $TAT/Contacts/query*" {
             $s = Get-TQuery $c.Uri
@@ -107,7 +124,8 @@ $Handler = {
         "POST $TAT/Tickets/1001/Notes" { Add-TNote (Read-Body $c).description; return [pscustomobject]@{ itemId = 3001 } }
         # HaloPSA
         'POST https://example.halopsa.example/auth/token' { return [pscustomobject]@{ access_token = 'SECRET-halo-token' } }
-        "GET $THA/Tickets/1001?includedetails=true" { return [pscustomobject]@{ id = 1001; summary = 'Printer offline'; client_id = $TS.company; user_id = 7; user_email = $TS.contact; emailcclist = ($TS.cc -join ';') } }
+        "GET $THA/Tickets/1001?includedetails=true" { return [pscustomobject]@{ id = 1001; summary = $TS.summary; details = $TS.desc; client_id = $TS.company; user_id = 7; user_email = $TS.contact; emailcclist = ($TS.cc -join ';')
+                status_name = (Get-TRich 'In Progress'); priority_name = (Get-TRich 'High'); client_name = (Get-TRich 'Contoso Ltd'); user_name = (Get-TRich 'Megan Bowen'); dateoccurred = (Get-TRich '2026-10-27T14:05:00Z') } }
         "POST $THA/Tickets" { Invoke-TWrite { $b = @(Read-Body $c)[0]; Set-TCc ($b.emailcclist -split ';') }; return , @([pscustomobject]@{ id = 1001 }) }
         "POST $THA/Actions" { Add-TNote @(Read-Body $c)[0].note; return , @([pscustomobject]@{ id = 1 }) }
         "GET $THA/Actions?ticket_id=1001*" { return [pscustomobject]@{ actions = @($TS.notes | ForEach-Object { [pscustomobject]@{ id = 1; note = $_; hiddenfromuser = $true } }) } }
@@ -118,6 +136,10 @@ $Handler = {
         "GET $TBM/servicedesk/tickets/ticketCcs/42?*" { $want = [uri]::UnescapeDataString((($c.Uri -split 'SearchString=', 2)[1] -split '&')[0]); return [pscustomobject]@{ Result = @($TDir.Keys | Where-Object { $_ -eq $want -and $TDir[$_].co -eq 42 } | ForEach-Object { [pscustomobject]@{ Id = $TDir[$_].id; EmailAddress = $_; FullName = ''; EntityType = 1 } }) } }
         "PATCH $TBM/servicedesk/tickets/1001" { Invoke-TWrite { $ops = @(Read-Body $c); $global:TBmsPatch = $ops; Set-TCc (@($ops[0].value) | ForEach-Object { $_.EmailAddress }) }; return [pscustomobject]@{ Success = $true } }
         "POST $TBM/servicedesk/tickets/1001/notes" { Add-TNote (Read-Body $c).Details; return [pscustomobject]@{ Result = [pscustomobject]@{ Id = 1 } } }
+        # Postmark and Microsoft Graph (the email to the new CC)
+        'POST https://api.postmarkapp.com/email' { if ($TS.mailFail) { New-HttpError $TS.mailFail '{"ErrorCode":406,"Message":"You tried to send to a recipient that has been marked as inactive."}' }; return [pscustomobject]@{ ErrorCode = 0; Message = 'OK'; MessageID = 'pm-0001' } }
+        'POST https://login.microsoftonline.com/*' { return [pscustomobject]@{ access_token = 'SECRET-graph-token'; expires_in = 3600 } }
+        'POST https://graph.microsoft.com/v1.0/users/*/sendMail' { if ($TS.mailFail) { New-HttpError $TS.mailFail '{"error":{"code":"ErrorAccessDenied","message":"Access is denied."}}' }; return $null }
         # Zendesk
         "GET $TZD/tickets/1001/comments*" { return [pscustomobject]@{ comments = @($TS.notes | ForEach-Object { [pscustomobject]@{ id = 1; body = $_; public = $false; author_id = 1 } }); next_page = $null } }
         "GET $TZD/tickets/1001" { return [pscustomobject]@{ ticket = [pscustomobject]@{ id = 1001; subject = 'Printer offline'; organization_id = $TS.company; requester_id = 501; email_cc_ids = @($TS.cc | ForEach-Object { Get-TId $_ }); status = 'open'; assignee_id = $null } } }
@@ -138,7 +160,7 @@ function New-TBody { param([hashtable]$Over = @{}) $b = @{}; foreach ($k in $TBa
 function Test-CcInList { param([string]$E, $L) foreach ($x in @($L)) { if ([string]$x -ieq $E) { return $true } }; return $false }
 function Test-NoDash { param($o) return (($o | ConvertTo-Json -Depth 8) -notmatch "[$([char]0x2013)$([char]0x2014)]") }
 function Test-NoSecret { param($o) return (($o | ConvertTo-Json -Depth 8) -notmatch 'SECRET-') }
-$TOutFields = @('status', 'message', 'ticket_id', 'cc_email', 'added', 'cc_list', 'actions', 'warnings', 'internal_note', 'public_note')
+$TOutFields = @('status', 'message', 'ticket_id', 'cc_email', 'added', 'cc_list', 'actions', 'warnings', 'internal_note', 'public_note', 'emailed', 'email_transport', 'email_subject', 'email_body')
 function Test-Shape { param($o) if ($null -eq $o) { return $false }; foreach ($f in $TOutFields) { if ($null -eq $o.PSObject.Properties[$f]) { return $false } }; return $true }
 
 # ---- 1. Success on each PSA ----
@@ -407,4 +429,116 @@ Reset-T; Reset-Mock (Get-TSecrets 'zendesk' @{ 'PSA-Type' = 'connectwise' }) $Ha
 $r = Invoke-Cc (New-TBody @{ psa = 'zendesk' })
 Check 'psa input picks Zendesk over the PSA-Type secret' ($r.out.status -eq 'success' -and @(Get-Calls 'GET' "$TZD/tickets/1001").Count -ge 1) "$($r.out.message) $($r.error)"
 
+# ---- 14. Emailing the new CC the ticket's details ----
+$TPm = @{ 'Postmark-ServerToken' = 'SECRET-pm-token'; 'Postmark-FromEmail' = 'help@example-msp.test' }
+$TGr = @{ 'M365-TenantId' = '00000000-0000-0000-0000-000000000001'; 'M365-ClientId' = 'SECRET-graph-id'; 'M365-ClientSecret' = 'SECRET-graph-sec'; 'AddCc-NotifySender' = 'help@example-msp.test' }
+function Get-TPmCalls { return @(Get-Calls 'POST' 'https://api.postmarkapp.com/email') }
+function Get-TGrCalls { return @(Get-Calls 'POST' 'https://graph.microsoft.com/v1.0/users/*/sendMail') }
+function Get-TMailCalls { return @(@(Get-TPmCalls) + @(Get-TGrCalls)) }
+$TDesc = 'The printer on the second floor shows offline for everyone since this morning. We tried turning it off and on.'
+
+# Postmark, ConnectWise, every detail on the ticket
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler; $TS.rich = $true; $TS.desc = "<p>$TDesc</p>"
+$r = Invoke-Cc (New-TBody)
+$o = $r.out; $TPmCall = @(Get-TPmCalls); $TMail = $(if ($TPmCall.Count) { Read-Body $TPmCall[0] } else { $null })
+Check 'postmark: success, one email to the new CC, emailed true' ($o.status -eq 'success' -and $o.added -eq $true -and $TPmCall.Count -eq 1 -and $TMail.To -eq 'alex.wilber@contoso.com' -and $o.emailed -eq $true -and $o.email_transport -eq 'postmark' -and -not $r.error) "$($o.status) $($o.message) $($r.error) $(Show-Calls)"
+Check 'postmark: subject names the ticket and its summary, tag add-cc, sender from Postmark-FromEmail' ($TMail.Subject -eq "You've been copied on ticket 1001: Printer offline" -and $TMail.Tag -eq 'add-cc' -and $TMail.From -eq 'help@example-msp.test' -and $o.email_subject -eq $TMail.Subject) ($TPmCall[0].Body)
+$TText = [string]$TMail.TextBody
+Check 'postmark: the body says who asked and lists the ticket''s details' ($TText -like "Hello,*megan.bowen@contoso.com asked for you to be kept up to date on this ticket.*Ticket: 1001*Subject: Printer offline*Status: In Progress*Priority: Medium*Contact: Megan Bowen*Company: Contoso Ltd*Opened: 27 October 2026*The original request:*$TDesc*") $TText
+Check 'postmark: the body ends with how updates work and the password line' ($TText -like "*You'll now get an email each time the ticket is updated. To add information, reply to any of those update emails.*Our IT team will never ask for your password by email.") $TText
+Check 'postmark: HTML body too, the original request with its HTML stripped' ($TMail.HtmlBody -like '*<strong>Status:</strong> In Progress*' -and $TText -notmatch '<p>' -and $o.email_body -eq $TText) $TMail.HtmlBody
+Check 'postmark: no public note, so the coworker gets one email' ($TS.notes.Count -eq 1 -and $o.public_note -eq '' -and @(Get-NoteCalls).Count -eq 1) ($TS.notes -join ' | ')
+Check 'postmark: the internal note and actions record the email and the transport' ($TS.notes[0] -like 'Added alex.wilber@contoso.com to the email CC list at the request of megan.bowen@contoso.com (self-service form). Emailed alex.wilber@contoso.com the ticket''s details through Postmark.' -and $o.internal_note -eq $TS.notes[0] -and (@($o.actions) -join ' ') -like '*Emailed alex.wilber@contoso.com the ticket''s details through Postmark.*') "$($TS.notes -join ' | ') / $(@($o.actions) -join ' | ')"
+Check 'postmark: output shape, no warnings, no secrets, no dashes' ((Test-Shape $o) -and @($o.warnings).Count -eq 0 -and (Test-NoSecret $o) -and (Test-NoDash $o)) (@($o.warnings) -join ' | ')
+$global:TSampleEmail = "Subject: $($TMail.Subject)`n`n$TText"
+
+# ConnectWise: an internal first note is never the original request
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler; $TS.desc = 'Technician only: the client owes us for the last two invoices.'; $TS.descInternal = $true
+$r = Invoke-Cc (New-TBody)
+$TText = [string](Read-Body @(Get-TPmCalls)[0]).TextBody
+Check 'connectwise: an internal first note is left out of the email' ($r.out.emailed -eq $true -and $TText -notlike '*Technician only*' -and $TText -notlike '*original request*') $TText
+
+# Graph from the AddCc-NotifySender mailbox
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TGr) $Handler; $TS.rich = $true
+$r = Invoke-Cc (New-TBody)
+$TGc = @(Get-TGrCalls); $TMsg = $(if ($TGc.Count) { Read-Body $TGc[0] } else { $null })
+Check 'graph: one sendMail from the AddCc-NotifySender mailbox to the new CC' ($r.out.status -eq 'success' -and $TGc.Count -eq 1 -and $TGc[0].Uri -eq 'https://graph.microsoft.com/v1.0/users/help%40example-msp.test/sendMail' -and @($TMsg.message.toRecipients)[0].emailAddress.address -eq 'alex.wilber@contoso.com' -and @(Get-TPmCalls).Count -eq 0) "$($r.out.message) $($r.error) $(Show-Calls)"
+Check 'graph: subject, HTML body with the details, not saved to sent items' ($TMsg.message.subject -eq "You've been copied on ticket 1001: Printer offline" -and $TMsg.message.body.contentType -eq 'HTML' -and $TMsg.message.body.content -like '*<strong>Contact:</strong> Megan Bowen*' -and $TMsg.saveToSentItems -eq $false) ($TGc[0].Body)
+Check 'graph: emailed, transport graph, no public note, recorded in the internal note' ($r.out.emailed -eq $true -and $r.out.email_transport -eq 'graph' -and $TS.notes.Count -eq 1 -and $r.out.public_note -eq '' -and $TS.notes[0] -like '*through Microsoft 365 (Graph).' -and (Test-NoSecret $r.out)) ($TS.notes -join ' | ')
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' @{ 'AddCc-NotifySender' = 'help@example-msp.test' }) $Handler
+$r = Invoke-Cc (New-TBody)
+Check 'graph: sender set but no M365 secrets -> warning naming them, public note instead, still success' ($r.out.status -eq 'success' -and $r.out.emailed -eq $false -and $TS.notes.Count -eq 2 -and $r.out.public_note -ne '' -and (@($r.out.warnings) -join ' ') -like '*M365-TenantId*') (@($r.out.warnings) -join ' | ')
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TGr) $Handler; $TS.mailFail = 403
+$r = Invoke-Cc (New-TBody)
+Check 'graph: sendMail refused (403) -> warning naming Mail.Send, public note fallback' ($r.out.status -eq 'success' -and $r.out.emailed -eq $false -and (@($r.out.warnings) -join ' ') -like '*through Microsoft 365 (Graph)*Mail.Send*A public note on the ticket tells them instead.' -and $TS.notes.Count -eq 2 -and $TS.notes[1] -like '*has been copied on ticket 1001*') (@($r.out.warnings) -join ' | ')
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' ($TPm + @{ 'AddCc-NotifySender' = 'help@example-msp.test' })) $Handler
+$r = Invoke-Cc (New-TBody)
+Check 'both set up: Postmark is used, Graph is not called' (@(Get-TPmCalls).Count -eq 1 -and @(Get-TGrCalls).Count -eq 0 -and @(Get-Calls 'POST' 'https://login.microsoftonline.com/*').Count -eq 0 -and $r.out.email_transport -eq 'postmark') (Show-Calls)
+
+# Neither set up: today's public note
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TBody)
+Check 'no transport: no email, the public note as before, emailed false' ($r.out.status -eq 'success' -and @(Get-TMailCalls).Count -eq 0 -and $r.out.emailed -eq $false -and $r.out.email_transport -eq '' -and $r.out.email_subject -eq '' -and $TS.notes.Count -eq 2 -and $r.out.public_note -eq $TS.notes[1] -and $TS.notes[0] -notlike '*Emailed*') ($TS.notes -join ' | ')
+
+# Postmark refuses: a warning, and the public note stands in
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler; $TS.mailFail = 422
+$r = Invoke-Cc (New-TBody)
+Check 'postmark refuses (422): success, CC added, warning with Postmark''s reason' ($r.out.status -eq 'success' -and $r.out.added -eq $true -and $r.out.emailed -eq $false -and -not $r.error -and (@($r.out.warnings) -join ' ') -like "*alex.wilber@contoso.com was added, but the email with the ticket's details couldn't be sent through Postmark*HTTP 422*marked as inactive*") (@($r.out.warnings) -join ' | ')
+Check 'postmark refuses: the public note is added instead, and the internal note says so' ($TS.notes.Count -eq 2 -and $TS.notes[1] -like 'alex.wilber@contoso.com has been copied on ticket 1001*' -and $r.out.public_note -eq $TS.notes[1] -and $TS.notes[0] -like '*The email to alex.wilber@contoso.com through Postmark failed, so a public note tells them instead.') ($TS.notes -join ' | ')
+
+# notify_cc false: neither
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler
+$r = Invoke-Cc (New-TBody @{ notify_cc = 'false' })
+Check 'notify_cc false: no email and no public note, internal note only' ($r.out.status -eq 'success' -and @(Get-TMailCalls).Count -eq 0 -and $r.out.emailed -eq $false -and $r.out.email_transport -eq '' -and $TS.notes.Count -eq 1 -and $r.out.public_note -eq '') "$(Show-Calls) / $($TS.notes -join ' | ')"
+
+# Preview: nothing sent, the email returned
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler; $TS.rich = $true; $TS.desc = $TDesc
+$r = Invoke-Cc (New-TBody @{ preview = $true })
+Check 'preview with Postmark: nothing sent or written' ($r.out.status -eq 'pending_confirmation' -and @(Get-WriteCalls).Count -eq 0 -and $TS.notes.Count -eq 0 -and $r.out.emailed -eq $false) (Show-Calls)
+Check 'preview with Postmark: returns the email and the transport' ($r.out.email_transport -eq 'postmark' -and $r.out.email_subject -eq "You've been copied on ticket 1001: Printer offline" -and $r.out.email_body -like '*Status: In Progress*The original request:*second floor*' -and $r.out.public_note -eq '') "$($r.out.email_subject) / $($r.out.email_body)"
+Check 'preview with Postmark: the actions say the email would go through Postmark' ((@($r.out.actions) -join ' ') -like "*Would add alex.wilber@contoso.com*then email alex.wilber@contoso.com the ticket's details through Postmark and add an internal note.*") (@($r.out.actions) -join ' | ')
+Reset-T; Reset-Mock (Get-TSecrets 'halopsa' $TGr) $Handler
+$r = Invoke-Cc (New-TBody @{ preview = $true })
+Check 'preview with Graph: no sign-in, nothing sent, says Microsoft 365 (Graph)' (@(Get-WriteCalls | Where-Object { $_.Uri -notlike 'https://example.halopsa.example/auth/*' }).Count -eq 0 -and $r.out.email_transport -eq 'graph' -and (@($r.out.actions) -join ' ') -like '*through Microsoft 365 (Graph)*') "$(Show-Calls) / $(@($r.out.actions) -join ' | ')"
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise') $Handler
+$r = Invoke-Cc (New-TBody @{ preview = $true })
+Check 'preview with no transport: no email, says the public note would be used' ($r.out.email_transport -eq '' -and $r.out.email_subject -eq '' -and $r.out.public_note -like '*has been copied on ticket 1001*' -and (@($r.out.actions) -join ' ') -like '*no email transport is set up*') (@($r.out.actions) -join ' | ')
+
+# Already on the list, already the contact: no email
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler
+$r = Invoke-Cc (New-TBody @{ ccEmail = 'adele.vance@contoso.com' })
+Check 'already on the list: no email' ($r.out.added -eq $false -and @(Get-TMailCalls).Count -eq 0 -and $r.out.emailed -eq $false -and $r.out.email_transport -eq '') (Show-Calls)
+Reset-T; Reset-Mock (Get-TSecrets 'zendesk' $TPm) $Handler
+$r = Invoke-Cc (New-TBody @{ ccEmail = 'megan.bowen@contoso.com' })
+Check 'already the contact: no email' ($r.out.added -eq $false -and @(Get-TMailCalls).Count -eq 0) (Show-Calls)
+
+# The original request: HTML stripped, trimmed to 1,500 characters, or left out
+Reset-T; Reset-Mock (Get-TSecrets 'halopsa' $TPm) $Handler; $TS.rich = $true
+$TS.desc = '<div><p>Hello team,</p><p>The &quot;Finance&quot; share is slow &amp; drops.</p>' + ('<p>' + ('x' * 99) + '</p>') * 20 + '</div>'
+$r = Invoke-Cc (New-TBody)
+$TText = [string](Read-Body @(Get-TPmCalls)[0]).TextBody
+$TReq = (($TText -split 'The original request:\n', 2)[1] -split "`n`nYou'll now get", 2)[0]
+Check 'halopsa: the original request has its HTML stripped and entities decoded' ($TReq -like "Hello team,*The `"Finance`" share is slow & drops.*" -and $TReq -notmatch '<|&quot;|&amp;') $TReq
+Check 'halopsa: the original request is cut to 1,500 characters with "..."' ($TReq.EndsWith('...') -and $TReq.Length -le 1503 -and $TReq.Length -ge 1400) "length $($TReq.Length)"
+Check 'halopsa: details from the ticket (status, priority, contact, company, opened)' ($TText -like '*Status: In Progress*Priority: High*Contact: Megan Bowen*Company: Contoso Ltd*Opened: 27 October 2026*' -and $r.out.emailed -eq $true -and $TS.notes.Count -eq 1) $TText
+Reset-T; Reset-Mock (Get-TSecrets 'halopsa' $TPm) $Handler; $TS.desc = $TDesc
+$r = Invoke-Cc (New-TBody @{ email_include_description = 'false' })
+$TText = [string](Read-Body @(Get-TPmCalls)[0]).TextBody
+Check 'email_include_description false: the original request is left out, the rest is there' ($r.out.emailed -eq $true -and $TText -notlike '*original request*' -and $TText -notlike '*second floor*' -and $TText -like '*Ticket: 1001*Subject: Printer offline*') $TText
+
+# Missing optional fields: simply left out
+Reset-T; Reset-Mock (Get-TSecrets 'connectwise' $TPm) $Handler; $TS.summary = ''
+$r = Invoke-Cc (New-TBody)
+$TMail = Read-Body @(Get-TPmCalls)[0]; $TText = [string]$TMail.TextBody
+Check 'missing fields: subject falls back to the number, only the details the ticket has' ($r.out.status -eq 'success' -and $r.out.emailed -eq $true -and $TMail.Subject -eq "You've been copied on ticket 1001" -and $TText -like '*Ticket: 1001*' -and $TText -notmatch '(?m)^(Subject|Status|Priority|Contact|Company|Opened):' -and $TText -notlike '*original request*' -and @($r.out.warnings).Count -eq 0) "$($TMail.Subject) / $TText / $(@($r.out.warnings) -join ' | ')"
+
+# Autotask: its ticket number, picklist labels and the company and contact records
+Reset-T; Reset-Mock (Get-TSecrets 'autotask' $TPm) $Handler; $TS.rich = $true; $TS.desc = $TDesc
+$r = Invoke-Cc (New-TBody)
+$TMail = Read-Body @(Get-TPmCalls)[0]; $TText = [string]$TMail.TextBody
+Check 'autotask: emailed with the ticket number people see, status and priority labels' ($r.out.emailed -eq $true -and $TMail.Subject -eq "You've been copied on ticket T20261027.0001: Printer offline" -and $TText -like '*Ticket: T20261027.0001*Status: In Progress*Priority: Medium*' ) "$($TMail.Subject) / $TText"
+Check 'autotask: contact and company names, date opened and the original request' ($TText -like '*Contact: Megan Bowen*Company: Contoso Ltd*Opened: 27 October 2026*The original request:*second floor*' -and $TS.notes.Count -eq 1 -and @($r.out.warnings).Count -eq 0) "$TText / $(@($r.out.warnings) -join ' | ')"
+
+# Set ADDCC_SHOW_EMAIL=1 to print the first Postmark email above (placeholder data), for docs and review.
+if ($env:ADDCC_SHOW_EMAIL) { Write-Host "`n----- sample email -----`n$global:TSampleEmail`n------------------------" }
 Complete-Test

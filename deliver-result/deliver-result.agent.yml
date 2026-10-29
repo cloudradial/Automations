@@ -3,7 +3,7 @@ agent:
   slug: deliver-result
   name: Deliver Result
   vendor: Azurative
-  version: 0.3.0
+  version: 0.3.1
   description: Pluggable delivery step. Turns a generic result into a PSA ticket (ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk), a Postmark email, or a ServiceAI return contract, chosen by a channel.
   category: Utility
   tags:

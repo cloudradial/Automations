@@ -3,7 +3,7 @@ agent:
   slug: deliver-result
   name: Deliver Result
   vendor: Azurative
-  version: 0.2.0
+  version: 0.3.0
   description: Pluggable delivery step. Turns a generic result into a PSA ticket (ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk), a Postmark email, or a ServiceAI return contract, chosen by a channel.
   category: Utility
   tags:
@@ -30,7 +30,8 @@ agent:
 
     Set `fromEmail` (a verified Postmark sender) and, for PSA, `defaultBoard` (the board /
     queue / group for new tickets; required on ConnectWise PSA, Autotask and Kaseya BMS,
-    where the agent won't guess one). On Kaseya BMS also set `noteTypeId` (the tenant's
+    where the agent won't guess one). Set `priorityMap` so low / medium / high / critical
+    always land on the same PSA priority. On Kaseya BMS also set `noteTypeId` (the tenant's
     note type id for internal notes). Runs **dry-run by default**.
   systemPrompt: |
     Every message you send must contain at least one short plain sentence of text,
@@ -61,6 +62,15 @@ agent:
     If defaultBoard is empty on ConnectWise PSA, Autotask or Kaseya BMS (which file every
     ticket on a board or queue), never pick one yourself: create nothing, fail, and say
     defaultBoard needs to be set. On the other PSAs, create the ticket without it.
+    Priority, the same way every run: first turn the priority input into one level: low;
+    medium (also normal, or empty); high; critical (also urgent or emergency). Then:
+    1. If the priorityMap variable has that level, use exactly its value (a PSA priority
+       name or id). If it doesn't match a priority in the PSA, fail and say so.
+    2. Otherwise, if exactly one PSA priority has the level word in its name (case
+       ignored), use it.
+    3. Otherwise don't set a priority, so the PSA's default applies, and say the
+       priorityMap variable would set it. Never choose one by what a name seems to mean.
+    Report the level and the priority used.
     Kaseya BMS: kaseya_bms_create_ticket needs the numeric accountId (find it with
     kaseya_bms_list_accounts) and takes numeric queueId, priorityId and statusId; resolve
     those with kaseya_bms_lookup (defaultBoard may be a queue name or id). Internal notes
@@ -92,7 +102,8 @@ agent:
       {"name":"fromEmail","label":"From address for Postmark email (verified sender)","type":"string","default":"","required":false},
       {"name":"defaultBoard","label":"PSA board / queue / group for new tickets (required on ConnectWise PSA, Autotask, Kaseya BMS)","type":"string","default":"","required":false},
       {"name":"messageStream","label":"Postmark message stream","type":"string","default":"outbound","required":false},
-      {"name":"noteTypeId","label":"Kaseya BMS note type id for internal notes (Kaseya BMS only)","type":"string","default":"","required":false}
+      {"name":"noteTypeId","label":"Kaseya BMS note type id for internal notes (Kaseya BMS only)","type":"string","default":"","required":false},
+      {"name":"priorityMap","label":"PSA priority for each level, as JSON, e.g. {\"low\":\"Priority 4 - Low\",\"medium\":\"Priority 3 - Normal\",\"high\":\"Priority 2 - High\",\"critical\":\"Priority 1 - Critical\"}","type":"string","default":"","required":false}
     ]
   inputSchema: |
     {"type":"object","properties":{"channel":{"type":"string","enum":["psa","email","serviceai"],"default":"psa"},"subject":{"type":"string"},"body":{"type":"string"},"cc":{"type":"array","items":{"type":"string"}},"priority":{"type":"string"},"internalNote":{"type":"string"},"companyId":{"type":"string"},"companyIdentifier":{"type":"string"},"companyName":{"type":"string"},"toEmail":{"type":"array","items":{"type":"string"}},"psa":{"type":"string"},"ticketId":{"type":"string"}},"required":["channel","subject","body"]}

@@ -196,17 +196,29 @@ Send a flat JSON body, the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Value
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The workflow never removes access; take test access away by hand.
 
+## Proven live
+
+On 2026-10-29 the workflow ran in AutomationAI against a real Microsoft 365 test tenant and ConnectWise PSA, giving a user full access to a shared mailbox:
+
+1. **Pending approval.** With `confirm` true and no approver, the run returned `pending_approval`. It wrote one internal note that named the user's manager, and nothing changed.
+2. **Grant.** With `approvedBy` set to that manager, the run returned `success`. It added full access with AutoMapping and read it back in place. It wrote the internal and public notes and closed the ticket.
+3. **Rerun.** The same input again returned `success` with `alreadyHadAccess` 1. It wrote no notes and didn't close the ticket again.
+4. **Note redirect.** ConnectWise answered the note calls with a redirect. The workflow read the ticket back to check the notes were there, and didn't send them again.
+
 ## Not yet proven live
 
 Everything below passes the strict-mode mock harness, but hasn't been run against a real tenant yet:
 
+- **The other five PSAs.** Notes, the rerun check and closing the ticket are proven only on ConnectWise PSA. Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk haven't been run live, and several of their close calls in `_shared/psa.ps1` carry `Unverified` comments.
+- **The approval email** through Graph `sendMail` from `Access-NotifySender`. It wasn't set in the live test.
+- **Microsoft 365 groups, Teams, security groups and distribution lists.** Only a shared mailbox has been granted live.
+- **Send as and send on behalf.** Only full access has been granted live.
+- **The `rejected` path for a privileged group.** No privileged group has been tried live.
 - **Team detection** reads the group's `resourceProvisioningOptions` through Graph v1.0. If a tenant doesn't return it, a Team is treated as a Microsoft 365 group, which is granted the same way.
 - **Owners of distribution lists and mail-enabled security groups** are read from Microsoft Graph owners for approval. Whether Exchange's `ManagedBy` always shows up there hasn't been checked.
 - **Adding a group owner through Graph** with only `GroupMember.ReadWrite.All`. Some tenants may need `Group.ReadWrite.All`.
 - **Hashtable parameters through the Exchange REST endpoint** (`-GrantSendOnBehalfTo @{Add=...}` and `-ManagedBy @{Add=...}`), and the read-back of `GrantSendOnBehalfTo` and `ManagedBy`, which Exchange may return as display names or ids.
-- **The approval email** through Graph `sendMail` from `Access-NotifySender`.
-- **Closing tickets** uses `Close-PsaTicket` from `_shared/psa.ps1`; several PSAs' close calls carry `Unverified` comments there.
-- **Treating the manager of a shared mailbox's account as its owner** is this workflow's own convention. Set those managers in Microsoft 365, or use `Access-Approvers`.
+- **Treating the manager of a shared mailbox's account as its owner** is this workflow's own convention. The live grant was approved by the user's manager, so this path hasn't been run. Set those managers in Microsoft 365, or use `Access-Approvers`.
 
 Preview against a test user and a test ticket before turning on `confirm` from a trigger.
 

@@ -21,6 +21,7 @@ function Invoke-RestMethod { param($Uri, $Method = 'GET', $Headers, $ContentType
         return [pscustomobject]@{ value = @(
             [pscustomobject]@{ companyId = 1; name = 'contoso.com'; dateExpires = $soon; registrar = 'Example Registrar'; isDeleted = $false; url = 'https://contoso.com'; issuer = 'Example CA'; dateEnd = $soon; expirationDate = $soon }
             [pscustomobject]@{ companyId = 1; name = 'contoso.net'; dateExpires = $gone; registrar = ''; isDeleted = $false; url = 'https://contoso.net'; issuer = 'Example CA'; dateEnd = $gone; expirationDate = $gone }
+            [pscustomobject]@{ companyId = 99; name = 'gone.example'; dateExpires = $soon; registrar = ''; isDeleted = $false; url = 'https://gone.example'; issuer = ''; dateEnd = $soon; expirationDate = $soon }
             [pscustomobject]@{ companyId = 2; name = 'fabrikam.com'; dateExpires = $far; registrar = ''; isDeleted = $false; url = 'https://fabrikam.com'; issuer = ''; dateEnd = $far; expirationDate = $far }
         ) } }
     if ($Method -in 'POST', 'PATCH') { return [pscustomobject]@{ success = $true } }
@@ -38,6 +39,7 @@ foreach ($n in @('certificate-expiration-report')) {
         Check "$n write=$write : no error" ($null -eq $err -and $null -ne $o -and $o.status -ne 'error') "$err | $($o | ConvertTo-Json -Compress -Depth 3)"
         Check "$n write=$write : company name on rows" (($o | ConvertTo-Json -Depth 8) -match 'Contoso Ltd' -and ($o | ConvertTo-Json -Depth 8) -match 'Company 2') ($o | ConvertTo-Json -Compress -Depth 4)
         Check "$n write=$write : cards $(if ($write) { 'written for the flagged company only' } else { 'not written' })" ($posts -eq $(if ($write) { 1 } else { 0 })) "posts=$posts"
+        if ($write) { Check "$n : company missing from the portal is skipped, not an error" ($o.counts.skippedMissingCompany -eq 1 -and $o.counts.errors -eq 0 -and $o.message -match 'No card for company id\(s\) 99') ($o | ConvertTo-Json -Compress -Depth 4) }
     }
 }
 if ($fail) { Write-Host "$fail failed"; exit 1 } else { Write-Host 'all passed' }

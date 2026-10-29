@@ -24,7 +24,7 @@ Microsoft 365 and CloudRadial. No PSA is needed.
 ## What you need
 
 - AutomationAI, with your CloudRadial API connected
-- A Microsoft app registration that can read Secure Score, approved in each client tenant you run it against
+- Your Microsoft 365 app registration (the one in the `M365-*` secrets) with **SecurityEvents.Read.All** added, approved in each client tenant you run it against. It adds to the app's existing permissions.
 
 ## Set it up
 
@@ -74,14 +74,14 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 1. Gets a Microsoft Graph app-only token for the **client's** tenant.
 2. Reads `GET /security/secureScores?$top=1` and every `secureScoreControlProfiles` (paged), dropping deprecated controls.
 3. Maps each control to an assessment question (Compliant when its current score meets its max), sorted by category then rank.
-4. Skips if an assessment with the same title already exists for the company, then **`POST /v2/assessment`** → builds the xlsx in memory → **`POST /v2/assessment/upload`** (multipart).
+4. Skips if an assessment with the same title already exists for the company, then builds the xlsx in memory and sends it to **`POST /v2/assessment/upload`** (multipart) with `assessmentId: 0` and `type: 20`, which creates the assessment with every question and answer. The upload returns no body, so the new assessment is found afterwards by title. A large tenant can make the upload outlast CloudRadial's gateway (HTTP 504) while the import still finishes, so a 5xx or timeout means it keeps looking for up to about 3 minutes before reporting an error.
 
 ## Install / run
 
 1. On **Workflows → Import**, upload `secure-score-assessment.yml`, then **Publish** and **deploy** it to your runner.
 2. Add the **runner Key Vault secrets**:
    - `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`
-   - `M365-ClientID`, `M365-ClientSecret`: an **Entra app registration** with the **`SecurityEvents.Read.All`** *application* permission, **admin-consented in each client tenant** you run this against (a multi-tenant app).
+   - `M365-ClientID`, `M365-ClientSecret`: the Microsoft 365 app registration you already use. **Add** the **`SecurityEvents.Read.All`** *application* permission (not Delegated) to it and **admin-consent it in each client tenant** you run this against (a multi-tenant app). It adds to what the app already has, so leave its existing permissions in place.
 3. Run it from **Test** with the input below. No trigger webhook is needed.
 
 ### Microsoft 365 secrets stored per company
@@ -105,5 +105,6 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 ## Notes
 
 - **Idempotent by title:** a same-titled assessment for the company is skipped, so re-runs don't duplicate. (Change `assessmentTitle` for a fresh snapshot.)
-- The `POST /v2/assessment` create endpoint is undocumented-but-functional; `POST /v2/assessment/upload` is the multipart xlsx import. Both are exercised here directly; the agent-style `cloudradial-v2-compliance` extension (0.2.2) wraps the create for other uses, but the upload is file-based so this workflow does it in PowerShell.
-- **Requires:** AutomationAI + the CloudRadial API secrets + an Entra app with `SecurityEvents.Read.All`. No custom extension needed.
+- The v2 API has no create endpoint: `POST /v2/assessment` returns 404. `POST /v2/assessment/upload` with `assessmentId: 0` creates the assessment, the same way the portal's Import Assessment dialog does and the same way [Microsoft Security Assessment](https://github.com/cloudradial/Automations/tree/main/microsoft-security-assessment) works. The upload is file-based, so this workflow does it in PowerShell.
+- **Requires:** AutomationAI + the CloudRadial API secrets + your Microsoft 365 app with `SecurityEvents.Read.All` added. No custom extension needed.
+- **If Graph refuses** (HTTP 403), the step stops before creating anything and names the app id and the application permissions its token holds in that tenant, so you can see whether `SecurityEvents.Read.All` is missing, Delegated instead of Application, or not consented yet.

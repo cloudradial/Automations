@@ -246,7 +246,7 @@ One node per step, so each can be tested on its own:
 
 | Node | What it does | Changes anything? |
 |---|---|---|
-| Receive form data | Reads the webhook body, flat `{key:value}` or the CloudRadial `{Ticket:{Questions:[...]},Company:{...}}` shape. Answers still left as `@token` count as not answered. | No |
+| Receive form data | Reads the request from a form **Action** (the answers by Field ID, plus the portal's own `ticket`, `company` and `user`), a Webhook activity's flat `{key:value}` Content, or the older `{Ticket:{Questions:[...]},Company:{...}}` shape. Answers still left as `@token` count as not answered. | No |
 | Check and plan | Fails closed on the checks under [Safety](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#safety). Resolves the sign-in name, manager, licence, groups and CloudRadial company, then writes the plan. Stops here with a preview when `confirm` is false. | No |
 | Create Microsoft 365 user | Creates the account with a random 16-character temporary password (change forced at first sign-in) and sets the manager. | Yes |
 | Assign licence and groups | Assigns the licence (Exchange Online creates the mailbox from it) and adds the approved groups. | Yes |
@@ -271,6 +271,7 @@ No extensions. Every call is made from PowerShell with runner Key Vault secrets.
 | `Onboarding-ProtectedGroupPatterns` | No | Extra comma-separated group name patterns to never add, on top of `admin`, `administrator`, `privileged` and `global`. |
 | `Onboarding-DefaultLicenceSku` | No | The licence to use when the form says a licence is needed but none is chosen. Same values as `m365License`. Without it, the account gets no licence and a warning. |
 | `Onboarding-UsageLocation` | No | Two-letter country code for new accounts, because the form doesn't ask for one. Without it, `US` is used. |
+| `Onboarding-Confirm` | For a form Action | `true` lets every run on this runner make changes. An Action can't send `confirm`, so this is how an Action goes live. Set it only after a preview has been checked. |
 
 The Microsoft 365 app needs these Graph application permissions: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
 
@@ -278,10 +279,12 @@ The Microsoft 365 app needs these Graph application permissions: `User.ReadWrite
 
 1. On **Workflows → Import**, upload `new-user-onboarding-direct.yml`.
 2. Add the secrets above to the runner's Key Vault. Deploy to the runner whose vault holds them.
-3. Enable the webhook under **Properties → Webhook**, then **Publish** and **deploy**.
-4. In the *Add a New User* form's automation, add a Webhook activity pointing at this workflow's webhook URL (it must be absolute), with the secret in the `X-Crauto-Webhook-Secret` header. Use the Content JSON from [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md), plus the keys under Settings that you want to use.
+3. **Publish** and **deploy**.
+4. **With Actions (UCP portals that have them):** add an **Action** question at the end of the *Add a New User* form and pick this workflow. The portal sends the ticket, company, tenant and requester itself. Every submission is a preview until you set the `Onboarding-Confirm` secret to `true`. Form answers named `confirm`, `psa`, `requestedBy` or `companyTenantId` are ignored, so a question can't confirm a run or change the requester or tenant. Then skip to step 5.
+
+   **With a Webhook activity:** enable the webhook under **Properties → Webhook**, publish again, then in the *Add a New User* form's automation, add a Webhook activity pointing at this workflow's webhook URL (it must be absolute), with the secret in the `X-Crauto-Webhook-Secret` header. Use the Content JSON from [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md), plus the keys under Settings that you want to use.
 5. The form's **Manager** question (Field ID `managerEmail`) sets and notifies the manager. Add it in the package source if your copy of the form doesn't have it yet. The Content in the mapping doc already includes `"managerEmail": "@managerEmail"`.
-6. Leave `confirm` out of the Content at first, so every submission returns a preview. Once you trust the previews, add `"confirm": "true"` to the Content to let the form create accounts.
+6. Leave `confirm` out of the Content at first, so every submission returns a preview. Once you trust the previews, add `"confirm": "true"` to the Content (or, for an Action, set `Onboarding-Confirm`) to let the form create accounts.
 
 ### Settings
 
@@ -302,7 +305,7 @@ Every input is optional apart from the name, and each has a default.
 | `companyId`, `companyPsaId`, `companyName` | none | Used to match the CloudRadial company and, for a new ticket, the ConnectWise company. |
 | `ticketId` | none | The form's ticket, as the PSA shows it (Autotask and Kaseya BMS ticket numbers are looked up). Without it, the onboarding ticket is created in your PSA. |
 | `psa` | the `PSA-Type` secret | Which PSA the ticket is in. Overrides the secret for one request. |
-| `confirm` (or `approvedToWrite`) | `false` | `false` returns a preview and changes nothing. |
+| `confirm` (or `approvedToWrite`) | `false` | `false` returns a preview and changes nothing. Ignored on a form Action, which uses the `Onboarding-Confirm` secret instead. |
 
 ### Safety
 

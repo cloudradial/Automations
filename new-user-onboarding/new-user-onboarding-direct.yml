@@ -21,10 +21,14 @@ definition:
     properties:
       script: |-
         # === NODE: Receive form data ===
-        # Reads the "Add a New User" webhook body. Accepts a flat {key:value} object (the form's
-        # Webhook activity Content, see form-webhook-mapping.md) or the CloudRadial
-        # {Ticket:{Questions:[...]},Company:{...}} shape. Answers CloudRadial left as literal
-        # @tokens (an unset Field ID arrives as "@startDate") are treated as not answered.
+        # Reads the "Add a New User" request in whichever shape it arrives:
+        #   - a CloudRadial Action on the form: the answers as top-level keys by Field ID, next to the portal's
+        #     own ticket {id}, company {id, name, psaId, tenantId} and user {email, isAdmin} objects
+        #   - a form Webhook activity's flat {key:value} Content (see form-webhook-mapping.md)
+        #   - the older {Ticket:{Questions:[...]},Company:{...}} shape
+        # Answers CloudRadial left as literal @tokens (an unset Field ID arrives as "@startDate") are treated as
+        # not answered. When the portal's objects are there, the requester, company, tenant and ticket come only
+        # from them, and confirm and psa are ignored, so no form answer can stand in for them.
         $ErrorActionPreference = 'Stop'
         Set-StrictMode -Version Latest
         function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -38,37 +42,41 @@ definition:
         if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { Stop-Incomplete 'The webhook body was text that is not valid JSON.' ''; return } }
         if ($null -eq $in) { Stop-Incomplete 'No webhook body was received. This workflow expects the Add a New User form webhook.' ''; return }
 
-        # Collect every answer by key: flat values first, then Ticket.Questions[].Id, then Company.
-        $answers = @{}
+        # answers: the body's simple values and Ticket.Questions[].Id (typed on the form, or set in a webhook's Content).
+        # portal: the simple values of the portal's own Ticket, Company and User objects, as "Company.TenantId" and so on.
+        function Test-Simple { param($v) return ($null -ne $v -and ($v -is [string] -or $v.GetType().IsValueType)) }
+        $answers = @{}; $portal = @{}
         foreach ($p in (Get-Pairs $in)) {
             $v = $p.Value
             if ($null -eq $v) { continue }
-            if ($v -is [string] -or $v.GetType().IsValueType) { $answers[$p.Name] = $v }
+            if (Test-Simple $v) { $answers[$p.Name] = $v }
             elseif ($v -is [array]) { $answers[$p.Name] = (@($v | ForEach-Object { [string]$_ }) -join ', ') }
+            elseif (@('Ticket', 'Company', 'User') -contains $p.Name) {
+                foreach ($q in (Get-Pairs $v)) { if (Test-Simple $q.Value) { $portal["$($p.Name).$($q.Name)"] = $q.Value } }
+            }
         }
         $ticket = Get-Prop $in 'Ticket'
-        if ($null -ne $ticket) {
+        if ($null -ne $ticket -and $ticket -isnot [string]) {
             foreach ($q in @(Get-Prop $ticket 'Questions')) {
                 $qid = [string](Get-Prop $q 'Id'); if ([string]::IsNullOrWhiteSpace($qid)) { continue }
                 $qv = Get-Prop $q 'Value'; if ($qv -is [array]) { $qv = (@($qv | ForEach-Object { [string]$_ }) -join ', ') }
                 $answers[$qid] = $qv
             }
-            $tid = Get-Prop $ticket 'TicketId'; if ($null -ne $tid) { $answers['ticketId'] = $tid }
         }
-        $company = Get-Prop $in 'Company'
-        if ($null -ne $company) {
-            $ctid = Get-Prop $company 'CompanyTenantId'; if ($null -ne $ctid) { $answers['companyTenantId'] = $ctid }
-        }
+        $fromPortal = $portal.Count -gt 0
 
-        function Get-Field { param([string[]]$Names, [string]$Default = '')
+        function Get-From { param([hashtable]$From, [string[]]$Names)
             foreach ($n in $Names) {
-                if (-not $answers.ContainsKey($n)) { continue }
-                $v = ([string]$answers[$n]).Trim()
+                if (-not $From.ContainsKey($n)) { continue }
+                $v = ([string]$From[$n]).Trim()
                 if ($v -eq '' -or $v.StartsWith('@')) { continue }
                 return $v
             }
-            return $Default
+            return ''
         }
+        function Get-Field { param([string[]]$Names, [string]$Default = '') $v = Get-From $answers $Names; if ($v) { return $v }; return $Default }
+        # Set by CloudRadial or whoever configured the webhook, never typed. From the portal only its own objects count.
+        function Get-Context { param([string[]]$BodyNames, [string[]]$PortalNames) if ($fromPortal) { return (Get-From $portal $PortalNames) }; return (Get-From $answers $BodyNames) }
         function Test-Yes { param([string]$v, [bool]$Default) if ([string]::IsNullOrWhiteSpace($v)) { return $Default }; return (@('true', 'yes', 'y', '1') -contains $v.Trim().ToLowerInvariant()) }
 
         $f = [ordered]@{
@@ -80,29 +88,37 @@ definition:
             managerEmail      = Get-Field @('managerEmail', 'managerUpn', 'manager')
             licenseSku        = Get-Field @('licenseSku', 'licenseSkuId', 'm365License')
             needsLicense      = Test-Yes (Get-Field @('needsM365License')) $true
-            groups            = ((@(Get-Field @('groups', 'groupIds'); Get-Field @('securityGroups', 'companyFileAccess'); Get-Field @('mailGroups')) | Where-Object { $_ }) -join ', ')
+            groups            = ((@(Get-Field @('groups', 'groupIds'); Get-Field @('securityGroups', 'companyFileAccess'); Get-Field @('mailGroups', 'mailDistributionGroups')) | Where-Object { $_ }) -join ', ')
             deviceType        = Get-Field @('deviceType', 'newComputerType')
             computerSource    = Get-Field @('computerSource')
             existingEndpoint  = Get-Field @('existingEndpoint')
             startDate         = Get-Field @('startDate')
             officeLocation    = Get-Field @('officeLocation')
             usageLocation     = (Get-Field @('usageLocation')).ToUpperInvariant()
-            email             = Get-Field @('userPrincipalName', 'email')
+            email             = Get-Field @('userPrincipalName', 'email', 'newUserEmail')
             upnFormat         = (Get-Field @('upnFormat') 'first.last').ToLowerInvariant()
-            companyTenantId   = Get-Field @('companyTenantId', 'CompanyTenantId', 'tenantId')
-            companyName       = Get-Field @('companyName', 'CompanyName')
-            companyPsaId      = Get-Field @('companyPsaId', 'CompanyPsaId')
-            companyId         = Get-Field @('companyId', 'CompanyId')
-            submittedByUpn    = Get-Field @('submittedByUpn', 'requestedBy', 'UserEmail')
-            requestedByIsAdmin = Get-Field @('requestedByIsAdmin', 'UserIsAdmin')
+            companyTenantId   = Get-Context @('companyTenantId', 'CompanyTenantId', 'tenantId') @('Company.TenantId', 'Company.CompanyTenantId')
+            companyName       = Get-Context @('companyName', 'CompanyName') @('Company.Name', 'Company.CompanyName')
+            companyPsaId      = Get-Context @('companyPsaId', 'CompanyPsaId') @('Company.PsaId', 'Company.CompanyPsaId')
+            companyId         = Get-Context @('companyId', 'CompanyId') @('Company.Id', 'Company.CompanyId')
+            submittedByUpn    = Get-Context @('submittedByUpn', 'requestedBy', 'UserEmail') @('User.Email', 'User.UserEmail')
+            requestedByIsAdmin = Get-Context @('requestedByIsAdmin', 'UserIsAdmin') @('User.IsAdmin', 'User.UserIsAdmin')
             otherAdditions    = Get-Field @('otherAdditions')
-            psa               = Get-Field @('psa')
+            psa               = Get-Context @('psa') @()
         }
         if ($f.displayName -eq '') { $f.displayName = ((@($f.firstName, $f.lastName) | Where-Object { $_ }) -join ' ') }
         if ($f.deviceType -eq '' -and $f.computerSource -match '^(?i)existing' -and $f.existingEndpoint -ne '') { $f.deviceType = "Existing computer: $($f.existingEndpoint)" }
-        $ticketId = Get-Field @('ticketId', 'TicketId', 'ticket_id')
-        # confirm (or approvedToWrite) must be true for anything to change. Default: preview only.
-        $confirm = Test-Yes (Get-Field @('confirm', 'approvedToWrite')) $false
+        $ticketId = Get-Context @('ticketId', 'TicketId', 'ticket_id') @('Ticket.Id', 'Ticket.TicketId')
+        # Nothing changes unless the run is confirmed: confirm (or approvedToWrite) true in a webhook body, or the
+        # Onboarding-Confirm runner secret set to true. A form Action can't send confirm (its top-level keys are typed
+        # answers), so from the portal only the secret confirms. Default: preview only.
+        $confirmSource = ''
+        if (-not $fromPortal -and (Test-Yes (Get-Field @('confirm', 'approvedToWrite')) $false)) { $confirmSource = 'request' }
+        elseif ($env:RUNNER_KV_NAME) {
+            $s = $null; try { $s = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name 'Onboarding-Confirm' -AsPlainText -ErrorAction SilentlyContinue } catch { $s = $null }
+            if (Test-Yes ([string]$s) $false) { $confirmSource = 'secret' }
+        }
+        $confirm = [bool]$confirmSource
 
         $missing = @()
         if ($f.firstName -eq '') { $missing += 'First name' }
@@ -115,7 +131,8 @@ definition:
         if ($f.submittedByUpn -eq '') { $warnings += 'The requester was not identified (submittedByUpn / @UserEmail is empty).' }
 
         Set-NodeOutput ([ordered]@{
-            status = 'ok'; confirm = $confirm; ticketId = $ticketId; fields = $f
+            status = 'ok'; confirm = $confirm; confirmSource = $confirmSource; source = $(if ($fromPortal) { 'action' } else { 'webhook' })
+            ticketId = $ticketId; fields = $f
             actions = @("Read the request for $($f.displayName)"); warnings = $warnings; followUp = @()
             message = "Request read for $($f.displayName)$(if (-not $confirm) { ' (preview only: confirm is false)' })."
         })
@@ -290,7 +307,13 @@ definition:
                 if (-not $co -and (F 'companyPsaId') -ne '') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=psaIdentifier eq '$(Esc (F 'companyPsaId'))'&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
                 if (-not $co -and (F 'companyName') -ne '') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=name eq '$(Esc (F 'companyName'))'&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
             } catch { Add-To $state 'warnings' "Couldn't look up the CloudRadial company: $($_.Exception.Message)" }
-            if (-not $co) { Add-To $state 'followUp' 'The CloudRadial company could not be matched, so no portal user will be created.' }
+            # The company found must be the one the request names. A form from a different portal than
+            # CloudRadial-BaseUrl can carry a company id that belongs to another client here.
+            if ($co -and (F 'companyName') -ne '' -and ([string]$co.name).Trim() -ne (F 'companyName').Trim()) {
+                Add-To $state 'followUp' "CloudRadial company $($co.companyId) is '$($co.name)', not '$(F 'companyName')' from the request, so no portal user will be created. Check CloudRadial-BaseUrl points at the portal the form came from."
+                $co = $null
+            }
+            elseif (-not $co) { Add-To $state 'followUp' 'The CloudRadial company could not be matched, so no portal user will be created.' }
             else {
                 $existingCr = $null
                 try { $existingCr = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/user?`$filter=email eq '$(Esc $upn)'&`$select=userId,email" -Headers $crH).value) | Select-Object -First 1 } catch { }

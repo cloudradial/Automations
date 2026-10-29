@@ -139,7 +139,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Only needed for the optional licence section. Application permission on the app registration, with admin consent:
+Only needed for the optional licence section. Add this application permission to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why | If it's missing |
 |---|---|---|

@@ -124,7 +124,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Application permissions on the app registration, with admin consent in the client tenant. The tenant needs **Microsoft Entra ID P2** (included in Microsoft 365 E5, or as an add-on).
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent in the client tenant. They add to what the app already has, so leave its existing permissions in place. The tenant needs **Microsoft Entra ID P2** (included in Microsoft 365 E5, or as an add-on).
 
 | Permission | Why |
 |---|---|

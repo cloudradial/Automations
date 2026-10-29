@@ -82,8 +82,10 @@ agent:
        name or id). If it doesn't match a priority in the PSA, fail and say so.
     2. Otherwise, if exactly one PSA priority has the level word in its name (case
        ignored), use it.
-    3. Otherwise don't set a priority, so the PSA's default applies, and say the
+    3. Otherwise don't set a priority, so the PSA's default applies, and say
        passing priorityMap would set it. Never choose one by what a name seems to mean.
+       This is not a failure: leave out the priority and carry on (status "preview" in
+       dry run, a created ticket live). Only rule 1 can fail on priority.
     Report the level and the priority used.
     Kaseya BMS: kaseya_bms_create_ticket needs the numeric accountId (find it with
     kaseya_bms_list_accounts) and takes numeric queueId, priorityId and statusId; resolve

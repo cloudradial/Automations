@@ -1,4 +1,67 @@
-# CloudRadial UCP Plugin for Claude
+# CloudRadial UCP MCP Plugin - Claude Cowork
+
+Manage your clients' CloudRadial portals by asking Claude in plain English. Look up a client, set up a portal, build training and assessments, or report across every client, without scripts or switching screens.
+
+## What you can ask
+
+- **Get started.** Claude connects to your portal and gives you a tour. "Set up the CloudRadial plugin"
+- **Look up a client and prepare for a meeting.** Get a client's portal at a glance before a call or a QBR. "Prepare me for my meeting with Contoso"
+- **Set up a client portal.** Add companies and users, build request forms, seed knowledge base articles, and create courses and assessments. "Seed Contoso with 10 starter KB articles"
+- **Run the service day to day.** Check training progress, audit portal content, and keep your company list tidy. "Who has completed the security training at Acme Corp?"
+- **Devices and lifecycle.** See warranty status and plan hardware refreshes. "Which of Contoso's devices are out of warranty?"
+- **Compliance and satisfaction.** Check assessment results and client feedback, for one client or all of them. "Roll up assessment scores across all my clients"
+- **Domains, certificates and reports.** Spot what is about to expire. "Which of my managed domains expire in the next 90 days?"
+
+Claude confirms the company and shows you any change before it writes to your portal. A few things, such as portal branding, security roles and connecting integrations, still happen in the portal itself, and Claude lists those for you instead.
+
+[See every example prompt](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp#technical-details)
+
+## What it protects
+
+- **Your API keys never go into chat.** You type them into a private form that opens on your own computer.
+- **Keys are checked before they are saved.** Bad keys are never stored.
+- **Keys stay in your computer's own secure keychain.** Windows Credential Manager, macOS Keychain, or Linux Secret Service. Nothing is saved to a plain file.
+- **Nothing is hosted.** The plugin runs on your computer and talks straight to CloudRadial. There is no separate server to deploy.
+
+## Works with
+
+- Claude Cowork, Claude Desktop and Claude Code
+- Windows, macOS and Linux
+- CloudRadial portals in the US or the EU
+- Using ChatGPT Codex instead? See the [Codex version](https://github.com/cloudradial/Automations/tree/main/codex-plugin).
+
+## What you need
+
+- A CloudRadial public key and private key, from **Settings → API** in your CloudRadial admin portal
+- Node.js 18 or newer on your computer
+- An internet connection the first time you set it up, so the plugin can install its keychain helper
+
+## Set it up
+
+You install the plugin once in each Claude app you use, but you enter your keys only once per computer.
+
+1. **Install the plugin.** The easiest way is the community marketplace. Type these two commands:
+   ```
+   /plugin marketplace add anthropics/claude-plugins-community
+   /plugin install cloudradial-ucp@claude-community
+   ```
+   Or download `cloudradial-ucp.plugin` from the [releases page](https://github.com/cloudradial/Automations/releases). It is one file for Windows, macOS and Linux.
+2. **Add the file to your app.**
+   - **Cowork:** drag the file into the Cowork window and approve it.
+   - **Claude Desktop:** drag the file into the app, then quit and reopen Claude Desktop.
+   - **Claude Code:** run `claude /plugin install` followed by the file's location, then restart Claude Code.
+3. **Connect your portal.** Start a new conversation and type **Setup the CloudRadial Plugin**. A form opens in your browser. Enter your public and private keys, pick US or EU, and save.
+4. **Try it.** Ask "Prepare me for my meeting with Contoso", using one of your own clients.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp#technical-details) list every example prompt, the skills and tools, how keys are stored, and troubleshooting.
+
+---
+
+## Technical details
+
+**Marketplace ID:** AAI-00007 | **Type:** Plugin (Claude)
 
 Connect Claude to your CloudRadial UCP Portal. Once it's installed, just ask Claude in plain English: look up companies, build training courses, create assessments, refresh device warranty info, and manage 30+ other CloudRadial resource types. No scripts, no separate server to deploy, no copy-pasting API keys around.
 

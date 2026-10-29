@@ -40,8 +40,12 @@ A reusable **agent** that other automations call as their last step, so they don
 
 1. Upload `deliver-result.agent.yml` on **Agents → Custom** (keyed on the slug).
 2. Install and connect the extensions you'll deliver through: **Postmark** (catalog `postmark` 1.0.0, secrets `Postmark-ServerToken`, `Postmark-FromEmail`, `Postmark-ApiUrl`) and your PSA (`connectwise-manage`, `autotask-psa`, `halo-psa`, `kaseya-bms`, `syncro` or `zendesk-ticketing`). The agent doesn't require a PSA extension to install.
-3. Set the agent variables: `fromEmail` (a verified Postmark sender, leave empty to use `Postmark-FromEmail`), `defaultBoard` (board / queue / group for new tickets; required on ConnectWise PSA, Autotask and Kaseya BMS, where the agent fails rather than guess a board), `messageStream` (default `outbound`), and on Kaseya BMS `noteTypeId` (the tenant's note type id for internal notes; without it the ticket is created and the note is skipped with a message), and `priorityMap` (see below).
-4. In the calling workflow, add an **Agent** node with `agentSlug: deliver-result`, set its `allowedExtensions` to the partner's PSA and/or `postmark`, and pass `channel`, `subject`, `body`, plus routing (`companyId` / `companyIdentifier` / `companyName` for PSA, `toEmail` for email).
+3. Nothing to set on the agent itself: AutomationAI has no screen for agent variables, and in testing a variable's value didn't reach the agent. The calling node passes the setup as inputs instead (step 4). The variables of the same name stay in the file as a fallback.
+4. In the calling workflow, add an **Agent** node with `agentSlug: deliver-result` and set its `allowedExtensions` to the partner's PSA and/or `postmark`. In its input bindings pass `channel`, `subject`, `body`, the routing (`companyId` / `companyIdentifier` / `companyName` for PSA, `toEmail` for email), and the setup:
+   - `defaultBoard`: the board / queue / group for new tickets. Required on ConnectWise PSA, Autotask and Kaseya BMS, where the agent fails rather than guess a board.
+   - `priorityMap`: see below.
+   - `noteTypeId`: Kaseya BMS only, the tenant's note type id for internal notes. Without it the ticket is created and the note is skipped with a message.
+   - `fromEmail` (a verified Postmark sender; empty uses `Postmark-FromEmail`) and `messageStream` (default `outbound`) for email.
 
 ## Confirm in your tenant
 

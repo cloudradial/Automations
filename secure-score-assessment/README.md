@@ -24,7 +24,7 @@ Microsoft 365 and CloudRadial. No PSA is needed.
 ## What you need
 
 - AutomationAI, with your CloudRadial API connected
-- A Microsoft app registration that can read Secure Score, approved in each client tenant you run it against
+- Your Microsoft 365 app registration (the one in the `M365-*` secrets) with **SecurityEvents.Read.All** added, approved in each client tenant you run it against. It adds to the app's existing permissions.
 
 ## Set it up
 
@@ -81,7 +81,7 @@ Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control
 1. On **Workflows → Import**, upload `secure-score-assessment.yml`, then **Publish** and **deploy** it to your runner.
 2. Add the **runner Key Vault secrets**:
    - `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey`
-   - `M365-ClientID`, `M365-ClientSecret`: an **Entra app registration** with the **`SecurityEvents.Read.All`** *application* permission, **admin-consented in each client tenant** you run this against (a multi-tenant app).
+   - `M365-ClientID`, `M365-ClientSecret`: the Microsoft 365 app registration you already use. **Add** the **`SecurityEvents.Read.All`** *application* permission (not Delegated) to it and **admin-consent it in each client tenant** you run this against (a multi-tenant app). It adds to what the app already has, so leave its existing permissions in place.
 3. Run it from **Test** with the input below. No trigger webhook is needed.
 
 ### Microsoft 365 secrets stored per company
@@ -106,4 +106,5 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 - **Idempotent by title:** a same-titled assessment for the company is skipped, so re-runs don't duplicate. (Change `assessmentTitle` for a fresh snapshot.)
 - The `POST /v2/assessment` create endpoint is undocumented-but-functional; `POST /v2/assessment/upload` is the multipart xlsx import. Both are exercised here directly; the agent-style `cloudradial-v2-compliance` extension (0.2.2) wraps the create for other uses, but the upload is file-based so this workflow does it in PowerShell.
-- **Requires:** AutomationAI + the CloudRadial API secrets + an Entra app with `SecurityEvents.Read.All`. No custom extension needed.
+- **Requires:** AutomationAI + the CloudRadial API secrets + your Microsoft 365 app with `SecurityEvents.Read.All` added. No custom extension needed.
+- **If Graph refuses** (HTTP 403), the step stops before creating anything and names the app id and the application permissions its token holds in that tenant, so you can see whether `SecurityEvents.Read.All` is missing, Delegated instead of Application, or not consented yet.

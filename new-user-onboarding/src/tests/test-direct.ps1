@@ -21,6 +21,8 @@ function Invoke-RestMethod { param($Method, $Uri, $Headers, $Body)
     if ($Uri -like '*/v1.0/subscribedSkus*') { return [pscustomobject]@{ value = @(
         [pscustomobject]@{ skuId = '11111111-1111-1111-1111-111111111111'; skuPartNumber = 'SPB'; consumedUnits = 1; prepaidUnits = [pscustomobject]@{ enabled = 5 }; servicePlans = @([pscustomobject]@{ servicePlanName = 'EXCHANGE_S_STANDARD' }) },
         [pscustomobject]@{ skuId = '22222222-2222-2222-2222-222222222222'; skuPartNumber = 'O365_BUSINESS_ESSENTIALS'; consumedUnits = 0; prepaidUnits = [pscustomobject]@{ enabled = 2 }; servicePlans = @([pscustomobject]@{ servicePlanName = 'EXCHANGE_S_STANDARD' }) }) } }
+    if ($Uri -like 'https://cr.example.com/v2/odata/company*') { return [pscustomobject]@{ value = @([pscustomobject]@{ companyId = 468; name = $global:CrCompanyName }) } }
+    if ($Uri -like 'https://cr.example.com/v2/odata/user*') { return [pscustomobject]@{ value = @() } }
     if ($Uri -like '*/v1.0/groups?*') { return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'g1'; displayName = 'Sales Team'; groupTypes = @(); mailEnabled = $false; securityEnabled = $true; isAssignableToRole = $false; onPremisesSyncEnabled = $false }) } }
     throw "Unmocked call: $Method $Uri"
 }
@@ -97,6 +99,14 @@ Check 'action: Onboarding-Confirm secret confirms' ($o.confirm -and $o.confirmSo
 $b = $action.Clone(); $b['company'] = @{ id = 468; name = 'Contoso'; tenantId = '11111111-1111-1111-1111-111111111111' }
 $o = Invoke-Direct $b @{}
 Check 'action: other tenant rejected' ($o.status -eq 'rejected' -and $o.reason -match 'Cross-tenant') "$($o.status) $($o.reason)"
+
+$cr = @{ 'CloudRadial-BaseUrl' = 'https://cr.example.com'; 'CloudRadial-PublicKey' = 'p'; 'CloudRadial-PrivateKey' = 'k' }
+$global:CrCompanyName = 'Contoso'
+$o = Invoke-Direct $action $cr
+Check 'action: portal user in the matching CloudRadial company' ($o.crCompanyId -eq '468' -and (Plan $o) -match 'portal user in Contoso') "$($o.crCompanyId) $(Plan $o)"
+$global:CrCompanyName = 'Fabrikam'
+$o = Invoke-Direct $action $cr
+Check 'action: CloudRadial company of another client -> no portal user' ($o.crCompanyId -eq '' -and (Plan $o) -notmatch 'portal user' -and (@($o.followUp) -join ' ') -match "is 'Fabrikam', not 'Contoso'") "$($o.crCompanyId) $(Plan $o) / $(@($o.followUp) -join ' ')"
 
 $b = $base.Clone(); $b['confirm'] = 'true'
 $o = Invoke-Direct $b @{}

@@ -307,7 +307,13 @@ definition:
                 if (-not $co -and (F 'companyPsaId') -ne '') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=psaIdentifier eq '$(Esc (F 'companyPsaId'))'&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
                 if (-not $co -and (F 'companyName') -ne '') { $co = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/company?`$filter=name eq '$(Esc (F 'companyName'))'&`$select=companyId,name" -Headers $crH).value) | Select-Object -First 1 }
             } catch { Add-To $state 'warnings' "Couldn't look up the CloudRadial company: $($_.Exception.Message)" }
-            if (-not $co) { Add-To $state 'followUp' 'The CloudRadial company could not be matched, so no portal user will be created.' }
+            # The company found must be the one the request names. A form from a different portal than
+            # CloudRadial-BaseUrl can carry a company id that belongs to another client here.
+            if ($co -and (F 'companyName') -ne '' -and ([string]$co.name).Trim() -ne (F 'companyName').Trim()) {
+                Add-To $state 'followUp' "CloudRadial company $($co.companyId) is '$($co.name)', not '$(F 'companyName')' from the request, so no portal user will be created. Check CloudRadial-BaseUrl points at the portal the form came from."
+                $co = $null
+            }
+            elseif (-not $co) { Add-To $state 'followUp' 'The CloudRadial company could not be matched, so no portal user will be created.' }
             else {
                 $existingCr = $null
                 try { $existingCr = @((Invoke-RestMethod -Method Get -Uri "$crRoot/v2/odata/user?`$filter=email eq '$(Esc $upn)'&`$select=userId,email" -Headers $crH).value) | Select-Object -First 1 } catch { }

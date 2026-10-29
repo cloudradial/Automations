@@ -1,8 +1,63 @@
 # Safe Device Fixes and Patch Checks Through Your RMM
 
-The shared engine behind the device fix and patch compliance automations. It works through Datto RMM, matches sites to clients, and never acts without approval.
+This is the shared AI agent behind two automations: one fixes common workstation alerts, the other reports each client's patch status. It works through Datto RMM, follows strict safety rules, and hands anything it can't handle to your team as a ticket.
+
+## What happens
+
+You don't run this agent on its own. You install it once, and these automations give it a job to do:
+
+- **[Fix Common Workstation Alerts Without a Technician](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation):** when Datto RMM raises an alert, the agent tries a safe fix (for example, a disk cleanup on a workstation that's low on space), checks it worked, and resolves the alert. You approve each fix first.
+- **[Show Every Client's Patch Compliance in Their Planner](https://github.com/cloudradial/Automations/tree/main/patch-compliance):** on a schedule, the agent checks patch status and keeps one Planner card per client up to date, written in plain sentences your clients can read.
+
+## What it protects
+
+- **Starts in preview.** Out of the box it reads everything and shows you each change it would make, but changes nothing.
+- **Servers are left alone.** It never runs a fix or resolves an alert on a server unless you allow it.
+- **It never guesses.** If it's unsure, or a fix fails, it asks for a ticket instead.
+- **It only matches a Datto site to a client when it's sure:** from your own list of matches, the client's Autotask company link, or an exact name match. Otherwise it skips the site and tells you.
+- **One Planner card per client.** It updates the existing card rather than adding duplicates, and never deletes anything.
+- **Technical detail stays internal.** It only goes in a ticket's internal note.
+
+## Works with
+
+- **RMM:** Datto RMM only. Another RMM needs changes to the agent.
+- **PSA:** tickets can be opened in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk. The agent doesn't open them itself: a step in the alert fix workflow does.
+
+## What you need
+
+- AutomationAI, with Datto RMM connected
+- CloudRadial companies and services (for Planner cards) connected in AutomationAI
+- No PSA connection on the agent itself
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [agent file](https://github.com/cloudradial/Automations/releases/tag/rmm-agent/v1.1.0).
+2. Go to **Agents > Custom > Import** and upload it.
+3. When you deploy it, fill in its settings:
+   - Your Datto disk cleanup component
+   - The minimum free disk space (5 GB unless you change it)
+   - Whether fixes may run on servers (off unless you change it)
+   - The Planner category for patch reports (Security unless you change it)
+   - Any Datto sites you want matched to a specific client
+4. Import the two automations above on **Workflows > Import**, then follow each one's setup.
+
+**Going live.** The agent stays in preview until you change its preview setting in the agent file and import it again. This switches every automation that uses it at once. The [technical details](https://github.com/cloudradial/Automations/tree/main/rmm-agent#dry-run-and-going-live) show exactly how.
+
+**Test it.** Run the patch compliance automation once and check its preview lists a Planner card for each of your clients.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/rmm-agent#technical-details) cover how the agent works, its settings, and how to go live.
+
+---
+
+## Technical details
 
 **Formerly:** RMM Agent (Datto) + command workflows | **Marketplace ID:** AAI-00037 | **Type:** Agent | **Version:** 1.1.0
+
+The shared engine behind the device fix and patch compliance automations. It works through Datto RMM, matches sites to clients, and never acts without approval.
 
 ## Files
 

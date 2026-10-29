@@ -1,6 +1,68 @@
 # Keep Every Client's Hardware Refresh Plan Current
 
-Every computer is checked against age, warranty and Windows 11 readiness, and each client's refresh plan in Planner stays sorted by priority.
+Every computer in your CloudRadial portal is checked for age, warranty and Windows 11 readiness. Each client gets a refresh plan in Planner, sorted by priority, that stays current every time it runs.
+
+## What happens
+
+You run it on a schedule, for example once a month. For each client, it reviews every workstation and server and keeps one Planner card per refresh category: **Replace**, **Plan replacement**, **Upgrade in place**, **Retain**, **Needs data**, **Human review** and **Virtual machines**.
+
+Each card is written for your client to read. It says what you recommend and lists each computer under its urgency (Critical, High, Medium or Low) with its model, serial number, age, warranty date, operating system and what to do. Healthy computers aren't put on a card.
+
+Your team also gets an internal note on each card that clients never see. When a category has no computers left, its card is marked Completed. If computers come back, the card reopens.
+
+## What it protects
+
+- **Your other Planner cards are never touched.** It only updates its own refresh cards.
+- **No duplicates.** Each run updates the same cards in place.
+- **Preview first.** A preview run shows what would change and writes nothing.
+- **Clients never see your cost.** If you add pricing, clients can see the price, but your cost stays internal. Cards stay hidden from clients until you publish them.
+- **No leftover prices.** A completed card stops showing its price to clients.
+
+## What happens behind the scenes
+
+- It follows fixed rules, with no AI, so it covers every client in one run and works the same with any AI provider.
+- It uses only what your portal already knows about each computer.
+- Servers go to **Human review**, and virtual machines get their own card.
+- Companies you've deleted are skipped.
+
+## Works with
+
+- **CloudRadial portal:** the only source it reads. No PSA, RMM or ScalePad connection needed.
+- **ScalePad Lifecycle Manager:** not read directly. To bring its data in first, run the [ScalePad to CloudRadial Sync](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync).
+- **AI providers:** works the same with OpenAI or Anthropic.
+
+## What you need
+
+- A UCP portal with your clients' computers in it
+- AutomationAI, with your CloudRadial API keys added to your runner
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to your runner.
+4. Add your CloudRadial API keys to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/endpoint-lifecycle-manager#install--run) list exactly what to add.
+5. Run it from **Test** as a preview first, then run it for real to write the cards.
+6. Attach a **Routine**, for example monthly, to keep the cards current.
+
+**Optional settings:**
+
+- Run it for just some clients instead of all of them.
+- Place the cards on the Planner roadmap by urgency.
+- Add your own approved models, parts, labour hours and rate, so each card shows an estimated cost.
+- Choose which Planner category the cards go in.
+- Read the refresh standards it follows (age, warranty, operating system, memory) in plain language in the included standards file.
+- An optional AI agent version lets you ask questions about the same rules in the AI Playground.
+
+**Test it.** Run a preview for one client, check the list it returns, then run it and open that client's Planner.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/endpoint-lifecycle-manager#technical-details) cover every input, how pricing works, the refresh standards, and how to change the rules.
+
+---
+
+## Technical details
 
 **Formerly:** Endpoint LifeCycle Manager | **Marketplace ID:** AAI-00021 | **Type:** Workflow (an optional AI agent version is included) | **Version:** 1.0.0
 

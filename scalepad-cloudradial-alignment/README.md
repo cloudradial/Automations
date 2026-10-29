@@ -1,6 +1,61 @@
 # Review Messy ScalePad Data Before You Migrate
 
-Optional. When ScalePad data is messy, it matches clients and plans the move so you can approve a reviewed plan before the migration runs.
+Moving clients from ScalePad Lifecycle Manager to CloudRadial, and the data is messy? An AI agent matches your clients, reads both sides, and gives you a reviewed plan to approve before the move runs.
+
+## What happens
+
+This is optional. The move itself is done by the [ScalePad to CloudRadial Sync](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync). Use this first when client matches are unclear, devices are typed wrong, or warranty dates conflict.
+
+Your team runs it in AutomationAI for one client, or lets it plan for up to three matched clients at once. The agent:
+
+- Matches each ScalePad client to its CloudRadial company.
+- Reads both sides and works out where each item belongs: computers and servers, other hardware, installed software, assessments, roadmap and budget, and deliverable PDFs.
+- Hands you a plan: what the Sync will move, the exact settings to run the Sync with, what it will skip, and what needs a person to look at.
+- Makes up to 10 small corrections itself, once you approve them.
+
+Other hardware, like network gear, mobile devices and printers, ends up as flexible assets grouped by kind of device. Your clients don't see any of this; it all happens on your side.
+
+## What it protects
+
+- **Preview by default.** The agent reads everything and shows each change it would make, but changes nothing until you switch it live.
+- **You approve every change.** Each write waits for you in the **Inbox**.
+- **Nothing changes without a named client.** A run across all clients only plans.
+- **Small fixes only.** At most 10 direct corrections. Bulk moves always go through the Sync, which has its own preview.
+- **Clients land on the right record.** You're warned to check a client doesn't match your own MSP's company.
+
+## Works with
+
+- **ScalePad Lifecycle Manager:** the source. Your ScalePad extension must be up to date; older versions read only the first page of each list, so counts come out low.
+- **CloudRadial:** the destination, through the CloudRadial extensions in AutomationAI.
+- **ScalePad to CloudRadial Sync:** required. It does the actual move.
+- **IT Glue:** not used.
+
+## What you need
+
+- AutomationAI, with the ScalePad (Lifecycle Manager) and CloudRadial extensions installed
+- The ScalePad to CloudRadial Sync workflow
+- The migration map file that comes with this automation, uploaded to Knowledge
+
+## Set it up
+
+1. **Download** the [files](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-alignment/v1.0.0): the agent, the workflow and the migration map.
+2. Go to **Agents > Custom > Import** and upload the agent first. The workflow can't find it otherwise.
+3. Upload the migration map to a **Knowledge** folder.
+4. Go to **Workflows > Import**, upload the workflow, then click **Publish** and **Deploy**.
+5. Open the workflow's agent step, turn on **Ground on knowledge**, and attach the map. Use **Preview recall** to check it comes back. Every install needs this step.
+6. Run it as a plan for one client and review the plan. Then run it again to apply, and approve each change in the **Inbox**.
+
+**Going live.** The agent's own corrections stay in preview until you change one setting in the agent file and import it again. The [technical details](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-alignment#dry-run-and-going-live) walk you through it.
+
+**Test it.** Run a plan for one client and check it matched the right CloudRadial company.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-alignment#technical-details) cover every run setting, what it hands to the Sync, and what to confirm in your tenant.
+
+---
+
+## Technical details
 
 **Formerly:** ScalePad → CloudRadial Alignment | **Marketplace ID:** AAI-00033 | **Type:** Agent + Workflow | **Version:** 1.0.0
 

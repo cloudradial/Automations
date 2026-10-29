@@ -40,7 +40,7 @@ A reusable **agent** that other automations call as their last step, so they don
 
 1. Upload `deliver-result.agent.yml` on **Agents → Custom** (keyed on the slug).
 2. Install and connect the extensions you'll deliver through: **Postmark** (catalog `postmark` 1.0.0, secrets `Postmark-ServerToken`, `Postmark-FromEmail`, `Postmark-ApiUrl`) and your PSA (`connectwise-manage`, `autotask-psa`, `halo-psa`, `kaseya-bms`, `syncro` or `zendesk-ticketing`). The agent doesn't require a PSA extension to install.
-3. Set the agent variables: `fromEmail` (a verified Postmark sender, leave empty to use `Postmark-FromEmail`), `defaultBoard` (board / queue / group for new tickets), `messageStream` (default `outbound`), and on Kaseya BMS `noteTypeId` (the tenant's note type id for internal notes; without it the ticket is created and the note is skipped with a message).
+3. Set the agent variables: `fromEmail` (a verified Postmark sender, leave empty to use `Postmark-FromEmail`), `defaultBoard` (board / queue / group for new tickets; required on ConnectWise PSA, Autotask and Kaseya BMS, where the agent fails rather than guess a board), `messageStream` (default `outbound`), and on Kaseya BMS `noteTypeId` (the tenant's note type id for internal notes; without it the ticket is created and the note is skipped with a message).
 4. In the calling workflow, add an **Agent** node with `agentSlug: deliver-result`, set its `allowedExtensions` to the partner's PSA and/or `postmark`, and pass `channel`, `subject`, `body`, plus routing (`companyId` / `companyIdentifier` / `companyName` for PSA, `toEmail` for email).
 
 ## Confirm in your tenant

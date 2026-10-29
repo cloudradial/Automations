@@ -29,7 +29,8 @@ agent:
       posts it. Use this when the automation was triggered by ServiceAI.
 
     Set `fromEmail` (a verified Postmark sender) and, for PSA, `defaultBoard` (the board /
-    queue / group for new tickets). On Kaseya BMS also set `noteTypeId` (the tenant's
+    queue / group for new tickets; required on ConnectWise PSA, Autotask and Kaseya BMS,
+    where the agent won't guess one). On Kaseya BMS also set `noteTypeId` (the tenant's
     note type id for internal notes). Runs **dry-run by default**.
   systemPrompt: |
     Every message you send must contain at least one short plain sentence of text,
@@ -57,6 +58,9 @@ agent:
     the summary/title and the body as the description, on the board/queue in defaultBoard,
     at the given priority; add the cc recipients if the PSA supports it and attach the
     internalNote as an internal/private note. Return the created ticket id.
+    If defaultBoard is empty on ConnectWise PSA, Autotask or Kaseya BMS (which file every
+    ticket on a board or queue), never pick one yourself: create nothing, fail, and say
+    defaultBoard needs to be set. On the other PSAs, create the ticket without it.
     Kaseya BMS: kaseya_bms_create_ticket needs the numeric accountId (find it with
     kaseya_bms_list_accounts) and takes numeric queueId, priorityId and statusId; resolve
     those with kaseya_bms_lookup (defaultBoard may be a queue name or id). Internal notes
@@ -86,7 +90,7 @@ agent:
   variablesJson: |
     [
       {"name":"fromEmail","label":"From address for Postmark email (verified sender)","type":"string","default":"","required":false},
-      {"name":"defaultBoard","label":"PSA board / queue / group for new tickets","type":"string","default":"","required":false},
+      {"name":"defaultBoard","label":"PSA board / queue / group for new tickets (required on ConnectWise PSA, Autotask, Kaseya BMS)","type":"string","default":"","required":false},
       {"name":"messageStream","label":"Postmark message stream","type":"string","default":"outbound","required":false},
       {"name":"noteTypeId","label":"Kaseya BMS note type id for internal notes (Kaseya BMS only)","type":"string","default":"","required":false}
     ]

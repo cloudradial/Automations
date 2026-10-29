@@ -1,8 +1,69 @@
 # Fix Common Workstation Alerts Without a Technician
 
-Workstation RMM alerts get a safe fix, a re-check and are resolved after you approve, and anything that can't be fixed safely becomes a ticket in your PSA: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+When Datto RMM raises an alert, this automation tries a safe fix on its own, checks that it worked, and closes the alert. Anything it can't fix safely becomes a ticket in your PSA, so nothing slips through.
+
+## What happens
+
+**A workstation runs low on disk space.** The automation runs your Datto disk cleanup on that device, waits for it to finish, and checks free space again. You approve the cleanup in your AutomationAI Inbox before it runs. If there's enough space afterwards, the alert is resolved and the before and after numbers are recorded. If not, the alert stays open and a ticket is opened.
+
+**Any other alert, or any alert on a server.** Nothing is changed on the device. A ticket is opened in your PSA instead, with a short plain summary of what fired, what was checked and what's left to do.
+
+Your clients just notice that small problems get fixed quickly, and your technicians only see the alerts that really need a person.
+
+## What it protects
+
+- **Servers are never fixed automatically.** A server alert always becomes a ticket.
+- **You approve every fix.** The cleanup waits in your Inbox until you say yes.
+- **It only acts on the alert that fired.** It never picks a different alert or device.
+- **When in doubt, it opens a ticket.** If a fix fails or it's unsure, it hands the alert to your team rather than guessing.
+- **Technical detail stays internal.** Device IDs, before and after numbers and errors go in an internal note on the ticket, not the summary.
+- **Tickets are previewed until you switch them on.** Until then, each run tells you which ticket and company it would use, and opens nothing.
+
+## Works with
+
+- **RMM:** Datto RMM.
+- **PSA:** ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+- **Real tickets not yet proven:** so far only previews have run, so check the first real ticket in your PSA.
+
+## What you need
+
+- AutomationAI, with Datto RMM and CloudRadial company lookup connected
+- The [Safe Device Fixes and Patch Checks Through Your RMM](https://github.com/cloudradial/Automations/tree/main/rmm-agent) agent
+- Your PSA and CloudRadial connection details saved on your AutomationAI runner
+- A disk cleanup component in Datto RMM
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. Import the [agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) on **Agents > Custom > Import**, if it isn't installed already. When you deploy it, enter your Datto disk cleanup component.
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.0).
+3. Go to **Workflows > Import** and upload it.
+4. Click **Publish**, then **Deploy**.
+5. Open the workflow's **Properties > Webhook** and turn on **Enable webhook**. It arrives switched off.
+6. In Datto RMM, point your alert webhook at the address AutomationAI gives you.
+7. Add your PSA and CloudRadial details to your AutomationAI runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation#install--run) list exactly what to add.
+
+**Optional settings, on your runner:**
+
+- A catch-all company in your PSA (for example your own) for alerts that can't be matched to a client. Without it, an unmatched alert stops with an error so you notice it.
+- The board, queue or group new tickets go to.
+
+**Going live.** The agent starts in preview, so fixes are only described, not run. When you're happy, switch the agent to live (see its [page](https://github.com/cloudradial/Automations/tree/main/rmm-agent#dry-run-and-going-live)) and switch tickets on.
+
+**Test it.** Trigger a low-disk alert on a test workstation, approve the cleanup in your Inbox, then check the alert in Datto RMM and the run's result.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation#technical-details) cover how companies are matched, every runner setting, and how it was tested.
+
+---
+
+## Technical details
 
 **Formerly:** RMM Auto-Remediation | **Marketplace ID:** AAI-00036 | **Type:** Workflow (agent plus one PowerShell step) | **Version:** 1.1.0
+
+Workstation RMM alerts get a safe fix, a re-check and are resolved after you approve, and anything that can't be fixed safely becomes a ticket in your PSA: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
 
 ## Files
 

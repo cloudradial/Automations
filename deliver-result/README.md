@@ -2,6 +2,63 @@
 
 Lets any automation finish by opening a ticket in your PSA, sending an email or handing the result back to ServiceAI, without rebuilding that step each time.
 
+## What happens
+
+This is a building block other automations use as their last step. When an automation has something to report (an audit, a briefing, an alert), it hands the result to this step and says where it should go:
+
+- **A ticket in your PSA,** on the board or queue you choose, with an internal note for your team.
+- **An email** to the people you name, sent through Postmark.
+- **Back to ServiceAI,** with a client-friendly reply and a separate internal note, when ServiceAI started the automation.
+
+Because every automation hands off to the same step, switching PSAs or moving from email to tickets is a setting change, not a rebuild.
+
+## What it protects
+
+- **It starts in preview.** Until you turn on sending, it only describes the ticket or email it would create.
+- **It never guesses where a ticket goes.** If the board or queue isn't set, it stops and says so, even in preview, so you find out before you go live.
+- **The same priority every time.** You decide which PSA priority low, medium, high and critical land on.
+- **It only uses your PSA.** If the PSA it's told to use isn't connected, it stops instead of using another one.
+- **Private detail stays private.** Technical detail goes only in internal notes, never in what your client sees.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, plus Postmark for email and ServiceAI.
+
+- **ConnectWise PSA, Autotask and Kaseya BMS** need a board or queue set before tickets can be created.
+- **Kaseya BMS** also needs your note type for internal notes. Without it, the ticket is created and the note is skipped. Kaseya BMS tickets haven't been proven on a live PSA yet.
+
+## What you need
+
+- AutomationAI, with an AI provider set up (it uses your own)
+- Your PSA's extension, connected in AutomationAI, for tickets
+- The Postmark extension and a verified sender address, for email
+- An automation that uses it, such as [Get a Weekly List of Warranty and Ownership Gaps](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit)
+
+## Set it up
+
+1. **Download** the [agent file](https://github.com/cloudradial/Automations/releases/tag/deliver-result/v1.2.1).
+2. Go to **Agents > Custom > Import** and upload it.
+3. Connect your PSA's extension, and Postmark if you'll send email.
+4. In the automation that uses it, open the step that runs **Deliver Result** and allow your PSA (and Postmark for email).
+5. In the same step, fill in where results go: the board or queue for tickets, or the people to email.
+6. Run the automation once in preview and read what it would have sent.
+
+## Optional settings
+
+- **Priorities:** choose which PSA priority each level uses. Without this, it uses the PSA priority whose name matches the level, or your PSA's default.
+- **From address and message stream** for email.
+- **Going live:** when the previews look right, turn on sending by re-importing the agent with preview switched off. This applies to every automation that uses it.
+
+**Test it.** Run the automation that uses it for Contoso, check the preview names the right company, board and priority, then go live and confirm one ticket or email arrives.
+
+## Need more detail?
+
+See the [technical details](https://github.com/cloudradial/Automations/tree/main/deliver-result#technical-details) for the inputs each calling step passes, how each PSA is handled, and how preview and going live work.
+
+---
+
+## Technical details
+
 **Formerly:** Deliver Result | **Marketplace ID:** AAI-00039 | **Type:** Agent | **Version:** 1.2.1
 
 ## Files

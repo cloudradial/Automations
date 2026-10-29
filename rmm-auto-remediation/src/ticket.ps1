@@ -4,10 +4,12 @@
 # The agent never opens tickets itself: it returns escalate, ticketSummary, ticketDescription, ticketNote,
 # ticketPriority, siteName, cloudradialCompanyId and dryRun, and this step reads them from the previous output.
 #   - escalate false: nothing to do; the agent's result is passed on.
-#   - dryRun true: preview only; says which ticket would be opened and opens nothing.
 #   - otherwise: finds the PSA company (CloudRadial company name, then the Datto site name, then the
 #     PSA-CompanyId secret as a catch-all), opens the ticket on the PSA-ServiceQueue queue when that secret
 #     is set, and adds ticketNote as an internal note.
+# Preview first: tickets are only opened when the RMM-OpenTickets secret is true and the agent didn't run as a
+# preview. Otherwise the step still looks up the company (read-only) and says which ticket it would open.
+# The step never relies on the agent's dryRun alone: a live test showed the agent can report false in a dry run.
 # A ticket that can't be opened fails the step, so the run shows the alert still needs a person.
 $ErrorActionPreference = 'Stop'
 function Get-RrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -56,15 +58,14 @@ $priority = Get-RrText $agent 'ticketPriority'; if ($priority -notin @('critical
 $site = Get-RrText $agent 'siteName'
 $crId = Get-RrText $agent 'cloudradialCompanyId'; if ($crId -notmatch '^\d+$' -or $crId -eq '0') { $crId = '' }
 $where = if ($site) { " for site $site" } else { '' }
-
-if ($out.dryRun) {
-    Complete-Rr 'preview' "Preview: would open a $priority ticket$where, '$summary'. Nothing was opened, because the agent ran as a preview."
-    return
-}
+$live = (Test-RrTrue (Get-PsaSecret 'RMM-OpenTickets')) -and -not $out.dryRun
+$why = if ($out.dryRun) { 'the agent ran as a preview' } else { "the RMM-OpenTickets secret isn't true" }
 
 # ---- PSA ----
 try { $conn = Connect-Psa -Psa (Get-PsaType ''); $out.psa = Get-PsaName }
-catch { Stop-Rr "The alert needs a ticket ('$summary'), but the PSA isn't set up, so none was opened: $($_.Exception.Message)" }
+catch {
+    if (-not $live) { $out.warnings += "The PSA isn't set up, so a live run would fail: $($_.Exception.Message)"; Complete-Rr 'preview' "Preview: would open a $priority ticket$where, '$summary'. Nothing was opened, because $why."; return }
+    Stop-Rr "The alert needs a ticket ('$summary'), but the PSA isn't set up, so none was opened: $($_.Exception.Message)" }
 
 # ---- The PSA company: CloudRadial company name, then the Datto site name, then PSA-CompanyId ----
 $psaCo = ''; $tried = @()
@@ -96,12 +97,18 @@ if (-not $psaCo) {
         $psaCo = $fallback
         $out.warnings += "Opened the ticket on the PSA-CompanyId company ($fallback), because the client's own company wasn't found ($($tried -join '; '))."
     }
+    elseif (-not $live) { $out.warnings += "A live run would fail: the client's $(Get-PsaName) company wasn't found ($($tried -join '; ')) and PSA-CompanyId isn't set." }
     else {
         $why = if ($tried.Count) { " ($($tried -join '; '))" } else { ' (the agent matched no CloudRadial company and named no site)' }
         Stop-Rr "The alert needs a ticket ('$summary'), but its $(Get-PsaName) company couldn't be found$why. Set the PSA-CompanyId secret to a catch-all company, or map the Datto site in the agent's siteCompanyMap variable."
     }
 }
 $out.psaCompanyId = $psaCo
+if (-not $live) {
+    $on = if ($psaCo) { " on $(Get-PsaName) company $psaCo" } else { '' }
+    Complete-Rr 'preview' "Preview: would open a $priority ticket$on$where, '$summary'. Nothing was opened, because $why."
+    return
+}
 
 # ---- Open the ticket and add the internal note ----
 $queue = ([string](Get-PsaSecret 'PSA-ServiceQueue')).Trim()

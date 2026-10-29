@@ -23,8 +23,9 @@ const folder = path.join(here, '..');
 const out = path.join(folder, 'rmm-auto-remediation.yml');
 const inject = path.join(here, '..', '..', '_shared', 'inject.js');
 
-const goal = `A Datto RMM alert has fired. Its details are in the trigger input
-(alertUid, and usually deviceUid and/or siteUid).
+const goal = `A Datto RMM alert has fired. Use exactly the alert in your input (alertUid, and
+usually deviceUid and siteUid); never pick a different alert or device.
+The trigger: {{ nodes.trigger.output }}
 1. Read the alert (datto_get_device_alerts or datto_get_site_alerts) and
    the device (datto_get_device; datto_get_device_hardware for disk free
    space). Note the device's Datto site and match it to a CloudRadial
@@ -42,9 +43,13 @@ const goal = `A Datto RMM alert has fired. Its details are in the trigger input
 You have no PSA tools. A later step opens the ticket in the MSP's PSA from
 your escalate, ticketSummary, ticketDescription, ticketNote, ticketPriority,
 siteName and cloudradialCompanyId fields. Keep technical detail in ticketNote.
-Always return alertUid, and dryRun true when this run is a preview.`;
+Always return alertUid, and dryRun true when this run is a preview.
+If the input has no alertUid, don't search for one: return escalate false and
+say the trigger had no alert.`;
 
 const agentInput = { type: 'object', properties: { alertUid: { type: 'string' }, deviceUid: { type: 'string' }, siteUid: { type: 'string' } }, required: ['alertUid'] };
+// The trigger fields are bound to the agent's input; without this the agent never sees the alert.
+const agentBindings = { alertUid: '{{ nodes.trigger.output.alertUid }}', deviceUid: '{{ nodes.trigger.output.deviceUid }}', siteUid: '{{ nodes.trigger.output.siteUid }}' };
 const agentOutput = {
   type: 'object',
   properties: {
@@ -75,6 +80,7 @@ function render() {
   L.push('      model: ""');
   L.push('      allowedExtensions:', '      - datto-rmm', '      - cloudradial-v2-companies');
   L.push('      timeoutSeconds: 600', '      autoApprove: false', '      agentSlug: rmm-agent');
+  L.push(`      inputBindingsJson: '${JSON.stringify(agentBindings)}'`);
   L.push(`      inputSchema: '${JSON.stringify(agentInput)}'`);
   L.push(`      outputSchema: '${JSON.stringify(agentOutput)}'`);
   const src = fs.readFileSync(path.join(here, ticketStep.file), 'utf8').replace(/\r\n/g, '\n').trimEnd().split('\n');

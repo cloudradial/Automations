@@ -82,7 +82,7 @@ $Escalate = [pscustomobject]@{
 
 # ---- Every PSA: the ticket opens on the client's company (matched through CloudRadial) ----
 foreach ($psa in @('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 'zendesk')) {
-    Reset-Mock (@{ 'PSA-Type' = $psa } + $S[$psa] + $CrSecrets) $Handler
+    Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = $psa } + $S[$psa] + $CrSecrets) $Handler
     $r = Invoke-Step $Escalate
     Check "$($psa): step finishes without error" (-not $r.err) $r.err
     Check "$($psa): status success" ($null -ne $r.out -and $r.out.status -eq 'success') $(if ($r.out) { "$($r.out.status): $($r.out.message)" })
@@ -94,44 +94,44 @@ foreach ($psa in @('connectwise', 'autotask', 'halopsa', 'kaseyabms', 'syncro', 
 }
 
 # ---- Wrapped and string agent output are unwrapped ----
-Reset-Mock (@{ 'PSA-Type' = 'zendesk' } + $S['zendesk'] + $CrSecrets) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'zendesk' } + $S['zendesk'] + $CrSecrets) $Handler
 $r = Invoke-Step ([pscustomobject]@{ output = ($Escalate | ConvertTo-Json -Compress) })
 Check 'wrapped JSON output is read' ($null -ne $r.out -and $r.out.status -eq 'success' -and $r.out.ticketId -eq '506') $(if ($r.out) { $r.out.message } else { $r.err })
 
 # ---- No escalation: nothing is opened ----
-Reset-Mock (@{ 'PSA-Type' = 'connectwise' } + $S['connectwise'] + $CrSecrets) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'connectwise' } + $S['connectwise'] + $CrSecrets) $Handler
 $r = Invoke-Step ([pscustomobject]@{ status = 'resolved'; action = 'Cleaned up disk'; alertUid = 'alert-002'; alertResolved = $true; escalate = $false; notes = 'Free space went from 3 GB to 18 GB.' })
 Check 'no escalation: success, no PSA calls' ($null -ne $r.out -and $r.out.status -eq 'success' -and $Mock.Calls.Count -eq 0 -and $r.out.alertResolved) "$(if ($r.out) { $r.out.message }) / $(Show-Calls)"
 Check 'no escalation: message carries the agent notes' ($null -ne $r.out -and $r.out.message -match '18 GB') $(if ($r.out) { $r.out.message })
 
 # ---- Dry run: preview only ----
-Reset-Mock (@{ 'PSA-Type' = 'autotask' } + $S['autotask'] + $CrSecrets) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'autotask' } + $S['autotask'] + $CrSecrets) $Handler
 $dry = $Escalate.PSObject.Copy(); $dry.dryRun = $true
 $r = Invoke-Step $dry
-Check 'dry run: status preview, nothing called' ($null -ne $r.out -and $r.out.status -eq 'preview' -and $Mock.Calls.Count -eq 0) "$(if ($r.out) { $r.out.message }) / $(Show-Calls)"
+Check 'agent dry run: preview even with RMM-OpenTickets true, no ticket created' ($null -ne $r.out -and $r.out.status -eq 'preview' -and @(Get-CreateCall 'autotask').Count -eq 0 -and $r.out.message -match 'agent ran as a preview') "$(if ($r.out) { $r.out.message }) / $(Show-Calls)"
 
 # ---- Falls back to the Datto site name, then to PSA-CompanyId ----
-Reset-Mock (@{ 'PSA-Type' = 'halopsa' } + $S['halopsa']) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'halopsa' } + $S['halopsa']) $Handler
 $site = $Escalate.PSObject.Copy(); $site.cloudradialCompanyId = 0; $site.siteName = 'Fabrikam Site'
 $r = Invoke-Step $site
 Check 'site name: matched to PSA company 77' ($null -ne $r.out -and $r.out.psaCompanyId -eq '77' -and $r.out.status -eq 'success') $(if ($r.out) { $r.out.message } else { $r.err })
 
-Reset-Mock (@{ 'PSA-Type' = 'syncro'; 'PSA-CompanyId' = '900' } + $S['syncro']) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'syncro'; 'PSA-CompanyId' = '900' } + $S['syncro']) $Handler
 $none = $Escalate.PSObject.Copy(); $none.cloudradialCompanyId = 0; $none.siteName = 'Unknown Site'
 $r = Invoke-Step $none
 Check 'catch-all: PSA-CompanyId used, with a warning' ($null -ne $r.out -and $r.out.psaCompanyId -eq '900' -and @($r.out.warnings | Where-Object { $_ -match 'PSA-CompanyId' }).Count -eq 1) $(if ($r.out) { "$($r.out.message) / $($r.out.warnings -join ' | ')" } else { $r.err })
 
-Reset-Mock (@{ 'PSA-Type' = 'syncro' } + $S['syncro']) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'syncro' } + $S['syncro']) $Handler
 $r = Invoke-Step $none
 Check 'no company found: the step fails with a plain message' ($r.err -match "couldn't be found" -and $null -ne $r.out -and $r.out.status -eq 'error' -and @(Get-CreateCall 'syncro').Count -eq 0) $r.err
 
-# ---- PSA not set up: the step fails ----
-Reset-Mock @{} $Handler
+# ---- PSA not set up: a live run fails ----
+Reset-Mock @{ 'RMM-OpenTickets' = 'true' } $Handler
 $r = Invoke-Step $Escalate
 Check 'no PSA: fails and says so' ($r.err -match "PSA isn't set up" -and $null -ne $r.out -and $r.out.status -eq 'error') $r.err
 
 # ---- Missing ticket fields get safe defaults ----
-Reset-Mock (@{ 'PSA-Type' = 'connectwise' } + $S['connectwise'] + $CrSecrets) $Handler
+Reset-Mock (@{ 'RMM-OpenTickets' = 'true'; 'PSA-Type' = 'connectwise' } + $S['connectwise'] + $CrSecrets) $Handler
 $r = Invoke-Step ([pscustomobject]@{ alertUid = 'alert-003'; deviceUid = 'dev-3'; escalate = 'true'; cloudradialCompanyId = 12; ticketPriority = 'urgent!' })
 Check 'defaults: summary and high priority filled in' ($null -ne $r.out -and $r.out.status -eq 'success' -and @(Get-CreateCall 'connectwise').Count -eq 1 -and @(Get-CreateCall 'connectwise')[0].Body -match 'dev-3') $(if ($r.out) { $r.out.message } else { $r.err })
 
@@ -139,5 +139,19 @@ Check 'defaults: summary and high priority filled in' ($null -ne $r.out -and $r.
 Reset-Mock @{} $Handler
 $r = Invoke-Step 'not json'
 Check 'unreadable agent output: fails plainly' ($r.err -match 'returned nothing this step can read') $r.err
+
+# ---- Preview unless RMM-OpenTickets is true, whatever the agent says about dryRun ----
+Reset-Mock (@{ 'PSA-Type' = 'connectwise' } + $S['connectwise'] + $CrSecrets) $Handler
+$r = Invoke-Step $Escalate
+Check 'no RMM-OpenTickets: preview, no ticket created' ($null -ne $r.out -and $r.out.status -eq 'preview' -and @(Get-CreateCall 'connectwise').Count -eq 0) "$(if ($r.out) { $r.out.message } else { $r.err }) / $(Show-Calls)"
+Check 'no RMM-OpenTickets: the preview still names the matched company' ($null -ne $r.out -and $r.out.psaCompanyId -eq '42' -and $r.out.message -match 'company 42' -and $r.out.message -match 'RMM-OpenTickets') $(if ($r.out) { $r.out.message })
+
+Reset-Mock (@{ 'RMM-OpenTickets' = 'false'; 'PSA-Type' = 'syncro' } + $S['syncro']) $Handler
+$r = Invoke-Step $none
+Check 'preview, company not found: no failure, a warning instead' (-not $r.err -and $null -ne $r.out -and $r.out.status -eq 'preview' -and @($r.out.warnings | Where-Object { $_ -match 'live run would fail' }).Count -eq 1 -and @(Get-CreateCall 'syncro').Count -eq 0) $(if ($r.out) { "$($r.out.message) / $($r.out.warnings -join ' | ')" } else { $r.err })
+
+Reset-Mock @{} $Handler
+$r = Invoke-Step $Escalate
+Check 'preview, no PSA: no failure, a warning instead' (-not $r.err -and $null -ne $r.out -and $r.out.status -eq 'preview' -and @($r.out.warnings | Where-Object { $_ -match "PSA isn't set up" }).Count -eq 1) $(if ($r.out) { "$($r.out.message) / $($r.out.warnings -join ' | ')" } else { $r.err })
 
 Complete-Test

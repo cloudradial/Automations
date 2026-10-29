@@ -135,7 +135,7 @@ self-service workflow's direct-PSA-API note), tell me the PSA + secret names and
 
 ## Required Runner Key Vault secrets
 
-`M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` (certified Microsoft 365 extension app, `User.ReadWrite.All` / `Directory.ReadWrite.All`). No PSA secrets needed for the return-contract design.
+`M365-TenantId`, `M365-ClientId`, `M365-ClientSecret` (the certified Microsoft 365 extension app, which already holds `User.ReadWrite.All` / `Directory.ReadWrite.All`, so there is nothing to add; leave its existing permissions in place). No PSA secrets needed for the return-contract design.
 
 ## Import & test
 

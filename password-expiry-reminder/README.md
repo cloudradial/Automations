@@ -62,7 +62,7 @@ When a client's Microsoft 365 secrets are saved under the company in AutomationA
 
 ## Required Graph permissions
 
-Application permissions on the app registration, with admin consent in the client tenant:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent in the client tenant. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why |
 |---|---|

@@ -273,7 +273,7 @@ No extensions. Every call is made from PowerShell with runner Key Vault secrets.
 | `Onboarding-UsageLocation` | No | Two-letter country code for new accounts, because the form doesn't ask for one. Without it, `US` is used. |
 | `Onboarding-Confirm` | For a form Action | `true` lets every run on this runner make changes. An Action can't send `confirm`, so this is how an Action goes live. Set it only after a preview has been checked. |
 
-The Microsoft 365 app needs these Graph application permissions: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
+Add these Graph application permissions to the Microsoft 365 app you already use (the one in the `M365-*` secrets), with admin consent: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. They add to what the app already has, so leave its existing permissions in place. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
 
 ### Setup
 

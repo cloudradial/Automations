@@ -174,8 +174,8 @@ The output adds `notes_posted`: `both`, `internal`, `public`, `none` or `not-req
 
 Graph app creds, first match wins: `M365-TenantId`/`-ClientId`/`-ClientSecret` (certified Microsoft 365
 extension app, preferred, already holds `User.ReadWrite.All`/`Directory.ReadWrite.All`), else `Entra-*`,
-else `Graph-*`. App also needs `RoleManagement.Read.Directory` + `IdentityRiskyUser.Read.All` and a
-password-admin role, or the reset PATCH / gate reads return 403. `aiExtensions: microsoft-entra-id`.
+else `Graph-*`. Add `RoleManagement.Read.Directory` + `IdentityRiskyUser.Read.All` to that app (they add to its
+existing permissions, so leave those in place) and assign it a password-admin role, or the reset PATCH / gate reads return 403. `aiExtensions: microsoft-entra-id`.
 
 To post the notes (a form Action, or `postNotes: true`), also the PSA secrets, the same names as each PSA's catalog extension:
 

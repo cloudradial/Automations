@@ -191,7 +191,7 @@ A missing PSA secret stops the run with a sentence naming it. A missing or wrong
 
 ## Required Graph permissions
 
-None, unless you send the email through Microsoft 365. Then the app registration in the `M365-*` secrets needs the `Mail.Send` application permission, with admin consent, for the `AddCc-NotifySender` mailbox. Graph is never called when Postmark is set up or neither is. If Graph refuses, the warning names `Mail.Send`.
+None, unless you send the email through Microsoft 365. Then add the `Mail.Send` application permission to the app registration in the `M365-*` secrets, with admin consent, for the `AddCc-NotifySender` mailbox. It adds to the app's existing permissions, so leave those in place. Graph is never called when Postmark is set up or neither is. If Graph refuses, the warning names `Mail.Send`.
 
 The PSA API user needs to read tickets, contacts (users in HaloPSA and Zendesk) and notes, update tickets (Autotask: create ticket additional contacts) and add notes. If the PSA refuses a call, the run stops with its own error text, for example "ConnectWise PATCH /service/tickets/1001 failed (HTTP 403): ...". Secrets and auth headers are never in the output.
 

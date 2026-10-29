@@ -52,7 +52,60 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cod
 
 **Marketplace ID:** AAI-00008 | **Type:** Plugin (Codex)
 
-Connect Codex to your CloudRadial UCP Portal and work in plain English: look up clients, set up portals, build content and training, create assessments, and report across every client. It's the same plugin as the [Claude plugin](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp), with the same 15 skills and 19 tools, packaged so Codex can load it too.
+Work in your CloudRadial UCP portal by asking Codex in plain English. Look up a client before a call, set up a portal, build training and assessments, and report across every client, without clicking through each screen.
+
+## What you can do
+
+Ask Codex, in your own words:
+
+1. **Prepare for a client call:** "Give me a briefing on Contoso before my call."
+2. **Set up a client portal:** add companies and users, build request forms, and add menu tiles and quickstarts.
+3. **Build content and training:** knowledge base articles, training courses and security assessments.
+4. **Keep devices current:** refresh warranty and end-of-life dates and plan hardware replacements.
+5. **Report across clients:** compliance, satisfaction, expiring domains and certificates, all in one answer.
+
+The full list of ready-made prompts is in the [technical details](https://github.com/cloudradial/Automations/tree/main/codex-plugin#what-you-can-do).
+
+## What happens behind the scenes
+
+- Codex works through the CloudRadial API using your own API keys.
+- **It confirms the company and shows you every change before it writes** anything to your portal.
+- Your keys are stored in your computer's secure keychain, never in the chat.
+- It runs on your computer. There's no server to host.
+- For anything the API can't do (branding, SSO, connecting your PSA), it tells you what to do in the portal instead.
+
+## Works with
+
+- **ChatGPT Codex,** on Windows, macOS and Linux.
+- **Claude apps:** the same file also installs in Cowork, Claude Desktop and Claude Code. See the [Claude version](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp).
+- **CloudRadial regions:** US and EU.
+
+## What you need
+
+- A CloudRadial UCP portal, and an API public and private key from **Settings > API**
+- Codex
+- Node.js 18 or newer on your computer (a free download)
+
+## Set it up
+
+1. **Download** the [plugin file](https://github.com/cloudradial/Automations/releases/tag/v2.6.4). It's one file for every computer.
+2. Install it in Codex as a plugin.
+3. Start a new conversation and type: **Setup the CloudRadial Plugin**
+4. A form opens in your browser. Enter your public key and private key and pick your region. Don't paste the keys into chat.
+5. Ask: **Give me a tour of the CloudRadial plugin**
+6. Try a real request, such as a briefing on one of your clients.
+
+**Test it.** Ask "How many companies are in my portal?" and check the answer matches what you see in CloudRadial.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/codex-plugin#technical-details) cover installing, all the prompts and skills, and how your keys are kept safe.
+
+---
+
+## Technical details
+
+**Marketplace ID:** AAI-00008 | **Type:** Plugin (Codex) | **Version:** 2.6.4
 
 ## Install
 

@@ -43,6 +43,9 @@ agent:
     YOUR GOAL: deliver the result you are given through the requested channel. Read the
     `channel` input: "psa", "email", or "serviceai". Do only what that channel needs.
     Honor dry-run: when previewing, describe the exact call without making it.
+    Dry run doesn't soften a failure: whenever a rule below says fail, return
+    status "failed" with delivered false and the reason in message, in dry run as
+    well as live. Use status "preview" only when the live call would go through.
 
     Inputs you receive: channel; subject; body (may be HTML or plain); optional cc (array
     of emails); priority; internalNote; and routing hints (companyId / companyIdentifier /

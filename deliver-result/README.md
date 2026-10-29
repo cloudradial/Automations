@@ -53,7 +53,7 @@ A reusable **agent** that other automations call as their last step, so they don
 
 ## Dry run and going live
 
-`deliver-result.agent.yml` ships with `dryRunDefault: true`. In dry run the agent describes the ticket or email it *would* send, but sends nothing. AutomationAI has **no dry-run switch** on the workflow's Agent node, the deployment, or the agent's page. The setting lives only in the agent file, so going live means re-importing it:
+`deliver-result.agent.yml` ships with `dryRunDefault: true`. In dry run the agent describes the ticket or email it *would* send, but sends nothing. A setup problem still fails in dry run: a missing `defaultBoard`, a PSA that isn't available, or a `priorityMap` value the PSA doesn't have returns `status: failed` with the reason, so a preview run shows what would break when you go live. AutomationAI has **no dry-run switch** on the workflow's Agent node, the deployment, or the agent's page. The setting lives only in the agent file, so going live means re-importing it:
 
 1. Open `deliver-result.agent.yml` and change `dryRunDefault: true` to `dryRunDefault: false`.
 2. On **Agents → Custom → Import**, upload the edited file. It replaces the installed agent in place.

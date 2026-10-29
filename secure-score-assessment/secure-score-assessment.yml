@@ -219,13 +219,28 @@ definition:
               Set-NodeOutput ([ordered]@{ status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
           }
           else {
-              $desc = "Imported from Microsoft Secure Score on $(Get-Date -Format 'yyyy-MM-dd'). Tenant score $tenantCur / $tenantMax."
-              $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId=[int]$companyId; title=$titleFinal; category='Security'; description=$desc })
-              $aid = Get-Prop $created 'assessmentId'; if (-not $aid) { $aid = Get-Prop $created 'id' }
-              if (-not $aid) { throw 'CloudRadial did not return an assessmentId from POST /v2/assessment.' }
+              # The v2 API has no create endpoint (POST /v2/assessment returns 404). Like the portal's Import Assessment
+              # dialog, the upload creates the assessment when assessmentId is 0 (type 20 = an assessment the portal lists)
+              # and returns 204 with no body, so the new row is found afterwards by title and type.
               $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-              $data = (@{ name = $titleFinal; assessmentId = [int]$aid; type = 0; companyId = [int]$companyId } | ConvertTo-Json -Compress)
-              $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx'
+              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 20; companyId = [int]$companyId } | ConvertTo-Json -Compress)
+              # A large upload (hundreds of controls) can outlast CloudRadial's gateway, which answers 502/503/504 while
+              # the import still finishes. So a 5xx or timeout only means "look for it longer"; other errors stop the run.
+              $uploadErr = $null
+              try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
+              catch { $uploadErr = $_.Exception.Message; if ($uploadErr -notmatch 'HTTP 5\d\d|time(d)? ?out|canceled') { throw } }
+              $waits = if ($uploadErr) { @(0, 15, 30, 60, 90) } else { @(0, 3, 10) }
+              $aid = $null
+              foreach ($wait in $waits) {
+                  if ($wait) { Start-Sleep -Seconds $wait }
+                  $seen = @(); try { $seen = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { continue }
+                  $hit = @($seen | Where-Object { ([string](Get-Prop $_ 'title')) -eq $titleFinal -and [int](Get-Prop $_ 'type') -eq 20 } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending) | Select-Object -First 1
+                  if ($hit) { $aid = Get-Prop $hit 'assessmentId'; break }
+              }
+              if (-not $aid) {
+                  $m = $(if ($uploadErr) { "The upload didn't answer in time ($uploadErr) and no assessment titled '$titleFinal' appeared for companyId $companyId within about 3 minutes. It may still appear; check the company's assessments before running again (a rerun skips it once it exists)." } else { "CloudRadial accepted the upload but no assessment titled '$titleFinal' appeared for companyId $companyId. Check the company's assessments before running again." })
+                  Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+              }
               Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=[int]$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
           }
         timeoutSeconds: 600

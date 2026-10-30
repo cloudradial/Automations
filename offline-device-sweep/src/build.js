@@ -2,7 +2,7 @@
 // into it (_shared/inject.js injectText).
 // Usage: node build.js          rewrite the .yml
 //        node build.js --check  exit 1 if the .yml is out of date
-// Edit find.ps1, ticket.ps1, common.ps1 and datto.ps1 (or _shared/psa.ps1 and _shared/psa-tickets.ps1), never the .yml.
+// Edit find.ps1, wake.ps1, ticket.ps1, common.ps1 and datto.ps1 (or _shared/psa.ps1 and _shared/psa-tickets.ps1), never the .yml.
 // Needs js-yaml: set JS_YAML_PATH (or NODE_PATH) to an existing copy, or npm install in _shared.
 const fs = require('fs');
 const path = require('path');
@@ -26,7 +26,7 @@ const script = (libs, locals, body) => [...libs.map(shared), ...locals.map(local
 
 const testInput = JSON.stringify({ preview: true }, null, 2);
 
-function psStep({ id, name: n, x, body, test }) {
+function psStep({ id, name: n, x, body, test, timeout = 900 }) {
   let s = `  - id: ${id}
     name: ${n}
     type: powershell-script
@@ -36,7 +36,7 @@ function psStep({ id, name: n, x, body, test }) {
     properties:
       script: |-
 ${block(body, '        ')}
-      timeoutSeconds: 900
+      timeoutSeconds: ${timeout}
       retryCount: 0
       parameters: []
       aiExtensions: []
@@ -45,9 +45,11 @@ ${block(body, '        ')}
   return s;
 }
 
-// Both steps are unbound: the first reads Get-NodeInput (a Routine sends nothing), the second reads the first's output.
+// Every step is unbound: the first reads Get-NodeInput (a Routine sends nothing), each later one reads the one before.
+// The wake step waits up to 10 minutes for woken desktops to check in, so it gets a longer timeout.
 const steps = [
   { id: 'node-find', name: 'Find offline devices', body: script(['psa.ps1', 'psa-tickets.ps1'], ['common.ps1', 'datto.ps1'], 'find.ps1'), test: testInput },
+  { id: 'node-wake', name: 'Wake offline desktops', body: script(['psa.ps1'], ['common.ps1', 'datto.ps1'], 'wake.ps1'), timeout: 1200 },
   { id: 'node-ticket', name: 'Open or update tickets', body: script(['psa.ps1'], ['common.ps1'], 'ticket.ps1') },
 ];
 
@@ -56,7 +58,8 @@ name: Offline Device Sweep
 description: Once a day, reads Datto RMM and finds managed devices that have been offline longer than a
   threshold (7 days for workstations and laptops, 4 hours for servers). Opens one PSA ticket per client company
   listing them, servers first, or adds an internal note to the open one with newly offline and recovered
-  devices. Reads Datto RMM only. Run with preview true first.
+  devices. Reads Datto RMM only, unless wake is true, when it first asks an online desktop at the site to
+  send a Wake-on-LAN packet to each offline desktop, through your Datto wake component. Run with preview true first.
 definition:
   schemaVersion: 1
   activities:
@@ -105,6 +108,9 @@ for (const a of acts.filter((z) => z.type === 'powershell-script')) {
 const find = acts.find((a) => a.id === 'node-find').properties.script;
 if (!find.includes('function Find-PsaTickets')) throw new Error('node-find: _shared/psa-tickets.ps1 was not pasted');
 if (!find.includes('function Connect-Datto')) throw new Error('node-find: src/datto.ps1 was not pasted');
+if (!acts.find((a) => a.id === 'node-wake').properties.script.includes('function Start-DattoQuickJob')) throw new Error('node-wake: src/datto.ps1 was not pasted');
+// Only the wake step may write to Datto RMM.
+for (const id of ['node-find', 'node-ticket']) { const sc = acts.find((a) => a.id === id).properties.script.split('# <<< src/datto.ps1').pop(); if (sc.includes('Start-DattoQuickJob')) throw new Error(`${id} must not start Datto jobs`); }
 const bad = text.split('\n').findIndex((l) => /[ \t]+$/.test(l) || l.includes('\t'));
 if (bad >= 0) throw new Error(`trailing whitespace or a tab on line ${bad + 1} of the .yml`);
 

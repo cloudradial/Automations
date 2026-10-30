@@ -15,8 +15,8 @@ if ($LASTEXITCODE -ne 0) { Write-Host 'FAIL the .yml is out of date: run node sr
 $yml = Join-Path $PSScriptRoot '..\offline-device-sweep.yml'
 $js = "const y=(()=>{try{return require('js-yaml')}catch{return require(process.env.JS_YAML_PATH)}})();const d=y.load(require('fs').readFileSync(process.argv[1],'utf8'));const o={};for(const a of d.definition.activities){if(a.type==='powershell-script'){o[a.id]=a.properties.script;o[a.id+'.params']=JSON.stringify(a.properties.parameters);o[a.id+'.test']=a.properties.testInput||''}}console.log(JSON.stringify(o));"
 $Steps = (& $node -e $js $yml) | ConvertFrom-Json -AsHashtable
-Check 'workflow has the find and ticket steps' ($Steps.Contains('node-find') -and $Steps.Contains('node-ticket'))
-Check 'both steps are unbound (Get-NodeInput)' ($Steps['node-find.params'] -eq '[]' -and $Steps['node-ticket.params'] -eq '[]')
+Check 'workflow has the find, wake and ticket steps' ($Steps.Contains('node-find') -and $Steps.Contains('node-wake') -and $Steps.Contains('node-ticket'))
+Check 'every step is unbound (Get-NodeInput)' ($Steps['node-find.params'] -eq '[]' -and $Steps['node-wake.params'] -eq '[]' -and $Steps['node-ticket.params'] -eq '[]')
 Check 'first step Test Input is a preview' (($Steps['node-find.test'] | ConvertFrom-Json).preview -eq $true)
 
 # ---- runner mocks ----
@@ -31,13 +31,15 @@ function Invoke-Step {
     $o = $null; if ($null -ne $global:NodeOut) { $o = ($global:NodeOut | ConvertTo-Json -Depth 14 | ConvertFrom-Json) }
     return @{ out = $o; error = $err }
 }
-# find -> ticket, the second fed the first's output, the way the runner chains unbound steps.
+# find -> wake -> ticket, each fed the one before's output, the way the runner chains unbound steps.
 function Invoke-Flow {
     param($Body = $null)
     $f = Invoke-Step 'node-find' $(if ($null -ne $Body) { ($Body | ConvertTo-Json -Depth 8 | ConvertFrom-Json) } else { $null })
-    if ($f.error) { return @{ stage = 'find'; r = $f; find = $f.out } }
-    $t = Invoke-Step 'node-ticket' $f.out
-    return @{ stage = 'ticket'; r = $t; find = $f.out }
+    if ($f.error) { return @{ stage = 'find'; r = $f; find = $f.out; wake = $null } }
+    $w = Invoke-Step 'node-wake' $f.out
+    if ($w.error) { return @{ stage = 'wake'; r = $w; find = $f.out; wake = $w.out } }
+    $t = Invoke-Step 'node-ticket' $w.out
+    return @{ stage = 'ticket'; r = $t; find = $f.out; wake = $w.out }
 }
 
 # ---- placeholder data ----
@@ -52,6 +54,8 @@ $TPsa = @{
 function Get-TSecrets { param([string]$P, [switch]$NoDatto) $s = @{}; foreach ($k in $TPsa[$P].Keys) { $s[$k] = $TPsa[$P][$k] }; if (-not $NoDatto) { foreach ($k in $TDatto.Keys) { $s[$k] = $TDatto[$k] } }; return $s }
 function TMs { param([double]$HoursAgo) return [DateTimeOffset]::UtcNow.AddHours(-$HoursAgo).ToUnixTimeMilliseconds() }
 function TJ { param($h) return ($h | ConvertTo-Json -Depth 10 | ConvertFrom-Json) }
+# On a second read of a site (after the wake-ups), the hostnames in $TS.wakeBack are online.
+function TAfterWake { param($List, [int]$N) if ($N -lt 2 -or -not @($TS.wakeBack).Count) { return @($List) }; return @(@($List) | ForEach-Object { $c = @{} + $_; if ($TS.wakeBack -contains $c.hostname) { $c.online = $true }; $c }) }
 function TDev { param([string]$HostName, [string]$Cat, $Online, $LastSeen, [string]$Os = 'Windows 11 Pro', [switch]$Suspended, [switch]$Deleted) return @{ uid = "uid-$HostName"; hostname = $HostName; deviceType = @{ category = $Cat; type = $Cat }; deviceClass = 'device'; online = $Online; lastSeen = $LastSeen; operatingSystem = $Os; suspended = [bool]$Suspended; deleted = [bool]$Deleted } }
 $TToday = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
 $TCompanies = @{ connectwise = @{ 'Contoso' = 42; 'Fabrikam' = 43 }; autotask = @{ 'Contoso' = 42; 'Fabrikam' = 43 }; zendesk = @{ 'Contoso' = 77; 'Fabrikam' = 78 } }
@@ -60,6 +64,13 @@ $TS = @{}
 function Reset-Scenario {
     $TS.tokenFail = 0; $TS.token429 = 0; $TS.fab429 = 0; $TS.retryAfter = ''; $TS.foreignNext = $false
     $TS.cwOpen = @(); $TS.cwNotes = @{}; $TS.atOpen = @(); $TS.atNotes = @(); $TS.zdOpen = @(); $TS.zdComments = @(); $TS.nextId = 5001
+    # Wake-on-LAN: audit network cards, the account's components, the quick job, and who is back online on the re-read.
+    $TS.nics = @{ 'uid-CONTOSO-PC01' = @(@{ instance = 'Ethernet'; macAddress = '00-11-22-AA-BB-01'; ipv4 = '10.0.1.21' })
+        'uid-CONTOSO-PC03' = @(@{ instance = 'Ethernet'; macAddress = '00:11:22:aa:bb:03'; ipv4 = '10.0.1.23' }, @{ instance = 'Wi-Fi'; macAddress = '00:11:22:aa:cc:03'; ipv4 = '169.254.3.3' })
+        'uid-FABRIKAM-PC01' = @(@{ instance = 'Ethernet'; macAddress = '00-11-22-FA-00-01'; ipv4 = '10.9.0.11' })
+        'uid-FABRIKAM-PC02' = @(@{ instance = 'Ethernet'; macAddress = '00-11-22-FA-00-02'; ipv4 = '10.9.0.12' }) }
+    $TS.components = @(@{ uid = 'comp-other'; name = 'Disk Cleanup' }, @{ uid = 'comp-wol'; name = 'Wake-on-LAN' })
+    $TS.wakeBack = @(); $TS.jobFail = 0; $TS.jobStatus = 'Success'
     $TS.sites1 = @(@{ uid = 's-contoso'; name = 'Contoso' }, @{ uid = 's-deleted'; name = 'Deleted Devices' }, @{ uid = 's-north'; name = 'Northwind Traders' })
     $TS.sites2 = @(@{ uid = 's-fab'; name = 'Fabrikam' }, @{ uid = 's-lab'; name = 'Contoso Lab' }, @{ uid = 's-managed'; name = 'Managed' })
     $TS.contoso1 = @(
@@ -96,14 +107,25 @@ $Handler = {
             return (TJ @{ pageDetails = @{ count = 3; prevPageUrl = $null; nextPageUrl = $nx }; sites = $TS.sites1 })
         }
         "GET $TDA/api/v2/account/sites?max=250&page=2" { return (TJ @{ pageDetails = @{ count = 3; prevPageUrl = "$TDA/api/v2/account/sites?max=250"; nextPageUrl = $null }; sites = $TS.sites2 }) }
-        "GET $TDA/api/v2/site/s-contoso/devices?max=250" { return (TJ @{ pageDetails = @{ nextPageUrl = "$TDA/api/v2/site/s-contoso/devices?max=250&page=2" }; devices = $TS.contoso1 }) }
+        "GET $TDA/api/v2/site/s-contoso/devices?max=250" { return (TJ @{ pageDetails = @{ nextPageUrl = "$TDA/api/v2/site/s-contoso/devices?max=250&page=2" }; devices = @(TAfterWake $TS.contoso1 $n) }) }
         "GET $TDA/api/v2/site/s-contoso/devices?max=250&page=2" { return (TJ @{ pageDetails = @{ nextPageUrl = $null }; devices = $TS.contoso2 }) }
         "GET $TDA/api/v2/site/*/devices?max=250" {
             $uid = ([regex]::Match($c.Uri, '/site/([^/]+)/devices')).Groups[1].Value
             if ($uid -eq 's-fab' -and $TS.fab429 -and $n -le $TS.fab429) { New-HttpError 429 '' $TS.retryAfter }
             if (-not $TS.devices.Contains($uid)) { throw "Unexpected Datto device read for $uid" }
-            return (TJ @{ pageDetails = @{ nextPageUrl = $null }; devices = @($TS.devices[$uid]) })
+            return (TJ @{ pageDetails = @{ nextPageUrl = $null }; devices = @(TAfterWake $TS.devices[$uid] $n) })
         }
+        "GET $TDA/api/v2/audit/device/*" {
+            $uid = ([regex]::Match($u, '/audit/device/(.+)$')).Groups[1].Value
+            return (TJ @{ nics = @($(if ($TS.nics.Contains($uid)) { $TS.nics[$uid] } else { @() })) })
+        }
+        "GET $TDA/api/v2/account/components?max=250" { return (TJ @{ pageDetails = @{ nextPageUrl = $null }; components = @($TS.components) }) }
+        "PUT $TDA/api/v2/device/*/quickjob" {
+            if ($TS.jobFail) { New-HttpError $TS.jobFail '{"message":"Access denied"}' }
+            $uid = ([regex]::Match($u, '/device/([^/]+)/quickjob')).Groups[1].Value
+            return (TJ @{ job = @{ uid = "job-$uid"; status = 'active' } })
+        }
+        "GET $TDA/api/v2/job/*/results/*" { return (TJ @{ jobUid = 'job'; deviceUid = 'dev'; jobDeploymentStatus = $TS.jobStatus }) }
         # ---- ConnectWise ----
         "GET $TCW/company/companies?*" {
             $m = [regex]::Match($u, 'name(?: contains)?\s*=?\s*"(?<n>[^"]+)"'); $exact = $u -notmatch 'name contains'
@@ -389,5 +411,127 @@ $TS.cwOpen = @(@{ id = 7004; summary = 'Offline devices: 1 not seen for 7+ days'
 $TS.cwNotes['7004'] = @([pscustomobject]@{ id = 5; text = "Offline Device Sweep opened this ticket on 2026-10-01 08:00 UTC for 1 device that Datto RMM has not seen recently.`nOffline in this check: FABRIKAM-SRV01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
 $f = Invoke-Flow @{ ignoreSites = 'Contoso, Contoso Lab, Northwind Traders' }
 Check 'site already noted as down at opening: no note' (@(Get-Calls 'POST' "$TCW/service/tickets/7004/notes").Count -eq 0 -and $f.r.out.counts.ticketsUnchanged -eq 1) "$($f.r.error) $($f.r.out.counts | ConvertTo-Json -Compress)"
+
+# ---- 13. Wake-on-LAN off (the default): the wake step hands on what it got and calls nothing ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$f = Invoke-Flow @{ ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'wake off: no audit, component or job calls, no wake summary' ($f.stage -eq 'ticket' -and @($Mock.Calls | Where-Object { $_.Uri -like "$TDA/api/v2/audit/*" -or $_.Uri -like "$TDA/api/v2/account/components*" -or $_.Method -eq 'PUT' }).Count -eq 0 -and $null -eq $f.r.out.wake -and $f.r.out.counts.wakeSent -eq 0) "$($f.r.error) $(Show-Calls)"
+Check 'wake off: no peers listed by the find step' (@($f.find.wakeSites).Count -eq 0) ($f.find.wakeSites | ConvertTo-Json -Depth 4)
+
+# ---- 14. Wake preview: only the desktop, from an online desktop on its network; nothing sent ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$f = Invoke-Flow @{ preview = $true; wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+$o = $f.r.out
+$TRow = Get-Row $o 'Contoso'
+Check 'wake preview: one would-wake (the desktop, not the laptop or server)' ($f.stage -eq 'ticket' -and $o.wake.wouldWake -eq 1 -and $o.counts.wouldWake -eq 1 -and $o.wake.sent -eq 0) "$($f.r.error) $($o.wake | ConvertTo-Json -Depth 4)"
+Check 'wake preview: nothing written anywhere, no Datto job' (@(Get-WriteCalls).Count -eq 0 -and @(Get-Calls 'PUT' "$TDA/*").Count -eq 0 -and @($Mock.Sleeps).Count -eq 0) (Show-Calls)
+Check 'wake preview: the ticket text names the peer' ($TRow.text -match 'CONTOSO-PC01 [^\n]*A wake-up would be sent from CONTOSO-PC03 before ticketing\.' -and $TRow.text -notmatch 'CONTOSO-LT06 [^\n]*wake') $TRow.text
+Check 'wake preview: the run summary says so' ($o.message -like '*Would send 1 wake-up first.') $o.message
+
+# ---- 15. Wake live, the desktop comes back: left off the ticket, which still lists the rest ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.wakeBack = @('CONTOSO-PC01')
+$f = Invoke-Flow @{ wake = 'yes'; wakeWaitMinutes = 3; ignoreSites = 'Contoso Lab, Northwind Traders' }
+$o = $f.r.out
+$TJob = @(Get-Calls 'PUT' "$TDA/api/v2/device/*/quickjob")
+$TJB = $(if ($TJob.Count) { Read-Body $TJob[0] } else { $null })
+Check 'wake live: one quick job, on the peer, with the wake component' ($TJob.Count -eq 1 -and $TJob[0].Uri -eq "$TDA/api/v2/device/uid-CONTOSO-PC03/quickjob" -and $TJB.jobComponent.componentUid -eq 'comp-wol') "$($f.r.error) $(Show-Calls)"
+Check 'wake live: the MAC address goes in the MacAddress variable' (@($TJB.jobComponent.variables | Where-Object { $_.name -eq 'MacAddress' -and $_.value -eq '001122AABB01' }).Count -eq 1) ($TJB | ConvertTo-Json -Depth 5)
+Check 'wake live: the job is never retried or redirected' ($TJob[0].MaxRedirect -eq 0) "$($TJob[0].MaxRedirect)"
+Check 'wake live: waited 3 minutes, then read the site again' (@($Mock.Sleeps) -contains 180 -and @(Get-Calls 'GET' "$TDA/api/v2/site/s-contoso/devices?max=250").Count -eq 2) "$(@($Mock.Sleeps) -join ',')"
+$TB = Read-Body @(Get-Calls 'POST' "$TCW/service/tickets")[0]
+$TD = [string]$TB.initialDescription
+Check 'wake live: the desktop that came back is not on the ticket' ($TD -like '*Offline in this check: CONTOSO-SRV01, CONTOSO-LT06.*' -and $TD -like '*Came back online after a wake-up, so not listed: CONTOSO-PC01.*' -and $TB.summary -eq 'Offline devices: 2 not seen recently, including 1 server') $TD
+Check 'wake live: counts and run summary' ($o.counts.wakeSent -eq 1 -and $o.counts.wokeUp -eq 1 -and $o.wake.attempts[0].cameBack -eq $true -and $o.wake.attempts[0].peer -eq 'CONTOSO-PC03' -and $o.message -like '*Sent 1 wake-up first; 1 came back online.') "$($o.message) $($o.wake | ConvertTo-Json -Depth 4)"
+
+# ---- 15b. Wake live, still offline and the job failed: ticketed with a line saying so ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.jobStatus = 'Failure'
+$f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+$TD = [string](Read-Body @(Get-Calls 'POST' "$TCW/service/tickets")[0]).initialDescription
+Check 'wake still offline: listed, with the wake-up and the job result' ($TD -match 'CONTOSO-PC01 [^\n]*A wake-up was sent from CONTOSO-PC03 at \d\d:\d\d UTC; it was still offline 5 minutes later\. The Datto job on CONTOSO-PC03 ended as ''Failure''' -and $TD -like '*Offline in this check: CONTOSO-SRV01, CONTOSO-LT06, CONTOSO-PC01.*') "$($f.r.error) $TD"
+Check 'wake still offline: default wait 5 minutes' (@($Mock.Sleeps) -contains 300 -and $f.r.out.counts.wokeUp -eq 0) "$(@($Mock.Sleeps) -join ',')"
+
+# ---- 15c. Every desktop came back: no ticket at all ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 240)), (TDev 'FABRIKAM-PC02' 'Desktop' $true (TMs 0.1)))
+$TS.wakeBack = @('FABRIKAM-PC01')
+$f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso, Contoso Lab, Northwind Traders' }
+$o = $f.r.out
+Check 'all woke: no ticket, the run summary says why' (@(Get-Calls 'POST' "$TCW/service/tickets").Count -eq 0 -and (Get-Row $o 'Fabrikam').action -eq 'woke' -and $o.internal_note -like '*Fabrikam: no ticket opened, because FABRIKAM-PC01 came back online after a wake-up.*') "$($f.r.error) $($o.internal_note)"
+
+# ---- 15d. Open ticket: a desktop on its last list came back, so it is noted as recovered ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.wakeBack = @('CONTOSO-PC01')
+$TS.cwOpen = @(@{ id = 7001; summary = 'Offline devices: 3 not seen recently, including 1 server'; initialDescription = ''; closedFlag = $false; company = @{ id = 42; name = 'Contoso' }; status = @{ name = 'New' } })
+$TS.cwNotes['7001'] = @([pscustomobject]@{ id = 1; text = "Offline in this check: CONTOSO-SRV01, CONTOSO-LT06, CONTOSO-PC01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+$TN = @(Get-Calls 'POST' "$TCW/service/tickets/7001/notes")
+$TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
+Check 'wake on an open ticket: one note, PC01 recovered after the wake-up' ($TN.Count -eq 1 -and $TT -like '*- CONTOSO-PC01 came back online after a wake-up sent from CONTOSO-PC03.*' -and $TT -like '*Offline in this check: CONTOSO-SRV01, CONTOSO-LT06.*' -and (Get-Row $f.r.out 'Contoso').action -eq 'updated') "$($f.r.error) $TT"
+
+# ---- 15e. A site newly down still gets its note when the only new device at the company's other site woke ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 30) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 6)),
+    (TDev 'FABRIKAM-PC02' 'Desktop' $false (TMs 6)), (TDev 'FABRIKAM-PC03' 'Desktop' $false (TMs 6)))
+$TS.devices['s-lab'] = @((TDev 'CONTOSO-LAB01' 'Desktop' $false (TMs 240)), (TDev 'CONTOSO-LAB02' 'Desktop' $true (TMs 0.1)))
+$TS.nics['uid-CONTOSO-LAB01'] = @(@{ macAddress = '00-11-22-1A-B0-01'; ipv4 = '10.7.0.11' }); $TS.nics['uid-CONTOSO-LAB02'] = @(@{ macAddress = '00-11-22-1A-B0-02'; ipv4 = '10.7.0.12' })
+$TS.wakeBack = @('CONTOSO-LAB01')
+$TS.cwOpen = @(@{ id = 7003; summary = 'Offline devices: 1 not seen for 7+ days'; initialDescription = ''; closedFlag = $false; company = @{ id = 43; name = 'Fabrikam' }; status = @{ name = 'New' } })
+$TS.cwNotes['7003'] = @([pscustomobject]@{ id = 4; text = "Offline Device Sweep checked Fabrikam again on 2026-10-01 08:00 UTC: 1 device is newly offline.`nOffline in this check: FABRIKAM-SRV01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ wake = $true; companyMap = '{"Contoso Lab": "Fabrikam"}'; ignoreSites = 'Contoso, Northwind Traders' }
+$TN = @(Get-Calls 'POST' "$TCW/service/tickets/7003/notes")
+$TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
+Check 'wake and a newly down site: the woken desktop is dropped, the site-down note is still written' ($f.r.out.counts.wokeUp -eq 1 -and $TN.Count -eq 1 -and $TT -like '*The whole Fabrikam site may be down*' -and $TT -notlike '*CONTOSO-LAB01*') "$($f.r.error) $TT"
+
+# ---- 16. Wake gates ----
+# Rerun the same day: the company was already noted today, so nothing is sent twice.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.cwOpen = @(@{ id = 7001; summary = 'Offline devices: 3 not seen recently, including 1 server'; initialDescription = ''; closedFlag = $false; company = @{ id = 42; name = 'Contoso' }; status = @{ name = 'New' } })
+$TS.cwNotes['7001'] = @([pscustomobject]@{ id = 1; text = "Offline in this check: CONTOSO-SRV01, CONTOSO-LT06, CONTOSO-PC01.`n[offline-device-sweep: $TToday]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'gate: already noted today, so no wake-up and no note' (@(Get-Calls 'PUT' "$TDA/*").Count -eq 0 -and @(Get-WriteCalls).Count -eq 0 -and @($Mock.Sleeps).Count -eq 0) "$($f.r.error) $(Show-Calls)"
+# The whole site may be down: nothing there could send a packet.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 6) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 240)), (TDev 'FABRIKAM-PC02' 'Desktop' $false (TMs 240)), (TDev 'FABRIKAM-PC03' 'Desktop' $true (TMs 0.1)))
+$f = Invoke-Flow @{ preview = $true; wake = $true; ignoreSites = 'Contoso, Contoso Lab, Northwind Traders' }
+Check 'gate: site down, so no wake-up' ($f.r.out.wake.wouldWake -eq 0 -and @($f.r.out.wake.skipped | Where-Object { $_.reason -like '*whole site may be down*' }).Count -eq 2 -and (Get-Row $f.r.out 'Fabrikam').text -like '*No wake-up was sent: the whole site may be down*') "$($f.r.error) $($f.r.out.wake | ConvertTo-Json -Depth 4)"
+# No online desktop on the same network (the only peer is on another subnet).
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.nics['uid-CONTOSO-PC03'] = @(@{ macAddress = '00:11:22:aa:bb:03'; ipv4 = '10.0.2.23' })
+$f = Invoke-Flow @{ preview = $true; wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'gate: peer on another subnet, so skipped with a reason' ($f.r.out.wake.wouldWake -eq 0 -and @($f.r.out.wake.skipped | Where-Object { $_.hostname -eq 'CONTOSO-PC01' -and $_.reason -eq 'no online Windows desktop or laptop is on its network' }).Count -eq 1) "$($f.r.error) $($f.r.out.wake | ConvertTo-Json -Depth 4)"
+# No MAC address in the audit.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.nics.Remove('uid-CONTOSO-PC01')
+$f = Invoke-Flow @{ preview = $true; wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'gate: no MAC address, so skipped' (@($f.r.out.wake.skipped | Where-Object { $_.reason -eq 'Datto RMM has no MAC address for it' }).Count -eq 1) "$($f.r.error) $($f.r.out.wake | ConvertTo-Json -Depth 4)"
+# A server is never used to send the packet.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.contoso1 = @($TS.contoso1 | Where-Object { $_.hostname -ne 'CONTOSO-PC03' }) + @((TDev 'CONTOSO-SRV09' 'Server' $true (TMs 0.1) 'Windows Server 2022'))
+$f = Invoke-Flow @{ preview = $true; wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'gate: only a server online, so no peer' (@($f.r.out.wake.skipped | Where-Object { $_.reason -like 'no Windows desktop or laptop at its site is online*' }).Count -eq 1 -and @(Get-Calls 'GET' "$TDA/api/v2/audit/*").Count -eq 0) "$($f.r.error) $($f.r.out.wake | ConvertTo-Json -Depth 4)"
+# wakeMax: the second desktop is left for a later run.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.contoso1 = @($TS.contoso1) + @((TDev 'CONTOSO-PC07' 'Desktop' $false (TMs 300)))
+$TS.nics['uid-CONTOSO-PC07'] = @(@{ macAddress = '00-11-22-AA-BB-07'; ipv4 = '10.0.1.27' })
+$f = Invoke-Flow @{ preview = $true; wake = $true; wakeMax = 1; ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'gate: wakeMax 1 tries one desktop and skips the other' ($f.r.out.wake.wouldWake -eq 1 -and @($f.r.out.wake.skipped | Where-Object { $_.reason -like '*wakeMax limit' }).Count -eq 1) "$($f.r.error) $($f.r.out.wake | ConvertTo-Json -Depth 4)"
+
+# ---- 17. Wake failures never stop the tickets ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.components = @(@{ uid = 'comp-other'; name = 'Disk Cleanup' })
+$f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+Check 'no wake component: warned, no job, the ticket still opens' ($f.stage -eq 'ticket' -and @(Get-Calls 'PUT' "$TDA/*").Count -eq 0 -and @(Get-Calls 'POST' "$TCW/service/tickets").Count -eq 1 -and @($f.r.out.warnings | Where-Object { $_ -like "*Datto RMM has no component named 'Wake-on-LAN'*datto-component*" }).Count -eq 1) "$($f.r.error) $(@($f.r.out.warnings) -join ' | ')"
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.jobFail = 403
+$f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders' }
+$TD = [string](Read-Body @(Get-Calls 'POST' "$TCW/service/tickets")[0]).initialDescription
+Check 'job refused (403): tried once, no wait, the ticket says why' (@(Get-Calls 'PUT' "$TDA/*").Count -eq 1 -and @($Mock.Sleeps).Count -eq 0 -and $TD -match 'CONTOSO-PC01 [^\n]*No wake-up was sent: the Datto job on CONTOSO-PC03 could not be started \(Datto RMM refused PUT [^\n]*Devices: Manage, Active Jobs: Manage') "$($f.r.error) $TD"
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$f = Invoke-Flow @{ wake = $true; wakeWaitMinutes = 30 }
+Check 'bad wakeWaitMinutes: fails closed before any call' ($f.stage -eq 'find' -and $f.r.error -eq "wakeWaitMinutes must be a whole number from 1 to 10, not '30'." -and $Mock.Calls.Count -eq 0) $f.r.error
+$t = Invoke-Step 'node-wake' $null
+Check 'wake step with no input: plain error' ($t.error -like '*Run the workflow from the start*') $t.error
 
 Complete-Test

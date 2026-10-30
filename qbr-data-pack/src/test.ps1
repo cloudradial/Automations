@@ -246,6 +246,14 @@ $w = @(Get-CrWrites)
 Check 'same quarter: PATCH the existing card found by its key, no new card' ($r.out.cardAction -eq 'updated' -and $w.Count -eq 1 -and $w[0].Method -eq 'PATCH' -and $w[0].Uri -like '*/v2/product/321') (Show-Calls)
 Check 'same quarter: subject put back' ((Get-Patch $w[0] 'subject') -eq "QBR prep: $QLabel") $w[0].Body
 Check 'same quarter: the QBR card is not counted as another open card' ($r.out.planner.open -eq 2) ($r.out.planner | ConvertTo-Json -Compress)
+Check 'same quarter: no Value review section, none added' ((Get-Patch $w[0] 'body') -notmatch 'value-review') (Get-Patch $w[0] 'body')
+$vr = '<p><em>value-review:start</em></p><p><strong>Value review</strong></p><p>Contoso review text.</p><p><em>value-review:end</em></p>'
+Set-Scenario 'connectwise' @{ cards = @($OtherCards) + @(@{ productId = 321; companyId = 7; subject = "QBR prep: $QLabel"; body = "<p>old numbers</p>$vr<p>old footer</p><p><em>$QKey</em></p>"; status = 'Proposed'; isDeleted = $false }) }
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7 })
+$w = @(Get-CrWrites); $b = [string](Get-Patch $w[0] 'body')
+Check 'value review: section kept once, above the footer' ($b.Contains($vr) -and ($b.Length - $b.Replace('value-review:start', '').Length) -eq 18 -and $b.IndexOf($vr) -lt $b.IndexOf('This card is prepared by the QBR Data Pack')) $b
+Check 'value review: old QBR numbers replaced' ($b -notmatch 'old numbers' -and $b -notmatch 'old footer' -and $b -match 'quarterly business review') $b
+Check 'value review: kept section noted in warnings' (@($r.out.warnings) -contains 'The Value review section already on the card was kept.') (@($r.out.warnings) -join ' | ')
 Set-Scenario 'connectwise' @{ cards = @(@{ productId = 320; companyId = 7; subject = 'QBR prep: Q1 2020'; body = '<p><em>qbr-data-pack:2020-Q1</em></p>'; status = 'Proposed'; isDeleted = $false }) }
 $r = Invoke-Workflow ([pscustomobject]@{ company_id = 7 })
 $w = @(Get-CrWrites)

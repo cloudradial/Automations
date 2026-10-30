@@ -32,7 +32,8 @@ Three steps. Only step 2 uses AI, and it can't call any tools.
    - A field the AI names that the template doesn't have is dropped.
    - Required Halo fields are always asked.
    - The question types always come from Halo, never from the AI.
-   - **Ticket routing uses CloudRadial's tokens by default** (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type), so Halo always accepts the ticket. With Halo's names on the form, Halo can reject the ticket, and the submitter still sees "submitted" (see CloudRadial's [Troubleshooting: Service Ticket Failures in HaloPSA](https://support.cloudradial.com/hc/en-us/articles/22172314482068-Troubleshooting-Service-Ticket-Failures-in-HaloPSA)). Each answer is linked to its Halo custom field (`customFieldName`, and `jsonId` for automations), so Halo receives the answers. **Every field Halo makes mandatory is on the form and required**, including fields hidden from end users that are mandatory on Halo's agent new-ticket screen. Otherwise Halo rejects the ticket, for example "First Name is mandatory". An AutomationAI automation can apply the template's ticket type and team after the ticket exists. Set `psaValues: "halo"` to put Halo's names on the form instead.
+   - **Ticket routing uses CloudRadial's tokens by default** (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type), so Halo always accepts the ticket. With Halo's names on the form, Halo can reject the ticket, and the submitter still sees "submitted" (see CloudRadial's [Troubleshooting: Service Ticket Failures in HaloPSA](https://support.cloudradial.com/hc/en-us/articles/22172314482068-Troubleshooting-Service-Ticket-Failures-in-HaloPSA)). Each question's Field ID (`jsonId`) is the Halo custom field name. **Every field Halo makes mandatory is on the form and required**, including fields hidden from end users that are mandatory on Halo's agent new-ticket screen. Set `psaValues: "halo"` to put Halo's names on the form instead.
+   - **How the ticket reaches Halo** depends on `ticketRoute`. See [Getting the ticket into Halo](#getting-the-ticket-into-halo).
 
    Every form ends with an "Anything else we should know?" box, which becomes the ticket description.
    - **`confirm` false (the default):** nothing is created. The run lists the planned forms and their questions (`status: pending_confirmation`).
@@ -45,12 +46,22 @@ Three steps. Only step 2 uses AI, and it can't call any tools.
 | Template details | Form description (scripts and event handlers removed) |
 | Incident-style ticket type | Problem Report; anything else is a Service Request (or set `usage`) |
 | Ticket type, priority, `category_1`, team, status | By default, CloudRadial's tokens (`@DefaultBoard`, `@DefaultStatus`, `@DefaultPriority`, and a blank type and category). With `psaValues: "halo"`, Halo's own names. |
-| Custom field name (for example `CFcostCentre`) | The question's `customFieldName` and `jsonId` |
+| Custom field name (for example `CFcostCentre`) | The question's Field ID (`jsonId`), which the Create a Halo Ticket workflow reads. `customFieldName` is set too. |
 | Field mandatory in Halo (on the end-user or agent new-ticket screen) | A required question, even when Halo hides the field from end users |
 | Text, memo, date, checkbox and number fields | Text, memo, date, checkbox and number questions |
 | Single and multiple choice fields | Dropdown and multi-select questions, with the Halo values as options |
 
 Nothing is ever written to Halo, and an existing CloudRadial form is never changed or deleted.
+
+### Getting the ticket into Halo
+
+CloudRadial's own ticket submission can't fill Halo **custom fields**. When a Halo ticket type makes a custom field mandatory, Halo rejects the ticket ("First Name is mandatory"), the requester still sees "submitted", and you get a Failed Ticket Advisory. So by default the forms are built for AutomationAI to create the ticket:
+
+- **`ticketRoute: "automationai"` (the default).** The forms are made for [Create a Halo Ticket from a Template](https://github.com/cloudradial/Automations/tree/main/create-halo-ticket-from-template). Attach that workflow as each form's **AutomationAI Action**. It creates the Halo ticket the way the template would: ticket type, team, priority and status, with every answer in its custom field.
+  - The forms are created with Send to PSA off, through the API. The form editor has no such switch.
+  - If CloudRadial still sends the ticket, Halo rejects it when a custom field is mandatory, you get a Failed Ticket Advisory, and the Action still creates the real ticket.
+  - For a form with **no** mandatory custom field, Halo could accept both, so check the first submission from each form for a duplicate ticket.
+- **`ticketRoute: "psa"`.** CloudRadial's own submission only, with no AutomationAI. Use it only when the templates have no mandatory custom fields, or after making those fields not required in Halo. The run warns about each template that would be rejected.
 
 ### Getting the forms to every client
 
@@ -97,7 +108,7 @@ None. This workflow only talks to HaloPSA and CloudRadial.
 | `includeInactive` | No (default `false`) | Also move templates Halo marks inactive. |
 | `usage` | No (default `auto`) | `request` or `problem` puts every form in that list. `auto` decides by ticket type. |
 | `category` | No | One category for every form, instead of the template group or ticket type. |
-| `sendToPsa` | No (default `true`) | `false` creates the forms without sending their tickets to the PSA. |
+| `ticketRoute` | No (default `automationai`) | `automationai` builds the forms for the Create a Halo Ticket Action. `psa` relies on CloudRadial's own submission. See [Getting the ticket into Halo](#getting-the-ticket-into-halo). The older `sendToPsa: true` means `psa`. |
 | `psaValues` | No (default `tokens`) | `tokens` puts CloudRadial's tokens in the ticket routing fields, so Halo always accepts the ticket. `halo` puts Halo's ticket type, team, priority, status and custom-field names on the form directly. Use `halo` only after a test submission shows Halo accepts them. |
 
 It accepts a flat JSON body, or one wrapped in `{trigger: ...}`.
@@ -119,7 +130,8 @@ It accepts a flat JSON body, or one wrapped in `{trigger: ...}`.
 2. **Preview first.** Run the first step's Test Input with your company number, two or three `templateIds` and `"confirm": false`. Expect `status: pending_confirmation` and each planned form's questions in `forms`.
 3. **Create.** Run again with `"confirm": true`. Then:
    - Open the new forms in the portal.
-   - Submit one, and check the Halo ticket has the right ticket type, priority, category and team.
+   - With the default route, attach Create a Halo Ticket from a Template as each form's AutomationAI Action.
+   - Submit one, and check the Halo ticket has the right ticket type, priority, category and team, every custom field filled, and no duplicate ticket.
 4. **Rerun.** Run once more. Expect "Nothing new to move" and nothing created.
 5. **Move the rest.** Run without `templateIds` until `remaining` is 0, then add the forms to a package and publish it.
 
@@ -133,4 +145,5 @@ It accepts a flat JSON body, or one wrapped in `{trigger: ...}`.
   - the field type numbers
   - the inactive flag
 - **The CloudRadial create call** was proven on a test form: `POST /v2/catalog` with inline questions and tags.
-- **Halo's names on the form (`psaValues: "halo"`):** a test submission with them created no Halo ticket (2026-10-19), which is why tokens are the default. Applying the template's values to the ticket afterwards is a separate AutomationAI step. Check step 3 of Import & test before moving everything.
+- **Halo's names on the form (`psaValues: "halo"`):** a test submission with them created no Halo ticket (2026-10-19), which is why tokens are the default. Check step 3 of Import & test before moving everything.
+- **The AutomationAI route end to end:** Create a Halo Ticket from a Template created a Halo ticket with every custom field filled from a manual run (ticket 14743). A real form submission through the Action isn't proven yet, nor is whether CloudRadial respects Send to PSA off set through the API.

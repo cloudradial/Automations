@@ -28,7 +28,7 @@ const testInput = JSON.stringify({
   maxTemplates: 10,
   usage: 'auto',
   category: '',
-  sendToPsa: true,
+  ticketRoute: 'automationai',
 }, null, 2);
 
 function psStep({ id, name, x, script, params, test, timeout }) {

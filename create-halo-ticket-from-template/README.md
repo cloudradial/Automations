@@ -44,9 +44,9 @@ One PowerShell step, no AI.
 
 1. **Import and deploy.** Import `create-halo-ticket-from-template.yml`, add the Halo secrets below to the runner vault, enable the webhook in **Properties**, then **Publish** and **Deploy**.
 2. **Set up the forms.** On each form made from a Halo template:
-   - turn **Send to PSA** off, so CloudRadial doesn't also try to create the ticket
    - attach this workflow as the form's **AutomationAI Action**. Actions run on every submission, whether or not the form sends to the PSA.
-3. **Test it.** Submit the form once, and check the Halo ticket's type, team, priority and custom fields.
+   - Forms made by the migration have Send to PSA off, set through the API; the form editor has no such switch. If CloudRadial still sends the ticket, Halo rejects it when a custom field is mandatory and this workflow creates the real one. For a form with no mandatory custom field, check the first submission for a duplicate ticket.
+3. **Test it.** Submit the form once, and check the Halo ticket's type, team, priority and custom fields, and that there's only one ticket.
 
 ## Required runner Key Vault secrets
 

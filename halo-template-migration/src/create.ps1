@@ -33,7 +33,13 @@ foreach ($a in @(Read-Json (Get-NodeInput -Name 'actions_json'))) { if ($a) { $n
 foreach ($s in @(Read-Json (Get-NodeInput -Name 'skipped'))) { if ($null -ne $s) { $null = $rows.Add($s) } }
 $remaining = 0; try { $remaining = [int](Get-NodeInput -Name 'remaining') } catch { }
 $confirm = (Get-Prop $req 'confirm') -eq $true
-$sendToPsa = (Get-Prop $req 'sendToPsa') -ne $false
+# automationai (the default): the Create a Halo Ticket from a Template workflow, attached as the form's AutomationAI
+# Action, creates the ticket. isSendToPsa is set false through the API so CloudRadial doesn't also send it; the form
+# editor has no such switch, so if CloudRadial sends it anyway, Halo rejects it when a custom field is mandatory and
+# the Action still creates the ticket. psa: CloudRadial's own submission, which can't fill Halo custom fields.
+$route = [string](Get-Prop $req 'ticketRoute'); if (-not $route) { $route = 'automationai' }
+$sendToPsa = $route -eq 'psa'
+$mandatoryForms = New-Object System.Collections.ArrayList
 $useHalo = ([string](Get-Prop $req 'psaValues')) -eq 'halo'
 $companyId = [int](Get-Prop $req 'companyId')
 $companyName = [string](Get-Prop $req 'companyName')
@@ -86,14 +92,16 @@ foreach ($p in $plan) {
                 placeholder = ''; type = $typeCode[$kind]; isRequired = ($q.required -or (Get-Prop $fd 'required') -eq $true)
                 isSubject = $false; isDescription = $false; order = $n * 10; defaultValue = ''
                 jsonId = [string](Get-Prop $fd 'name'); isIncludeInTicket = $true; isUserLookup = $false
-                # Always set: it is how CloudRadial fills the Halo custom field, and a mandatory one left empty
-                # makes Halo reject the ticket (verified 2026-10-19).
+                # jsonId is the Field ID the Create a Halo Ticket workflow reads each answer by. customFieldName is set
+                # too, but CloudRadial's own submission doesn't fill Halo custom fields with it (2026-10-19: a mandatory
+                # one linked this way still made Halo reject the ticket).
                 customFieldName = [string](Get-Prop $fd 'name'); hideConditions = @()
             })
     }
     # Always a free-text box last, so the requester can add detail; it becomes the ticket description.
     $null = $questions.Add([ordered]@{ label = 'Anything else we should know?'; info = ''; options = ''; placeholder = ''; type = 10; isRequired = $false; isSubject = $false; isDescription = $true; order = ($n + 1) * 10; defaultValue = ''; jsonId = 'details'; isIncludeInTicket = $true; isUserLookup = $false; customFieldName = ''; hideConditions = @() })
 
+    if (@($picked | Where-Object { (Get-Prop $_.fd 'required') -eq $true }).Count) { $null = $mandatoryForms.Add($name) }
     $short = Get-Short ([string](Get-Prop $af 'shortDescription')) 120
     if (-not $short) { $short = Get-Short $(if (Get-Prop $p 'summary') { [string](Get-Prop $p 'summary') } else { $name }) 120 }
     $desc = [string](Get-Prop $p 'description')
@@ -158,6 +166,16 @@ foreach ($p in $plan) {
     $null = $rows.Add($row)
 }
 
+# How each form's ticket reaches Halo, said once for the whole run.
+$made = $created + $planned
+if ($made -and $route -eq 'automationai') {
+    $null = $actions.Add("Attach the 'Create a Halo Ticket from a Template' workflow as the AutomationAI Action on each new form (in the form editor). Until it's attached, a submission from these forms doesn't create a Halo ticket with its custom fields.")
+    $null = $warnings.Add('The new forms have Send to PSA off (set through the API). If CloudRadial still sends their tickets, Halo rejects the ones with a mandatory custom field and sends you a Failed Ticket Advisory, and the AutomationAI Action creates the real ticket. For a form with no mandatory custom field, Halo would accept both, so check the first submission from each form for a duplicate ticket.')
+}
+elseif ($made -and $mandatoryForms.Count) {
+    $null = $warnings.Add("CloudRadial's own submission can't fill Halo custom fields, so Halo will reject every ticket from $($mandatoryForms -join ', ') (a mandatory custom field). Run again with ticketRoute automationai, or make those fields not required in Halo.")
+}
+
 $skippedCount = @($rows | Where-Object { (Get-Prop $_ 'action') -eq 'skipped' }).Count
 $more = if ($remaining) { " $remaining more template(s) are left: run it again to move the next batch." } else { '' }
 $status = 'success'
@@ -165,7 +183,7 @@ if (-not $plan.Count) { $msg = "Nothing new to move into '$companyName'. $skippe
 elseif (-not $confirm) { $status = 'pending_confirmation'; $msg = "Preview only, nothing was created. Would create $planned form(s) in '$companyName'.$more" }
 else {
     if ($failed -and -not $created) { $status = 'error' } elseif ($failed -or @($rows | Where-Object { (Get-Prop $_ 'action') -eq 'incomplete' }).Count) { $status = 'incomplete' }
-    $msg = "Created $created form(s) in '$companyName'$(if ($failed) { "; $failed failed" }). Review them, then add them to a package in Partner > Content and publish.$more"
+    $msg = "Created $created form(s) in '$companyName'$(if ($failed) { "; $failed failed" }). $(if ($route -eq 'automationai') { "Attach the Create a Halo Ticket from a Template workflow as each form's AutomationAI Action, review the forms, then add them" } else { 'Review them, then add them' }) to a package in Partner > Content and publish.$more"
 }
 $stopState.done = $true
 Set-NodeOutput ([ordered]@{

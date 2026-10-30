@@ -166,6 +166,20 @@ Check 'live: options, jsonId and customFieldName set after the create (also with
 Check 'live: required, hint and description flag set after the create' ($TOpsDay['/isRequired'] -eq $true -and $TOpsDay['/info'] -eq 'Their first working day.' -and $TOpsLast['/isDescription'] -eq $true) "$($TOpsDay | ConvertTo-Json -Compress) $($TOpsLast | ConvertTo-Json -Compress)"
 Check 'live: question count read from the wrapped reply' ((Get-TRow $r.out 12).action -eq 'created' -and $r.out.counts.questionsCreated -eq 6) "$($r.out.counts | ConvertTo-Json -Compress)"
 
+Check 'live: the AutomationAI route (the default) turns Send to PSA off and says to attach the Action' ($b12.isSendToPsa -eq $false -and $b15.isSendToPsa -eq $false -and [bool](@($r.out.actions) -match 'Create a Halo Ticket from a Template') -and [bool](@($r.out.warnings) -match 'duplicate') -and $r.out.message -like '*AutomationAI Action*') "$($r.out.message) | $(@($r.out.actions) -join ' | ')"
+
+# 2b. ticketRoute psa: CloudRadial's own submission, with a warning for templates with a mandatory custom field.
+Reset-T
+$r = Invoke-Flow ($TBody + @{ confirm = $true; ticketRoute = 'psa' }) $TAi
+$b12 = @($TH.posts | Where-Object { $_.subject -eq 'New starter setup' })[0]
+Check 'ticketRoute psa: Send to PSA on, mandatory custom field warned, no Action step' ($r.out.status -eq 'success' -and $b12.isSendToPsa -eq $true -and [bool](@($r.out.warnings) -match "can't fill Halo custom fields.*New starter setup") -and -not [bool](@($r.out.actions) -match 'Create a Halo Ticket')) "$(@($r.out.warnings) -join ' | ')"
+Reset-T
+$r = Invoke-Flow ($TBody + @{ confirm = $true; templateIds = @(12); sendToPsa = $true }) $TAi
+Check 'older sendToPsa true still means the psa route' ($TH.posts[0].isSendToPsa -eq $true) ''
+Reset-T
+$r = Invoke-Flow ($TBody + @{ ticketRoute = 'email' }) $TAi
+Check 'bad ticketRoute: incomplete before reading' ($r.out.status -eq 'incomplete' -and $r.out.message -like '*ticketRoute must be*' -and -not @($Mock.Calls).Count) "$($r.out.message)"
+
 # 2c. psaValues halo: Halo's own names and the custom-field link, as before.
 Reset-T
 $r = Invoke-Flow ($TBody + @{ confirm = $true; templateIds = @(12); psaValues = 'halo' }) $TAi

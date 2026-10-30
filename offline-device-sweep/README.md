@@ -133,15 +133,25 @@ node src/build.js                     # writes offline-device-sweep.yml (needs j
 pwsh -NoProfile -File src/test.ps1    # runs the shipped steps against the mocks
 ```
 
+## Proven live
+
+On 2026-10-30 the workflow ran in AutomationAI against a real Datto RMM account and ConnectWise PSA, limited to one test site with `ignoreSites`:
+
+1. **Preview.** With `preview` true, it signed in to Datto RMM and read the test site. It skipped the `Managed` and `OnDemand` placeholder sites and the ignored sites. It found one laptop that Datto RMM last saw 49 days earlier, and matched the site to the PSA company with the same name. It returned `pending_confirmation` with one ticket to open, and wrote nothing.
+2. **Live run.** With no `preview`, it opened one ticket, `Offline devices: 1 not seen for 7+ days`, listing the laptop with its suggested first step, and added the internal note with the day's marker.
+3. **Rerun.** The same input again returned `success` with `ticketsUnchanged` 1. It found the open ticket and the day's note, and wrote nothing new.
+4. **Ticket redirect.** ConnectWise answered the new ticket and the note with a redirect. The workflow searched for the ticket and read the note back, and sent neither again.
+
+That proves the Datto sign-in body, a readable `lastSeen`, the `Laptop` device type, `online: false`, the placeholder site skip, and the ConnectWise company search, ticket create, open-ticket search and note read.
+
 ## Not yet proven live
 
-Nothing here has run against a real Datto RMM account yet. Each Datto item below has an `Unverified` comment in `src/datto.ps1` or `src/find.ps1`. Check them on the first preview run:
+Everything below passes the strict-mode mock harness, but hasn't been run against a real account yet. The `Unverified` comments in `src/datto.ps1` and `src/find.ps1` predate the live run: the sign-in body, `lastSeen` format, `Laptop` type and placeholder-site skip they mention are now proven (see above), and the rest still apply:
 
-- **Datto sign-in body.** Datto's help page confirms the token URL (`/auth/oauth/token`) and the `public-client` / `public` OAuth client, but its PowerShell example is an image. `grant_type=password` with the API key as `username` and the API secret as `password` follows the datto-rmm catalog extension, not a live run. A refused sign-in stops the run with a plain sentence.
-- **`lastSeen` format.** Not shown in the help page. Epoch milliseconds, epoch seconds and ISO text are all accepted. A device with no readable `lastSeen` is counted in the warnings, not ticketed.
-- **`deviceType.category` values.** Mapped from the names the Datto web UI shows (Desktop, Laptop, Server, ESXi Host, Printer, Network Device, Mobile), with `deviceClass` as a fallback. A device with no type is skipped and counted in the warnings. ESXi hosts count as servers.
-- **`online`, `suspended` and `deleted` on device records.** `online: false` is required before a device is ticketed. The `suspended` and `deleted` flags are read when present; if Datto names them differently, those devices would be checked like any other.
-- **Placeholder site names.** `Deleted Devices`, `Managed` and `OnDemand` are skipped by name, as the RMM Agent does.
-- **Retry-After.** Datto doesn't say it sends one on a 429; the workflow uses it when present and waits 60 seconds otherwise (Datto's advice). A `403` after repeated 429s means Datto blocked the runner's address for about 5 minutes.
+- **Servers.** The test site had no server, so the `Server` and `ESXi Host` types, the `serverOfflineHours` threshold, servers at the top of the ticket and `serverPriority` haven't run live.
+- **Other `deviceType.category` values.** Only `Laptop` has been seen live. The rest are mapped from the names the Datto web UI shows (Desktop, Server, ESXi Host, Printer, Network Device, Mobile), with `deviceClass` as a fallback. A device with no type is skipped and counted in the warnings.
+- **`suspended` and `deleted` on device records.** No suspended or deleted device was in the test. The flags are read when present; if Datto names them differently, those devices would be checked like any other.
+- **Updating an open ticket.** The live test opened a ticket and reran with nothing changed. A note for newly offline or recovered devices, and the "everything recovered" note, haven't run live.
+- **Retry-After.** No `429` came up. Datto doesn't say it sends one; the workflow uses it when present and waits 60 seconds otherwise (Datto's advice). A `403` after repeated 429s means Datto blocked the runner's address for about 5 minutes.
 - **Whole site down.** Only the mock harness has seen it. The live test site had one laptop and no server, so it can't trigger there. The three-in-four share is a starting value, not tuned against a real outage.
-- **PSA calls.** Ticket create, company search, the open-ticket search (`Find-PsaTickets` with text `Offline devices`) and note reads follow `_shared/psa.ps1` and `_shared/psa-tickets.ps1`; see the `Unverified` list in the [_shared README](https://github.com/cloudradial/Automations/tree/main/_shared#calls-not-yet-proven-live). Kaseya BMS has no ticket text search, so its open tickets are read and matched here.
+- **The other five PSAs.** Ticket create, company search, the open-ticket search (`Find-PsaTickets` with text `Offline devices`) and note reads are proven only on ConnectWise PSA. Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk follow `_shared/psa.ps1` and `_shared/psa-tickets.ps1`; see the `Unverified` list in the [_shared README](https://github.com/cloudradial/Automations/tree/main/_shared#calls-not-yet-proven-live). Kaseya BMS has no ticket text search, so its open tickets are read and matched here.

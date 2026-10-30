@@ -333,4 +333,40 @@ Check 'zendesk: counts' ($o.status -eq 'success' -and $o.counts.ticketsUpdated -
 $t = Invoke-Step 'node-ticket' $null
 Check 'ticket step with no input: plain error' ($t.out.status -eq 'error' -and $t.error -like '*Run the workflow from the start*') $t.error
 
+# ---- 12. Site down: every server past its threshold and most devices offline now gets one line at the top ----
+# Fabrikam: its only server 6 hours offline, two desktops offline 6 hours (under 7 days, so not listed), one online.
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 6) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 6)),
+    (TDev 'FABRIKAM-PC02' 'Desktop' $false (TMs 6)), (TDev 'FABRIKAM-PC03' 'Desktop' $true (TMs 0.1)))
+$f = Invoke-Flow @{ ignoreSites = 'Contoso Lab, Northwind Traders' }
+$o = $f.r.out
+$TFP = Get-Plan $f.find 'Fabrikam'
+Check 'site down: find counts the site (3 of 4 offline, 1 server)' ($f.find.counts.sitesDown -eq 1 -and @($TFP.sitesDown).Count -eq 1 -and $TFP.sitesDown[0].checked -eq 4 -and $TFP.sitesDown[0].offline -eq 3 -and $TFP.sitesDown[0].servers -eq 1) "$($f.r.error) $($TFP | ConvertTo-Json -Depth 4)"
+$TFB = @(Get-Calls 'POST' "$TCW/service/tickets" | ForEach-Object { Read-Body $_ } | Where-Object { $_.company.id -eq 43 })
+$TFD = $(if ($TFB.Count) { [string]$TFB[0].initialDescription } else { '' })
+Check 'site down: the line sits above the device list' ($TFD -like '*The whole Fabrikam site may be down: Datto RMM shows 3 of its 4 devices offline right now, including its only server. Check the site''s power, internet connection and firewall*' -and $TFD.IndexOf('may be down') -lt $TFD.IndexOf('Servers first')) $TFD
+Check 'site down: only the server is listed (the desktops are under 7 days)' ($TFD -like '*Offline in this check: FABRIKAM-SRV01.*' -and $TFB[0].impact -eq 'High') $TFD
+$TCB = @(Get-Calls 'POST' "$TCW/service/tickets" | ForEach-Object { Read-Body $_ } | Where-Object { $_.company.id -eq 42 })
+Check 'site down: Contoso has a server under its threshold, so no line' ($TCB.Count -eq 1 -and [string]$TCB[0].initialDescription -notlike '*may be down*' -and @((Get-Plan $f.find 'Contoso').sitesDown).Count -eq 0) ([string]$TCB[0].initialDescription)
+Check 'site down: output row, count and run summary' (@((Get-Row $o 'Fabrikam').sitesDown) -contains 'Fabrikam' -and @((Get-Row $o 'Contoso').sitesDown).Count -eq 0 -and $o.counts.sitesDown -eq 1 -and $o.internal_note -like '*Fabrikam: the whole Datto RMM site Fabrikam may be down (power, internet or firewall).*') $o.internal_note
+
+# ---- 12b. Not a site down: most devices online, a lone server, or a second server still online ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 6) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $true (TMs 0.1)),
+    (TDev 'FABRIKAM-PC02' 'Desktop' $true (TMs 0.1)), (TDev 'FABRIKAM-PC03' 'Desktop' $false (TMs 6)))
+$TS.devices['s-north'] = @((TDev 'NORTHWIND-SRV01' 'Server' $false (TMs 6) 'Windows Server 2022'))
+$TS.devices['s-lab'] = @((TDev 'CONTOSO-LABSRV1' 'Server' $false (TMs 6) 'Windows Server 2022'), (TDev 'CONTOSO-LABSRV2' 'Server' $true (TMs 0.1)), (TDev 'CONTOSO-LAB01' 'Desktop' $false (TMs 480)), (TDev 'CONTOSO-LAB02' 'Desktop' $false (TMs 480)), (TDev 'CONTOSO-LAB03' 'Desktop' $false (TMs 480)))
+$f = Invoke-Flow @{ preview = $true }
+Check 'not site down: 2 of 4 offline, a one-device site, a server still online' ($f.stage -eq 'ticket' -and $f.find.counts.sitesDown -eq 0 -and $f.r.out.counts.sitesDown -eq 0 -and (Get-Row $f.r.out 'Fabrikam').text -notlike '*may be down*') "$($f.r.error) $($f.find.counts | ConvertTo-Json -Compress)"
+
+# ---- 12c. Site down on an open ticket: the update note carries the line under its first sentence ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 6) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 300)))
+$TS.cwOpen = @(@{ id = 7002; summary = 'Offline devices: 1 not seen for 7+ days'; initialDescription = ''; closedFlag = $false; company = @{ id = 43; name = 'Fabrikam' }; status = @{ name = 'New' } })
+$TS.cwNotes['7002'] = @([pscustomobject]@{ id = 3; text = "Offline in this check: FABRIKAM-PC01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ ignoreSites = 'Contoso, Contoso Lab, Northwind Traders' }
+$TN = @(Get-Calls 'POST' "$TCW/service/tickets/7002/notes")
+$TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
+Check 'site down on update: note has the line after its first sentence, all servers' ($TN.Count -eq 1 -and $TT -match '(?s)^Offline Device Sweep checked Fabrikam again[^\n]*\n\nThe whole Fabrikam site may be down: Datto RMM shows 2 of its 2 devices offline right now, including its only server\..*Newly offline:.*FABRIKAM-SRV01') $TT
+
 Complete-Test

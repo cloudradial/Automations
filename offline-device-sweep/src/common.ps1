@@ -97,10 +97,23 @@ function Get-OdsDeviceBlock {
     }
     return $lines
 }
+# One line per Datto site that looks down as a whole, then a blank line; nothing when no site does.
+# The offline count includes devices still under their threshold, so it can be more than the list below.
+function Get-OdsSiteDownLines {
+    param($Item)
+    $lines = @()
+    foreach ($sd in @(@($Item.sitesDown) | Where-Object { $null -ne $_ })) {
+        $srv = $(if ([int]$sd.servers -eq 1) { 'its only server' } else { "all $($sd.servers) servers" })
+        $lines += "The whole $($sd.site) site may be down: Datto RMM shows $($sd.offline) of its $($sd.checked) devices offline right now, including $srv. Check the site's power, internet connection and firewall before working through the devices one by one."
+    }
+    if ($lines.Count) { $lines += '' }
+    return $lines
+}
 function Get-OdsDescription {
     param($Item, $Settings)
     $devs = @($Item.devices)
     $lines = @("Offline Device Sweep found $(Get-OdsPlural $devs.Count 'device' 'devices') at $($Item.companyName) that Datto RMM has not seen for a while. Please check each one and update this ticket.", '')
+    $lines += Get-OdsSiteDownLines $Item
     $lines += Get-OdsDeviceBlock $devs $Settings
     $lines += ''
     $lines += "Checked on $($Settings.checkedText). Datto RMM $(if (@($Item.sites).Count -eq 1) { 'site' } else { 'sites' }): $(@($Item.sites) -join ', ')."
@@ -122,6 +135,8 @@ function Get-OdsUpdateNote {
     if ($still.Count) { $parts += "$(Get-OdsPlural $still.Count 'device is' 'devices are') still offline" }
     if ($rec.Count) { $parts += "$(Get-OdsPlural $rec.Count 'device has' 'devices have') recovered" }
     $lines = @("Offline Device Sweep checked $($Item.companyName) again on $($Settings.checkedText): $($parts -join ', ').")
+    $down = @(Get-OdsSiteDownLines $Item)
+    if ($down.Count) { $lines += ''; $lines += @($down | Select-Object -SkipLast 1) }
     if (-not $devs.Count) { $lines += 'Nothing on this ticket is offline any more. Close the ticket once you are happy everything is working.' }
     if (@($new | Where-Object { $_.isServer }).Count) { $lines += 'A server is newly offline, so consider raising this ticket''s priority.' }
     if ($new.Count) { $lines += ''; $lines += 'Newly offline:'; $lines += @($new | ForEach-Object { Format-OdsDevice $_ }) }

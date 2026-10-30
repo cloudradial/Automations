@@ -90,7 +90,9 @@ function Get-OdsDeviceBlock {
         if ($rest.Count) { $lines += '' }
     }
     if ($rest.Count) {
-        $lines += "$(Get-OdsPlural $rest.Count 'other device has' 'other devices have') not been seen for $($Settings.offlineDays) days or more:"
+        # "other" only reads right when the servers are listed above.
+        $noun = $(if ($srv.Count) { @('other device has', 'other devices have') } else { @('device has', 'devices have') })
+        $lines += "$(Get-OdsPlural $rest.Count $noun[0] $noun[1]) not been seen for $($Settings.offlineDays) days or more:"
         $lines += @($rest | ForEach-Object { Format-OdsDevice $_ })
     }
     return $lines

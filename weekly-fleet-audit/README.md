@@ -1,6 +1,64 @@
 # Get a Weekly List of Warranty and Ownership Gaps
 
-A weekly email grades every managed computer against hardware-refresh standards, lists warranty gaps, and flags clients with no account manager, so refresh and ownership conversations don't slip.
+Every week your team gets one email that grades every managed computer against hardware refresh standards, lists warranty gaps, and flags clients with no account manager. Refresh and ownership conversations stop slipping through the cracks.
+
+## What happens
+
+Once a week, the automation looks at every client and every computer in CloudRadial and sorts each computer into a plain category:
+
+- **Replace:** old, too little memory, or stuck on an operating system that can't move to Windows 11
+- **Upgrade in place:** on Windows 10, but the hardware can run Windows 11
+- **Plan replacement:** old enough that it's time to plan its replacement
+- **Retain:** fine for now, but the warranty has expired or ends soon, or memory is low
+- **Needs data:** not enough details to decide
+- **Human review:** servers, which a person should judge
+- **Virtual machines:** ones with an old operating system or low memory
+
+The most urgent computers are marked **Critical**. It also counts warranty gaps (expired, ending within 90 days, or no date at all) and lists clients with no account manager.
+
+Your team gets one email with the headline numbers, a "Start here" list, a table by client, and up to three of the most urgent computers per client. The subject line shows how many critical computers there are, so you know at a glance how big this week's list is.
+
+## What happens behind the scenes
+
+- **Read-only.** Nothing in CloudRadial is changed.
+- **Same rules as Endpoint LifeCycle Manager.** If you use it too, this email and its Hardware Refresh Planner cards always agree.
+- **No guessing.** If the account manager details aren't available, the email says so instead of guessing.
+- **Deleted clients are left out.**
+- **No AI in the audit itself**, so it works with any AI provider. An agent only sends the email.
+
+## Works with
+
+- **CloudRadial:** the computer and client details come from your CloudRadial portal.
+- **ScalePad:** optional. If you use the ScalePad sync, it fills in warranty dates.
+- **Postmark:** sends the email.
+- **Your PSA:** it can post the result to a PSA ticket instead of an email, but that needs a change to the workflow. The technical details explain how.
+
+## What you need
+
+- AutomationAI, with your CloudRadial API details added to your runner
+- A Postmark account with a verified sender address, connected in AutomationAI
+- The **Deliver Result** agent, which sends the email
+
+## Set it up
+
+1. Import the [Deliver Result agent](https://github.com/cloudradial/Automations/tree/main/deliver-result) on **Agents > Custom > Import**, if you don't have it yet.
+2. Install and connect the **Postmark** extension, and set the sender address Deliver Result should use.
+3. Take Deliver Result out of preview mode. It starts out describing the email without sending it. Its [guide](https://github.com/cloudradial/Automations/blob/main/deliver-result/README.md#dry-run-and-going-live) shows how to go live.
+4. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.0.0).
+5. Go to **Workflows > Import** and upload it.
+6. Click **Publish**, then **Deploy**.
+7. Add your CloudRadial API details to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit#required-runner-key-vault-secrets) list exactly what to add.
+8. Schedule it as a weekly **Routine**, with the email addresses that should get the audit. You can list one address or several.
+
+**Test it.** Run the workflow once from **Test** with your own email address, and check the audit arrives.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit#technical-details) cover the exact grading rules, what each step does, and how to deliver to a PSA ticket instead.
+
+---
+
+## Technical details
 
 **Formerly:** Weekly Fleet Audit | **Marketplace ID:** AAI-00032 | **Type:** Workflow (PowerShell audit + Deliver Result agent) | **Version:** 1.0.0
 

@@ -1,6 +1,70 @@
 # Acknowledge Every New Ticket Personally
 
-The moment a ticket arrives, the client gets a short, personal acknowledgement with their ticket number, when to expect a response and, when one fits, a knowledge base article to try while they wait, without ever being promised a fix time.
+The moment a new ticket arrives, your client gets a short, personal reply: their ticket number, when to expect a response and, when one fits, a help article to try while they wait.
+
+## What happens
+
+When a new ticket is created in your PSA, the client right away gets an email that:
+
+- greets them and repeats their ticket number and summary
+- shows in a sentence or two that their request was understood
+- says when your team will respond, using your PSA's own response target if the ticket has one, or your usual times for that priority
+- links up to two articles from their own knowledge base, or your MSP-wide one, that might help
+- tells them they can just reply to the email
+
+Your team sees an internal note on the ticket recording exactly what the client was told.
+
+## What it protects
+
+- **No promised fix times.** It only ever states when you'll respond, never when the problem will be solved.
+- **Facts come from your PSA, not the AI.** The AI writes only the friendly paragraph. If that paragraph mentions a time, promises a fix, mentions passwords or codes, or includes a link, it's swapped for standard wording.
+- **One acknowledgement per ticket.** Closed tickets, tickets with no contact email and tickets already acknowledged are skipped, even if it runs twice.
+- **It only adds notes.** The reply goes out as a public note, so your PSA emails it to the ticket contact (and anyone your PSA copies on updates), plus one internal note.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Autotask and Zendesk:** looking up the contact's email hasn't been tested live yet. Preview on your own ticket first.
+- **Response times from your PSA's own targets:** not yet tested live on every PSA. Preview first to check the response line.
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- CloudRadial connected in AutomationAI, if you want help articles suggested (optional)
+- Something to start it when a ticket is created: a ServiceAI Action, or your PSA's ticket-created alert
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Turn on the webhook in **Properties**.
+4. Click **Publish**, then **Deploy**.
+
+**Preview before you switch it on:**
+
+1. Create a test ticket with yourself as the contact.
+2. Run the workflow on it. By default it shows you the message and sends nothing.
+3. Check the response line and article links.
+
+**Start it on every new ticket:**
+
+1. In ServiceAI, go to **Settings > Actions** and create an Action that calls this workflow's webhook when a ticket is created, set to send. Or call it from your PSA's ticket-created alert.
+2. If ServiceAI's own auto-response is on, turn one of them off so clients don't get two replies.
+
+**Optional settings:** your response time for each priority (the defaults are 1 hour critical, 4 hours high, 1 business day medium, 2 business days low), your time zone, the link format for articles in your portal, or no articles at all.
+
+**Test it.** Open a new ticket as a client and check you get one acknowledgement email, and the ticket has a matching internal note.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/smart-acknowledgement#technical-details) cover each step, every setting, and what hasn't been tested live yet.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00059 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 

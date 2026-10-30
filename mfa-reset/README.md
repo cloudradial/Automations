@@ -1,6 +1,65 @@
 # Let Users Reset Their Own MFA Safely
 
-A user who lost their phone or authenticator resets their own multi-factor authentication from the portal in seconds, and built-in checks stop anyone resetting another person's, an admin's, a disabled or an at-risk account.
+When a client loses their phone or authenticator app, they reset their own multi-factor authentication (MFA) from the portal in seconds. Built-in checks stop anyone resetting someone else's, an admin's, a disabled or an at-risk account.
+
+## What your clients see in the portal
+
+**A short MFA reset form.** The client doesn't type whose account it is. The portal already knows who is signed in, and that's the account that gets reset.
+
+**A simple confirmation.** They're told MFA was reset and to set it up again the next time they sign in. They're signed out everywhere. Their password doesn't change.
+
+## What it protects
+
+- **People can only reset their own MFA.** The signed-in portal user must be the account. This check is stricter than the password reset one, because clearing MFA is a bigger change. A form answer can't change who the requester is.
+- **Admins are never reset this way.** Any account with an admin role, including through a group or an eligible role, goes through a technician.
+- **Disabled and at-risk accounts are refused.** Clearing MFA on a compromised account would let an attacker add their own device.
+- **The wrong client's tenant is refused.** Each company's request uses only that company's Microsoft 365 and PSA connection.
+- **Details stay internal.** What was removed (phone numbers masked) and any one-time pass go only in an internal ticket note for your technicians. Refused requests get an internal note too, saying why.
+- **Safe to run twice.** If the reset is already recorded on the ticket, a second run changes nothing.
+
+## What happens behind the scenes
+
+Every sign-in method except the password is removed: Microsoft Authenticator, phone, security keys and passkeys, email, code apps and Windows Hello. If a method can't be removed, such as a hardware token, it's left in place and the note tells your technician.
+
+## Works with
+
+Microsoft 365 (Entra ID), for the reset itself. The internal note goes on the ticket in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+
+- **At-risk check:** needs Entra ID P2. Without it, that one check is skipped with a warning.
+
+## What you need
+
+- A UCP portal request form that can send a webhook
+- AutomationAI, with Microsoft 365 connected and allowed to manage sign-in methods, read admin roles and sign users out
+- Your PSA connected in AutomationAI, so the note reaches the ticket
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/mfa-reset/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Turn on the webhook in **Properties**. AutomationAI gives you a URL and secret.
+4. Click **Publish**, then **Deploy**.
+
+If a client's Microsoft 365 connection is saved under that company rather than shared, set **Company** to that client on the check and reset steps, then publish and deploy. Do this again after every import.
+
+**In your UCP portal:**
+
+1. Create an **MFA Reset** request form. It needs no questions about whose account it is.
+2. Under **Partner > Automations**, add a **Webhook** activity for that form, using the URL and secret from AutomationAI and the request body shown in the technical details.
+
+**Optional:** you can also give the user a one-time Temporary Access Pass that lasts 60 minutes. It goes only in the internal note, so a technician can pass it on after checking who they're talking to. This needs the Temporary Access Pass policy turned on in Entra.
+
+**Test it.** In AutomationAI, start with a practice run on a test account you own: it runs every check and lists what would be removed, without changing anything. Then do one real run on a spare test account.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/mfa-reset#technical-details) cover each safety check, the Microsoft permissions needed, the request body, and how to test it.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00045 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
 
@@ -73,7 +132,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Application permissions on the `M365-*` app registration, with admin consent:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why |
 |---|---|

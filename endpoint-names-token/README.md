@@ -1,6 +1,53 @@
 # Let Users Pick Their Computer on Portal Forms
 
-Keeps each client's device list current in the portal, so forms offer a "which computer?" dropdown and tickets arrive with the right device.
+Keeps each client's list of computers up to date in your UCP portal, so your forms can ask "Which computer?" and tickets arrive with the right device named.
+
+## What happens
+
+The automation looks at every client company in CloudRadial and collects the names of that company's computers. It sorts them, removes duplicates and saves the list on the company in your portal.
+
+Your portal forms and pages can then show that list, so a client picks their computer instead of guessing at its name. Your team gets tickets that already say which device the problem is on.
+
+Run it whenever you like, or put it on a schedule so the list stays current as computers are added and retired.
+
+## What it protects
+
+- **Nothing changes until you say so.** Unless you turn on write approval, a run only reads and reports what it would save.
+- **Each company sees only its own computers.** Every list is built and saved per company.
+- **Read only, apart from the list.** It never changes the computers themselves, only the saved list.
+
+## Works with
+
+Any CloudRadial portal. It reads computers already in CloudRadial, so no PSA connection is needed.
+
+## What you need
+
+- A UCP portal with your clients' computers showing in CloudRadial
+- AutomationAI, with your CloudRadial API keys (from **Settings > API** in CloudRadial) added to your runner
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/endpoint-names-token/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy**.
+4. Run it with **Test**. Leave write approval off the first time to see what it would save, then run it again with write approval set to yes.
+5. To keep lists current, attach a **Routine** so it runs on a schedule.
+
+**In your UCP portal:** add the saved device list to any form or page where you want clients to pick their computer.
+
+Optionally, you can change the name the list is saved under. By default it uses a standard name.
+
+**Test it.** Open a form as a client user and check that their computers appear in the list.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/endpoint-names-token#technical-details) cover the settings, how the list is built and what your runner needs.
+
+---
+
+## Technical details
 
 **Formerly:** Endpoint Names Token | **Marketplace ID:** AAI-00005 | **Type:** Workflow | **Version:** 1.0.0
 

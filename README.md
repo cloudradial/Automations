@@ -37,6 +37,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`bulk-create-training-courses/`](bulk-create-training-courses/) | Add Many Training Courses at Once | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00026](https://automations.cloudradial.com/marketplace/AAI-00026) |
 | [`certificate-expiration-report/`](certificate-expiration-report/) | Renew SSL Certificates Before Browsers Warn | Workflow | [AAI-00024](https://automations.cloudradial.com/marketplace/AAI-00024) |
 | [`cloudradial-ucp/`](cloudradial-ucp/) | Run Portal Admin Tasks by Asking | Agent | [AAI-00031](https://automations.cloudradial.com/marketplace/AAI-00031) |
+| [`create-halo-ticket-from-template/`](create-halo-ticket-from-template/) | Create a Halo Ticket from a Template | Workflow (one PowerShell step, no AI) | Not listed |
 | [`deliver-result/`](deliver-result/) | Send Automation Results Wherever Your Team Works | Agent | [AAI-00039](https://automations.cloudradial.com/marketplace/AAI-00039) |
 | [`domain-expiration-report/`](domain-expiration-report/) | Never Let a Client Domain Expire | Workflow | [AAI-00023](https://automations.cloudradial.com/marketplace/AAI-00023) |
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Keep Every Client's Hardware Refresh Plan Current | Workflow (an optional AI agent version is included) | [AAI-00021](https://automations.cloudradial.com/marketplace/AAI-00021) |
@@ -49,12 +50,15 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`kb-draft-from-resolution/`](kb-draft-from-resolution/) | Turn Resolved Tickets into Knowledge Base Drafts | Workflow (PowerShell steps plus one AI Prompt step) | Not listed |
 | [`knowbe4/`](knowbe4/) | Chase Overdue Security Training Automatically | Workflow | [AAI-00029](https://automations.cloudradial.com/marketplace/AAI-00029) |
 | [`license-reclamation/`](license-reclamation/) | Find Unused Microsoft 365 Licences and Show the Monthly Saving | Workflow (PowerShell, no AI, read-only in Microsoft 365) | [AAI-00048](https://automations.cloudradial.com/marketplace/AAI-00048) |
+| [`mailbox-group-access/`](mailbox-group-access/) | Mailbox and Group Access on Request | Workflow | Not listed |
 | [`mfa-reset/`](mfa-reset/) | Let Users Reset Their Own MFA Safely | Workflow (PowerShell steps, no AI) | [AAI-00045](https://automations.cloudradial.com/marketplace/AAI-00045) |
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Turn a Microsoft 365 Security Review into a Client Assessment | Workflow (PowerShell, no AI) | Not listed |
 | [`new-client-onboarding/`](new-client-onboarding/) | Onboard a New Client in CloudRadial, the PSA and Microsoft 365 | Workflow (run by hand, MSP-wide) | Not listed |
 | [`new-user-onboarding/`](new-user-onboarding/) | Get New Hires Ready for Day One | Agent + Workflow | [AAI-00040](https://automations.cloudradial.com/marketplace/AAI-00040) |
+| [`offline-device-sweep/`](offline-device-sweep/) | Ticket Devices That Have Dropped Off the RMM | Workflow (PowerShell, no AI, runs on a schedule) | Not listed |
 | [`onboard-users-to-portal/`](onboard-users-to-portal/) | Onboard Many Portal Users at Once | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00006](https://automations.cloudradial.com/marketplace/AAI-00006) |
 | [`outage-broadcast/`](outage-broadcast/) | Tell Every Affected Client About an Outage in One Step | Workflow (PowerShell steps, no AI) | [AAI-00061](https://automations.cloudradial.com/marketplace/AAI-00061) |
+| [`password-expiry-reminder/`](password-expiry-reminder/) | Remind People Before Their Microsoft 365 Password Expires | Workflow (PowerShell, no AI, runs on a schedule) | Not listed |
 | [`password-reset/`](password-reset/) | Let Users Reset Their Own Password Safely | Workflow | [AAI-00027](https://automations.cloudradial.com/marketplace/AAI-00027) |
 | [`password-reset-triage/`](password-reset-triage/) | Resolve Password Reset Tickets Automatically | Workflow (ServiceAI Triage Action) | [AAI-00028](https://automations.cloudradial.com/marketplace/AAI-00028) |
 | [`patch-compliance/`](patch-compliance/) | Show Every Client's Patch Compliance in Their Planner | Workflow | [AAI-00035](https://automations.cloudradial.com/marketplace/AAI-00035) |
@@ -68,7 +72,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Remove a Flexible Asset Type You No Longer Use | Workflow | [AAI-00041](https://automations.cloudradial.com/marketplace/AAI-00041) |
 | [`risky-signin-response/`](risky-signin-response/) | Respond to Risky Microsoft 365 Sign-ins Within the Hour | Workflow (run hourly by a Routine, or by hand) | [AAI-00046](https://automations.cloudradial.com/marketplace/AAI-00046) |
 | [`rmm-agent/`](rmm-agent/) | Safe Device Fixes and Patch Checks Through Your RMM | Agent | [AAI-00037](https://automations.cloudradial.com/marketplace/AAI-00037) |
-| [`rmm-auto-remediation/`](rmm-auto-remediation/) | Fix Common Workstation Alerts Without a Technician | Workflow | [AAI-00036](https://automations.cloudradial.com/marketplace/AAI-00036) |
+| [`rmm-auto-remediation/`](rmm-auto-remediation/) | Fix Common Workstation Alerts Without a Technician | Workflow (agent plus one PowerShell step) | [AAI-00036](https://automations.cloudradial.com/marketplace/AAI-00036) |
 | [`role-change-mover/`](role-change-mover/) | Move a User to a New Department Without Missing Any Access | Workflow | [AAI-00043](https://automations.cloudradial.com/marketplace/AAI-00043) |
 | [`scalepad-cloudradial-alignment/`](scalepad-cloudradial-alignment/) | Review Messy ScalePad Data Before You Migrate | Agent + Workflow | [AAI-00033](https://automations.cloudradial.com/marketplace/AAI-00033) |
 | [`scalepad-cloudradial-sync/`](scalepad-cloudradial-sync/) | Move Off ScalePad Without Losing Your Data | Workflow | [AAI-00030](https://automations.cloudradial.com/marketplace/AAI-00030) |
@@ -82,7 +86,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`ticket-routing/`](ticket-routing/) | Send Every Ticket to the Right Engineer | Agent + Workflow (ServiceAI Triage Action) | Not listed |
 | [`time-entry-review/`](time-entry-review/) | Catch Missing and Low-Detail Time Before It Costs You a Bill | Workflow (run daily by a Routine, or by hand) | [AAI-00051](https://automations.cloudradial.com/marketplace/AAI-00051) |
 | [`troubleshooting-article-delivery/`](troubleshooting-article-delivery/) | Send the Right Fix-It Article the Moment a Ticket Arrives | Workflow (PowerShell steps, no AI) | [AAI-00053](https://automations.cloudradial.com/marketplace/AAI-00053) |
-| [`user-offboarding/`](user-offboarding/) | Offboard a Departing Employee in One Reviewed Run | Workflow | Not listed |
+| [`user-offboarding/`](user-offboarding/) | Offboard a Departing Employee in One Reviewed Run | Workflow (two PowerShell steps, no AI) | Not listed |
 | [`vip-ticket-alert/`](vip-ticket-alert/) | Alert the Account Manager When a VIP Client Opens a Ticket | Workflow (PowerShell steps, no AI) | [AAI-00047](https://automations.cloudradial.com/marketplace/AAI-00047) |
 | [`waiting-on-client-nudge/`](waiting-on-client-nudge/) | Nudge Clients Who Haven't Replied, Then Close the Ticket | Workflow (PowerShell, no AI, runs on a schedule) | [AAI-00060](https://automations.cloudradial.com/marketplace/AAI-00060) |
 | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Get a Weekly List of Warranty and Ownership Gaps | Workflow (PowerShell audit + Deliver Result agent) | [AAI-00032](https://automations.cloudradial.com/marketplace/AAI-00032) |

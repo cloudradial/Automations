@@ -1,6 +1,63 @@
 # Move a User to a New Department Without Missing Any Access
 
-When someone changes department, their Microsoft 365 groups, department, title and manager are brought in line with your department map in one run, and you see every add and remove before anything changes.
+When someone changes department, one run brings their Microsoft 365 groups, department, job title and manager in line with your department map. Your team sees every add and remove before anything changes.
+
+## What happens
+
+1. **A technician starts it** in AutomationAI with the person's sign-in, their new department, and a new title or manager if those change.
+2. **It shows a preview first.** The groups to add, the groups to remove, and anything that needs a person, posted as an internal note on the ticket.
+3. **Once the plan looks right, run it again to apply it.** The person gets the new department's groups and loses the old department's (except any both share), and their department, title and manager are updated.
+4. **The ticket gets a note** of what ran and what didn't.
+
+Your client's employee has the right access in their new role, with nothing left over from the old one.
+
+## What it protects
+
+- **Preview by default.** Nothing changes until your technician says so.
+- **Licences are never changed.** Licences the new department needs, or the old one no longer uses, are flagged for your team.
+- **Distribution lists are flagged, not forced.** Microsoft 365 can't change them this way, so they're listed for a technician to change in Exchange. So are groups that fill themselves automatically or come from an on-premises server.
+- **A bad map changes nothing.** If the department or a group can't be found, the run stops and says why.
+- **Stops at the first problem** and says exactly what ran and what didn't.
+- **Client-safe.** Group and licence details stay in the internal note.
+
+## What happens behind the scenes
+
+Your department map is a simple table in a knowledge base article: each department, its groups, and any licences it uses. No AI is involved. The map decides everything.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, for the ticket note.
+
+- **Kaseya BMS and Syncro:** supported, but not yet covered by its tests. Check the first note by hand.
+- **Kaseya BMS:** you also choose which note type to use.
+- **No PSA set up:** the run still works and shows its plan, it just can't add the note.
+
+## What you need
+
+- Microsoft 365, connected on the client's AutomationAI runner, with permission to change users and group members
+- Your CloudRadial API connected on that runner, to read the department map
+- A **Role Change: Department Map** knowledge base article
+- Your PSA connected on that runner, for the ticket note
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/role-change-mover/v1.0.0).
+2. Create the **Role Change: Department Map** knowledge base article from the [template](https://raw.githubusercontent.com/cloudradial/Automations/main/role-change-mover/kb-articles/role-change-department-map.txt), with your real departments and groups. There's also a [spreadsheet template](https://raw.githubusercontent.com/cloudradial/Automations/main/role-change-mover/department-map-template.csv).
+3. In AutomationAI, go to **Workflows > Import** and upload the file.
+4. Connect Microsoft 365, CloudRadial and your PSA on the runner for that client.
+5. Click **Publish**, then **Deploy** to that runner.
+
+**Test it.** Run it once on a test user in preview, check the planned changes, then run it again to apply them.
+
+Optionally, a portal form can start it too. From a form it only ever posts a preview, and a technician applies it.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/role-change-mover#technical-details) cover the department map format, every setting, permissions and testing.
+
+---
+
+## Technical details
 
 **Formerly:** Role change (mover) | **Marketplace ID:** AAI-00043 | **Type:** Workflow | **Version:** 1.0.0
 
@@ -103,7 +160,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Microsoft Graph permissions
 
-Application permissions on the app registration, with admin consent:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why |
 |---|---|

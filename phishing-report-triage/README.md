@@ -1,6 +1,63 @@
 # Triage Reported Phishing Emails into a Ticket with the Evidence
 
-When a user reports a suspicious email, the technician gets a categorized ticket that already shows who really sent it, whether it passed SPF, DKIM and DMARC, where its links go and what is attached, with a risk verdict and, for malicious mail, a ready-to-review purge script.
+When one of your clients' users reports a suspicious email, your team gets a ticket that already shows who really sent it, where its links go, what is attached and how risky it looks.
+
+## What your clients see in the portal
+
+**A "Report a suspicious email" form.** The user gives the email's subject and sender (or its message ID if they have it) and submits.
+**What your team gets.** A ticket for that client with a risk verdict (high priority if malicious, medium if suspicious, low if it looks safe). An internal note lists the evidence: sender checks, look-alike names and domains, every link (shown safely, so nobody clicks it), and risky attachment types. For a malicious email, it adds a draft clean-up script for a technician to review.
+
+It can also start from a help desk ticket through ServiceAI.
+
+## What it protects
+
+- **Users can only report their own email.** It looks only in the mailbox of the person who submitted the form.
+- **Nothing is ever deleted.** The workflow never purges, deletes or moves an email. Clean-up is a draft a technician runs.
+- **The email's text stays out of the ticket.** Only the facts are copied. Attachments are listed by name and type, never opened.
+- **One client's email never lands in another client's ticket.** Each run checks the report came from that client's own Microsoft 365.
+- **A person decides close calls.** If the AI and the built-in rules strongly disagree, the email is marked suspicious for your team to check.- **No duplicates.** Running it again for the same email adds nothing twice.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Microsoft 365 only:** the email has to be in a Microsoft 365 mailbox.
+- **How many people got it:** not checked. Microsoft's mail lookup can't count other mailboxes that received the same email, and the note says so.
+
+## What you need
+
+- AutomationAI, with your PSA connected
+- Microsoft 365 connected in AutomationAI for each client, with an app that can read mail and look up users (admin consent given). We recommend limiting which mailboxes it can read.
+- A UCP portal form, or ServiceAI, to start it
+- For the clean-up script: the technician who runs it needs the Compliance Search and Search And Purge roles in Microsoft Purview
+
+## Set it up
+
+**Once per client, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/phishing-report-triage/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add that client's Microsoft 365 and PSA connection details to the runner that serves them. If the client's Microsoft 365 details are saved under the company in AutomationAI instead, open the **Look up the email** step and set **Company** to that client. Do this again after every import.
+4. In **Properties**, turn on the webhook. AutomationAI gives you its address and secret.
+5. Click **Publish**, then **Deploy**.
+
+**In your UCP portal, add the form:**
+
+1. Create a request form called **Report a suspicious email**.
+2. Add questions for the email's **Subject** and **Sender**, and an optional one for its **Message ID**. Set their Field IDs to `emailSubject`, `emailSender` and `messageId`.
+3. In the form's automation, add a **Webhook** step pointing at the workflow's address, with its secret.
+
+**Optionally, in ServiceAI:** add a triage rule in plain words, such as "If a user reports a suspicious or phishing email, run the Phishing Report Triage action."
+
+**Test it.** Run it once by hand in AutomationAI first: a manual run shows the verdict and the note but writes nothing. Then submit the form as a client user and check the new ticket in your PSA.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/phishing-report-triage#technical-details) cover every check, the exact permissions, and when to use the certified Phishing Alert Triage agent instead.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00044 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
@@ -82,7 +139,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Application permissions on the `M365-*` app registration, with admin consent:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why |
 |---|---|

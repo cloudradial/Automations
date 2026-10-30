@@ -1,8 +1,61 @@
 # Catch Missing and Low-Detail Time Before It Costs You a Bill
 
-Every morning, email the service manager a plain list of yesterday's closed tickets that have no time logged, time notes too short to bill from, or time entries with no billable setting.
+Every morning, your service manager gets one short email listing yesterday's closed tickets where time is missing, too thin to bill from, or not marked billable. Your team fixes the time before invoices go out.
+
+## What happens
+
+**Each morning, one email.** The automation looks at every ticket closed the day before and flags three things:
+
+- **No time logged.** The ticket was closed with no time on it.
+- **Short notes.** A time entry note is too short to bill from (under 20 characters unless you change it).
+- **No billable choice.** A time entry was never marked billable or not billable.
+
+The email is a plain table: ticket, company, summary, technician, what's wrong and hours. Your technicians fix the entries in your PSA as usual. Your clients don't see anything.
+
+## What it protects
+
+- **It never changes a ticket.** It only reads your PSA. All fixes are made by your team.
+- **No AI guessing.** The rules are fixed, so the same ticket always gets the same result.
+- **Nothing is lost if email isn't set up.** The list is kept in the run results instead.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Syncro:** when a ticket has no timer, labour line items count as time.
+- **Zendesk:** Zendesk has no built-in time entries. If you use the Zendesk Time Tracking app, it can flag tickets closed with no tracked time. Short notes and billable choices can't be checked. Without that app, the check isn't supported.
+
+## What you need
+
+- AutomationAI, with your PSA connected (with read access to tickets and time entries)
+- Postmark, connected in AutomationAI, to send the email
+- The service manager's email address
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/time-entry-review/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds your PSA and Postmark connections.
+4. Save the service manager's email address on that runner, so a scheduled run knows who to send to.
+5. Go to **Routines > New**, pick this workflow and choose a daily schedule, for example 7:00 each morning. The schedule isn't part of the download, so add it after each import.
+
+You can also choose a different day, a time zone, one company only, or a different note length when you run it by hand. A scheduled run reviews yesterday in UTC.
+
+**Test it.** Run it by hand for a day you know had closed tickets, sent to your own email. Check that each flagged ticket really is missing time, has a short note or has no billable choice.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/time-entry-review#technical-details) cover where each PSA keeps its time, every setting and how to test it.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00051 | **Type:** Workflow (run daily by a Routine, or by hand) | **Version:** 1.0.0
+
+Every morning, email the service manager a plain list of yesterday's closed tickets that have no time logged, time notes too short to bill from, or time entries with no billable setting.
 
 ## Files
 

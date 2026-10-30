@@ -1,6 +1,61 @@
 # Show Every Client's Patch Compliance in Their Planner
 
-Each client gets a current patch compliance score and a list of problem devices in their Planner, ready for review meetings.
+Each client gets a current patch compliance score and a plain list of the devices that need attention, right in their Planner. It's ready for your next review meeting, with no spreadsheet to build.
+
+## What happens
+
+On a schedule you choose (weekly works well), the automation checks the patch status of every device in Datto RMM. For each client it works out a compliance score and writes one card in that client's Planner, called "Patch Compliance Report".
+
+The card says, in plain sentences:
+
+- the client's compliance score
+- which devices have patches on the way
+- which devices failed to install patches
+- which devices have no patch policy at all (a setup gap to fix)
+- which devices sent no patch information, so someone can check them
+
+Each run updates the same card, so the Planner always shows the latest picture instead of piling up old cards.
+
+## What it protects
+
+- **Fair scores.** Network devices, printers and ESXi hosts can't be patched, so they're left out of every score. Devices that sent no patch information are listed, never counted as failing.
+- **No guessing which client is which.** If a Datto site can't be matched to a client, it's skipped and listed in the run results for you to sort out.
+- **Nothing is deleted or changed in Datto.** It only reads patch status and writes the one Planner card per client.
+- **A safe first run.** The RMM Agent starts in preview mode, so you can see what it would write before any card is created.
+
+## Works with
+
+- **Datto RMM:** the only RMM it reads patch status from.
+- **Autotask:** if your Datto and Autotask integration is on, sites are matched to clients using the Autotask company. Otherwise it matches by company name.
+- Datto's built-in Managed and OnDemand sites are left out unless you match them to a client yourself.
+
+## What you need
+
+- AutomationAI, with Datto RMM and CloudRadial connected
+- The **RMM Agent** (from Safe Device Fixes and Patch Checks Through Your RMM), up to date
+- Your clients set up as companies in CloudRadial
+
+## Set it up
+
+1. Import the [RMM Agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) on **Agents > Custom > Import**, if you don't have it yet. If you do, make sure it's the latest version.
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/patch-compliance/v1.0.0).
+3. Go to **Workflows > Import** and upload it.
+4. Click **Publish**, then **Deploy**.
+5. Schedule it as a weekly **Routine**.
+6. Run it once while the RMM Agent is still in preview mode. Check that it would write one card for each client.
+7. Take the RMM Agent out of preview mode. The [RMM Agent guide](https://github.com/cloudradial/Automations/blob/main/rmm-agent/README.md#dry-run-and-going-live) shows how.
+
+**Optional settings.** You can run it for a single Datto site instead of your whole fleet. If a site's name doesn't match its client in CloudRadial, you can tell the RMM Agent which client that site belongs to.
+
+**Test it.** Run it twice, then open a client's Planner and check there's one "Patch Compliance Report" card, updated by the second run rather than duplicated.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/patch-compliance#technical-details) cover how devices are sorted, how sites are matched to clients, and what the run reports back.
+
+---
+
+## Technical details
 
 **Formerly:** Patch Compliance | **Marketplace ID:** AAI-00035 | **Type:** Workflow | **Version:** 1.0.0
 
@@ -39,7 +94,7 @@ and upsert one Planner card per client. This is one of the rmm-agent "commands",
 2. Import `patch-compliance.yml` on **Workflows → Import**.
 3. Schedule it as a Routine (e.g. weekly).
 4. Optional input `siteUid` restricts the run to one Datto site; omit for the whole fleet.
-5. Optional agent variable `siteCompanyMap` (JSON, e.g. `{"Woodward Labs": 42}`) forces a Datto site onto a CloudRadial company id when neither the PSA id nor the name matches.
+5. Optional agent variable `siteCompanyMap` (JSON, e.g. `{"Contoso": 42}`) forces a Datto site onto a CloudRadial company id when neither the PSA id nor the name matches.
 6. First run: leave dry run on and check that `cardsPreviewed` is 1 per matched company. Then go live, dry run is set on the agent, not this workflow; see [Dry run and going live](https://github.com/cloudradial/Automations/blob/main/rmm-agent/README.md#dry-run-and-going-live), run twice, and confirm the second run updates the same card instead of adding one.
 
 ## Confirm in your tenant

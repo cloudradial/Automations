@@ -1,6 +1,56 @@
-# CloudRadial Codex Plugin
+# CloudRadial UCP MCP Plugin - ChatGPT Codex
 
-Connect Codex to your CloudRadial UCP Portal and work in plain English: look up clients, set up portals, build content and training, create assessments, and report across every client. It's the same plugin as the [Claude plugin](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp), with the same 15 skills and 19 tools, packaged so Codex can load it too.
+Manage your clients' CloudRadial portals by asking Codex in plain English. Look up a client, set up a portal, build training and assessments, or report across every client, without scripts or switching screens.
+
+## What you can ask
+
+- **Get started.** Codex connects to your portal and gives you a tour. "Set up the CloudRadial plugin"
+- **Look up a client and prepare for a meeting.** Get a client's portal at a glance before a call or a QBR. "Prepare me for my meeting with Contoso"
+- **Set up a client portal.** Add companies and users, build request forms, seed knowledge base articles, and create courses and assessments. "Seed Contoso with 10 starter KB articles"
+- **Run the service day to day.** Check training progress, audit portal content, and keep your company list tidy. "Who has completed the security training at Acme Corp?"
+- **Devices and lifecycle.** See warranty status and plan hardware refreshes. "Which of Contoso's devices are out of warranty?"
+- **Compliance and satisfaction.** Check assessment results and client feedback, for one client or all of them. "Roll up assessment scores across all my clients"
+- **Domains, certificates and reports.** Spot what is about to expire. "Which of my managed domains expire in the next 90 days?"
+
+The plugin confirms the company and shows you any change before it writes to your portal. A few things, such as portal branding, security roles and connecting integrations, still happen in the portal itself, and the plugin lists those for you instead.
+
+[See every example prompt](https://github.com/cloudradial/Automations/tree/main/codex-plugin#technical-details)
+
+## What it protects
+
+- **Your API keys never go into chat.** You type them into a private form that opens on your own computer.
+- **Keys are checked before they are saved.** Bad keys are never stored.
+- **Keys stay in your computer's own secure keychain.** Windows Credential Manager, macOS Keychain, or Linux Secret Service. Nothing is saved to a plain file.
+- **Nothing is hosted.** The plugin runs on your computer and talks straight to CloudRadial.
+
+## Works with
+
+- ChatGPT Codex
+- Windows, macOS and Linux
+- CloudRadial portals in the US or Europe
+- It is the same plugin as the [Claude version](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp), and the same file also installs in Claude Cowork, Claude Desktop and Claude Code.
+
+## What you need
+
+- A CloudRadial public key and private key, from **Settings → API** in your CloudRadial admin portal
+- Node.js 18 or newer on your computer, with npm for the first setup
+
+## Set it up
+
+1. **Download** [`cloudradial-ucp.plugin`](https://github.com/cloudradial/Automations/raw/main/codex-plugin/cloudradial-ucp.plugin), or get it from the [releases page](https://github.com/cloudradial/Automations/releases). It is one file for Windows, macOS and Linux.
+2. **Install it in Codex** as a Codex plugin.
+3. **Connect your portal.** Start a new conversation and type **Setup the CloudRadial Plugin**. A form opens in your browser. Enter your public and private keys, pick your region, and save.
+4. **Try it.** Ask "Prepare me for my meeting with Contoso", using one of your own clients.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/codex-plugin#technical-details) list every example prompt, the skills, how it works, and how keys are stored.
+
+---
+
+## Technical details
+
+**Marketplace ID:** AAI-00008 | **Type:** Plugin (Codex) | **Version:** 2.6.4
 
 ## Install
 

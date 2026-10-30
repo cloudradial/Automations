@@ -5,8 +5,12 @@
 # the ticket's contact or already on its CC list. allow_company_colleagues relaxes the second part to "same company".
 # preview=true says what would happen and changes nothing. Already on the list: success, no change, no note.
 # Status: success, rejected (nothing changed), error (nothing changed unless the message says so) or
-# pending_confirmation (a preview).
-$ccRun = @{ ticketId = ''; ccEmail = ''; done = $false }
+# pending_confirmation (a preview). A setup problem (no ticket number, no address, no requester or company) is an
+# error, so the step fails and shows in the run history; a refusal that is the rule working stays rejected.
+# Once added, the new CC is emailed the ticket's details directly (src/email.ps1: Postmark, else Graph from the
+# AddCc-NotifySender mailbox). Only when no email went (none set up, or it failed) is the public note added instead,
+# so a PSA that emails CCs on public notes doesn't send them two emails. notify_cc=false turns both off.
+$ccRun = @{ ticketId = ''; ccEmail = ''; done = $false; emailed = $false; transport = ''; subject = ''; body = '' }
 $ccWarnings = New-Object System.Collections.ArrayList
 $ccActions = New-Object System.Collections.ArrayList
 
@@ -20,7 +24,33 @@ function New-CcResult {
         status = $Status; message = (& $clean $Message); ticket_id = $ccRun.ticketId; cc_email = $ccRun.ccEmail; added = $Added
         cc_list = @($CcList); actions = @($ccActions | ForEach-Object { & $clean $_ }); warnings = @($ccWarnings | ForEach-Object { & $clean $_ })
         internal_note = (& $clean $Note); public_note = (& $clean $PublicNote)
+        emailed = [bool]$ccRun.emailed; email_transport = $ccRun.transport; email_subject = (& $clean $ccRun.subject); email_body = (& $clean $ccRun.body)
     }
+}
+
+# An address as typed: a mailto: prefix and angle brackets are dropped.
+function Get-CcAddress { param($v) return ((([string]$v) -replace '^(?i)mailto:', '').Trim().Trim('<', '>').Trim()) }
+# The one form answer that fits, when the question's Field ID isn't one of the expected names (the portal makes a
+# Field ID from the question's label, for example emailAddressToAdd). Answers whose Field ID matches KeyPattern and
+# whose value passes Test count. None: ''. One value: that value. Several different values: a setup error, since
+# guessing could change the wrong ticket or copy the wrong person. Who-is-asking Field IDs never count.
+function Find-CcAnswer {
+    param([hashtable]$Answers, [string]$KeyPattern, [scriptblock]$Test, [string]$What, [string]$FieldId)
+    $skip = @('requester_email', 'requesterEmail', 'UserEmail', 'userPrincipalName', 'upn', 'company_psa_id', 'companyPsaId', 'CompanyPsaId')
+    $hits = [ordered]@{}
+    foreach ($k in @($Answers.Keys | Sort-Object)) {
+        if ($skip -contains $k -or $k -notmatch $KeyPattern) { continue }
+        $v = Get-StepText $Answers[$k]
+        if (-not $v -or -not (& $Test $v)) { continue }
+        $key = $v.ToLowerInvariant(); if (-not $hits.Contains($key)) { $hits[$key] = @{ value = $v; ids = @() } }
+        $hits[$key].ids += $k
+    }
+    if ($hits.Count -eq 0) { return '' }
+    if ($hits.Count -gt 1) {
+        $ids = @($hits.Values | ForEach-Object { $_.ids }) -join ', '
+        throw "The form sent more than one $What ($ids), so it can't tell which to use and nothing was changed. Set the Field ID of the one to use to $FieldId."
+    }
+    return @($hits.Values)[0].value
 }
 
 function Invoke-CcMain {
@@ -30,10 +60,14 @@ function Invoke-CcMain {
     # Ticket and address: the webhook body first, then the form's answers.
     $ticketRef = Get-StepField $f @('ticket_number', 'ticketNumber', 'ticketId', 'ticket_id')
     if (-not $ticketRef) { $ticketRef = Get-StepField $q @('ticket_number', 'ticketNumber', 'ticketId', 'ticket_id') }
+    # A ticket-number question with another Field ID: the one answer whose Field ID mentions "ticket" and that looks
+    # like a ticket number. This comes before the form's own ticket, so a renamed question never sends the CC there.
+    if (-not $ticketRef) { $ticketRef = Find-CcAnswer $q '(?i)ticket' { param($v) (($v -replace '^(?i)\s*ticket\s*', '').Trim()) -match '^#?[A-Za-z0-9.-]{1,40}$' } 'ticket number' 'ticketNumber' }
     # From a CloudRadial Action with no ticket-number question, the target is the ticket the form itself created
     # (for example a Password Reset form that also asks who to copy). The ownership check below still applies, so the
     # requester must be that ticket's contact, which the person who submitted the form is.
-    if (-not $ticketRef -and $in.portal) { $ticketRef = Get-StepField $f @('Ticket.Id', 'Ticket.Reference') }
+    $ownTicket = $false
+    if (-not $ticketRef -and $in.portal) { $ticketRef = Get-StepField $f @('Ticket.Id', 'Ticket.Reference'); $ownTicket = [bool]$ticketRef }
     $ccIn = Get-StepField $f @('cc_email', 'ccEmail', 'cc', 'email', 'contactEmail')
     if (-not $ccIn) { $ccIn = Get-StepField $q @('cc_email', 'ccEmail', 'cc', 'email', 'contactEmail') }
     # Who is asking, and the rules: the webhook body only (CloudRadial fills @UserEmail and @CompanyPsaId at submit;
@@ -45,18 +79,28 @@ function Invoke-CcMain {
     $colleagues = Test-StepTrue (Get-StepField $f @('allow_company_colleagues', 'allowCompanyColleagues'))
     $domainsIn = Get-StepField $f @('allowed_domains', 'allowedDomains')
     $preview = Test-StepTrue (Get-StepField $f @('preview', 'dryRun', 'dry_run'))
-    # A public note tells the new CC (and the contact) what the ticket is about. On unless notify_cc is false.
+    # The new CC is told what the ticket is about: by email, else by a public note. On unless notify_cc is false.
     $notifyIn = Get-StepField $f @('notify_cc', 'notifyCc')
     $notify = if ($notifyIn) { Test-StepTrue $notifyIn } else { $true }
+    # The email carries the ticket's original request unless email_include_description is false.
+    $descIn = Get-StepField $f @('email_include_description', 'emailIncludeDescription')
+    $withDesc = if ($descIn) { Test-StepTrue $descIn } else { $true }
     $psaIn = Get-StepField $f @('psa')
+    # An email question with another Field ID: the one answer whose Field ID mentions mail or cc, that is a single
+    # address, and that isn't the requester's own address.
+    if (-not $ccIn) { $ccIn = Find-CcAnswer $q '(?i)mail|cc' { param($v) $a = Get-CcAddress $v; (Test-CcEmail $a) -and $a -ine $requester } 'email address to add' 'ccEmail' }
 
     # ---- the request itself ----
     $ticketRef = ($ticketRef -replace '^(?i)\s*ticket\s*', '').Trim()
-    if (-not $ticketRef) { return (New-CcResult 'rejected' 'The request has no ticket number, so nothing was changed.') }
+    if (-not $ticketRef) { throw 'The request has no ticket number, so nothing was changed. Check the form has a ticket number question (Field ID ticketNumber).' }
     if ($ticketRef -notmatch '^#?[A-Za-z0-9.-]{1,40}$') { return (New-CcResult 'rejected' "'$ticketRef' isn't a ticket number, so nothing was changed.") }
     $ccRun.ticketId = $ticketRef.TrimStart('#')
-    $cc = ($ccIn -replace '^(?i)mailto:', '').Trim().Trim('<', '>').Trim()
-    if (-not $cc) { return (New-CcResult 'rejected' 'The request has no email address to add, so nothing was changed.') }
+    $cc = Get-CcAddress $ccIn
+    if (-not $cc) {
+        # On the form's own ticket the question is optional: left blank, nobody is added.
+        if ($ownTicket) { return (New-CcResult 'success' "Nobody was named to copy on ticket $($ccRun.ticketId), so nothing changed.") }
+        throw 'The request has no email address to add, so nothing was changed. Check the form has an Email question for the address to add (Field ID ccEmail).'
+    }
     if (-not (Test-CcEmail $cc)) { return (New-CcResult 'rejected' "'$cc' isn't a single email address, so nothing was changed.") }
     $ccRun.ccEmail = $cc
     $domains = @(Get-CcEmailList $domainsIn | ForEach-Object { $_.TrimStart('@').ToLowerInvariant() } | Where-Object { $_ })
@@ -68,7 +112,7 @@ function Invoke-CcMain {
     if ($companyPsa -and $companyPsa -notmatch '^[A-Za-z0-9-]{1,40}$') { return (New-CcResult 'rejected' "The company id '$companyPsa' isn't a PSA company id, so nothing was changed.") }
     $missing = @(); if (-not $requester) { $missing += 'requester_email' }; if (-not $companyPsa) { $missing += 'company_psa_id' }
     if ($missing.Count) {
-        if (-not $techRun) { return (New-CcResult 'rejected' "The request didn't include $($missing -join ' and ') (map requester_email to @UserEmail and company_psa_id to @CompanyPsaId in the webhook body), so nothing was changed." -Note "Add CC refused: the request had no $($missing -join ' or '), so it couldn't check that the ticket belongs to the requester.") }
+        if (-not $techRun) { throw "The request didn't include $($missing -join ' and ') (map requester_email to @UserEmail and company_psa_id to @CompanyPsaId in the webhook body), so nothing was changed." }
         Add-CcWarning "technician_run is set and the request had no $($missing -join ' or '), so only the checks the request had data for were made. Don't send technician_run from a client-facing form."
     }
 
@@ -117,10 +161,23 @@ function Invoke-CcMain {
     $asker = if ($requester) { $requester } else { 'our service desk' }
     $publicNote = ''
     if ($notify) { $publicNote = "$cc has been copied on $about at the request of $asker, and will now receive email updates on it. To add information, reply to any update email." }
+    # The email to the new CC, built from the ticket's own client-facing fields (reads only).
+    $transport = if ($notify) { Get-CcTransport } else { '' }
+    $mail = $null
+    if ($transport) {
+        try {
+            $mail = New-CcEmail (Get-CcEmailDetails $info) $requester $withDesc
+            $ccRun.transport = $transport; $ccRun.subject = $mail.subject; $ccRun.body = $mail.text
+        }
+        catch { Add-CcWarning "The email to $cc couldn't be put together, so a public note tells them instead: $($_.Exception.Message)"; $transport = '' }
+    }
     if ($preview) {
-        $then = if ($notify) { 'add an internal note and a public note telling them what the ticket is about' } else { 'add an internal note' }
+        $then = if (-not $notify) { 'add an internal note' }
+        elseif ($transport) { "email $cc the ticket's details through $(Get-CcTransportName $transport) and add an internal note" }
+        else { 'add an internal note and a public note telling them what the ticket is about (no email transport is set up)' }
         $null = $ccActions.Add("Would $($plan.detail) on ticket $id, then $then.")
-        return (New-CcResult 'pending_confirmation' "Preview: $cc would be added to the CC list on ticket $id; run again without preview to add it." -CcList $plan.list -Note $note -PublicNote $publicNote)
+        $previewPublic = if ($transport) { '' } else { $publicNote }
+        return (New-CcResult 'pending_confirmation' "Preview: $cc would be added to the CC list on ticket $id; run again without preview to add it." -CcList $plan.list -Note $note -PublicNote $previewPublic)
     }
     $PsaState.LastWriteRedirect = $null
     $saved = $null
@@ -137,6 +194,22 @@ function Invoke-CcMain {
     if (-not $saved.ok) { throw "$(Get-PsaName) accepted the CC change on ticket $id, but reading the ticket back shows $cc isn't on its CC list, so check the ticket's CC settings in $(Get-PsaName)." }
     $null = $ccActions.Add("Added $cc to the CC list on ticket $id.")
 
+    # ---- the email to the new CC (a failure is a warning: the CC is already added, and the public note stands in) ----
+    # Sent before the internal note so that one note records both the change and whether the email went.
+    if ($transport) {
+        $how = Get-CcTransportName $transport
+        $sent = Send-CcEmail $transport $cc $mail
+        if ($sent.sent) {
+            $ccRun.emailed = $true
+            $null = $ccActions.Add("Emailed $cc the ticket's details through $how.")
+            $note += " Emailed $cc the ticket's details through $how."
+        }
+        else {
+            Add-CcWarning "$cc was added, but the email with the ticket's details couldn't be sent through ${how}: $($sent.reason) A public note on the ticket tells them instead."
+            $note += " The email to $cc through $how failed, so a public note tells them instead."
+        }
+    }
+
     # ---- the internal note (a failure is a warning: the CC is already added) ----
     try {
         Add-PsaNote -Id $id -Text $note -Title 'CC added'
@@ -146,9 +219,9 @@ function Invoke-CcMain {
     }
     catch { Add-CcWarning "$cc was added, but the internal note on ticket $id couldn't be added: $($_.Exception.Message)" }
 
-    # ---- the public note to the new CC (a failure is a warning) ----
+    # ---- the public note to the new CC, only when no email went (a failure is a warning) ----
     $sentPublic = ''
-    if ($notify) {
+    if ($notify -and -not $ccRun.emailed) {
         try {
             Add-PsaNote -Id $id -Text $publicNote -Title 'You have been copied on this ticket' -Public
             $null = $ccActions.Add("Added a public note to ticket $id telling $cc what the ticket is about.")

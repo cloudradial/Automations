@@ -1,6 +1,56 @@
 # Find Unused Microsoft 365 Licences and Show the Monthly Saving
 
-Every month, each client's CloudRadial Planner board gets one card listing the paid Microsoft 365 licences nobody has used in 60 days, with an estimated monthly saving, so you can raise it at the next review. Nothing is removed automatically.
+Once a month, each client gets one card on their CloudRadial Planner board listing the paid Microsoft 365 licences nobody has used in 60 days, with an estimated monthly saving. You can raise it at the next review. Nothing is removed automatically.
+
+## What happens
+
+- **Once a month, a card appears or updates.** It is called "Reclaim unused Microsoft 365 licences" and sits on that client's Planner board.
+- **The card is easy to read.** It says how many licences are unused and the estimated monthly and yearly saving, then lists each person, their licence, their last sign-in and their status.
+- **The same card is reused.** Next month it updates the card instead of adding a new one, even if someone renamed it.
+- **Your clients don't see it unless you choose.** The card starts as internal only. If you make it visible, later updates leave that choice alone.
+- **It flags what matters most.** The card is high priority when the saving is $100 a month or more, or a disabled account still holds a licence.
+- **When there's nothing to reclaim,** an existing card is updated to say so and marked completed. No new card is created.
+
+## What it protects
+
+- **It never changes Microsoft 365.** It only reads. No licence or account is touched.
+- **New people aren't flagged.** Accounts created within the last 60 days are skipped as too new to judge.
+- **Active mailbox users aren't flagged.** When allowed, it also checks mailbox use, so someone who rarely signs in but still uses email is left off.
+- **Free and trial licences are ignored.** Only paid licences count.
+- **One client per run.** One client's people never appear on another client's card. If the company and the Microsoft 365 tenant don't match, it stops and writes nothing.
+
+## Works with
+
+Microsoft 365 and CloudRadial Planner. No PSA needed.
+
+- **Microsoft 365:** the tenant needs Microsoft Entra ID P1 (included in Business Premium and E3/E5) to read last sign-in times.
+- **Prices:** savings use Microsoft list prices in US dollars for common licences. A licence with no known price shows "price unknown" and is left out of the total.
+
+## What you need
+
+- AutomationAI, with the client's Microsoft 365 connected (read access to users, sign-ins and subscriptions)
+- Your CloudRadial API connected in AutomationAI
+- Optionally, permission to read Microsoft 365 usage reports, so mailbox activity is included
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0).
+2. In AutomationAI, go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that has this client's Microsoft 365 connection.
+4. Add a monthly **Routine** for the workflow, for example at 7am on the 1st. Add it again after any fresh import, because the schedule isn't part of the file.
+5. Make sure the run knows which client it's for: set the client's Microsoft 365 tenant in CloudRadial, or give the runner the client's company number.
+
+Optional: change how many days count as unused (14 to 365), or enter your real prices for any licence.
+
+**Test it.** Run it once by hand in preview mode to see the list without touching the board, then run it for real and check the client's Planner board for the card.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/license-reclamation#technical-details) cover the exact rules, permissions, settings and how to test it.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00048 | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365) | **Version:** 1.0.0
 
@@ -78,7 +128,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Application permissions on the app registration, with admin consent:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why | If it's missing |
 |---|---|---|

@@ -1,6 +1,69 @@
 # Answer Invoice Questions with the Billing Context Already on the Ticket
 
-When a client questions an invoice, the account manager finds an internal note on the ticket that already shows what was billed, how much time was logged and how much of it was billable, the tickets with the most time, and which agreements covered the period.
+When a client questions an invoice, your account manager opens the ticket and finds the billing picture already there: what was billed, the time logged, and the agreements that covered it.
+
+## What happens
+
+**A client asks about a bill.** ServiceAI triage spots that the ticket is about an invoice or a charge, and runs this automation. Your technicians can also run it themselves from a ServiceAI Quick Action called **Invoice context**.
+
+**An internal note appears on the ticket.** It starts with a short, neutral summary in plain sentences, followed by the figures straight from your PSA:
+
+- What was billed on that invoice, where your PSA can look it up
+- Hours logged, and how many of them were billable
+- The tickets that took the most time
+- The agreements in effect for that period
+
+The billing period comes from the period the client mentions, or from the invoice. If neither is known, it uses last month and says so.
+
+**Your client sees nothing.** The note is for your team only, and nothing is emailed or posted to the client.
+
+## What it protects
+
+- **One client's data only.** It reads only the ticket's own company. If the invoice belongs to a different company, it stops and reads nothing about it.
+- **Exact numbers.** The figures are copied from your PSA, never worked out by AI. The AI only writes the short summary, and is told not to judge the invoice or promise credits.
+- **Nothing else changes.** It adds one internal note and changes nothing else in your PSA. Time-entry notes are never copied.
+- **No duplicate notes.** If it runs again for the same ticket and period, it doesn't add a second note.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Kaseya BMS and Syncro:** can't look up an invoice by number, so the billing period must be given instead.
+- **Zendesk:** tickets only. Zendesk has no time entries or agreements to read.
+- Several of the time, agreement and invoice lookups have not been tested live yet, especially on Kaseya BMS and Syncro.
+
+## What you need
+
+- AutomationAI, with your PSA connected and an AI provider set up
+- A PSA login that can read tickets, time entries, agreements and invoices, and add notes
+- ServiceAI, if you want it to run on its own from triage
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/invoice-context/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+
+**In ServiceAI (Settings > Actions):**
+
+1. Save the workflow's webhook secret in the ServiceAI **Secrets** manager.
+2. Create two Actions pointing at the workflow's webhook address: **Invoice Dispute Context** (**Use in AI**) and **Invoice Dispute Context (Triage)** (**Use in Triage**).
+3. Add a triage rule in plain words: "When a ticket questions or disputes an invoice or charge, call the Invoice Dispute Context action."
+4. Optionally, add a Pod Quick Action labelled **Invoice context** (Settings > AI Behavior > Pod Quick Actions) so technicians can run it on demand.
+
+You can change how many top tickets the note lists, or preview the note without writing it.
+
+**Test it.** Run it on a test ticket with a known month, then compare the hours in the note with your PSA's own time report.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/invoice-context#technical-details) cover what each PSA can read, the exact Action setup, and what is still being tested.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00055 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 

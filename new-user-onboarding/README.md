@@ -1,6 +1,73 @@
 # Get New Hires Ready for Day One
 
-Takes a new starter from request to ready: plans access from a similar user without copying privileged groups, raises quotes instead of buying, and hands over credentials securely.
+Your clients ask for a new starter in the portal, and AutomationAI takes it from request to ready for day one: account, access, quotes for equipment, portal login and training, with a note on the ticket that says what is done and what still needs your team.
+
+## What your clients see in the portal
+
+**They fill in the Add a New User form.** Name, start date, role, which coworker the new person should match, and any equipment or software they need.
+
+**They get a ticket, as usual.** Behind the scenes the request is checked and worked through in stages. Your technicians see the full result as an internal note on that same ticket.
+
+## What happens behind the scenes
+
+- **Checks the request.** A request with no start date stops here.
+- **Raises quotes, never buys.** Hardware, phones and software are listed as quote requests for your team.
+- **Plans access from a similar coworker.** Admin and other sensitive groups are never copied without approval.
+- **Sets up the account.** Microsoft 365 account, licence, mailbox and the approved access.
+- **Hands over the password safely.** Only through 1Password, never by email or chat.
+- **Adds portal access and training.** A UCP portal login and your onboarding courses.
+- **Double checks.** A final step looks at what really exists and reports each starter as ready or not.
+- **Can start your other workflows,** such as Split Request to raise the service ticket and the quote.
+
+## What it protects
+
+- **Nothing happens without you.** It starts in preview, and every change waits for approval in your AutomationAI Inbox.
+- **Existing users are never changed.**
+- **The requester can't be faked.** Who asked, and for which client, comes from the portal, never from a typed answer.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, for the ticket note.
+
+- **All PSAs:** the note hasn't been posted to a live PSA yet, so check the first one by hand.
+- **Kaseya BMS:** you also choose which note type to use.
+
+This automation is still in testing. Keep it in preview until a full run has been checked from start to finish.
+
+## What you need
+
+- Microsoft 365 and Microsoft Entra ID, connected in AutomationAI
+- CloudRadial, 1Password Business and Microsoft Teams, connected in AutomationAI
+- A 1Password vault for handing over new passwords
+- Your PSA connected on your AutomationAI runner, for the ticket note
+- A UCP portal with **Actions** on your request forms
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** both files from the [release page](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.1.0).
+2. Go to **Agents > Custom > Import** and upload the New User Onboarding agent first.
+3. In the agent's settings, pick your 1Password vault and your default licence.
+4. Go to **Workflows > Import** and upload the workflow.
+5. Click **Publish**, then **Deploy**.
+
+**In your UCP portal:**
+
+1. Open the **Add a New User** form.
+2. At the end of the form, add an **Action** question and pick **New User Onboarding**.
+
+**Test it.** Submit the form once as a client user and check the preview note on the ticket. Switch to live only once you trust the results.
+
+Prefer no AI? A simpler version creates the same accounts straight from the form, without quotes or access mirroring. It's in the same folder.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#technical-details) cover each stage, going live, the simpler no-AI version and every setting.
+
+---
+
+## Technical details
 
 **Formerly:** New User Onboarding (agent) | **Marketplace ID:** AAI-00040 | **Type:** Agent + Workflow | **Version:** 1.1.0
 
@@ -8,7 +75,7 @@ This folder has two ways to onboard. The agent workflow below plans and verifies
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.0.0).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.1.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -20,11 +87,11 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `new-user-onboarding.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.yml) |
-| Download `new-user-onboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.0.0) |
+| Download `new-user-onboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.1.0) |
 | View `new-user-onboarding.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding.agent.yml) |
-| Download `new-user-onboarding.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.0.0) |
+| Download `new-user-onboarding.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.1.0) |
 | View `new-user-onboarding-direct.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/new-user-onboarding-direct.yml) |
-| Download `new-user-onboarding-direct.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.0.0) |
+| Download `new-user-onboarding-direct.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-user-onboarding/v1.1.0) |
 | View `form-webhook-mapping.md` | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md) |
 | All files in this automation | [new-user-onboarding](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/new-user-onboarding) |
@@ -179,7 +246,7 @@ One node per step, so each can be tested on its own:
 
 | Node | What it does | Changes anything? |
 |---|---|---|
-| Receive form data | Reads the webhook body, flat `{key:value}` or the CloudRadial `{Ticket:{Questions:[...]},Company:{...}}` shape. Answers still left as `@token` count as not answered. | No |
+| Receive form data | Reads the request from a form **Action** (the answers by Field ID, plus the portal's own `ticket`, `company` and `user`), a Webhook activity's flat `{key:value}` Content, or the older `{Ticket:{Questions:[...]},Company:{...}}` shape. Answers still left as `@token` count as not answered. | No |
 | Check and plan | Fails closed on the checks under [Safety](https://github.com/cloudradial/Automations/tree/main/new-user-onboarding#safety). Resolves the sign-in name, manager, licence, groups and CloudRadial company, then writes the plan. Stops here with a preview when `confirm` is false. | No |
 | Create Microsoft 365 user | Creates the account with a random 16-character temporary password (change forced at first sign-in) and sets the manager. | Yes |
 | Assign licence and groups | Assigns the licence (Exchange Online creates the mailbox from it) and adds the approved groups. | Yes |
@@ -204,17 +271,20 @@ No extensions. Every call is made from PowerShell with runner Key Vault secrets.
 | `Onboarding-ProtectedGroupPatterns` | No | Extra comma-separated group name patterns to never add, on top of `admin`, `administrator`, `privileged` and `global`. |
 | `Onboarding-DefaultLicenceSku` | No | The licence to use when the form says a licence is needed but none is chosen. Same values as `m365License`. Without it, the account gets no licence and a warning. |
 | `Onboarding-UsageLocation` | No | Two-letter country code for new accounts, because the form doesn't ask for one. Without it, `US` is used. |
+| `Onboarding-Confirm` | For a form Action | `true` lets every run on this runner make changes. An Action can't send `confirm`, so this is how an Action goes live. Set it only after a preview has been checked. |
 
-The Microsoft 365 app needs these Graph application permissions: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
+Add these Graph application permissions to the Microsoft 365 app you already use (the one in the `M365-*` secrets), with admin consent: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Organization.Read.All`, and `Mail.Send` if you set `Onboarding-NotifySender`. They add to what the app already has, so leave its existing permissions in place. Password Reset confirmed the certified Microsoft 365 extension's app already has `User.ReadWrite.All`. The other three aren't verified yet, so check them in Entra before the first live run.
 
 ### Setup
 
 1. On **Workflows → Import**, upload `new-user-onboarding-direct.yml`.
 2. Add the secrets above to the runner's Key Vault. Deploy to the runner whose vault holds them.
-3. Enable the webhook under **Properties → Webhook**, then **Publish** and **deploy**.
-4. In the *Add a New User* form's automation, add a Webhook activity pointing at this workflow's webhook URL (it must be absolute), with the secret in the `X-Crauto-Webhook-Secret` header. Use the Content JSON from [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md), plus the keys under Settings that you want to use.
+3. **Publish** and **deploy**.
+4. **With Actions (UCP portals that have them):** add an **Action** question at the end of the *Add a New User* form and pick this workflow. The portal sends the ticket, company, tenant and requester itself. Every submission is a preview until you set the `Onboarding-Confirm` secret to `true`. Form answers named `confirm`, `psa`, `requestedBy` or `companyTenantId` are ignored, so a question can't confirm a run or change the requester or tenant. Then skip to step 5.
+
+   **With a Webhook activity:** enable the webhook under **Properties → Webhook**, publish again, then in the *Add a New User* form's automation, add a Webhook activity pointing at this workflow's webhook URL (it must be absolute), with the secret in the `X-Crauto-Webhook-Secret` header. Use the Content JSON from [form-webhook-mapping.md](https://github.com/cloudradial/Automations/blob/main/new-user-onboarding/form-webhook-mapping.md), plus the keys under Settings that you want to use.
 5. The form's **Manager** question (Field ID `managerEmail`) sets and notifies the manager. Add it in the package source if your copy of the form doesn't have it yet. The Content in the mapping doc already includes `"managerEmail": "@managerEmail"`.
-6. Leave `confirm` out of the Content at first, so every submission returns a preview. Once you trust the previews, add `"confirm": "true"` to the Content to let the form create accounts.
+6. Leave `confirm` out of the Content at first, so every submission returns a preview. Once you trust the previews, add `"confirm": "true"` to the Content (or, for an Action, set `Onboarding-Confirm`) to let the form create accounts.
 
 ### Settings
 
@@ -235,7 +305,7 @@ Every input is optional apart from the name, and each has a default.
 | `companyId`, `companyPsaId`, `companyName` | none | Used to match the CloudRadial company and, for a new ticket, the ConnectWise company. |
 | `ticketId` | none | The form's ticket, as the PSA shows it (Autotask and Kaseya BMS ticket numbers are looked up). Without it, the onboarding ticket is created in your PSA. |
 | `psa` | the `PSA-Type` secret | Which PSA the ticket is in. Overrides the secret for one request. |
-| `confirm` (or `approvedToWrite`) | `false` | `false` returns a preview and changes nothing. |
+| `confirm` (or `approvedToWrite`) | `false` | `false` returns a preview and changes nothing. Ignored on a form Action, which uses the `Onboarding-Confirm` secret instead. |
 
 ### Safety
 

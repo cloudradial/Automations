@@ -1,8 +1,65 @@
 # Have Every Client's QBR Numbers Ready on One Planner Card
 
-Before a quarterly business review, one run gathers a client's device age and warranty picture, ticket trends from your PSA, Microsoft 365 licence usage, and expiring domains and certificates, and puts them on one internal CloudRadial Planner card for the vCIO. Nothing else is changed anywhere.
+Before a quarterly business review, one run gathers a client's key numbers and puts them on a single internal Planner card in CloudRadial. Your vCIO walks into the meeting prepared, without pulling reports from four places.
+
+## What happens
+
+**One card per client, per quarter.** The card is called "QBR prep" with the quarter and year, and sits on that client's Planner board. It opens with plain sentences, then short tables:
+
+- **Devices:** how many workstations, servers and virtual machines; how old they are; warranties expired or ending soon; operating systems that no longer get security updates; devices that haven't checked in for 30 days; and how many workstations are due for replacement.
+- **Tickets:** tickets opened and closed this period compared with the period before, tickets open now, and the top 5 categories.
+- **Microsoft 365 licences:** purchased, assigned and unassigned for each paid licence (optional).
+- **Expiring items:** domains expiring within 60 days and certificates within 30 days.
+- **Other open cards** on the client's board.
+
+If something can't be read, the card says so in a sentence and the rest is still posted. Your clients don't see the card unless you choose to make it visible.
+
+## What it protects
+
+- **It changes nothing else.** It only reads CloudRadial, your PSA and Microsoft 365. Its one write is the Planner card.
+- **No duplicates.** Running it again in the same quarter updates the same card, even if someone renamed it. Next quarter gets a new card.
+- **One client's data stays on one card.** Every lookup is limited to that client. Licences are only included when the Microsoft 365 tenant is confirmed as that client's.
+- **No AI.** The numbers come straight from your systems.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk for ticket trends.
+
+- **No PSA connected:** the ticket section says "not available" and the rest of the card is still posted.
+- **Microsoft 365 not connected:** the licence section is skipped with a note.
+
+## What you need
+
+- AutomationAI, with CloudRadial connected
+- Your PSA, connected in AutomationAI (optional, for ticket trends)
+- The client's Microsoft 365, connected in AutomationAI with permission to read the organisation's details (optional, for licences)
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds your connections.
+4. If a client's Microsoft 365 connection is saved under that company in AutomationAI, open the workflow, set **Company** to that client on the **Read Microsoft 365 licences** step, then publish and deploy again. Do this after every import.
+
+**Run it before each QBR.** Run it by hand and give it the client's CloudRadial company number. You can ask for a preview first, which shows the card text without posting it. You can also change how many days it looks back (90 by default).
+
+**Schedule it (optional).** Go to **Routines** and attach a schedule, for example two weeks before each quarter's reviews. Save the client's company number on the runner so the Routine knows which client to prepare. Routines aren't part of the download, so add it after each import.
+
+**Test it.** Run a preview for one client, then a real run, and check the client's Planner board for the "QBR prep" card.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/qbr-data-pack#technical-details) cover how each number is worked out, every setting and how to test it.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00065 | **Type:** Workflow (PowerShell, no AI, read-only except one internal Planner card) | **Version:** 1.0.0
+
+Before a quarterly business review, one run gathers a client's device age and warranty picture, ticket trends from your PSA, Microsoft 365 licence usage, and expiring domains and certificates, and puts them on one internal CloudRadial Planner card for the vCIO. Nothing else is changed anywhere.
 
 ## Files
 
@@ -82,7 +139,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Only needed for the optional licence section. Application permission on the app registration, with admin consent:
+Only needed for the optional licence section. Add this application permission to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why | If it's missing |
 |---|---|---|

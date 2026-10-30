@@ -1,6 +1,58 @@
 # Remove a Flexible Asset Type You No Longer Use
 
-Deletes one empty flexible asset type, such as the old "ScalePad Assets" list, which the CloudRadial portal has no button for. It checks first that no company has anything in it.
+Deletes one flexible asset type you don't need anymore, such as the old "ScalePad Assets" list. The portal has no button to delete these, so this does it for you, and only when the type is empty.
+
+## What happens
+
+Flexible asset types show up as lists under **Infrastructure** in your portal. You tell the workflow which type to remove by its exact name (it uses "ScalePad Assets" if you don't name one). The CloudRadial UCP Assistant then:
+
+1. Finds the type by its exact name. If there's no match, or more than one, it stops.
+2. Checks every company for anything stored in that type. If any company still has something in it, it stops and tells you how much each company has.
+3. Only if the type is empty everywhere, it deletes it, after you approve.
+4. Confirms the type is gone.
+
+The usual reason to run it is after the [ScalePad to CloudRadial Sync](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync). Older versions put all non-computer hardware into one "ScalePad Assets" list; the current version sorts it by kind of device. Once every company has been synced again, "ScalePad Assets" is empty and can go.
+
+## What it protects
+
+- **It only deletes an empty type.** If even one company still has data in it, nothing is deleted.
+- **Only the type you named.** It never deletes any of the items, fields or other types.
+- **You approve the delete.** The delete waits in the **Inbox** until you approve it, every time.
+
+## Works with
+
+CloudRadial only. No PSA is needed.
+
+- **A type that still has fields:** CloudRadial may refuse to delete it. If so, the workflow reports the error and stops.
+
+## What you need
+
+- AutomationAI
+- The **CloudRadial UCP Assistant** agent, from [Run Portal Admin Tasks by Asking](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp), in a recent version that includes the flexible asset tools
+- The CloudRadial compliance extension, installed and connected in AutomationAI
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. If you don't have it yet, import the [CloudRadial UCP Assistant](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp) on **Agents > Custom > Import**.
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/remove-empty-flexible-asset-type/v1.0.0).
+3. Go to **Workflows > Import** and upload it.
+4. Click **Publish**, then **Deploy**.
+
+**To remove a type:**
+
+1. **Preview.** Run the workflow. To remove a type other than "ScalePad Assets", give its exact name. It reports what it found and whether it would delete the type. Nothing changes.
+2. **Delete.** Take the assistant out of preview (the [assistant's page](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp#dry-run-and-going-live) shows how), run it again, and approve the delete in the **Inbox**.
+**Test it.** Run the preview and check the result names the right type and shows zero items before you delete anything.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/remove-empty-flexible-asset-type#technical-details) cover how the workflow is built, its one setting, and every possible result.
+
+---
+
+## Technical details
 
 **Formerly:** Remove Empty Flexible Asset Type | **Marketplace ID:** AAI-00041 | **Type:** Workflow | **Version:** 1.0.0
 

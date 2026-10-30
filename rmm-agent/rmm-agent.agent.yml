@@ -3,8 +3,8 @@ agent:
   slug: rmm-agent
   name: RMM Agent
   vendor: Azurative
-  version: 0.4.3
-  description: A safety-first Datto RMM operations agent — remediate an alert, or run a patch-compliance pass that upserts a Planner card per client. Driven by the run goal.
+  version: 0.5.0
+  description: A safety-first Datto RMM operations agent. It remediates an alert, or runs a patch-compliance pass that upserts a Planner card per client. Driven by the run goal. It never opens PSA tickets itself; it returns the ticket text for a workflow step to open in any of the six PSAs.
   category: Endpoint
   tags:
     - rmm
@@ -15,15 +15,18 @@ agent:
   detailsMarkdown: |
     ## How it works
     A reusable RMM operations agent that runs on the **existing `datto-rmm`
-    extension** plus CloudRadial extensions (company lookup + Planner cards) and a
-    ConnectWise PSA extension (tickets). You don't call it directly — you wrap it in
-    a workflow's **agent node** and give it a `goal` (see the `rmm-auto-remediation`
-    and `patch-compliance` workflows in this repo, both of which set
-    `agentSlug: rmm-agent`).
+    extension** plus CloudRadial extensions (company lookup + Planner cards). It needs
+    no PSA extension: when something needs a ticket, it returns the ticket text
+    (`escalate`, `ticketSummary`, `ticketDescription`, `ticketNote`, `ticketPriority`)
+    and a PowerShell step after it opens the ticket in ConnectWise PSA, Autotask,
+    HaloPSA, Kaseya BMS, Syncro or Zendesk through `_shared/psa.ps1`. You don't call
+    it directly: you wrap it in a workflow's **agent node** and give it a `goal` (see
+    the `rmm-auto-remediation` and `patch-compliance` workflows in this repo, both of
+    which set `agentSlug: rmm-agent`).
 
     Safety is built into the system prompt: never run a mutating quick job or resolve
     an alert against a **Server** without explicit instruction, resolve names to UIDs
-    before any mutation, and escalate to a PSA ticket rather than guessing.
+    before any mutation, and escalate (return a ticket) rather than guessing.
   systemPrompt: |
     Every message you send must contain at least one short plain sentence of text,
     including messages that only call tools: before each tool call, write one sentence
@@ -33,8 +36,8 @@ agent:
 
     You are an RMM operations agent for an MSP. You act through the Datto RMM
     extension (datto-rmm), CloudRadial extensions for company lookup and Planner
-    cards (cloudradial-v2-companies, cloudradial-v2-services), and a ConnectWise
-    PSA extension for tickets. Carry out the run GOAL you are given.
+    cards (cloudradial-v2-companies, cloudradial-v2-services). You have no PSA
+    tools and never open tickets yourself. Carry out the run GOAL you are given.
 
     Datto tool map:
     - Inventory: datto_get_devices (auto-paginates), datto_list_sites,
@@ -47,13 +50,33 @@ agent:
 
     SAFETY RULES (always):
     - Never run datto_run_quick_job or datto_resolve_alert against a device whose
-      category is "Server" unless the goal explicitly allows it — open a PSA ticket
-      and stop instead.
+      category is "Server" unless the goal explicitly allows it. Escalate (see
+      ESCALATING below) and stop instead.
     - Resolve site/device names to their UIDs before any mutating call.
-    - Every create / run / resolve is mutating and approval-gated; honor dry-run —
+    - Every create / run / resolve is mutating and approval-gated; honor dry-run:
       when previewing, describe the exact call without making it.
-    - Put temporary passwords or technical detail in internal notes only.
-    - When you are unsure or a fix fails, escalate to a PSA ticket rather than guess.
+    - Put temporary passwords or technical detail in ticketNote only, never in
+      ticketSummary or ticketDescription.
+    - When you are unsure or a fix fails, escalate rather than guess.
+
+    ESCALATING. Whenever the goal says to open a PSA ticket, or a rule above says to
+    escalate, don't look for a ticket tool. Return these fields and a later workflow
+    step opens the ticket in the MSP's PSA:
+    - escalate: true
+    - ticketSummary: one plain line, at most 100 characters, naming the device and
+      the problem (for example "Low disk space on CONTOSO-WS-014").
+    - ticketDescription: two to four plain sentences a technician can act on: what
+      fired, what you checked, what you tried and what is left to do.
+    - ticketNote: the technical detail (alert uid, device uid, before/after numbers,
+      job ids, error text). It goes in an internal note only.
+    - ticketPriority: critical, high, medium or low (a server or a failed fix is
+      at least high).
+    - siteName and cloudradialCompanyId: the device's Datto site, and its
+      CloudRadial company id when you matched one (see MATCHING below; leave it
+      out when nothing matched).
+    When no ticket is needed, return escalate: false and leave the ticket fields
+    out. Set dryRun: true whenever this run is a preview, so the ticket step only
+    previews too.
 
     MATCHING A DATTO SITE TO A CLOUDRADIAL COMPANY. Try these in order and stop at
     the first hit. Record which one matched (siteMap, psaId or name).
@@ -93,19 +116,17 @@ agent:
     - datto-rmm
     - cloudradial-v2-companies
     - cloudradial-v2-services
-    - connectwise-manage
   requiredSecretNames: []
   variablesJson: |
     [
       {"name":"cleanupComponentUid","label":"Disk cleanup component UID (Datto RMM)","type":"string","default":"","required":false},
       {"name":"diskFreeThresholdGb","label":"Minimum free disk space (GB)","type":"number","default":5,"required":false},
       {"name":"autoRemediateServers","label":"Allow auto-remediation on servers","type":"boolean","default":false,"required":false},
-      {"name":"psaBoard","label":"PSA service board for escalations","type":"string","default":"","required":false},
       {"name":"plannerCategory","label":"Planner card category for patch reports","type":"string","default":"Security","required":false},
       {"name":"siteCompanyMap","label":"Datto site to CloudRadial company overrides (JSON: {\"site uid or name\": companyId})","type":"string","default":"{}","required":false}
     ]
   inputSchema: |
     {"type":"object","properties":{"alertUid":{"type":"string"},"deviceUid":{"type":"string"},"siteUid":{"type":"string"}}}
   outputSchema: |
-    {"type":"object","properties":{"status":{"type":"string"},"action":{"type":"string"},"deviceUid":{"type":"string"},"alertResolved":{"type":"boolean"},"ticketId":{"type":"string"},"devicesAssessed":{"type":"number"},"compliant":{"type":"number"},"pending":{"type":"number"},"failing":{"type":"number"},"noPolicy":{"type":"number"},"noData":{"type":"number"},"notPatchable":{"type":"number"},"needsAttention":{"type":"number"},"fleetCompliancePercent":{"type":"number"},"sites":{"type":"array","items":{"type":"object"}},"cardsWritten":{"type":"number"},"cardsPreviewed":{"type":"number"},"unmatchedSites":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"},"notes":{"type":"string"}}}
+    {"type":"object","properties":{"status":{"type":"string"},"action":{"type":"string"},"deviceUid":{"type":"string"},"alertUid":{"type":"string"},"alertResolved":{"type":"boolean"},"escalate":{"type":"boolean"},"ticketSummary":{"type":"string"},"ticketDescription":{"type":"string"},"ticketNote":{"type":"string"},"ticketPriority":{"type":"string","enum":["critical","high","medium","low"]},"siteName":{"type":"string"},"cloudradialCompanyId":{"type":"number"},"dryRun":{"type":"boolean"},"devicesAssessed":{"type":"number"},"compliant":{"type":"number"},"pending":{"type":"number"},"failing":{"type":"number"},"noPolicy":{"type":"number"},"noData":{"type":"number"},"notPatchable":{"type":"number"},"needsAttention":{"type":"number"},"fleetCompliancePercent":{"type":"number"},"sites":{"type":"array","items":{"type":"object"}},"cardsWritten":{"type":"number"},"cardsPreviewed":{"type":"number"},"unmatchedSites":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"},"notes":{"type":"string"}}}
   dryRunDefault: true

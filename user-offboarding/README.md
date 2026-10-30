@@ -2,16 +2,16 @@
 
 When someone leaves, their Microsoft 365 account is locked, signed out, stripped of groups and licences, and their mailbox kept as a shared mailbox, and you see every change before anything happens.
 
-**Formerly:** User offboarding | **Marketplace ID:** TBD | **Type:** Workflow
+**Formerly:** User offboarding | **Marketplace ID:** TBD | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.0.1
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with `user-offboarding.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.0.1).
 
 | What | Link |
 |---|---|
-| View `user-offboarding.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/user-offboarding/user-offboarding.yml) |
-| Download `user-offboarding.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/user-offboarding/user-offboarding.yml) |
+| Download `user-offboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.0.1) |
+| View the current source | [`user-offboarding.yml`](https://github.com/cloudradial/Automations/blob/main/user-offboarding/user-offboarding.yml) |
 | Source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/user-offboarding/src) |
 | All files in this automation | [user-offboarding](https://github.com/cloudradial/Automations/tree/main/user-offboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/user-offboarding) |
@@ -86,7 +86,7 @@ Set-Mailbox -Identity 'sam.doe@contoso.com' -ForwardingAddress 'alex.kim@contoso
 
 ## Download & import
 
-**Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/blob/main/user-offboarding/user-offboarding.yml)
+**Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.0.1)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [secrets](#required-runner-key-vault-secrets), grant the [permissions](#required-microsoft-graph-permissions), then publish and deploy. Full steps are under [Import & test](#import--test).
 
@@ -116,7 +116,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Microsoft Graph permissions
 
-Application permissions on the app registration, with admin consent:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why |
 |---|---|
@@ -140,7 +140,7 @@ Send a flat JSON body, or the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Va
 |---|---|---|
 | `upn` | required | The departing user (UPN or object id) |
 | `forward_to_manager` | `false` | Forward new mail to the user's manager |
-| `forward_to` | none | Forward to this user instead (a UPN or email address in the same tenant). Wins over `forward_to_manager`. |
+| `forward_to` | none | Forward to this user instead (a UPN or email address in the same tenant). Wins over `forward_to_manager`. Before planning the forward, the workflow checks the target has a mailbox in Exchange Online; if not, it skips forwarding and says so in the report. |
 | `keep_licenses_days` | `0` | Keep the licences for this many days. `0` removes them once the mailbox is safe. |
 | `confirm` | `false` | `false` previews and changes nothing. `true` makes the changes. |
 | `allow_admin` | `false` | Let the workflow offboard a user who holds an admin role |

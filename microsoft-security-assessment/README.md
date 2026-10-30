@@ -50,7 +50,7 @@ If Graph can't read an area (a missing permission or licence), its questions are
 
 ## Install / run
 
-1. Register an Entra app (client credentials). Give it these **application** permissions on Microsoft Graph, with admin consent:
+1. Use the Microsoft 365 app registration you already have (the one in the `M365-*` secrets), or register one (client credentials) if you have none. Add these **application** permissions on Microsoft Graph to it, with admin consent. They add to what the app already has, so leave its existing permissions in place:
    - `Policy.Read.All`
    - `AuditLog.Read.All`
    - `RoleManagement.Read.Directory` (or `Directory.Read.All`)

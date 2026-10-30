@@ -146,12 +146,30 @@ definition:
           $tok = (Invoke-RestMethod -Uri $tokUri -Method Post -ContentType 'application/x-www-form-urlencoded' -Body @{ grant_type='client_credentials'; client_id=$appId; client_secret=$appSecret; scope='https://graph.microsoft.com/.default' }).access_token
           if (-not $tok) { throw 'Could not get a Microsoft Graph token - check the app id/secret and that the app is consented in the client tenant.' }
           $gh = @{ Authorization = "Bearer $tok" }
-          $score = (Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/security/secureScores?$top=1' -Headers $gh).value | Select-Object -First 1
+          # What the token holds: the app id and its application permissions (never the token itself), so a 403 can say what is missing.
+          function Get-TokenInfo { param([string]$Jwt)
+              $info = [ordered]@{ appId = ''; roles = @() }
+              try {
+                  $p = $Jwt.Split('.')[1].Replace('-', '+').Replace('_', '/'); while ($p.Length % 4) { $p += '=' }
+                  $c = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p)) | ConvertFrom-Json
+                  $info.appId = [string](Get-Prop $c 'appid'); $info.roles = @(Get-Prop $c 'roles' | Where-Object { $_ })
+              } catch { }
+              return $info
+          }
+          try { $score = (Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/security/secureScores?$top=1' -Headers $gh).value | Select-Object -First 1 }
+          catch {
+              $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+              if ($code -ne 403 -and $code -ne 401) { throw }
+              $ti = Get-TokenInfo $tok
+              $has = if (@($ti.roles).Count) { (@($ti.roles) | Sort-Object) -join ', ' } else { 'none' }
+              $m = "Microsoft Graph refused to read Secure Score (HTTP $code). The app registration $($ti.appId) has these application permissions in tenant $($tenantId): $has. Add SecurityEvents.Read.All to it as an Application permission (not Delegated) and grant admin consent in this tenant. Its existing permissions stay as they are. Nothing was created."
+              Set-NodeOutput @{ status = 'error'; message = $m; appId = $ti.appId; grantedRoles = @($ti.roles) }; throw $m
+          }
           if (-not $score) { throw 'No Secure Score data for this tenant (is Microsoft Secure Score enabled, and does the app have SecurityEvents.Read.All?).' }
           $tenantCur = [double]$score.currentScore; $tenantMax = [double]$score.maxScore
           $lookup = @{}; foreach ($cs in @($score.controlScores)) { $lookup[[string]$cs.controlName] = $cs.score }
           $profiles = @(); $uri = 'https://graph.microsoft.com/v1.0/security/secureScoreControlProfiles'
-          while ($uri) { $r = Invoke-RestMethod -Uri $uri -Headers $gh; $profiles += @($r.value); $uri = $r.'@odata.nextLink' }
+          while ($uri) { $r = Invoke-RestMethod -Uri $uri -Headers $gh; $profiles += @($r.value); $uri = Get-Prop $r '@odata.nextLink' }
           $active = @($profiles | Where-Object { -not $_.deprecated })
           if ($active.Count -eq 0) { throw 'No active Secure Score control profiles returned.' }
 
@@ -201,13 +219,28 @@ definition:
               Set-NodeOutput ([ordered]@{ status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
           }
           else {
-              $desc = "Imported from Microsoft Secure Score on $(Get-Date -Format 'yyyy-MM-dd'). Tenant score $tenantCur / $tenantMax."
-              $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId=[int]$companyId; title=$titleFinal; category='Security'; description=$desc })
-              $aid = Get-Prop $created 'assessmentId'; if (-not $aid) { $aid = Get-Prop $created 'id' }
-              if (-not $aid) { throw 'CloudRadial did not return an assessmentId from POST /v2/assessment.' }
+              # The v2 API has no create endpoint (POST /v2/assessment returns 404). Like the portal's Import Assessment
+              # dialog, the upload creates the assessment when assessmentId is 0 (type 20 = an assessment the portal lists)
+              # and returns 204 with no body, so the new row is found afterwards by title and type.
               $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-              $data = (@{ name = $titleFinal; assessmentId = [int]$aid; type = 0; companyId = [int]$companyId } | ConvertTo-Json -Compress)
-              $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx'
+              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 20; companyId = [int]$companyId } | ConvertTo-Json -Compress)
+              # A large upload (hundreds of controls) can outlast CloudRadial's gateway, which answers 502/503/504 while
+              # the import still finishes. So a 5xx or timeout only means "look for it longer"; other errors stop the run.
+              $uploadErr = $null
+              try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
+              catch { $uploadErr = $_.Exception.Message; if ($uploadErr -notmatch 'HTTP 5\d\d|time(d)? ?out|canceled') { throw } }
+              $waits = if ($uploadErr) { @(0, 15, 30, 60, 90) } else { @(0, 3, 10) }
+              $aid = $null
+              foreach ($wait in $waits) {
+                  if ($wait) { Start-Sleep -Seconds $wait }
+                  $seen = @(); try { $seen = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { continue }
+                  $hit = @($seen | Where-Object { ([string](Get-Prop $_ 'title')) -eq $titleFinal -and [int](Get-Prop $_ 'type') -eq 20 } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending) | Select-Object -First 1
+                  if ($hit) { $aid = Get-Prop $hit 'assessmentId'; break }
+              }
+              if (-not $aid) {
+                  $m = $(if ($uploadErr) { "The upload didn't answer in time ($uploadErr) and no assessment titled '$titleFinal' appeared for companyId $companyId within about 3 minutes. It may still appear; check the company's assessments before running again (a rerun skips it once it exists)." } else { "CloudRadial accepted the upload but no assessment titled '$titleFinal' appeared for companyId $companyId. Check the company's assessments before running again." })
+                  Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+              }
               Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=[int]$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
           }
         timeoutSeconds: 600

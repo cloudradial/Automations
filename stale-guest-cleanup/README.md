@@ -1,6 +1,56 @@
 # Find and Clean Up Unused Microsoft 365 Accounts and Guests
 
-Every month, list the client's Microsoft 365 accounts and guests that haven't signed in for 90 days, and disable only the ones you approve.
+Once a month, see which of a client's Microsoft 365 accounts and guests haven't signed in for 90 days, then disable only the ones you approve.
+
+## What happens
+
+- **Once a month, a review is saved.** A plain report lists every inactive account and guest, with their last sign-in and how long they've been inactive. It goes into the client's **Account Reviews** report archive, which only admins can see. It never goes into the knowledge base.
+- **Nothing changes on its own.** The monthly run only reviews. Your team reads the report and decides.
+- **You approve, it disables.** Run it again by hand with the accounts you picked from the report. It turns off sign-in for each one and signs them out everywhere. That run is saved as its own report, so every change is on record.
+- **Optionally, a ticket note.** Give it a ticket number and it adds an internal note to that ticket with the counts, the accounts and where the report is.
+
+## What it protects
+
+- **Admins are never disabled.** Anyone with an admin role is flagged "review manually".
+- **Accounts synced from on-premises are never disabled.** They're flagged, because they have to be turned off in Active Directory.
+- **It double-checks before disabling.** An approved account is only disabled if it's still inactive on that run. Anyone who signed in since is skipped, and the report says why.
+- **New accounts are left alone.** Accounts created in the last 90 days are skipped.
+- **It stops at the first problem** and reports what didn't run.
+- **One client per run.** One client's accounts never show up in another client's report or ticket.
+- **No duplicate notes.** If a run repeats, the ticket note isn't added twice.
+
+## Works with
+
+Microsoft 365. For the optional ticket note: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
+
+- **Microsoft 365:** the tenant needs Microsoft Entra ID P1 (included in Business Premium and E3/E5) to read last sign-in times.
+- **Guests:** reviewed by default under the same rules. A guest who never accepted their invitation is listed once it's older than 90 days. You can leave guests out.
+
+## What you need
+
+- AutomationAI, with the client's Microsoft 365 connected (read access to users, sign-ins and admin roles, plus permission to disable accounts and sign them out for approval runs)
+- Your CloudRadial API connected in AutomationAI, for the report
+- Your PSA connected in AutomationAI, only if you want ticket notes
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0).
+2. In AutomationAI, go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that has this client's Microsoft 365 connection.
+4. Give the runner the client's CloudRadial company number, so the scheduled run knows where to save the report.
+5. Go to **Routines > New**, pick this workflow and a monthly schedule, for example 8am on the 1st. Add it again after any fresh import, and redeploy after every edit.
+
+Optional: change how many days count as inactive, or leave guests out.
+
+**Test it.** Run it once by hand, then check the client's Account Reviews archive for the report and that admins are flagged. Try disabling on a spare test account first.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/stale-guest-cleanup#technical-details) cover the exact rules, permissions, settings and how to test it.
+
+---
+
+## Technical details
 
 **Marketplace ID:** AAI-00064 | **Type:** Workflow (run monthly by a Routine, or by hand) | **Version:** 1.0.0
 
@@ -60,7 +110,7 @@ Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and
 
 ## Required Graph permissions
 
-Application permissions on the app registration, with admin consent in the client tenant:
+Add these application permissions to the Microsoft 365 app registration you already use (the one in the `M365-*` secrets), then grant admin consent in the client tenant. They add to what the app already has, so leave its existing permissions in place.
 
 | Permission | Why |
 |---|---|

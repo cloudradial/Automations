@@ -250,7 +250,7 @@ catch { Stop-OdsRun "Couldn't search $psaName for open Offline devices tickets, 
 $plan = New-Object System.Collections.ArrayList
 foreach ($co in $companies.Values) {
     $devs = @($co.devices | Sort-Object -Property @{ Expression = { -not $_.isServer } }, @{ Expression = { -[double]$_.hoursOffline } })
-    $item = [ordered]@{ companyId = $co.companyId; companyName = $co.companyName; sites = @($co.sites | Select-Object -Unique); sitesDown = @($co.sitesDown); devices = @($devs); recovered = @(); woke = @(); hadList = $false; action = 'none'; ticketId = ''; ticketUrl = ''; alreadyToday = $false; error = '' }
+    $item = [ordered]@{ companyId = $co.companyId; companyName = $co.companyName; sites = @($co.sites | Select-Object -Unique); sitesDown = @($co.sitesDown); devices = @($devs); recovered = @(); woke = @(); hadList = $false; newDown = $false; action = 'none'; ticketId = ''; ticketUrl = ''; alreadyToday = $false; error = '' }
     try {
         $rows = @(); if ($openBy.ContainsKey($co.companyId)) { $rows = @($openBy[$co.companyId]) }
         if (-not $rows.Count -and $searchTruncated -and $devs.Count) {
@@ -279,8 +279,15 @@ foreach ($co in $companies.Values) {
                 $why = switch ($st) { 'online' { 'is back online in Datto RMM' } 'recent' { 'checked in to Datto RMM recently' } 'suspended' { 'is suspended or deleted in Datto RMM' } default { 'is no longer in Datto RMM' } }
                 [ordered]@{ hostname = $hn; reason = $why }
             })
+        # A site that has gone down since the last note is a change even when the device list is the same: the rest of
+        # the site can drop offline under its own threshold while the ticket already lists the server. The last note
+        # says so when the site was already down; when that note is the one written at opening, the description does.
+        $lastText = $(if ($marked.Count) { ConvertTo-PsaPlainText $marked[$marked.Count - 1].text } else { "" })
+        if (-not $marked.Count -or $lastText.TrimStart().StartsWith("Offline Device Sweep opened this ticket")) { $lastText += "`n" + (ConvertTo-PsaPlainText $tk.description) }
+        $newDown = @(@($item.sitesDown) | Where-Object { $_ -and -not $lastText.Contains("The whole $($_.site) site may be down") }).Count -gt 0
+        $item.newDown = $newDown   # the wake step keeps this when it works out the change again
         # A ticket with no device list yet (opened by hand, or its list line was edited away) gets the current list once.
-        $changed = (@($devs | Where-Object { $_.isNew }).Count -gt 0) -or ($item.recovered.Count -gt 0) -or ($null -eq $prev -and $devs.Count -gt 0)
+        $changed = (@($devs | Where-Object { $_.isNew }).Count -gt 0) -or ($item.recovered.Count -gt 0) -or ($null -eq $prev -and $devs.Count -gt 0) -or $newDown
         $item.action = $(if ($item.alreadyToday) { 'unchanged' } elseif ($changed) { 'update' } else { 'unchanged' })
         $null = $plan.Add($item)
     }

@@ -391,6 +391,27 @@ $TN = @(Get-Calls 'POST' "$TCW/service/tickets/7002/notes")
 $TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
 Check 'site down on update: note has the line after its first sentence, all servers' ($TN.Count -eq 1 -and $TT -match '(?s)^Offline Device Sweep checked Fabrikam again[^\n]*\n\nThe whole Fabrikam site may be down: Datto RMM shows 2 of its 2 devices offline right now, including its only server\..*Newly offline:.*FABRIKAM-SRV01') $TT
 
+
+# ---- 12d. The site goes down after the ticket already lists its server: a note, even with no new device listed ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 30) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 6)),
+    (TDev 'FABRIKAM-PC02' 'Desktop' $false (TMs 6)), (TDev 'FABRIKAM-PC03' 'Desktop' $false (TMs 6)))
+$TS.cwOpen = @(@{ id = 7003; summary = 'Offline devices: 1 not seen for 7+ days'; initialDescription = ''; closedFlag = $false; company = @{ id = 43; name = 'Fabrikam' }; status = @{ name = 'New' } })
+$TS.cwNotes['7003'] = @([pscustomobject]@{ id = 4; text = "Offline Device Sweep checked Fabrikam again on 2026-10-01 08:00 UTC: 1 device is newly offline.`nOffline in this check: FABRIKAM-SRV01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ ignoreSites = 'Contoso, Contoso Lab, Northwind Traders' }
+$TN = @(Get-Calls 'POST' "$TCW/service/tickets/7003/notes")
+$TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
+Check 'site newly down, same list: one note with the line' ($TN.Count -eq 1 -and $TT -like '*The whole Fabrikam site may be down: Datto RMM shows 4 of its 4 devices offline right now*' -and $TT -like '*Still offline:*FABRIKAM-SRV01*' -and $TT -notlike '*Newly offline:*' -and $f.r.out.counts.ticketsUpdated -eq 1) "$($f.r.error) $TT"
+
+# ---- 12e. The last note already says the site is down and nothing else changed: no note ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 30) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 6)),
+    (TDev 'FABRIKAM-PC02' 'Desktop' $false (TMs 6)), (TDev 'FABRIKAM-PC03' 'Desktop' $false (TMs 6)))
+$TS.cwOpen = @(@{ id = 7004; summary = 'Offline devices: 1 not seen for 7+ days'; initialDescription = "Offline Device Sweep found 1 device at Fabrikam.`n`nThe whole Fabrikam site may be down: Datto RMM shows 4 of its 4 devices offline right now, including its only server.`n`nOffline in this check: FABRIKAM-SRV01."; closedFlag = $false; company = @{ id = 43; name = 'Fabrikam' }; status = @{ name = 'New' } })
+$TS.cwNotes['7004'] = @([pscustomobject]@{ id = 5; text = "Offline Device Sweep opened this ticket on 2026-10-01 08:00 UTC for 1 device that Datto RMM has not seen recently.`nOffline in this check: FABRIKAM-SRV01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ ignoreSites = 'Contoso, Contoso Lab, Northwind Traders' }
+Check 'site already noted as down at opening: no note' (@(Get-Calls 'POST' "$TCW/service/tickets/7004/notes").Count -eq 0 -and $f.r.out.counts.ticketsUnchanged -eq 1) "$($f.r.error) $($f.r.out.counts | ConvertTo-Json -Compress)"
+
 # ---- 13. Wake-on-LAN off (the default): the wake step hands on what it got and calls nothing ----
 Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
 $f = Invoke-Flow @{ ignoreSites = 'Contoso Lab, Northwind Traders' }
@@ -448,6 +469,20 @@ $f = Invoke-Flow @{ wake = $true; ignoreSites = 'Contoso Lab, Northwind Traders'
 $TN = @(Get-Calls 'POST' "$TCW/service/tickets/7001/notes")
 $TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
 Check 'wake on an open ticket: one note, PC01 recovered after the wake-up' ($TN.Count -eq 1 -and $TT -like '*- CONTOSO-PC01 came back online after a wake-up sent from CONTOSO-PC03.*' -and $TT -like '*Offline in this check: CONTOSO-SRV01, CONTOSO-LT06.*' -and (Get-Row $f.r.out 'Contoso').action -eq 'updated') "$($f.r.error) $TT"
+
+# ---- 15e. A site newly down still gets its note when the only new device at the company's other site woke ----
+Reset-Mock (Get-TSecrets 'connectwise') $Handler; Reset-Scenario
+$TS.devices['s-fab'] = @((TDev 'FABRIKAM-SRV01' 'Server' $false (TMs 30) 'Windows Server 2022'), (TDev 'FABRIKAM-PC01' 'Desktop' $false (TMs 6)),
+    (TDev 'FABRIKAM-PC02' 'Desktop' $false (TMs 6)), (TDev 'FABRIKAM-PC03' 'Desktop' $false (TMs 6)))
+$TS.devices['s-lab'] = @((TDev 'CONTOSO-LAB01' 'Desktop' $false (TMs 240)), (TDev 'CONTOSO-LAB02' 'Desktop' $true (TMs 0.1)))
+$TS.nics['uid-CONTOSO-LAB01'] = @(@{ macAddress = '00-11-22-1A-B0-01'; ipv4 = '10.7.0.11' }); $TS.nics['uid-CONTOSO-LAB02'] = @(@{ macAddress = '00-11-22-1A-B0-02'; ipv4 = '10.7.0.12' })
+$TS.wakeBack = @('CONTOSO-LAB01')
+$TS.cwOpen = @(@{ id = 7003; summary = 'Offline devices: 1 not seen for 7+ days'; initialDescription = ''; closedFlag = $false; company = @{ id = 43; name = 'Fabrikam' }; status = @{ name = 'New' } })
+$TS.cwNotes['7003'] = @([pscustomobject]@{ id = 4; text = "Offline Device Sweep checked Fabrikam again on 2026-10-01 08:00 UTC: 1 device is newly offline.`nOffline in this check: FABRIKAM-SRV01.`n[offline-device-sweep: 2026-10-01]"; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false; dateCreated = '2026-10-01T08:00:00Z' })
+$f = Invoke-Flow @{ wake = $true; companyMap = '{"Contoso Lab": "Fabrikam"}'; ignoreSites = 'Contoso, Northwind Traders' }
+$TN = @(Get-Calls 'POST' "$TCW/service/tickets/7003/notes")
+$TT = $(if ($TN.Count) { [string](Read-Body $TN[0]).text } else { '' })
+Check 'wake and a newly down site: the woken desktop is dropped, the site-down note is still written' ($f.r.out.counts.wokeUp -eq 1 -and $TN.Count -eq 1 -and $TT -like '*The whole Fabrikam site may be down*' -and $TT -notlike '*CONTOSO-LAB01*') "$($f.r.error) $TT"
 
 # ---- 16. Wake gates ----
 # Rerun the same day: the company was already noted today, so nothing is sent twice.

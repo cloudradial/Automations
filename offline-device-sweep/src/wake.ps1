@@ -141,7 +141,7 @@ foreach ($p in $plan) {
     }
     # On an open ticket a desktop that was on its last list has recovered; one that was newly offline never reached it.
     foreach ($g in @($gone | Where-Object { -not [bool]$_.isNew })) { $p.recovered = @($p.recovered) + @([ordered]@{ hostname = [string]$g.hostname; reason = $why[([string]$g.hostname).ToLowerInvariant()] }) }
-    $changed = (@($p.devices | Where-Object { [bool]$_.isNew }).Count -gt 0) -or (@($p.recovered).Count -gt 0) -or (-not [bool]$p.hadList -and @($p.devices).Count -gt 0)
+    $changed = (@($p.devices | Where-Object { [bool]$_.isNew }).Count -gt 0) -or (@($p.recovered).Count -gt 0) -or (-not [bool]$p.hadList -and @($p.devices).Count -gt 0) -or [bool]$p.newDown
     $p.action = $(if ($changed) { 'update' } else { 'unchanged' })
 }
 Complete-OdsWake

@@ -1,17 +1,72 @@
 # Ticket Devices That Have Dropped Off the RMM
 
-Once a day, every managed device that Datto RMM hasn't seen for too long lands on one PSA ticket per client, servers first, with a suggested first step for each device. A level 1 tech no longer has to sweep the RMM by hand.
+Once a day, every managed device that Datto RMM hasn't seen for too long lands on one PSA ticket per client, servers first, with a suggested first step for each device. Nobody has to sweep the RMM by hand, and a retired laptop or a dead server stops going unnoticed.
 
-**Formerly:** Offline Device Sweep (tracker 3.3) | **Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
+## What happens
 
-## Files (always the latest version)
+**Once a day, in the background.** The automation checks every client site in Datto RMM and picks out devices that have been offline too long: 7 days for workstations and laptops, 4 hours for servers.
 
-These links point at the `main` branch, so they always open the current version.
+**Each client gets one ticket.** Your team sees a ticket per client listing the offline devices, with servers at the top. Each device shows when it was last seen and what to try first: check power and network, ask the client whether it was retired, or remove it from the RMM.
+
+**Servers get attention sooner.** A ticket with a server on it opens at high priority.
+
+**It spots a whole site going down.** If most devices at a site drop off at once, including its servers, the ticket starts with a line telling the tech to check the site's power, internet and firewall first.
+
+**The ticket stays up to date.** Later runs add a short note when something new goes offline or comes back, instead of opening another ticket. When everything is back, the note asks the tech to close the ticket.
+
+## What it protects
+
+- **No duplicate tickets.** One open ticket per client, and running it again the same day writes nothing new.
+- **No guessing.** A Datto site is only ticketed to a PSA client with the same name, or one you map it to. Anything else is listed in the run summary for you to sort out.
+- **Datto RMM is never changed.** The automation only reads from it.
+- **No noise.** Phones, printers and network gear are left out unless you ask for them, and Datto's own placeholder sites are skipped.
+
+## Works with
+
+Datto RMM, plus ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+
+- **Proven live:** Datto RMM with ConnectWise PSA. The other five PSAs pass the same tests but haven't run against a real account yet, so start with a preview run (step 4 below).
+- **Other RMMs:** not supported yet.
+
+## What you need
+
+- AutomationAI, with your PSA connected on your runner
+- A Datto RMM API user that can view all sites and devices (read-only is enough)
+- A PSA login for the automation that can read companies, create tickets and add internal notes
+
+## Set it up
+
+**In AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/offline-device-sweep/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your Datto RMM API details to the runner, next to your PSA connection, then click **Publish** and **Deploy** to that runner.
+4. **Preview first.** Open **Test** and run it with preview turned on (the first step's test input already does this). It lists which devices would be ticketed for each client, and any sites it couldn't match, and changes nothing.
+5. **Match any odd site names.** If a Datto site is named differently from the client in your PSA, add it to the site map setting and preview again.
+6. **Schedule it.** Attach a daily **Routine**, early in the morning before your service desk starts.
+
+**Optional settings.** You can change how long a workstation or server must be offline, include phones, printers or network devices, leave out sites you don't want checked, pick the ticket priorities, and choose the board or queue new tickets go to.
+
+**Test it.** Run it live, open one of the new tickets in your PSA and check the device list, then run it again straight away and confirm nothing new was written.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/offline-device-sweep#technical-details) cover how devices are picked, the site-down check, every setting and its default, the secrets and permissions, and what has been proven live.
+
+---
+
+## Technical details
+
+**Formerly:** Offline Device Sweep (tracker 3.3) | **Marketplace ID:** AAI-00066 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
+
+## Files
+
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/offline-device-sweep/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `offline-device-sweep.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/offline-device-sweep/offline-device-sweep.yml) |
-| Download `offline-device-sweep.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/offline-device-sweep/offline-device-sweep.yml) |
+| Download `offline-device-sweep.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/offline-device-sweep/v1.0.0) |
 | All files in this automation | [offline-device-sweep](https://github.com/cloudradial/Automations/tree/main/offline-device-sweep) |
 | Build source (`src/`) | [offline-device-sweep/src](https://github.com/cloudradial/Automations/tree/main/offline-device-sweep/src) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/offline-device-sweep) |
@@ -46,7 +101,7 @@ Each device line gives the hostname, type, OS, when it was last seen (date, and 
 
 ## Download & import
 
-**Download the workflow:** [`offline-device-sweep.yml`](https://raw.githubusercontent.com/cloudradial/Automations/main/offline-device-sweep/offline-device-sweep.yml)
+**Download the workflow:** [`offline-device-sweep.yml`](https://github.com/cloudradial/Automations/releases/tag/offline-device-sweep/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), **Publish**, **Deploy** to the runner that holds the secrets, and attach a daily **Routine** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

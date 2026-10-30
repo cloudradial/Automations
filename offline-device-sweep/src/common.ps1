@@ -67,7 +67,8 @@ function Format-OdsDevice {
     $what = @(@($d.typeLabel, $d.os) | Where-Object { $_ }) -join ', '
     $seen = $(if ($d.lastSeenText) { "last seen $($d.lastSeenText), $(Format-OdsAgo ([double]$d.hoursOffline))" } else { 'last seen date unknown' })
     $where = $(if ($d.siteName) { " Datto site: $($d.siteName)." } else { '' })
-    return "- $($d.hostname)$(if ($what) { " ($what)" }): $seen. Suggested first step: $(Get-OdsFirstStep $d)$where"
+    $woken = [string](Get-PsaProp $d 'wakeNote')
+    return "- $($d.hostname)$(if ($what) { " ($what)" }): $seen. Suggested first step: $(Get-OdsFirstStep $d)$where$(if ($woken) { " $woken" })"
 }
 
 # Ticket summary, for example "Offline devices: 3 not seen for 7+ days".
@@ -115,6 +116,8 @@ function Get-OdsDescription {
     $lines = @("Offline Device Sweep found $(Get-OdsPlural $devs.Count 'device' 'devices') at $($Item.companyName) that Datto RMM has not seen for a while. Please check each one and update this ticket.", '')
     $lines += Get-OdsSiteDownLines $Item
     $lines += Get-OdsDeviceBlock $devs $Settings
+    $back = @(@(Get-PsaProp $Item 'woke') | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.hostname })
+    if ($back.Count) { $lines += ''; $lines += "Came back online after a wake-up, so not listed: $($back -join ', ')." }
     $lines += ''
     $lines += "Checked on $($Settings.checkedText). Datto RMM $(if (@($Item.sites).Count -eq 1) { 'site' } else { 'sites' }): $(@($Item.sites) -join ', ')."
     $lines += Get-OdsListLine @($devs | ForEach-Object { $_.hostname })

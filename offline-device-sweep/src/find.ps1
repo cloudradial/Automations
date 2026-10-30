@@ -3,7 +3,8 @@
 # its devices, keeps the devices that have been offline longer than the threshold for their category, matches
 # each site to a PSA company, and finds this workflow's open ticket for each company. It also counts the online
 # devices at each site, to flag a site that may be down as a whole. Changes nothing in
-# Datto RMM or the PSA. The next step opens or updates the tickets (or, in a preview, only lists them).
+# Datto RMM or the PSA. The wake step may then try a Wake-on-LAN (only with wake: true), and the last step
+# opens or updates the tickets (or, in a preview, only lists them).
 $ErrorActionPreference = 'Stop'
 
 $raw = Get-NodeInput
@@ -92,6 +93,11 @@ try {
             $settings.companyMap[([string]$kv.Key).Trim().ToLowerInvariant()] = $mv
         }
     }
+    # Wake-on-LAN before ticketing (the next step). Off unless asked for; see that step for the gates.
+    $settings.wake = ConvertTo-OdsBool (Get-OdsInput @('wake', 'wakeBeforeTicket', 'wake_before_ticket') $false) 'wake'
+    $settings.wakeComponent = [string](Get-OdsInput @('wakeComponent', 'wake_component') 'Wake-on-LAN')
+    $settings.wakeWaitMinutes = ConvertTo-OdsInt (Get-OdsInput @('wakeWaitMinutes', 'wake_wait_minutes') 5) 'wakeWaitMinutes' 1 10
+    $settings.wakeMax = ConvertTo-OdsInt (Get-OdsInput @('wakeMax', 'wake_max') 20) 'wakeMax' 1 50
     $psaType = Get-PsaType ([string](Get-OdsInput @('psa') ''))
     if (-not $psaType) { throw 'No PSA is set up. Add the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro or zendesk) to the runner Key Vault.' }
     $settings.psa = $psaType
@@ -137,6 +143,7 @@ foreach ($s in $sites) {
     $offline = New-Object System.Collections.ArrayList
     $seen = @{}   # hostname (lower) -> online, recent, suspended
     $tally = @{ checked = 0; online = 0; servers = 0; serversOffline = 0 }
+    $peers = New-Object System.Collections.ArrayList   # online Windows desktops and laptops, for the wake step
     foreach ($d in $devices) {
         $host0 = ([string](Get-DattoProp $d 'hostname')).Trim()
         if (-not $host0) { $host0 = [string](Get-DattoProp $d 'uid') }
@@ -145,6 +152,10 @@ foreach ($s in $sites) {
         if ((Get-DattoProp $d 'suspended') -eq $true -or (Get-DattoProp $d 'deleted') -eq $true) { $counts.suspendedOrDeleted++; $seen[$hk] = 'suspended'; continue }
         $cat = Get-DattoDeviceCategory $d
         if (-not $cat.key) { $counts.noDeviceType++; continue }
+        # A wake is only ever sent from a client's desktop or laptop, never from a server.
+        if ($settings.wake -and (Get-DattoProp $d 'online') -eq $true -and $cat.key -in @('workstations', 'laptops') -and ([string](Get-DattoProp $d 'operatingSystem')) -match '(?i)windows') {
+            $null = $peers.Add(@{ uid = [string](Get-DattoProp $d 'uid'); hostname = $host0 })
+        }
         if ($wanted -notcontains $cat.key) { continue }
         $counts.devicesChecked++
         $tally.checked++
@@ -161,9 +172,9 @@ foreach ($s in $sites) {
         if ($isServer) { $tally.serversOffline++ }
         $null = $offline.Add(@{
                 uid = [string](Get-DattoProp $d 'uid'); hostname = $host0; category = $cat.key; typeLabel = $cat.label; isServer = $isServer
-                os = ([string](Get-DattoProp $d 'operatingSystem')).Trim(); siteName = $sName
+                os = ([string](Get-DattoProp $d 'operatingSystem')).Trim(); siteName = $sName; siteUid = $sUid
                 lastSeenText = $last.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) + ' UTC'
-                hoursOffline = [Math]::Round($hours, 1); isNew = $true
+                hoursOffline = [Math]::Round($hours, 1); isNew = $true; wakeNote = ''
             })
     }
     $counts.offline += $offline.Count
@@ -175,7 +186,12 @@ foreach ($s in $sites) {
         $down = [ordered]@{ site = $sName; checked = $tally.checked; offline = $offNow; servers = $tally.servers }
         $counts.sitesDown++
     }
-    $null = $siteRows.Add(@{ uid = $sUid; name = $sName; offline = @($offline); seen = $seen; online = $tally.online; checked = $tally.checked; down = $down })
+    $null = $siteRows.Add(@{ uid = $sUid; name = $sName; offline = @($offline); seen = $seen; online = $tally.online; checked = $tally.checked; down = $down; peers = @($peers) })
+}
+# What the wake step needs per site: its online peers, and whether the site looks down (then no wake is sent).
+$odsOut.wakeSites = @()
+if ($settings.wake) {
+    $odsOut.wakeSites = @($siteRows | Where-Object { @($_.offline).Count } | ForEach-Object { [ordered]@{ siteUid = $_.uid; siteName = $_.name; down = ($null -ne $_.down); peers = @($_.peers) } })
 }
 if ($counts.noDeviceType) { $null = $warnings.Add("$(Get-OdsPlural $counts.noDeviceType 'device had' 'devices had') no device type in Datto RMM, so they were not checked.") }
 if ($counts.noLastSeen) { $null = $warnings.Add("$(Get-OdsPlural $counts.noLastSeen 'offline device has' 'offline devices have') no last seen date in Datto RMM, so they were not ticketed.") }
@@ -234,7 +250,7 @@ catch { Stop-OdsRun "Couldn't search $psaName for open Offline devices tickets, 
 $plan = New-Object System.Collections.ArrayList
 foreach ($co in $companies.Values) {
     $devs = @($co.devices | Sort-Object -Property @{ Expression = { -not $_.isServer } }, @{ Expression = { -[double]$_.hoursOffline } })
-    $item = [ordered]@{ companyId = $co.companyId; companyName = $co.companyName; sites = @($co.sites | Select-Object -Unique); sitesDown = @($co.sitesDown); devices = @($devs); recovered = @(); action = 'none'; ticketId = ''; ticketUrl = ''; alreadyToday = $false; error = '' }
+    $item = [ordered]@{ companyId = $co.companyId; companyName = $co.companyName; sites = @($co.sites | Select-Object -Unique); sitesDown = @($co.sitesDown); devices = @($devs); recovered = @(); woke = @(); hadList = $false; action = 'none'; ticketId = ''; ticketUrl = ''; alreadyToday = $false; error = '' }
     try {
         $rows = @(); if ($openBy.ContainsKey($co.companyId)) { $rows = @($openBy[$co.companyId]) }
         if (-not $rows.Count -and $searchTruncated -and $devs.Count) {
@@ -253,6 +269,7 @@ foreach ($co in $companies.Values) {
         $prev = $null
         for ($i = $marked.Count - 1; $i -ge 0 -and $null -eq $prev; $i--) { $prev = Get-OdsListedHosts $marked[$i].text }
         if ($null -eq $prev) { $prev = Get-OdsListedHosts $tk.description }
+        $item.hadList = ($null -ne $prev)
         $prevKeys = @(@($prev) | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
         $nowKeys = @($devs | ForEach-Object { $_.hostname.ToLowerInvariant() })
         foreach ($d in $devs) { $d.isNew = ($null -ne $prev -and $prevKeys -notcontains $d.hostname.ToLowerInvariant()) }

@@ -1,15 +1,16 @@
-# === Step 2: Open or update tickets ===
+# === Step 3: Open or update tickets ===
 # For each company the first step found: opens one ticket listing its offline devices (servers first, at the
 # higher priority), or adds an internal note to this workflow's open ticket when the list changed (newly offline
-# and recovered devices). A preview writes nothing and returns what would be ticketed. Returns the run summary.
+# and recovered devices). Desktops that came back after the wake step are left off. A preview writes nothing
+# and returns what would be ticketed. Returns the run summary.
 $ErrorActionPreference = 'Stop'
 
 $in = Get-NodeInput
 if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { $in = $null } }
 $out = [ordered]@{
     status = 'error'; message = ''; preview = $false; internal_note = ''; public_note = ''; ticket_id = ''
-    counts = [ordered]@{ sites = 0; devicesChecked = 0; offline = 0; sitesDown = 0; ticketsCreated = 0; ticketsUpdated = 0; ticketsUnchanged = 0; wouldCreate = 0; wouldUpdate = 0; unmatchedSites = 0; failed = 0 }
-    companies = @(); unmatchedSites = @(); warnings = @()
+    counts = [ordered]@{ sites = 0; devicesChecked = 0; offline = 0; sitesDown = 0; ticketsCreated = 0; ticketsUpdated = 0; ticketsUnchanged = 0; wouldCreate = 0; wouldUpdate = 0; unmatchedSites = 0; failed = 0; wakeSent = 0; wokeUp = 0; wouldWake = 0 }
+    companies = @(); unmatchedSites = @(); warnings = @(); wake = $null
 }
 $s0 = Get-PsaProp $in 'settings'
 if ($null -eq $s0 -or $null -eq (Get-PsaProp $in 'counts') -or [string](Get-PsaProp $in 'status') -ne 'success') {
@@ -27,6 +28,11 @@ $out.preview = $settings.preview
 $out.unmatchedSites = @(Get-PsaProp $in 'unmatchedSites' | Where-Object { $null -ne $_ })
 $warnings = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
 $plan = @(ConvertTo-OdsList (Get-PsaProp $in 'plan'))
+$wk = Get-PsaProp $in 'wake'
+if ($null -ne $wk) {
+    $out.wake = $wk
+    $out.counts.wakeSent = [int](Get-PsaProp $wk 'sent'); $out.counts.wokeUp = [int](Get-PsaProp $wk 'cameBack'); $out.counts.wouldWake = [int](Get-PsaProp $wk 'wouldWake')
+}
 
 try { $null = Connect-Psa ([string]$settings.psa) }
 catch { $out.message = [string]$_.Exception.Message; $out.warnings = @($warnings); Set-NodeOutput $out; throw $out.message }
@@ -41,6 +47,7 @@ foreach ($p in $plan) {
         sitesDown = @(@($p.sitesDown) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.site })
         action = [string]$p.action; ticketId = [string]$p.ticketId; ticketUrl = [string]$p.ticketUrl
         devices = @($devs | ForEach-Object { [string]$_.hostname }); recovered = @(@($p.recovered) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.hostname })
+        wokeUp = @(@($p.woke) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.hostname })
         summary = ''; text = ''; error = [string]$p.error
     }
     $label = "$($row.company)$(if ($row.ticketId) { " (ticket #$($row.ticketId))" })"
@@ -69,6 +76,7 @@ foreach ($p in $plan) {
                 $null = $lines.Add("${label}: added a note, $(Get-OdsPlural $devs.Count 'device' 'devices') offline and $(Get-OdsPlural $row.recovered.Count 'recovered' 'recovered').")
             }
             'unchanged' { $out.counts.ticketsUnchanged++; $null = $lines.Add("${label}: nothing changed since the last note.") }
+            'woke' { $null = $lines.Add("$($row.company): no ticket opened, because $($row.wokeUp -join ', ') came back online after a wake-up.") }
             'failed' { $out.counts.failed++; $null = $lines.Add("${label}: not checked. $($row.error)") }
             default { }
         }
@@ -96,6 +104,11 @@ else {
     $out.message = "Checked $(Get-OdsPlural $cn.devicesChecked 'device' 'devices') across $(Get-OdsPlural $cn.sites 'Datto RMM site' 'Datto RMM sites') and found $(Get-OdsPlural $cn.offline 'offline device' 'offline devices'). Opened $(Get-OdsPlural $cn.ticketsCreated 'ticket' 'tickets') and updated $(Get-OdsPlural $cn.ticketsUpdated 'ticket' 'tickets')$(if ($cn.failed) { "; $(Get-OdsPlural $cn.failed 'company' 'companies') failed" })."
 }
 if ($cn.unmatchedSites) { $out.message += " $(Get-OdsPlural $cn.unmatchedSites 'site has' 'sites have') no PSA company match (see warnings)." }
+if ($null -ne $wk) {
+    $nSkip = @(Get-PsaProp $wk 'skipped' | Where-Object { $null -ne $_ }).Count
+    $out.message += $(if ($settings.preview) { " Would send $(Get-OdsPlural $cn.wouldWake 'wake-up' 'wake-ups') first" } else { " Sent $(Get-OdsPlural $cn.wakeSent 'wake-up' 'wake-ups') first; $($cn.wokeUp) came back online" })
+    $out.message += $(if ($nSkip) { " ($nSkip offline $(if ($nSkip -eq 1) { 'desktop' } else { 'desktops' }) skipped, see each ticket)." } else { '.' })
+}
 $note = @("Offline Device Sweep: $($out.message)")
 if ($lines.Count) { $note += ''; $note += @($lines) }
 if ($out.warnings.Count) { $note += ''; $note += 'Warnings:'; $note += @($out.warnings | ForEach-Object { "- $_" }) }

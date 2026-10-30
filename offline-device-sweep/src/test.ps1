@@ -230,6 +230,7 @@ $TContoso = @($TBodies | Where-Object { $_.company.id -eq 42 })
 $TFab = @($TBodies | Where-Object { $_.company.id -eq 43 })
 Check 'companyMap: Contoso Lab (by name) joins the Contoso ticket' ($TContoso.Count -eq 1 -and $TContoso[0].initialDescription -like '*CONTOSO-LAB01*' -and $TContoso[0].initialDescription -like '*Datto RMM sites: Contoso, Contoso Lab.*') (Show-Calls)
 Check 'companyMap: Northwind (by site uid, to a company name) goes to Fabrikam' ($TFab.Count -eq 1 -and $TFab[0].initialDescription -like '*NORTHWIND-PC01*' -and $TFab[0].summary -eq 'Offline devices: 1 not seen for 7+ days' -and $TFab[0].impact -eq 'Medium') ($TFab | ConvertTo-Json -Depth 4)
+Check 'no servers: the device line does not say "other"' ($TFab.Count -eq 1 -and $TFab[0].initialDescription -like '*1 device has not been seen for 7 days or more:*' -and $TFab[0].initialDescription -notlike '*other device*') ($TFab | ConvertTo-Json -Depth 4)
 Check 'companyMap: the mapped name was looked up once, Contoso Lab never searched by its own name' (@(Get-Calls 'GET' "$TCW/company/companies?*" | Where-Object { [uri]::UnescapeDataString($_.Uri) -like '*Contoso Lab*' }).Count -eq 0 -and $o.counts.unmatchedSites -eq 0) (Show-Calls)
 
 # ---- 4. Existing ticket: an internal note with newly offline and recovered devices ----

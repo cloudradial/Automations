@@ -55,7 +55,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Turn a Microsoft 365 Security Review into a Client Assessment | Workflow (PowerShell, no AI) | Not listed |
 | [`new-client-onboarding/`](new-client-onboarding/) | Onboard a New Client in CloudRadial, the PSA and Microsoft 365 | Workflow (run by hand, MSP-wide) | Not listed |
 | [`new-user-onboarding/`](new-user-onboarding/) | Get New Hires Ready for Day One | Agent + Workflow | [AAI-00040](https://automations.cloudradial.com/marketplace/AAI-00040) |
-| [`offline-device-sweep/`](offline-device-sweep/) | Ticket Devices That Have Dropped Off the RMM | Workflow (PowerShell, no AI, runs on a schedule) | [AAI-00066](https://automations.cloudradial.com/marketplace/AAI-00066) |
+| [`offline-device-sweep/`](offline-device-sweep/) | Ticket Devices That Have Dropped Off the RMM | Workflow (PowerShell, no AI, runs on a schedule) | Not listed |
 | [`onboard-users-to-portal/`](onboard-users-to-portal/) | Onboard Many Portal Users at Once | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00006](https://automations.cloudradial.com/marketplace/AAI-00006) |
 | [`outage-broadcast/`](outage-broadcast/) | Tell Every Affected Client About an Outage in One Step | Workflow (PowerShell steps, no AI) | [AAI-00061](https://automations.cloudradial.com/marketplace/AAI-00061) |
 | [`password-expiry-reminder/`](password-expiry-reminder/) | Remind People Before Their Microsoft 365 Password Expires | Workflow (PowerShell, no AI, runs on a schedule) | Not listed |

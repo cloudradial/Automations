@@ -8,7 +8,7 @@ $in = Get-NodeInput
 if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { $in = $null } }
 $out = [ordered]@{
     status = 'error'; message = ''; preview = $false; internal_note = ''; public_note = ''; ticket_id = ''
-    counts = [ordered]@{ sites = 0; devicesChecked = 0; offline = 0; ticketsCreated = 0; ticketsUpdated = 0; ticketsUnchanged = 0; wouldCreate = 0; wouldUpdate = 0; unmatchedSites = 0; failed = 0 }
+    counts = [ordered]@{ sites = 0; devicesChecked = 0; offline = 0; sitesDown = 0; ticketsCreated = 0; ticketsUpdated = 0; ticketsUnchanged = 0; wouldCreate = 0; wouldUpdate = 0; unmatchedSites = 0; failed = 0 }
     companies = @(); unmatchedSites = @(); warnings = @()
 }
 $s0 = Get-PsaProp $in 'settings'
@@ -22,7 +22,7 @@ $settings.preview = [bool]$settings.preview
 # The runner's JSON hand-off can turn date text into a [datetime]; the day marker needs yyyy-MM-dd text.
 if ($settings.today -is [datetime]) { $settings.today = $settings.today.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
 $c1 = ConvertTo-OdsHash (Get-PsaProp $in 'counts')
-foreach ($k in @('sites', 'devicesChecked', 'offline', 'unmatchedSites')) { if ($c1.ContainsKey($k)) { $out.counts[$k] = [int]$c1[$k] } }
+foreach ($k in @('sites', 'devicesChecked', 'offline', 'sitesDown', 'unmatchedSites')) { if ($c1.ContainsKey($k)) { $out.counts[$k] = [int]$c1[$k] } }
 $out.preview = $settings.preview
 $out.unmatchedSites = @(Get-PsaProp $in 'unmatchedSites' | Where-Object { $null -ne $_ })
 $warnings = @(Get-PsaProp $in 'warnings' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
@@ -38,6 +38,7 @@ foreach ($p in $plan) {
     $servers = @($devs | Where-Object { $_.isServer }).Count
     $row = [ordered]@{
         company = [string]$p.companyName; companyId = [string]$p.companyId; sites = @($p.sites); offline = $devs.Count; servers = $servers
+        sitesDown = @(@($p.sitesDown) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.site })
         action = [string]$p.action; ticketId = [string]$p.ticketId; ticketUrl = [string]$p.ticketUrl
         devices = @($devs | ForEach-Object { [string]$_.hostname }); recovered = @(@($p.recovered) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.hostname })
         summary = ''; text = ''; error = [string]$p.error
@@ -75,6 +76,9 @@ foreach ($p in $plan) {
     catch {
         $row.action = 'failed'; $row.error = [string]$_.Exception.Message; $out.counts.failed++
         $null = $lines.Add("${label}: failed. $($row.error)")
+    }
+    if ($row.sitesDown.Count -and $row.action -in @('created', 'updated', 'would create', 'would update')) {
+        $null = $lines.Add("$($row.company): the whole Datto RMM $(if ($row.sitesDown.Count -eq 1) { 'site' } else { 'sites' }) $($row.sitesDown -join ', ') may be down (power, internet or firewall).")
     }
     $null = $rows.Add($row)
 }

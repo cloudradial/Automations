@@ -28,12 +28,15 @@ A Routine runs the workflow once a day. It reads Datto RMM and works in ConnectW
    - signs in to Datto RMM and reads every site, then every device at each site (all pages);
    - skips Datto's placeholder sites (`Deleted Devices`, `Managed`, `OnDemand`) unless `companyMap` names them, any site in `ignoreSites`, and suspended or deleted devices;
    - keeps a device when Datto says it is offline and it was last seen longer ago than the threshold for its category: `offlineDays` (7) for workstations and laptops, `serverOfflineHours` (4) for servers. Mobile devices, printers and network devices are skipped unless `includeCategories` asks for them;
+   - counts the online devices at each site, to spot a site that may be down as a whole. A site counts as down when it has at least two checked devices, every server there is past `serverOfflineHours`, and at least three in four of its checked devices are offline right now (even those still under their own threshold);
    - matches each site to a PSA company: the `companyMap` entry first, otherwise exactly one PSA company with exactly the site's name. A site with no match, or with two companies of the same name, is never ticketed to a guess. It is listed in `unmatchedSites` and in the warnings. Several sites that map to one company share one ticket;
    - looks for this workflow's open ticket for each company (an open ticket whose summary starts with `Offline devices:`) and reads its notes to see which devices were offline last time.
 2. **Open or update tickets** acts on what step 1 found:
    - **No open ticket and something offline:** opens one ticket for the company, with summary such as `Offline devices: 3 not seen for 7+ days`. Servers get their own line at the top, and a ticket with a server in it opens at `serverPriority` (high); otherwise at `priority` (medium). An internal note with the marker follows.
    - **An open ticket and the list changed:** adds one internal note saying what is newly offline, what is still offline, and what recovered (back online, checked in recently, suspended, or no longer in Datto RMM). When everything recovered, the note says so and asks the tech to close the ticket. A newly offline server is called out so the tech can raise the priority.
    - **An open ticket and nothing changed:** writes nothing, so the ticket doesn't fill up with the same list every day.
+
+**When a whole site may be down.** If a site looks down, the ticket (or the update note) starts with one line before the device list, for example `The whole Contoso site may be down: Datto RMM shows 9 of its 10 devices offline right now, including its only server.` It asks the tech to check the site's power, internet connection and firewall before working through the devices one by one. The number counts every offline device at the site, so it can be higher than the list below it, which only shows devices past their threshold. A site with no server checked, or a single device, never gets this line.
 
 Each device line gives the hostname, type, OS, when it was last seen (date, and hours or days ago), and a suggested first step: check power and network (servers, and devices offline under 30 days), confirm with the client whether it has been decommissioned (30 to 90 days), or confirm and remove it from Datto RMM if it looks retired (90 days or more).
 
@@ -75,8 +78,8 @@ Bad input fails closed: the run stops with a plain sentence before anything is r
 | `status` | `success`, `incomplete` when any company failed, `pending_confirmation` for a preview with tickets to open or update, or `error` |
 | `message` | One plain sentence |
 | `preview` | Whether this was a preview |
-| `counts` | `sites`, `devicesChecked`, `offline`, `ticketsCreated`, `ticketsUpdated`, `ticketsUnchanged`, `wouldCreate`, `wouldUpdate` (preview), `unmatchedSites`, `failed` |
-| `companies` | One row per company: `company`, `companyId`, `sites`, `offline`, `servers`, `action` (`created`, `updated`, `unchanged`, `would create`, `would update`, `failed`), `ticketId`, `ticketUrl`, `devices`, `recovered`, `summary`, `text` (the ticket body or note), `error` |
+| `counts` | `sites`, `devicesChecked`, `offline`, `sitesDown`, `ticketsCreated`, `ticketsUpdated`, `ticketsUnchanged`, `wouldCreate`, `wouldUpdate` (preview), `unmatchedSites`, `failed` |
+| `companies` | One row per company: `company`, `companyId`, `sites`, `offline`, `servers`, `sitesDown` (Datto sites that look down), `action` (`created`, `updated`, `unchanged`, `would create`, `would update`, `failed`), `ticketId`, `ticketUrl`, `devices`, `recovered`, `summary`, `text` (the ticket body or note), `error` |
 | `unmatchedSites` | Each Datto site with no PSA company match: `site`, `offline`, `reason` |
 | `warnings` | Plain sentences: unmatched sites with offline devices, devices with no type or last seen date, duplicate open tickets, anything the PSA library warned about |
 | `internal_note` | The run summary, one line per company, then the warnings |
@@ -117,7 +120,7 @@ The two PowerShell steps are generated. Edit the files in `src/`, never the scri
 
 | File | What it is |
 |---|---|
-| `src/find.ps1` | Step 1: input, Datto read, thresholds, company match, open-ticket lookup |
+| `src/find.ps1` | Step 1: input, Datto read, thresholds, site-down check, company match, open-ticket lookup |
 | `src/ticket.ps1` | Step 2: open or update tickets, preview, run summary |
 | `src/common.ps1` | Marker, ticket and note text, helpers used by both steps |
 | `src/datto.ps1` | The read-only Datto RMM API v2 client (sign-in, paging, 429 retry, device categories) |
@@ -143,11 +146,12 @@ That proves the Datto sign-in body, a readable `lastSeen`, the `Laptop` device t
 
 ## Not yet proven live
 
-Everything below passes the strict-mode mock harness, but hasn't been run against a real account yet. The Datto items still carry `Unverified` comments in `src/datto.ps1` or `src/find.ps1`:
+Everything below passes the strict-mode mock harness, but hasn't been run against a real account yet. The `Unverified` comments in `src/datto.ps1` and `src/find.ps1` predate the live run: the sign-in body, `lastSeen` format, `Laptop` type and placeholder-site skip they mention are now proven (see above), and the rest still apply:
 
 - **Servers.** The test site had no server, so the `Server` and `ESXi Host` types, the `serverOfflineHours` threshold, servers at the top of the ticket and `serverPriority` haven't run live.
 - **Other `deviceType.category` values.** Only `Laptop` has been seen live. The rest are mapped from the names the Datto web UI shows (Desktop, Server, ESXi Host, Printer, Network Device, Mobile), with `deviceClass` as a fallback. A device with no type is skipped and counted in the warnings.
 - **`suspended` and `deleted` on device records.** No suspended or deleted device was in the test. The flags are read when present; if Datto names them differently, those devices would be checked like any other.
 - **Updating an open ticket.** The live test opened a ticket and reran with nothing changed. A note for newly offline or recovered devices, and the "everything recovered" note, haven't run live.
 - **Retry-After.** No `429` came up. Datto doesn't say it sends one; the workflow uses it when present and waits 60 seconds otherwise (Datto's advice). A `403` after repeated 429s means Datto blocked the runner's address for about 5 minutes.
+- **Whole site down.** Only the mock harness has seen it. The live test site had one laptop and no server, so it can't trigger there. The three-in-four share is a starting value, not tuned against a real outage.
 - **The other five PSAs.** Ticket create, company search, the open-ticket search (`Find-PsaTickets` with text `Offline devices`) and note reads are proven only on ConnectWise PSA. Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk follow `_shared/psa.ps1` and `_shared/psa-tickets.ps1`; see the `Unverified` list in the [_shared README](https://github.com/cloudradial/Automations/tree/main/_shared#calls-not-yet-proven-live). Kaseya BMS has no ticket text search, so its open tickets are read and matched here.

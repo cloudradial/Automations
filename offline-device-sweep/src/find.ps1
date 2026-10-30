@@ -1,7 +1,8 @@
 # === Step 1: Find offline devices ===
 # Reads the run input (a Routine sends none, so every setting has a default), reads every Datto RMM site and
 # its devices, keeps the devices that have been offline longer than the threshold for their category, matches
-# each site to a PSA company, and finds this workflow's open ticket for each company. Changes nothing in
+# each site to a PSA company, and finds this workflow's open ticket for each company. It also counts the online
+# devices at each site, to flag a site that may be down as a whole. Changes nothing in
 # Datto RMM or the PSA. The next step opens or updates the tickets (or, in a preview, only lists them).
 $ErrorActionPreference = 'Stop'
 
@@ -102,7 +103,7 @@ $settings.checkedText = $odsNow.ToString('yyyy-MM-dd HH:mm', [Globalization.Cult
 $odsOut.preview = $settings.preview
 $odsOut.settings = $settings
 
-$counts = [ordered]@{ sites = 0; sitesSkipped = 0; devicesChecked = 0; offline = 0; offlineServers = 0; suspendedOrDeleted = 0; noDeviceType = 0; noLastSeen = 0; unmatchedSites = 0 }
+$counts = [ordered]@{ sites = 0; sitesSkipped = 0; devicesChecked = 0; offline = 0; offlineServers = 0; sitesDown = 0; suspendedOrDeleted = 0; noDeviceType = 0; noLastSeen = 0; unmatchedSites = 0 }
 $odsOut.counts = $counts
 $warnings = New-Object System.Collections.ArrayList
 
@@ -114,6 +115,9 @@ try { $null = Connect-Datto } catch { Stop-OdsRun ([string]$_.Exception.Message)
 # ---- read Datto RMM ----
 # Unverified: Datto's placeholder site names (the RMM Agent skips the same three).
 $placeholderSites = @('deleted devices', 'managed', 'ondemand')
+# A site may be down as a whole (power, internet or firewall) when every checked server there is past its
+# threshold and at least this share of its checked devices is offline right now, whatever their threshold.
+$siteDownShare = 0.75
 $sites = @()
 try { $sites = @(Get-DattoSites) } catch { Stop-OdsRun "Couldn't list the Datto RMM sites: $($_.Exception.Message)" }
 $ignore = @($settings.ignoreSites | ForEach-Object { $_.ToLowerInvariant() })
@@ -132,6 +136,7 @@ foreach ($s in $sites) {
     try { $devices = @(Get-DattoSiteDevices $sUid) } catch { Stop-OdsRun "Couldn't read the devices at the Datto RMM site '$sName': $($_.Exception.Message)" }
     $offline = New-Object System.Collections.ArrayList
     $seen = @{}   # hostname (lower) -> online, recent, suspended
+    $tally = @{ checked = 0; online = 0; servers = 0; serversOffline = 0 }
     foreach ($d in $devices) {
         $host0 = ([string](Get-DattoProp $d 'hostname')).Trim()
         if (-not $host0) { $host0 = [string](Get-DattoProp $d 'uid') }
@@ -142,15 +147,18 @@ foreach ($s in $sites) {
         if (-not $cat.key) { $counts.noDeviceType++; continue }
         if ($wanted -notcontains $cat.key) { continue }
         $counts.devicesChecked++
+        $tally.checked++
+        $isServer = $cat.key -eq 'servers'
+        if ($isServer) { $tally.servers++ }
         $online = Get-DattoProp $d 'online'
-        if ($online -eq $true) { $seen[$hk] = 'online'; continue }
+        if ($online -eq $true) { $seen[$hk] = 'online'; $tally.online++; continue }
         $last = ConvertFrom-DattoTime (Get-DattoProp $d 'lastSeen')
         if ($null -eq $last) { $counts.noLastSeen++; continue }
         $hours = ($odsNow - $last).TotalHours
-        $isServer = $cat.key -eq 'servers'
         $limit = $(if ($isServer) { [double]$settings.serverOfflineHours } else { [double]$settings.offlineDays * 24 })
         if ($hours -lt $limit) { $seen[$hk] = 'recent'; continue }
         $seen[$hk] = 'offline'
+        if ($isServer) { $tally.serversOffline++ }
         $null = $offline.Add(@{
                 uid = [string](Get-DattoProp $d 'uid'); hostname = $host0; category = $cat.key; typeLabel = $cat.label; isServer = $isServer
                 os = ([string](Get-DattoProp $d 'operatingSystem')).Trim(); siteName = $sName
@@ -160,7 +168,14 @@ foreach ($s in $sites) {
     }
     $counts.offline += $offline.Count
     $counts.offlineServers += @($offline | Where-Object { $_.isServer }).Count
-    $null = $siteRows.Add(@{ uid = $sUid; name = $sName; offline = @($offline); seen = $seen })
+    # One device alone, or a site with no server checked, never reads as a whole site down.
+    $down = $null
+    $offNow = $tally.checked - $tally.online
+    if ($tally.checked -ge 2 -and $tally.servers -ge 1 -and $tally.serversOffline -eq $tally.servers -and $offNow -ge $siteDownShare * $tally.checked) {
+        $down = [ordered]@{ site = $sName; checked = $tally.checked; offline = $offNow; servers = $tally.servers }
+        $counts.sitesDown++
+    }
+    $null = $siteRows.Add(@{ uid = $sUid; name = $sName; offline = @($offline); seen = $seen; online = $tally.online; checked = $tally.checked; down = $down })
 }
 if ($counts.noDeviceType) { $null = $warnings.Add("$(Get-OdsPlural $counts.noDeviceType 'device had' 'devices had') no device type in Datto RMM, so they were not checked.") }
 if ($counts.noLastSeen) { $null = $warnings.Add("$(Get-OdsPlural $counts.noLastSeen 'offline device has' 'offline devices have') no last seen date in Datto RMM, so they were not ticketed.") }
@@ -191,9 +206,10 @@ foreach ($sr in $siteRows) {
         $null = $unmatched.Add([ordered]@{ site = $sr.name; offline = @($sr.offline).Count; reason = $why })
         continue
     }
-    if (-not $companies.Contains($m.id)) { $companies[$m.id] = @{ companyId = $m.id; companyName = $(if ($m.name) { $m.name } else { $sr.name }); sites = @(); devices = (New-Object System.Collections.ArrayList); seen = @{} } }
+    if (-not $companies.Contains($m.id)) { $companies[$m.id] = @{ companyId = $m.id; companyName = $(if ($m.name) { $m.name } else { $sr.name }); sites = @(); sitesDown = @(); devices = (New-Object System.Collections.ArrayList); seen = @{} } }
     $co = $companies[$m.id]
     $co.sites += $sr.name
+    if ($null -ne $sr.down) { $co.sitesDown += $sr.down }
     foreach ($d in $sr.offline) { $null = $co.devices.Add($d) }
     foreach ($k in $sr.seen.Keys) { if (-not $co.seen.ContainsKey($k) -or $sr.seen[$k] -eq 'offline') { $co.seen[$k] = $sr.seen[$k] } }
 }
@@ -218,7 +234,7 @@ catch { Stop-OdsRun "Couldn't search $psaName for open Offline devices tickets, 
 $plan = New-Object System.Collections.ArrayList
 foreach ($co in $companies.Values) {
     $devs = @($co.devices | Sort-Object -Property @{ Expression = { -not $_.isServer } }, @{ Expression = { -[double]$_.hoursOffline } })
-    $item = [ordered]@{ companyId = $co.companyId; companyName = $co.companyName; sites = @($co.sites | Select-Object -Unique); devices = @($devs); recovered = @(); action = 'none'; ticketId = ''; ticketUrl = ''; alreadyToday = $false; error = '' }
+    $item = [ordered]@{ companyId = $co.companyId; companyName = $co.companyName; sites = @($co.sites | Select-Object -Unique); sitesDown = @($co.sitesDown); devices = @($devs); recovered = @(); action = 'none'; ticketId = ''; ticketUrl = ''; alreadyToday = $false; error = '' }
     try {
         $rows = @(); if ($openBy.ContainsKey($co.companyId)) { $rows = @($openBy[$co.companyId]) }
         if (-not $rows.Count -and $searchTruncated -and $devs.Count) {

@@ -77,6 +77,19 @@ $TCf = @{}; foreach ($cf in @($b.customfields)) { $TCf[$cf.name] = $cf }
 Check 'custom fields: text, checkbox, multi-select ids, single-select id, date' ($TCf['CFfirstName'].value -eq 'Pat' -and $TCf['CFfirstName'].id -eq 101 -and $TCf['CFhardwareRequired'].value -eq $true -and $TCf['CFperipherals'].value -eq '11,12' -and $TCf['CFcostCentre'].value -eq '23' -and $TCf['CFstartingDate'].value -eq '2026-10-21') (@($b.customfields) | ConvertTo-Json -Depth 3 -Compress)
 Check 'a mandatory built-in field is a warning' ([bool](@($r.out.warnings) -match "built-in field 'Delivery Address'")) (@($r.out.warnings) -join ' | ')
 
+
+# 1b. The AutomationAI Action payload (2026-10-30): answers as top-level keys, lists as arrays, a null checkbox,
+# lowercase ticket/company/user objects, ticket.description is the form's own text, and no Questions list.
+Reset-T
+$TAction = [ordered]@{ CFfirstName = 'Pat'; CFhardwareRequired = $null; CFperipherals = @('Monitor', 'Webcam'); CFstartingDate = '2026-10-21'; CFcostCentre = 'COSTCENTRE3'; details = 'Desk by the window, please.'
+    ticket = [ordered]@{ id = $null; reference = $null; subject = 'New Starter Request'; description = 'Use this form to set up a new starter.' }
+    company = [ordered]@{ id = 1; name = 'Contoso'; psaId = 42; psaIdentifier = 'HaloPSA' }
+    user = [ordered]@{ id = 'u-1'; name = 'Pat Example'; email = 'pat.example@contoso.com'; psaId = 7 } }
+$r = Invoke-TRun ($TAction | ConvertTo-Json -Depth 5 | ConvertFrom-Json)
+$b = $TH.posts[0]; $TCf = @{}; foreach ($c in @($b.customfields)) { $TCf[$c.name] = $c }
+Check 'Action payload: created without confirm, client and user from company/user psaId' ($r.out.status -eq 'success' -and $TH.posts.Count -eq 1 -and $b.client_id -eq 42 -and $b.user_id -eq 7) "$($r.error) $($r.out.message)"
+Check 'Action payload: array answer becomes option ids, null checkbox left out, details is the description' ($TCf['CFperipherals'].value -eq '11,12' -and -not $TCf.ContainsKey('CFhardwareRequired') -and $b.details -eq 'Desk by the window, please.' -and $b.summary -eq 'New Starter Request') (@($b.customfields) | ConvertTo-Json -Depth 3 -Compress)
+
 # 2. A manual run (flat body) previews unless confirm is true.
 Reset-T
 $r = Invoke-TRun (@{ templateId = '1'; companyPsaId = '42'; userEmail = 'pat.example@contoso.com'; subject = 'New Starter Request'; fields = @{ CFfirstName = 'Pat'; CFcostCentre = 'COSTCENTRE1' } })

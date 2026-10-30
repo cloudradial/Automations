@@ -2,7 +2,7 @@
 
 When a client submits a CloudRadial request form, the HaloPSA ticket is created exactly as its Halo ticket template would create it: the right ticket type, team, priority and status, with every answer in its Halo custom field. Halo's mandatory fields no longer reject the ticket.
 
-**Marketplace ID:** TBD | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
+**Marketplace ID:** TBD | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 
 ## Files
 
@@ -26,7 +26,10 @@ This workflow creates the ticket through Halo's API instead. Use it with the for
 
 One PowerShell step, no AI.
 
-1. **Reads the submission.** It takes CloudRadial's form payload (`User`, `Company`, `Ticket` with its `Questions`), a flat body, or either one wrapped in `{trigger: ...}`.
+1. **Reads the submission.** It takes any of these, or one wrapped in `{trigger: ...}`:
+   - **The form's AutomationAI Action payload:** each answer by Field ID, plus `ticket`, `company` (`psaId`) and `user` (`email`, `psaId`).
+   - **CloudRadial's webhook payload:** `User`, `Company`, and `Ticket` with its `Questions`.
+   - **A flat body.**
    - **Answers:** found by each question's Field ID. A token nobody filled (`@CFfirstName`) counts as missing.
 2. **Finds the Halo template.** It uses the form's `haloTemplateId` answer or a `templateId` input. Failing that, it looks for the template whose name the form's subject starts with.
 3. **Reads Halo.** It reads the template, its ticket type, the ticket type's field groups, and each custom field's definition and list values.
@@ -64,7 +67,7 @@ None.
 
 | Field | Required | Meaning |
 |---|---|---|
-| The form submission | Yes | CloudRadial's payload: `User.UserPsaId`, `User.UserEmail`, `Company.CompanyPsaId`, `Ticket.TicketSubject`, `Ticket.TicketDescription`, `Ticket.Questions` |
+| The form submission | Yes | The AutomationAI Action payload (answers by Field ID, `company.psaId`, `user.psaId`, `user.email`, `ticket.subject`), or CloudRadial's webhook payload (`User.UserPsaId`, `User.UserEmail`, `Company.CompanyPsaId`, `Ticket.TicketSubject`, `Ticket.TicketDescription`, `Ticket.Questions`). The ticket description is the form's "Anything else" answer (Field ID `details`) when there is one. |
 | `haloTemplateId` (a form answer) or `templateId` | No | The Halo template. Without it, the form's subject is matched to a template name. |
 | `companyPsaId`, `userPsaId`, `userEmail`, `subject`, `description`, `fields` | No | The same values as a flat body, for a manual run. `fields` holds the answers by Halo field name. |
 | `confirm` | No | A form submission creates the ticket. A manual run creates it only with `true`. |

@@ -57,7 +57,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/off
 
 ## Technical details
 
-**Formerly:** Offline Device Sweep (tracker 3.3) | **Marketplace ID:** AAI-00066 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
+**Formerly:** Offline Device Sweep (tracker 3.3) | **Marketplace ID:** CRA-00001 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
 
 ## Files
 

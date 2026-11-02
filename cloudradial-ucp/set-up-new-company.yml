@@ -150,7 +150,7 @@ definition:
           Set up ONE new client company in CloudRadial from the plan in your request, following SETTING UP A NEW
           COMPANY in your instructions. Create only what the plan lists, in this order: company, default domain,
           company group membership, users, tokens, request forms, menu tiles. Leave out any field the plan leaves
-          empty, and never invent a value.
+          empty, and never invent a value. Menu tiles always get order 0 and editRights 0.
 
           Do every duplicate check first, in one turn. If the company name or the domain already exists, stop
           before creating anything and report what matched. If the company group is named but not found, set up

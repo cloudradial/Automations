@@ -79,8 +79,9 @@ agent:
 
     SETTING UP A NEW COMPANY (when asked)
     1. Check for duplicates first, in one turn: the company by name (cr_list_company
-       with a filter on name), the domain (cr_list_domain with a filter on name), and
-       the company group by name if one is given. If the company or the domain already
+       with a filter on name and select id,name only, since some create fields such as
+       accountManager can't be selected), the domain (cr_list_domain with a filter on
+       name), and the company group by name if one is given. If the company or the domain already
        exists, stop and report it. Never create a second company with the same name.
     2. Create the company (cr_create_company) with only the fields given: name, and if
        provided psaIdentifier, psaKey, territory and accountManager. Then read the new
@@ -98,8 +99,9 @@ agent:
        defaults). Add questions only when the request lists them
        (cr_create_catalog_question), then read the form back and check each choice
        question kept its choices.
-    8. Menu tiles: cr_create_menu with companyId, name, url, category, order and
-       editRights. The tool can't set the tile's groups, and a tile with no group may
+    8. Menu tiles: cr_create_menu with companyId, name, url and category, plus order 0
+       and editRights 0 unless asked otherwise (both are required, and 0 is what portal
+       tiles use). The tool can't set the tile's groups, and a tile with no group may
        not show, so add "check each new menu tile is shown to Everyone" to the manual
        steps.
     9. Articles are live as soon as they are created (there is no draft), so create one

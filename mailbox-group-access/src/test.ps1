@@ -476,4 +476,30 @@ New-TWorld 'zendesk'
 $r = Invoke-TRequest (New-TBody @{ resource = 'Helpdesk Admins' })
 Check 'Zendesk refusal: one private comment, not solved' ($r.out.status -eq 'rejected' -and @(Get-TPsaWrites).Count -eq 1 -and (Read-Body @(Get-TPsaWrites)[0]).ticket.comment.public -eq $false -and $TW.closed.Count -eq 0) (Show-Calls)
 
+# =================== 13. a portal form Action ===================
+# The Action shape: answers at the top level, the portal's own ticket, company and user objects beside them.
+function New-TAction {
+    param([hashtable]$Answers = @{}, [string]$UserEmail = 'alex.kim@contoso.com')
+    $b = [ordered]@{ targetUser = 'alex.kim@contoso.com'; resource = 'sales@contoso.com'; accessType = 'Full access' }
+    foreach ($k in $Answers.Keys) { $b[$k] = $Answers[$k] }
+    $b['ticket'] = [pscustomobject]@{ id = 12345; reference = '12345'; subject = 'Mailbox access'; description = '' }
+    $b['company'] = [pscustomobject]@{ id = 7; name = 'Contoso'; psaId = 42; tenantId = $TTenant }
+    $b['user'] = [pscustomobject]@{ id = 'u-1'; name = 'Portal User'; email = $UserEmail; psaId = 501 }
+    return ([pscustomobject]$b | ConvertTo-Json -Depth 5 | ConvertFrom-Json)
+}
+New-TWorld
+$r = Invoke-TRequest (New-TAction)
+Check 'Action from the user themself: live run, ticket from ticket.id, pending_approval, nothing granted' ($r.read.ticket_id -eq '12345' -and $r.read.confirm -eq $true -and $r.read.requester -eq 'alex.kim@contoso.com' -and $r.out.status -eq 'pending_approval' -and @(Get-TWrites).Count -eq 0 -and @(Get-TInternal).Count -eq 1) "$($r.read.ticket_id) $($r.out.status) $($r.out.message)"
+New-TWorld
+$r = Invoke-TRequest (New-TAction @{} 'pat.lee@contoso.com')
+Check 'Action from the manager: granted, noted and closed' ($r.out.status -eq 'success' -and $r.out.counts.granted -eq 1 -and $TW.notes.Count -eq 2 -and $TW.closed.Count -eq 1) "$($r.out.status) $($r.out.message) $($r.err)"
+New-TWorld
+$r = Invoke-TRequest (New-TAction @{ approvedBy = 'pat.lee@contoso.com'; requester_email = 'pat.lee@contoso.com'; UserEmail = 'pat.lee@contoso.com'; ticketId = '999'; confirm = 'false'; company_tenant_id = '00000000-0000-0000-0000-000000000009' })
+Check 'Action: answers that try to set the approver, requester, ticket, confirm or tenant are ignored' ($r.read.approved_by -eq '' -and $r.read.requester -eq 'alex.kim@contoso.com' -and $r.read.ticket_id -eq '12345' -and $r.read.confirm -eq $true -and $r.out.status -eq 'pending_approval' -and @(Get-TWrites).Count -eq 0) "$($r.read.requester) $($r.read.ticket_id) $($r.out.status)"
+New-TWorld
+$r = Invoke-TRequest (New-TAction @{ targetUser = 'jo@fabrikam.com'; allowGuest = 'true' } 'pat.lee@contoso.com')
+Check 'Action: an allowGuest answer is ignored, so a guest is refused' ($r.out.status -eq 'rejected' -and @(Get-TWrites).Count -eq 0) "$($r.out.status) $($r.out.message)"
+New-TWorld
+$r = Invoke-TRequest (New-TAction @{ resource = 'Project Falcon'; accessType = 'Member' } 'sam.doe@contoso.com')
+Check 'Action from a group owner: member added' ($r.out.status -eq 'success' -and ($TW.graphWrites -join ',') -eq 'members g-proj u-alex') "$($r.out.status) $($r.out.message)"
 Complete-Test

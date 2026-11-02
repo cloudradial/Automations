@@ -598,7 +598,8 @@ definition:
           # Finds the user and the mailbox, group or Team, refuses what must never be granted automatically
           # (role-assignable, privileged-looking, dynamic and on-premises synced groups), checks whether the user already
           # has the access, and works out who must approve. Its output feeds the Grant step.
-          # Accepts a flat body, the CloudRadial {Ticket:{...}, Company:{...}} shape, or either one wrapped in {trigger:...}.
+          # Accepts a flat body, the CloudRadial {Ticket:{...}, Company:{...}} shape, either one wrapped in {trigger:...}, or a
+          # portal form Action (answers at the top level beside the portal's own ticket, company and user objects).
 
           $in = Get-NodeInput
           if ($in -is [string]) { try { $in = $in | ConvertFrom-Json } catch { $in = $null } }
@@ -626,6 +627,12 @@ definition:
           $ticketObj = Get-OfProp $in 'Ticket'
           foreach ($q in @(Get-OfProp $ticketObj 'Questions')) { $qid = [string](Get-OfProp $q 'Id'); if ($qid) { $answers[$qid.ToLowerInvariant()] = Get-OfProp $q 'Value' } }
           $companyObj = Get-OfProp $in 'Company'
+          # A form Action sends the answers as top-level keys next to the portal's ticket, company and user objects, with no
+          # Ticket.Questions. Every top-level key is then something the submitter typed, so the trusted fields come only from
+          # those objects: the requester from user.email, the ticket from ticket.id and the tenant from company.tenantId.
+          $isObj = { param($v) return ($null -ne $v -and -not ($v -is [string] -or $v.GetType().IsValueType) -and $v -isnot [array]) }
+          $userObj = Get-OfProp $in 'user'
+          $portalAction = ((& $isObj $userObj) -or (& $isObj $companyObj) -or (& $isObj $ticketObj)) -and $null -eq (Get-OfProp $ticketObj 'Questions')
           # A value is missing when it is blank or still an unfilled placeholder (<x>, {{x}} or a bare @token).
           function Get-In {
               param([string[]]$Names)
@@ -705,7 +712,18 @@ definition:
               $managerIn = Get-In @('managerEmail', 'manager_email')
               $out.approved_by = Get-In @('approvedBy', 'approved_by')
               $tenantIn = Get-In @('company_tenant_id', 'companyTenantId', 'CompanyTenantId')
-
+              # From a form Action, an answer can't set the ticket, the requester, the approver, the tenant, the PSA, confirm or
+              # allowGuest. The submitter only counts as approval when Microsoft 365 says they are the manager or an owner, and
+              # the run is live: a request that isn't approved waits on the ticket as pending_approval.
+              if ($portalAction) {
+                  $out.ticket_id = [string](Get-OfProp $ticketObj 'id')
+                  $out.requester = [string](Get-OfProp $userObj 'email'); if ($out.requester -notlike '*@*') { $out.requester = '' }
+                  $out.approved_by = ''
+                  $tenantIn = [string](Get-OfProp $companyObj 'tenantId')
+                  $out.psa = ''
+                  $out.confirm = $true
+                  $allowGuest = $false
+              }
               if (-not $out.ticket_id) { Stop-AccRead 'incomplete' 'The request has no ticketId, so there is no ticket to note. Nothing was changed.'; return }
               if (-not $targetIn) { Stop-AccRead 'incomplete' 'The request has no targetUser (the person who should get access). Nothing was changed.'; return }
               if (-not (Test-AccEmail $targetIn)) { Stop-AccRead 'incomplete' "targetUser '$targetIn' isn't an email address or user principal name. Nothing was changed."; return }

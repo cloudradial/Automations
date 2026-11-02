@@ -1,17 +1,79 @@
-# Mailbox and Group Access on Request
+# Give People Mailbox and Group Access Once It's Approved
 
-When someone asks for access to a shared mailbox, a Microsoft 365 group, a security group, a distribution list or a Team that already exists, the user gets exactly that access once their manager or the group's owner has approved it, and the ticket is noted and closed, while privileged groups and anything unusual are left for a technician.
+In your UCP portal, clients ask for access to a shared mailbox, group, distribution list or Team. Once the person's manager or the group's owner approves, they get exactly that access in Microsoft 365 and the ticket is closed, with no technician needed.
 
-**Formerly:** Mailbox / Group Access Request (tracker 10.2) | **Marketplace ID:** TBD | **Type:** Workflow
+## What your clients see in the portal
 
-## Files (always the latest version)
+**A Mailbox or Group Access form.** The client says who needs access, to which mailbox, group, list or Team, and what kind, such as full access to a shared mailbox or membership of a Team. A ticket is created, as with any other request.
 
-These links point at the `main` branch, so they always open the current version.
+**When the manager asks, it's done in moments.** If the person submitting the form is the user's manager in Microsoft 365, or an owner of the group, the access is given straight away. The ticket gets a reply such as "Alex Kim now has full access to the Contoso Sales mailbox. It can take up to an hour to appear in Outlook." and is closed.
+
+**Anyone else's request waits for approval.** The ticket says who can approve it. If you've set up a mailbox to send from, the manager is emailed and asked to reply on the ticket. Once they agree, a technician runs it once more with them as the approver.
+
+## What it protects
+
+- **Nobody approves their own access.** Only the user's manager or the group's owner, as set in Microsoft 365, or people you name for that client, can approve. A form answer can't change who asked.
+- **Privileged groups are never granted.** Admin-looking groups, groups that can hold admin roles, dynamic groups and groups synced from on-premises go to a technician, with a note saying why.
+- **Guests and blocked accounts are refused,** and access to a person's own mailbox always needs a technician.
+- **One change, checked afterwards.** The access is read back before the client is told it's done, and nothing is ever removed.
+- **No duplicates.** A retried request doesn't write its notes twice.
+
+## Works with
+
+Microsoft 365 (Exchange Online and Entra ID). The notes go on the ticket in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+
+- **Proven live:** full access to a shared mailbox, with ConnectWise PSA.
+- **Not yet run against a real account:** groups, Teams, distribution lists, send as, the approval email and the other five PSAs. They pass the same tests, so try one of each on a test account first.
+
+## What you need
+
+- A UCP portal with **Actions** on your request forms
+- AutomationAI, with Microsoft 365 connected and allowed to read users and groups and change group membership
+- Exchange Online connected too, for mailboxes and distribution lists (the same connection the Microsoft Exchange extension uses)
+- Your PSA connected in AutomationAI, so the notes reach the ticket
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/mailbox-group-access/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds the client's Microsoft 365 connection.
+4. Optionally, to email managers for approval, add a mailbox to send from to that runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/mailbox-group-access#required-runner-key-vault-secrets) list exactly what to add.
+
+If a client's Microsoft 365 connection is saved under that company rather than shared, open the workflow, set **Company** to that client on all three steps, then publish and deploy. Do this again after every import.
+
+**In your UCP portal, create the form:**
+
+1. Create a request form called **Mailbox or Group Access**.
+2. Add an **Email** question, "Who needs access?", and set its Field ID to `targetUser`.
+3. Add a **Text** question, "Which mailbox, group, list or Team?", and set its Field ID to `resource`. Its email address or its exact name both work.
+4. Optionally, add a choice question, "What kind of access?", with Field ID `accessType` and the options Full access, Send as, Send on behalf, Member and Owner. Without it, mailboxes get full access and groups get membership.
+5. At the end of the form, add an **Action** question and pick **Mailbox / Group Access Request**.
+6. Make sure the company's Microsoft 365 tenant is set in the portal, and the form still sends tickets to your PSA.
+
+**Approving a waiting request.** When the approver agrees on the ticket, open the workflow's **Test**, enter the same answers with the ticket number, set `approvedBy` to the approver's email and `confirm` to true, and run it.
+
+**Test it.** Submit the form as a test user asking for access to a test shared mailbox, and check the ticket says it's waiting for approval. Then submit it as that user's manager, and check the access is given and the ticket closes. Remove the test access by hand afterwards.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/mailbox-group-access#technical-details) cover every access type, each safety check, who counts as an approver, the Microsoft permissions needed, other ways to start it, and what has been proven live.
+
+---
+
+## Technical details
+
+**Formerly:** Mailbox / Group Access Request (tracker 10.2) | **Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
+
+## Files
+
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/mailbox-group-access/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `mailbox-group-access.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/mailbox-group-access/mailbox-group-access.yml) |
-| Download `mailbox-group-access.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/mailbox-group-access/mailbox-group-access.yml) |
+| Download `mailbox-group-access.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/mailbox-group-access/v1.0.0) |
 | Source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/mailbox-group-access/src) |
 | All files in this automation | [mailbox-group-access](https://github.com/cloudradial/Automations/tree/main/mailbox-group-access) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/mailbox-group-access) |
@@ -99,7 +161,7 @@ All six PSAs are supported: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Sync
 
 ## Download & import
 
-**Download the workflow:** [`mailbox-group-access.yml`](https://github.com/cloudradial/Automations/blob/main/mailbox-group-access/mailbox-group-access.yml)
+**Download the workflow:** [`mailbox-group-access.yml`](https://github.com/cloudradial/Automations/releases/tag/mailbox-group-access/v1.0.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [secrets](#required-runner-key-vault-secrets), grant the [permissions](#required-microsoft-graph-permissions), then publish and deploy. Full steps are under [Import & test](#import--test).
 
@@ -151,7 +213,7 @@ Role-assignable groups are always refused, so `RoleManagement.ReadWrite.Director
 
 ## Inputs
 
-Send a flat JSON body, the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Value}]}, Company:{CompanyTenantId}}` shape (each question's Field ID is the input name), or either one wrapped in `{trigger: ...}`. A value that is blank, or still an unfilled placeholder (`<targetUser>`, `{{targetUser}}` or a bare `@token`), counts as not given.
+Send a flat JSON body, the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Value}]}, Company:{CompanyTenantId}}` shape (each question's Field ID is the input name), either one wrapped in `{trigger: ...}`, or start it from a [form Action](#starting-it-from-a-form-action). A value that is blank, or still an unfilled placeholder (`<targetUser>`, `{{targetUser}}` or a bare `@token`), counts as not given.
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -168,7 +230,16 @@ Send a flat JSON body, the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Value
 | `company_tenant_id` | none | `@CompanyTenantId`, for the tenant check |
 | `psa` | secret `PSA-Type` | Which PSA holds the ticket |
 
-**From a portal form,** send `requester_email` as `@UserEmail` and `confirm` as `true`. A request from the user's manager (or the group's owner) is then granted straight away; any other request waits on the ticket as `pending_approval`, and the manager is emailed when `Access-NotifySender` is set. Only `@UserEmail` should fill `requester_email`: a value the requester can type would let them approve their own request.
+### Starting it from a form Action
+
+On portals with Actions, add a question of type **Action** to the form and pick **Mailbox / Group Access Request**. There's nothing to map. The portal sends each answer under its Field ID (so the form needs `targetUser` and `resource` questions, and optionally `accessType` and `managerEmail`), plus its own `ticket`, `company` and `user` objects. From an Action:
+
+- **The requester** is the portal's `user.email`, **the ticket** is `ticket.id` (the ticket the form creates), and **the tenant** is `company.tenantId`.
+- **The run is live** (`confirm` true). It only changes something when the requester is an approver; any other request waits as `pending_approval`.
+- **A form answer can't set** `ticketId`, `requester_email`, `approvedBy`, `company_tenant_id`, `psa`, `confirm` or `allowGuest`. Answers with those Field IDs are ignored, so a requester can't approve their own request.
+- **To grant a waiting request,** a technician runs the workflow from **Test** with a flat body: the same answers, the `ticketId`, `approvedBy` set to the approver and `confirm` true.
+
+**From a form Automation (Webhook activity) or ServiceAI,** send `requester_email` as `@UserEmail` and `confirm` as `true`. A request from the user's manager (or the group's owner) is then granted straight away; any other request waits on the ticket as `pending_approval`, and the manager is emailed when `Access-NotifySender` is set. Only `@UserEmail` should fill `requester_email`: a value the requester can type would let them approve their own request.
 
 ## Output
 
@@ -192,7 +263,7 @@ Send a flat JSON body, the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Value
 6. **Grant.** Run again with `approvedBy` set to the test user's manager. Expect `success`, the access in Microsoft 365, an internal note, a public note and the ticket closed.
 7. **Rerun.** Run the same input once more. Expect `success` saying the user already has the access, no new notes, and the ticket not closed again.
 8. Repeat 6 for a Microsoft 365 group (`accessType` `member`) and a distribution list, and check a privileged group name returns `rejected`.
-9. To start it from the portal or ServiceAI, turn on the webhook under **Properties → Webhook** (it mints the URL and secret), redeploy, and post the inputs with the `X-Crauto-Webhook-Secret` header: from a request form's Automation (Webhook activity), or from a ServiceAI Action such as "Grant Access Request".
+9. To start it from a portal form, add the [form Action](#starting-it-from-a-form-action). To start it from a form Automation or ServiceAI instead, turn on the webhook under **Properties → Webhook** (it mints the URL and secret), redeploy, and post the inputs with the `X-Crauto-Webhook-Secret` header: from a request form's Automation (Webhook activity), or from a ServiceAI Action such as "Grant Access Request".
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The workflow never removes access; take test access away by hand.
 

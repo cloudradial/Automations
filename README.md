@@ -50,7 +50,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`kb-draft-from-resolution/`](kb-draft-from-resolution/) | Turn Resolved Tickets into Knowledge Base Drafts | Workflow (PowerShell steps plus one AI Prompt step) | Not listed |
 | [`knowbe4/`](knowbe4/) | Chase Overdue Security Training Automatically | Workflow | [AAI-00029](https://automations.cloudradial.com/marketplace/AAI-00029) |
 | [`license-reclamation/`](license-reclamation/) | Find Unused Microsoft 365 Licences and Show the Monthly Saving | Workflow (PowerShell, no AI, read-only in Microsoft 365) | [AAI-00048](https://automations.cloudradial.com/marketplace/AAI-00048) |
-| [`mailbox-group-access/`](mailbox-group-access/) | Mailbox and Group Access on Request | Workflow | Not listed |
+| [`mailbox-group-access/`](mailbox-group-access/) | Give People Mailbox and Group Access Once It's Approved | Workflow (PowerShell, no AI) | [CRA-00002](https://automations.cloudradial.com/marketplace/CRA-00002) |
 | [`mfa-reset/`](mfa-reset/) | Let Users Reset Their Own MFA Safely | Workflow (PowerShell steps, no AI) | [AAI-00045](https://automations.cloudradial.com/marketplace/AAI-00045) |
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Turn a Microsoft 365 Security Review into a Client Assessment | Workflow (PowerShell, no AI) | Not listed |
 | [`new-client-onboarding/`](new-client-onboarding/) | Onboard a New Client in CloudRadial, the PSA and Microsoft 365 | Workflow (run by hand, MSP-wide) | Not listed |

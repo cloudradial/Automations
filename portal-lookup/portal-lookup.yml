@@ -57,9 +57,9 @@ definition:
         x: 520
         y: 100
       properties:
-        # Runs the CloudRadial UCP Assistant (import cloudradial-ucp/ first). The goal keeps this run
+        # Runs the CloudRadial UCP Reporting agent (import cloudradial-ucp-reporting/ first). The goal keeps this run
         # read-only and sets the briefing format; the run inputs arrive as `request` and `companyName`.
-        agentSlug: cloudradial-ucp-assistant
+        agentSlug: cloudradial-ucp-reporting
         goal: |
           Produce a clear, current CloudRadial portal briefing for meeting prep, as described in
           the request you are given. This run is READ-ONLY: never call a create, update, patch or

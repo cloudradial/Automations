@@ -1,6 +1,6 @@
 automationsWorkflow: 1
 name: "Bulk-Create Training Courses"
-description: 'Creates training courses and their lessons in a CloudRadial portal from a list, via the CloudRadial UCP Assistant agent. Send {"companyName":"Acme Ltd","courses":[{"name":"Security Basics","category":"Security","lessons":[{"title":"Phishing","text":"..."}]}, ...]}. Skips courses that already exist by name; every create is approval-gated. Replaces the AAI-00026 CSV import script.'
+description: 'Creates training courses and their lessons in a CloudRadial portal from a list, via the CloudRadial UCP Reporting agent. Send {"companyName":"Acme Ltd","courses":[{"name":"Security Basics","category":"Security","lessons":[{"title":"Phishing","text":"..."}]}, ...]}. Skips courses that already exist by name; every create is approval-gated. Replaces the AAI-00026 CSV import script.'
 definition:
   schemaVersion: 1
   activities:
@@ -59,7 +59,7 @@ definition:
         x: 500
         y: 120
       properties:
-        agentSlug: cloudradial-ucp-assistant
+        agentSlug: cloudradial-ucp-reporting
         goal: >-
           Create the training courses you are given in the CloudRadial portal. Your "request"
           input holds the target company and a JSON array of courses, each with an optional

@@ -175,7 +175,7 @@ definition:
         autoApprove: false
         inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}","companyName":"{{ nodes.node-inputs.output.companyName }}"}'
         inputSchema: '{"type":"object","properties":{"request":{"type":"string"},"companyName":{"type":"string"}},"required":["request"],"additionalProperties":false}'
-        outputSchema: '{"type":"object","properties":{"companyId":{"type":"string"},"answer":{"type":"string"},"actions":{"type":"array","items":{"type":"string"}},"skipped":{"type":"array","items":{"type":"string"}},"manualSteps":{"type":"array","items":{"type":"string"}}},"required":["answer"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"companyId":{"type":"string"},"answer":{"type":"string"},"actions":{"type":"array","items":{"type":"string"}},"skipped":{"type":"array","items":{"type":"string"}},"manualSteps":{"type":"array","items":{"type":"string"}}},"required":["companyId","answer"],"additionalProperties":false}'
     - id: end
       name: End
       type: end

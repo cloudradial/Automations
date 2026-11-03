@@ -64,7 +64,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/mai
 
 ## Technical details
 
-**Formerly:** Mailbox / Group Access Request (tracker 10.2) | **Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
+**Formerly:** Mailbox / Group Access Request (tracker 10.2) | **Marketplace ID:** CRA-00002 | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
 
 ## Files
 

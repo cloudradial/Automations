@@ -444,6 +444,8 @@ definition:
           # Step 1: read the request and the user, run the safety checks and work out the offboarding plan.
           # Writes nothing. Reads the user, roles, groups, licences, manager, direct reports and devices from Microsoft
           # Graph, and the mailbox from Exchange Online when the runner can reach it. Its output feeds the Apply step.
+          # Accepts a flat body, the CloudRadial {Ticket:{...}, Company:{...}} shape, either one wrapped in {trigger:...}, or a
+          # portal form Action (answers at the top level beside the portal's own ticket, company and user objects).
           function Test-OfGuid { param([string]$s) return ([string]$s).Trim() -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' }
           function Test-OfTrue { param($v) return ([string]$v).Trim() -match '^(?i)(true|yes|y|1|on)$' }
           function Format-OfQuote { param([string]$s) return "'" + $s.Replace("'", "''") + "'" }
@@ -476,6 +478,12 @@ definition:
           $ticketObj = Get-OfProp $in 'Ticket'
           foreach ($q in @(Get-OfProp $ticketObj 'Questions')) { $qid = [string](Get-OfProp $q 'Id'); if ($qid) { $answers[$qid.ToLowerInvariant()] = Get-OfProp $q 'Value' } }
           $companyObj = Get-OfProp $in 'Company'
+          # A form Action sends the answers as top-level keys next to the portal's ticket, company and user objects, with no
+          # Ticket.Questions. Every top-level key is then something the submitter typed, so the trusted fields come only from
+          # those objects: the requester from user.email, the ticket from ticket.id and the tenant from company.tenantId.
+          $isObj = { param($v) return ($null -ne $v -and -not ($v -is [string] -or $v.GetType().IsValueType) -and $v -isnot [array]) }
+          $userObj = Get-OfProp $in 'user'
+          $portalAction = ((& $isObj $userObj) -or (& $isObj $companyObj) -or (& $isObj $ticketObj)) -and $null -eq (Get-OfProp $ticketObj 'Questions')
           # A value is missing when it is blank or still an unreplaced token (@Field or {{field}}).
           function Get-In {
               param([string[]]$Names)
@@ -510,6 +518,18 @@ definition:
               $reqEmail = Get-In @('requester_email', 'requesterEmail', 'submittedByUpn', 'UserEmail')
               $reqOid = Get-In @('requester_office_id', 'requesterOfficeId', 'userOfficeId', 'UserOfficeId')
               $tenantIn = Get-In @('company_tenant_id', 'companyTenantId', 'CompanyTenantId')
+              if ($portalAction) {
+                  # A form request only ever previews: a technician checks the plan on the ticket and reruns it with confirm.
+                  $out.ticket_id = [string](Get-OfProp $ticketObj 'id')
+                  $out.psa = ''
+                  $out.confirm = $false
+                  $out.company_id = Get-OfSecret 'CloudRadial-CompanyId'
+                  $allowAdmin = $false
+                  $alreadyShared = $false
+                  $reqEmail = [string](Get-OfProp $userObj 'email'); if ($reqEmail -notlike '*@*') { $reqEmail = '' }
+                  $reqOid = ''
+                  $tenantIn = [string](Get-OfProp $companyObj 'tenantId')
+              }
               $out.upn = $upn
               if (-not $upn) { Stop-OfRead 'incomplete' 'The request has no upn (the departing user). Nothing was changed.'; return }
               if ($upn -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$' -and -not (Test-OfGuid $upn)) { Stop-OfRead 'incomplete' "'$upn' isn't a user principal name or object id. Nothing was changed."; return }

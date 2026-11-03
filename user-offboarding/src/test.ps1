@@ -390,4 +390,30 @@ $r = Invoke-Offboard (New-Body)
 $sw = @(@($r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 12345 with a redirect; reading the ticket back showed the note was saved' })
 Check 'shared warning: a redirected note POST that was saved is in the output warnings once' ($r.out.status -eq 'pending_confirmation' -and $Sc.notes.Count -eq 1 -and $sw.Count -eq 1) "$($r.out.status) / $(@($r.out.warnings) -join ' | ')"
 
+# =================== portal form Action (answers at the top level beside ticket, company and user) ===================
+function New-Action {
+    param([hashtable]$Answers = @{}, [string]$UserEmail = 'alex.kim@contoso.com', [string]$Tenant = $TenantGuid)
+    $b = [ordered]@{ upn = 'sam.doe@contoso.com'; forward_to_manager = 'Yes' }
+    foreach ($k in $Answers.Keys) { $b[$k] = $Answers[$k] }
+    $b['ticket'] = [pscustomobject]@{ id = 12345; reference = '12345'; subject = 'Offboard a leaver'; description = '' }
+    $b['company'] = [pscustomobject]@{ id = 7; name = 'Contoso'; psaId = 42; tenantId = $Tenant }
+    $b['user'] = [pscustomobject]@{ id = 'u-1'; name = 'Alex Kim'; email = $UserEmail; psaId = 501 }
+    return ([pscustomobject]$b | ConvertTo-Json -Depth 5 | ConvertFrom-Json)
+}
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Offboard (New-Action)
+Check 'Action: preview on ticket.id, nothing changed, plan noted' ($r.out.status -eq 'pending_confirmation' -and $r.read.ticket_id -eq '12345' -and $r.read.confirm -eq $false -and @(Get-GraphWrites).Count -eq 0 -and @(Get-ExoWrites).Count -eq 0 -and @(Get-PsaNotes).Count -eq 1 -and ($r.out.planned -match 'Forward new mail to Alex Kim').Count -eq 1) "$($r.out.status) $($r.read.ticket_id) $($r.err)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Offboard (New-Action @{ confirm = 'true'; mailbox_already_shared = 'true'; ticket_id = '999'; requester_email = 'pat.lee@contoso.com'; company_tenant_id = '11111111-2222-4333-8444-555555555555' })
+Check 'Action: answers that try to set confirm, the ticket, the requester or the tenant are ignored' ($r.out.status -eq 'pending_confirmation' -and $r.read.confirm -eq $false -and $r.read.ticket_id -eq '12345' -and @(Get-GraphWrites).Count -eq 0 -and @(Get-ExoWrites).Count -eq 0) "$($r.out.status) $($r.read.ticket_id) $($r.err)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Offboard (New-Action @{} 'sam@contoso.com')
+Check 'Action: a user asking to offboard their own account (matched on a proxy address) is refused' ($r.out.status -eq 'rejected' -and $r.err -match 'their own account' -and @(Get-GraphWrites).Count -eq 0) "$($r.out.status) $($r.err)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Offboard (New-Action @{} 'alex.kim@contoso.com' '11111111-2222-4333-8444-555555555555')
+Check 'Action: company.tenantId for another tenant is refused' ($r.out.status -eq 'rejected' -and $r.err -match 'tenant') "$($r.out.status) $($r.err)"
+New-Scenario 'connectwise' 'rest' @{ roles = @('Global Administrator') }
+$r = Invoke-Offboard (New-Action @{ allow_admin = 'true' })
+Check 'Action: an admin is refused even when the form says allow_admin' ($r.out.status -eq 'rejected' -and $r.err -match 'admin roles') "$($r.out.status) $($r.err)"
+
 Complete-Test

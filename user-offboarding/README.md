@@ -1,17 +1,78 @@
 # Offboard a Departing Employee in One Reviewed Run
 
-When someone leaves, their Microsoft 365 account is locked, signed out, stripped of groups and licences, and their mailbox kept as a shared mailbox, and you see every change before anything happens.
+When someone leaves, a client asks in your UCP portal and the plan lands on the ticket. Once a technician has checked it, one run locks the person's Microsoft 365 account, signs them out, removes their groups and licences, and keeps their mailbox as a shared mailbox.
 
-**Formerly:** User offboarding | **Marketplace ID:** TBD | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.0.1
+## What your clients see in the portal
+
+**An Offboard a User form.** The client says who is leaving and, if they want, who should get that person's new email. A ticket is created, as with any other request.
+
+**Nothing changes straight away.** The ticket gets a note listing exactly what will happen, such as blocking sign-in, removing six groups and converting the mailbox, and what a technician will need to do by hand. The client sees only that a technician will review the request.
+
+**A technician finishes it.** Once the plan looks right, the technician runs it once more to make the changes. The client then sees "The offboarding request has been processed." and the full report goes in the company's admin-only Report Archives.
+
+## What it protects
+
+- **Nothing happens without a technician.** A form request only ever previews. Making the changes needs a technician to run it again.
+- **Admin accounts are refused,** and nobody can offboard their own account. The portal says who asked, and a form answer can't change that.
+- **The mailbox is kept.** Licences are removed last, and only once the mailbox is safely shared. Mailboxes on hold, with an archive or over 50 GB keep their licence.
+- **The password is never seen.** It's reset to a random value that is never stored, shown or written down.
+- **Clients see no detail.** Groups, licences, devices and passwords appear only in internal notes and the admin-only report.
+- **No duplicates.** A retried request doesn't write its notes twice.
+
+## Works with
+
+Microsoft 365 (Entra ID and Exchange Online). The notes go on the ticket in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+
+- **Not yet run against a real account.** Every step and the form path pass the tests, with ConnectWise PSA, Autotask and HaloPSA notes tested directly, so try it on a disposable test user first.
+
+## What you need
+
+- A UCP portal with **Actions** on your request forms
+- AutomationAI, with Microsoft 365 connected and allowed to read and change users, groups and licences, plus the User Administrator role so it can reset passwords
+- Exchange Online connected too, for the mailbox (the same connection the Microsoft Exchange extension uses). Without it the mailbox steps are listed for a technician and the licences stay on.
+- Your PSA connected in AutomationAI, so the notes reach the ticket
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds the client's Microsoft 365 connection.
+4. Give the Microsoft 365 app the permissions and role in the [technical details](https://github.com/cloudradial/Automations/tree/main/user-offboarding#required-microsoft-graph-permissions).
+
+If a client's Microsoft 365 connection is saved under that company rather than shared, open the workflow, set **Company** to that client on both steps, then publish and deploy. Do this again after every import.
+
+**In your UCP portal, create the form:**
+
+1. Create a request form called **Offboard a User**.
+2. Add an **Email** question, "Who is leaving?", and set its Field ID to `upn`.
+3. Optionally, add a **Yes/No** question, "Forward their new email to their manager?", with Field ID `forward_to_manager`, or an **Email** question, "Forward their new email to", with Field ID `forward_to`.
+4. At the end of the form, add an **Action** question and pick **Offboard a Departing Employee**.
+5. Make sure the company's Microsoft 365 tenant is set in the portal, and the form still sends tickets to your PSA.
+
+**Finishing a request.** When the plan on the ticket looks right, open the workflow's **Test**, enter `upn`, the ticket number as `ticket_id` and any forwarding answer, set `confirm` to true, and run it.
+
+**Test it.** Create a disposable test user with a licence, a mailbox, a manager and a couple of groups. Submit the form for them and check the plan on the ticket and that nothing changed. Then finish it as above and check the user is blocked, the mailbox is shared and the report is in Report Archives.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/user-offboarding#technical-details) cover every change and its order, what's left for a technician, what happens without Exchange Online, the Microsoft permissions needed, and other ways to start it.
+
+---
+
+## Technical details
+
+**Formerly:** User offboarding | **Marketplace ID:** TBD | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `user-offboarding.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.0.1).
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `user-offboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.0.1) |
-| View the current source | [`user-offboarding.yml`](https://github.com/cloudradial/Automations/blob/main/user-offboarding/user-offboarding.yml) |
+| View `user-offboarding.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/user-offboarding/user-offboarding.yml) |
+| Download `user-offboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0) |
 | Source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/user-offboarding/src) |
 | All files in this automation | [user-offboarding](https://github.com/cloudradial/Automations/tree/main/user-offboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/user-offboarding) |
@@ -86,7 +147,7 @@ Set-Mailbox -Identity 'sam.doe@contoso.com' -ForwardingAddress 'alex.kim@contoso
 
 ## Download & import
 
-**Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.0.1)
+**Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [secrets](#required-runner-key-vault-secrets), grant the [permissions](#required-microsoft-graph-permissions), then publish and deploy. Full steps are under [Import & test](#import--test).
 
@@ -154,6 +215,15 @@ Send a flat JSON body, or the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Va
 
 **From a portal form or ticket webhook, always send `confirm: false`.** The request posts the plan to the ticket, and a technician reruns the workflow with `confirm: true` (Run dialog, or a ServiceAI Action in AI mode) once the plan looks right.
 
+### Starting it from a form Action
+
+On portals with Actions, add a question of type **Action** to the form and pick **Offboard a Departing Employee**. There's nothing to map. The portal sends each answer under its Field ID (so the form needs a `upn` question, and optionally `forward_to_manager`, `forward_to` and `keep_licenses_days`), plus its own `ticket`, `company` and `user` objects. From an Action:
+
+- **The requester** is the portal's `user.email`, **the ticket** is `ticket.id` (the ticket the form creates), and **the tenant** is `company.tenantId`.
+- **The run is always a preview** (`confirm` false). It posts the plan to the ticket and changes nothing.
+- **A form answer can't set** `confirm`, `allow_admin`, `mailbox_already_shared`, `ticket_id`, `requester_email`, `requester_office_id`, `company_tenant_id`, `company_id` or `psa`. Answers with those Field IDs are ignored, so a requester can't skip the review, offboard an admin or offboard themselves.
+- **To make the changes,** a technician runs the workflow from **Test** with a flat body: the same answers, the `ticket_id` and `confirm` true.
+
 ## Output
 
 ```json
@@ -174,7 +244,7 @@ Send a flat JSON body, or the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Va
 4. Create a disposable test user with a licence, a mailbox, a manager and a couple of groups.
 5. Open the first step's **Test Input**, set `upn` to the test user, keep `confirm` as `"false"`, and run it. Check the planned changes, the follow-up items and the ticket note. Nothing should change in Microsoft 365.
 6. Run again with `confirm` as `"true"`. Check the user is blocked, signed out and out of the groups, the mailbox is shared and hidden, forwarding is set if asked, the licences are gone, and the report is in the company's **Offboarding** report archive.
-7. To start it from the portal, turn on the webhook under **Properties → Webhook** (it mints the URL and secret), redeploy, and add a Webhook activity to the offboarding form's Automation that posts the inputs (with `confirm` false and the requester tokens) with the `X-Crauto-Webhook-Secret` header.
+7. To start it from the portal, add an **Action** question to the offboarding form and pick **Offboard a Departing Employee** (see [Starting it from a form Action](#starting-it-from-a-form-action)), submit it for the test user and check the plan on the ticket. On a portal without Actions, turn on the webhook under **Properties → Webhook** (it mints the URL and secret), redeploy, and add a Webhook activity to the form's Automation that posts the inputs (with `confirm` false and the requester tokens) with the `X-Crauto-Webhook-Secret` header.
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. A run with `confirm` true locks the account and removes its access; test against a disposable user.
 

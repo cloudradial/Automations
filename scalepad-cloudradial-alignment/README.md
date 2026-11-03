@@ -15,6 +15,8 @@ Your team runs it in AutomationAI for one client, or lets it plan for up to thre
 
 Other hardware, like network gear, mobile devices and printers, ends up as flexible assets grouped by kind of device. Your clients don't see any of this; it all happens on your side.
 
+**Keep warranty dates in step.** After the move, run it on a schedule with the warranty phase. It copies ScalePad's warranty end dates onto your clients' computers and servers in CloudRadial, so warranty reports stay right.
+
 ## What it protects
 
 - **Preview by default.** The agent reads everything and shows each change it would make, but changes nothing until you switch it live.
@@ -22,6 +24,7 @@ Other hardware, like network gear, mobile devices and printers, ends up as flexi
 - **Nothing changes without a named client.** A run across all clients only plans.
 - **Small fixes only.** At most 10 direct corrections. Bulk moves always go through the Sync, which has its own preview.
 - **Clients land on the right record.** You're warned to check a client doesn't match your own MSP's company.
+- **Warranty runs only fill or fix dates.** They never clear a date, never add devices, and stop after a set number of changes each run.
 
 ## Works with
 
@@ -93,7 +96,7 @@ It needs the `lifecycle-manager` (ScalePad) extension at **1.2.0 or later**: 1.0
 
 | File | Type | Role |
 |---|---|---|
-| [`scalepad-cloudradial-alignment.agent.yml`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.2.7). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
+| [`scalepad-cloudradial-alignment.agent.yml`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.agent.yml) | `automationsAgent` | The brain (v0.3.0). Reads ScalePad and CloudRadial, maps each item to its home, and returns a plan: one entry per phase for the Sync workflow (with the inputs to run), grouped skips, and up to 10 direct corrections. Publish it → slug `scalepad-cloudradial-alignment`. Dry-run by default. |
 | [`scalepad-cloudradial-alignment.yml`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/scalepad-cloudradial-alignment.yml) | `automationsWorkflow` | **Command: align.** One agent node, `autoApprove: false` (you approve each write). Static goal: the agent reads `mode`/`phase`/company from its input bag. |
 | [`knowledge/scalepad-to-cloudradial-migration-map.md`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-alignment/knowledge/scalepad-to-cloudradial-migration-map.md) | Knowledge | Section-by-section map (ScalePad → CloudRadial home → API/import route → policy-evaluable?), the endpoint field map, and the guardrails. Upload to Knowledge and ground the workflow's agent node on it. |
 
@@ -121,16 +124,33 @@ Every input is optional, the agent never stops to ask. Defaults are shown.
 |---|---|---|
 | `companyId` |, | CloudRadial company to align. |
 | `scalePadClientName` |, | Or name the ScalePad client; it's matched through the crosswalk. |
-| `mode` | `plan` | `apply` writes approved changes, and only when a company is named, a portfolio-wide `apply` runs as `plan`. |
-| `phase` | `all` | Which phase to review, the Sync's names: `devices`, `assets`, `software`, `assessments`, `roadmap`, `archive`. All of them come from the APIs. |
+| `mode` | `plan` | `apply` writes approved changes, and only when a company is named, a portfolio-wide `apply` runs as `plan`. The one exception is the warranty phase with `allCompanies` true. |
+| `phase` | `all` | Which phase to review, the Sync's names: `devices`, `assets`, `software`, `assessments`, `roadmap`, `archive`. All of them come from the APIs. `warranty` is a separate standing job, see [Warranty phase](#warranty-phase). |
 | `createPlaceholders` | `false` | Kept for compatibility. Missing devices are created by the Sync workflow (`createMissingDevices`); the agent flags any that look wrong first. |
-| `maxCompanies` | `3` | With no company named, how many crosswalked clients to plan for. |
+| `maxCompanies` | `3` (`25` for `warranty`) | With no company named, how many crosswalked clients to plan for. |
+| `allCompanies` | `false` | Warranty phase only. With no company named, `true` lets `apply` update every crosswalked client, up to `maxCompanies`. |
+| `maxWarrantyWrites` | `150` | Warranty phase only. The most warranty dates written in one run; the next run carries on. |
 
 Example first run: `{"mode":"plan","companyId":1,"phase":"devices"}`
 
 **What it hands to the Sync workflow.** For devices, assets, software, assessments, roadmap and archive the plan carries one `planned` entry with `action: "workflow"` and the count, plus a single **`syncRun`**, the exact run input for the Sync, for example `{"companyId":123,"scalePadClientId":"…","mode":"plan","phases":"all"}`. Paste it as the Sync's run input. `phases` only ever uses the Sync's six names, initiatives and contracts are `roadmap`, deliverable PDFs are `archive`.
 
 **Flexible assets come from ScalePad.** ScalePad hardware that isn't an endpoint (network, mobile and imaging devices) and devices with no serial number go to one flexible asset type per kind of device (**Network Devices**, **Mobile Devices**, **Printers & Imaging**, and so on) through the Sync's `assets` phase. For a one-off fix the agent uses the `cloudradial-v2-compliance` tools (0.2.1 or later, because 0.2.0's `cr_patch_flexible_asset` can't change anything). No IT Glue tooling is involved.
+
+## Warranty phase
+
+`phase: "warranty"` is a standing job for a Routine, usually weekly or monthly. It skips the normal plan and the `syncRun`, and only keeps warranty dates in CloudRadial aligned with ScalePad.
+
+- **What it covers.** ScalePad workstations and servers. Virtual machines have no hardware warranty, and network, mobile and imaging devices live in flexible assets, so those are skipped and counted by reason.
+- **How it matches.** By serial number, trimmed and upper-cased. A device with no serial is skipped.
+- **What it writes.** Only the endpoint's `expirationDate`, through the `cloudradial-v2-endpoints` endpoint update (`PATCH /v2/endpoint/id/{companyEndpointId}`). It never uses `update-warranty`, because that starts a manufacturer lookup that can overwrite the ScalePad date.
+- **When it writes.** A blank CloudRadial date is filled, and a different date is updated to ScalePad's, because ScalePad is the source of truth in this phase. A blank ScalePad date leaves CloudRadial alone, so a date is never cleared.
+- **What it never does.** It never creates an endpoint (endpoints come from the RMM). Devices that are in ScalePad but not in CloudRadial are counted under `notInCloudRadial` with up to 20 example serials.
+- **How much it writes.** In `apply`, up to `maxWarrantyWrites` per run, servers first, then workstations, oldest expiry first. When the cap is reached it reports `remaining` and the next run carries on. The 10-write limit for small corrections doesn't apply here.
+
+For a whole portfolio, run it on a Routine with `{"phase":"warranty","mode":"apply","allCompanies":true}`. Run it once with `mode: plan` first and check the list of changes.
+
+The output adds a `warranty` object: per company the counts (`matched`, `filled`, `updated`, `unchanged`, `scalePadBlank`, `notInCloudRadial`, `skipped`, `remaining`, `errors`), and up to 50 `changes` with the device, serial, old date and new date. `expirationDate` feeds the Warranty Coverage policy for workstations and servers.
 
 ## Confirm in your tenant
 

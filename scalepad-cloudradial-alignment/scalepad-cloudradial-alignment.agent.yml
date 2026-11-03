@@ -14,12 +14,13 @@ agent:
   slug: scalepad-cloudradial-alignment
   name: ScalePad to CloudRadial Alignment
   vendor: CloudRadial
-  version: 0.2.7
+  version: 0.3.0
   description: >-
     Maps a client's ScalePad Lifecycle Manager data to its CloudRadial home and produces an
     apply-plan (writes only on approval): enriches endpoints, keeps non-endpoint hardware as
     flexible assets, syncs software, uploads assessments, archives deliverables - without clobbering RMM data or
-    attempting anything the policy engine does not allow.
+    attempting anything the policy engine does not allow. Phase "warranty" keeps endpoint and
+    server warranty dates in CloudRadial aligned with ScalePad on a schedule.
   category: Lifecycle
   tags:
     - scalepad
@@ -40,6 +41,11 @@ agent:
     for flexible-asset updates), plus the workflow's agent node
     grounded on `knowledge/scalepad-to-cloudradial-migration-map.md`.
 
+    **Warranty phase (0.3.0):** `phase: "warranty"` is a standing job for a Routine. It
+    matches workstations and servers by serial and writes ScalePad's warranty expiry to the
+    endpoint's `expirationDate` when the portal value is blank or different. It never creates
+    devices, never clears a date, and caps writes per run (`maxWarrantyWrites`).
+
     **Does not:** configure Compliance Policies (there is no policy API) - it only writes the
     endpoint inputs policies read, and reports which policies each write affects.
   systemPrompt: |
@@ -59,7 +65,8 @@ agent:
     conflict in `warnings`.
 
     NEVER STOP TO ASK FOR INPUTS. Every input is optional. Use these defaults and state them
-    in `summary`: mode = "plan"; phase = "all"; createPlaceholders = false; maxCompanies = 3.
+    in `summary`: mode = "plan"; phase = "all"; createPlaceholders = false; maxCompanies = 3
+    (25 when phase is "warranty"); allCompanies = false; maxWarrantyWrites = 150.
     The workflow always sends every field: companyId 0 and an empty scalePadClientName both
     mean "no company named".
     - No companyId and no scalePadClientName: list the ScalePad clients yourself
@@ -67,7 +74,8 @@ agent:
       then exact normalized name), and plan for up to maxCompanies matched clients. List the
       rest in `unresolvedClients` or as "not processed - over maxCompanies" in `warnings`.
     - mode = "apply" with no companyId or scalePadClientName: do NOT write across the
-      portfolio. Run as "plan" instead and say so in `warnings`.
+      portfolio. Run as "plan" instead and say so in `warnings`. The ONE exception is
+      phase = "warranty" with allCompanies = true (see WARRANTY PHASE).
 
     WHO DOES WHAT. You make the judgment calls; the ScalePad to CloudRadial Sync workflow
     does the bulk transfer. Everything below is reachable by API, so none of it is "unmapped":
@@ -94,6 +102,46 @@ agent:
       such as fixing one mismatched warranty date or one wrongly typed device.
     - GROUP repeated results: never list the same skip reason once per item. One entry per
       reason with a count and up to 20 example serials.
+
+    WARRANTY PHASE (phase = "warranty"). A standing job, usually on a weekly or monthly
+    Routine. It does ONLY this, and skips the Procedure below and the syncRun:
+    - Scope: ScalePad core hardware of type WORKSTATION and SERVER. Skip VIRTUAL (no
+      hardware warranty), NETWORK, MOBILE and IMAGING (they live in flexible assets, not
+      endpoints). Group skips by reason with a count.
+    - Companies: the named company (companyId or scalePadClientName). With no company named
+      and allCompanies = true, crosswalk every ScalePad client (psaIdentifier first, then exact
+      normalized name) and process up to maxCompanies matched clients; never guess a company,
+      never use companyId 1 unless it is the explicit target. With no company named and
+      allCompanies = false, plan for up to maxCompanies clients and write nothing.
+    - Read, per company: ScalePad hardware lifecycles (GET
+      /lifecycle-manager/v1/assets/hardware/lifecycles, filter_client_id) for serial_number and
+      warranty_expiry_date, and ScalePad hardware assets for the type; CloudRadial endpoints
+      for the company (companyEndpointId, name, serialNumber, isServer, isVirtual,
+      expirationDate). Match on serial, trimmed and upper-cased. A device with no serial is
+      skipped (reason "no serial").
+    - Decide per matched device, comparing dates by day (yyyy-MM-dd):
+        * ScalePad warranty blank -> leave CloudRadial alone (never clear a date).
+        * CloudRadial blank -> write ScalePad's date ("filled").
+        * Dates differ -> write ScalePad's date ("updated"). ScalePad is the source of truth
+          for warranty in this phase, so this overrides "report both dates and let the
+          operator decide"; list each change with the old and new date.
+        * Same day -> no write ("unchanged").
+    - Devices in ScalePad but not in CloudRadial: do NOT create them here (endpoints come from
+      the RMM). Count them under "notInCloudRadial" with up to 20 example serials.
+    - Write with the cloudradial-v2-endpoints endpoint update tool (PATCH
+      /v2/endpoint/id/{companyEndpointId}), sending ONLY expirationDate as an ISO date. Never
+      use update-warranty (it starts a manufacturer lookup that can overwrite the ScalePad date).
+      Never change any other field in this phase.
+    - mode = "plan": no writes; list what would change. mode = "apply": write, up to
+      maxWarrantyWrites writes per run in total (servers first, then workstations, oldest
+      expiry first). When the cap is reached, stop writing, report "remaining" with the count,
+      and say the next run continues. The 10-write limit for small corrections does not apply
+      to this phase.
+    - Return the normal output plus `warranty`: per company {cloudradialCompanyId, name,
+      scalePadDevices, matched, filled, updated, unchanged, scalePadBlank, notInCloudRadial,
+      skipped, remaining, errors} and `changes` (up to 50: device, serial, isServer, from, to).
+      Put the totals in `summary` in one plain sentence. Policy impact: expirationDate feeds
+      the Warranty Coverage policy (workstation and server).
 
     Procedure:
     1. Resolve the target: use input.companyId, or match input.scalePadClientName through the
@@ -151,8 +199,8 @@ agent:
     - cloudradial-v2-compliance
   requiredSecretNames: []
   inputSchema: |
-    {"type":"object","properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Optional - omit to resolve from scalePadClientName, or to let the agent crosswalk ScalePad clients itself (up to maxCompanies)."},"scalePadClientName":{"type":"string","description":"Optional. Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"default":"plan","description":"plan = describe changes, no writes (default); apply = write approved changes only, and only for a named company."},"phase":{"type":"string","enum":["devices","assets","software","assessments","roadmap","archive","all"],"default":"all","description":"Which phase to review - the same names as the ScalePad to CloudRadial Sync. Defaults to all."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."},"maxCompanies":{"type":"integer","default":3,"description":"When no company is named, how many crosswalked clients to plan for."}}}
+    {"type":"object","properties":{"companyId":{"type":"integer","description":"Target CloudRadial companyId. Optional - omit to resolve from scalePadClientName, or to let the agent crosswalk ScalePad clients itself (up to maxCompanies)."},"scalePadClientName":{"type":"string","description":"Optional. Restrict the run to a single ScalePad client by name."},"mode":{"type":"string","enum":["plan","apply"],"default":"plan","description":"plan = describe changes, no writes (default); apply = write approved changes only, and only for a named company."},"phase":{"type":"string","enum":["devices","assets","software","assessments","roadmap","archive","all","warranty"],"default":"all","description":"Which phase to review - the same names as the ScalePad to CloudRadial Sync, plus warranty (keep endpoint and server warranty dates aligned with ScalePad). Defaults to all."},"createPlaceholders":{"type":"boolean","default":false,"description":"Allow creating placeholder endpoints for unmanaged ScalePad assets."},"maxCompanies":{"type":"integer","default":3,"description":"When no company is named, how many crosswalked clients to plan for (25 for the warranty phase)."},"allCompanies":{"type":"boolean","default":false,"description":"Warranty phase only: with no company named and mode apply, update every crosswalked client (up to maxCompanies)."},"maxWarrantyWrites":{"type":"integer","default":150,"description":"Warranty phase only: most warranty writes in one run; the next run continues."}}}
   outputSchema: |
-    {"type":"object","properties":{"summary":{"type":"string"},"clientsMapped":{"type":"array","items":{"type":"object","properties":{"scalepadClient":{"type":"string"},"cloudradialCompanyId":{"type":"integer"},"matchConfidence":{"type":"string"}}}},"unresolvedClients":{"type":"array","items":{"type":"string"}},"matched":{"type":"integer"},"enriched":{"type":"integer"},"created":{"type":"integer"},"skipped":{"type":"integer"},"syncRun":{"type":"object","description":"The ONE ScalePad to CloudRadial Sync run to start next - paste as its run input.","properties":{"companyId":{"type":"integer"},"scalePadClientId":{"type":"string"},"mode":{"type":"string","enum":["plan","apply"]},"phases":{"type":"string","description":"Comma list of devices, assets, software, assessments, roadmap, archive - or all."}}},"planned":{"type":"array","items":{"type":"object","properties":{"target":{"type":"string"},"action":{"type":"string","enum":["workflow","enrich","create","upload","archive","skip"]},"fields":{"type":"object"},"policyImpact":{"type":"string"},"reason":{"type":"string"},"count":{"type":"integer","description":"Items covered by this entry (grouped skips, or a workflow phase)."},"examples":{"type":"array","items":{"type":"string"},"description":"Up to 20 example serials or names."},"workflowInputs":{"type":"object","description":"For action workflow: the ScalePad to CloudRadial Sync inputs to run (companyId, scalePadClientId, mode, phases). phases uses only: devices, assets, software, assessments, roadmap, archive."}}}},"unmapped":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"reason":{"type":"string"}}}},"policySpecification":{"type":"array","items":{"type":"object","properties":{"proposedPolicy":{"type":"string"},"input":{"type":"string"},"note":{"type":"string"}}}},"currencyNote":{"type":"string"},"warnings":{"type":"array","items":{"type":"string"}}}}
+    {"type":"object","properties":{"summary":{"type":"string"},"clientsMapped":{"type":"array","items":{"type":"object","properties":{"scalepadClient":{"type":"string"},"cloudradialCompanyId":{"type":"integer"},"matchConfidence":{"type":"string"}}}},"unresolvedClients":{"type":"array","items":{"type":"string"}},"matched":{"type":"integer"},"enriched":{"type":"integer"},"created":{"type":"integer"},"skipped":{"type":"integer"},"syncRun":{"type":"object","description":"The ONE ScalePad to CloudRadial Sync run to start next - paste as its run input.","properties":{"companyId":{"type":"integer"},"scalePadClientId":{"type":"string"},"mode":{"type":"string","enum":["plan","apply"]},"phases":{"type":"string","description":"Comma list of devices, assets, software, assessments, roadmap, archive - or all."}}},"planned":{"type":"array","items":{"type":"object","properties":{"target":{"type":"string"},"action":{"type":"string","enum":["workflow","enrich","create","upload","archive","skip"]},"fields":{"type":"object"},"policyImpact":{"type":"string"},"reason":{"type":"string"},"count":{"type":"integer","description":"Items covered by this entry (grouped skips, or a workflow phase)."},"examples":{"type":"array","items":{"type":"string"},"description":"Up to 20 example serials or names."},"workflowInputs":{"type":"object","description":"For action workflow: the ScalePad to CloudRadial Sync inputs to run (companyId, scalePadClientId, mode, phases). phases uses only: devices, assets, software, assessments, roadmap, archive."}}}},"unmapped":{"type":"array","items":{"type":"object","properties":{"item":{"type":"string"},"reason":{"type":"string"}}}},"policySpecification":{"type":"array","items":{"type":"object","properties":{"proposedPolicy":{"type":"string"},"input":{"type":"string"},"note":{"type":"string"}}}},"currencyNote":{"type":"string"},"warranty":{"type":"object","description":"Warranty phase only.","properties":{"companies":{"type":"array","items":{"type":"object","properties":{"cloudradialCompanyId":{"type":"integer"},"name":{"type":"string"},"scalePadDevices":{"type":"integer"},"matched":{"type":"integer"},"filled":{"type":"integer"},"updated":{"type":"integer"},"unchanged":{"type":"integer"},"scalePadBlank":{"type":"integer"},"notInCloudRadial":{"type":"integer"},"skipped":{"type":"integer"},"remaining":{"type":"integer"},"errors":{"type":"integer"}}}},"changes":{"type":"array","items":{"type":"object","properties":{"device":{"type":"string"},"serial":{"type":"string"},"isServer":{"type":"boolean"},"from":{"type":"string"},"to":{"type":"string"}}}}}},"warnings":{"type":"array","items":{"type":"string"}}}}
   # Start runs in dry-run (preview mutating tools) by default - the plan/apply safety gate.
   dryRunDefault: true

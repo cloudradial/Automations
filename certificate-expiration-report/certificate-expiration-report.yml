@@ -139,7 +139,7 @@ definition:
             # ----- Certificates -----
             $certs = @(Get-CrCollection ("/v2/odata/certificate$companyFilterClause"))
 
-            $counts = [ordered]@{ evaluated=0; expired=0; expiring=0; active=0; unknown=0; cardsCreated=0; cardsUpdated=0; errors=0 }
+            $counts = [ordered]@{ evaluated=0; expired=0; expiring=0; active=0; unknown=0; skippedMissingCompany=0; cardsCreated=0; cardsUpdated=0; errors=0 }
             $flaggedByCompany = @{}
             $allRows = [System.Collections.Generic.List[object]]::new()
 
@@ -172,6 +172,7 @@ definition:
             # ----- Per-company Planner cards (plain language) -----
             $productsByCompany = @{}
             $firstError = $null
+            $missingCompanies = [System.Collections.Generic.List[string]]::new()
             foreach ($companyId in @($flaggedByCompany.Keys)) {
                 $items = @($flaggedByCompany[$companyId].ToArray() | Sort-Object { if ($null -eq $_.daysLeft) { [int]::MaxValue } else { $_.daysLeft } })
                 $expiredN = @($items | Where-Object { $_.status -eq 'expired' }).Count
@@ -191,6 +192,9 @@ definition:
                 $body = $sb.ToString()
 
                 if (-not $WriteCards) { continue }
+                # A domain or certificate can outlive its company (deleted from the portal), and a card can't be written
+                # to a company that isn't there. Skip it and say so instead of counting an error.
+                if (-not $companyName.ContainsKey([string]$companyId)) { $counts.skippedMissingCompany++; [void]$missingCompanies.Add([string]$companyId); continue }
                 try {
                     if (-not $productsByCompany.ContainsKey($companyId)) { $productsByCompany[$companyId] = @(Get-CrCollection ("/v2/odata/product?`$filter=companyId eq $([int]$companyId)")) }
                     $ref = [ref]$productsByCompany[$companyId]
@@ -202,6 +206,7 @@ definition:
             }
 
             $message = "Evaluated $($counts.evaluated) certificates across $(@($companyName.Keys).Count) companies: $($counts.expired) expired, $($counts.expiring) expiring within $WindowDays days. Cards created $($counts.cardsCreated), updated $($counts.cardsUpdated), errors $($counts.errors)."
+            if ($missingCompanies.Count -gt 0) { $message = "$message No card for company id(s) $(($missingCompanies | Sort-Object -Unique) -join ', '): they aren't in the portal any more, so their items were left out of the cards." }
             if ($firstError) { $message = "$message FIRST ERROR: $firstError" }
 
             Set-NodeOutput @{ status='success'; message=$message; windowDays=$WindowDays; counts=$counts; firstError=$firstError; certificates=@($allRows.ToArray()) }

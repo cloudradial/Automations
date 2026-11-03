@@ -63,7 +63,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/use
 
 ## Technical details
 
-**Formerly:** User offboarding | **Marketplace ID:** TBD | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.1.0
+**Formerly:** User offboarding | **Marketplace ID:** CRA-00003 | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.1.0
 
 ## Files
 

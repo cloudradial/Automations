@@ -1,6 +1,6 @@
 automationsWorkflow: 1
 name: "Sync IT Glue Documentation into the Portal"
-description: 'Copies an IT Glue flexible-asset type and its records into a CloudRadial company as flexible assets, via the CloudRadial UCP Assistant agent (IT Glue read + CloudRadial compliance write). Send {"companyName":"Acme Ltd","itglueOrgName":"Acme","flexibleAssetTypeName":"SSL Certificates"}. Idempotent: matches existing assets so re-runs update rather than duplicate. Every write is approval-gated. Replaces the AAI-00004 IT Glue sync script.'
+description: 'Copies an IT Glue flexible-asset type and its records into a CloudRadial company as flexible assets, via the CloudRadial UCP Reporting agent (IT Glue read + CloudRadial compliance write). Send {"companyName":"Acme Ltd","itglueOrgName":"Acme","flexibleAssetTypeName":"SSL Certificates"}. Idempotent: matches existing assets so re-runs update rather than duplicate. Every write is approval-gated. Replaces the AAI-00004 IT Glue sync script.'
 definition:
   schemaVersion: 1
   activities:
@@ -54,7 +54,7 @@ definition:
         x: 500
         y: 120
       properties:
-        agentSlug: cloudradial-ucp-assistant
+        agentSlug: cloudradial-ucp-reporting
         goal: >-
           Copy an IT Glue flexible-asset type and its records into a CloudRadial company as
           flexible assets. Work from the "request" input (it names the CloudRadial company, the

@@ -1,0 +1,195 @@
+# CloudRadial AutomationAI - Set Up a New Company (goal workflow for the CloudRadial UCP Assistant).
+# Import the agent (cloudradial-ucp.agent.yml) first, then this file on Workflows -> Import.
+# Manual run: leave the first step unbound; it reads the Run input. See README.md.
+automationsWorkflow: 1
+name: Set Up a New Company
+description: 'Sets up one new client company in CloudRadial through the CloudRadial UCP Assistant: the company, its default domain, company group, first portal users, replacement tokens, starter request forms and menu tiles. Checks for duplicates first; every create is approval-gated. Send {"companyName":"Contoso Ltd","domain":"contoso.com", ...}.'
+definition:
+  schemaVersion: 1
+  activities:
+    - id: start
+      name: Start
+      type: start
+      position:
+        x: 100
+        'y': 120
+      properties:
+        webhookEnabled: false
+    - id: node-inputs
+      name: Read the setup
+      type: powershell-script
+      position:
+        x: 300
+        'y': 120
+      properties:
+        script: |
+          # === NODE: Read the setup ===
+          # Checks the run input and turns it into one request for the CloudRadial UCP Assistant. Fails closed:
+          # a missing company name, a bad email or domain, or more than the per-run limits stops the run before
+          # the agent starts, so nothing is half created. Run input (only companyName is required):
+          #   companyName, domain, companyGroup, accountManager, territory, psaIdentifier, psaKey,
+          #   users        [{"firstName","lastName","email"}]          up to 5
+          #   tokens       [{"token","value"}] or {"Token":"value"}   up to 5
+          #   requestForms [{"subject","category","description"}]     up to 3
+          #   menuTiles    [{"name","url","category"}]                 up to 3
+          $ErrorActionPreference = 'Stop'
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function Get-Text { param($o, $n) $v = Get-Prop $o $n; if ($null -eq $v) { return '' }; return ([string]$v).Trim() }
+          function Get-Pairs { param($o) if ($o -is [System.Collections.IDictionary]) { return @($o.Keys | ForEach-Object { @{ Name = [string]$_; Value = $o[$_] } }) }; return @($o.PSObject.Properties | ForEach-Object { @{ Name = $_.Name; Value = $_.Value } }) }
+          function Stop-Setup { param([string]$Msg) Set-NodeOutput ([ordered]@{ status = 'rejected'; message = $Msg; request = ''; companyName = '' }); throw $Msg }
+
+          $in = Get-NodeInput
+          $t = Get-Prop $in 'trigger'; if ($null -ne $t) { $in = $t }
+          if ($in -is [string]) { $s = $in.Trim(); $in = $(if ($s.StartsWith('{')) { $s | ConvertFrom-Json } else { $null }) }
+          if ($null -eq $in) { Stop-Setup 'No run input. Send at least {"companyName": "Contoso Ltd"}.' }
+
+          $limits = @{ users = 5; tokens = 5; requestForms = 3; menuTiles = 3 }
+          $problems = New-Object System.Collections.ArrayList
+          $company = [ordered]@{ name = (Get-Text $in 'companyName') }
+          if (-not $company.name) { $null = $problems.Add('companyName is required.') }
+          elseif ($company.name.Length -gt 100) { $null = $problems.Add('companyName is longer than 100 characters.') }
+          foreach ($k in @('accountManager', 'territory', 'psaIdentifier')) { $v = Get-Text $in $k; if ($v) { $company[$k] = $v } }
+          $psaKeyText = Get-Text $in 'psaKey'
+          if ($psaKeyText) { $pk = [long]0; if ([long]::TryParse($psaKeyText, [ref]$pk) -and $pk -gt 0) { $company.psaKey = $pk } else { $null = $problems.Add("psaKey must be a whole number (got '$psaKeyText').") } }
+          $domain = (Get-Text $in 'domain').ToLowerInvariant()
+          if ($domain -and $domain -notmatch '^(?=.{4,253}$)([a-z0-9](-?[a-z0-9])*\.)+[a-z]{2,}$') { $null = $problems.Add("domain '$domain' isn't a domain name (for example contoso.com).") }
+          $group = Get-Text $in 'companyGroup'
+
+          $users = @(); foreach ($u in @(Get-Prop $in 'users')) {
+              if ($null -eq $u) { continue }
+              $row = [ordered]@{ firstName = (Get-Text $u 'firstName'); lastName = (Get-Text $u 'lastName'); email = (Get-Text $u 'email').ToLowerInvariant() }
+              if (-not $row.firstName -or -not $row.lastName -or $row.email -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { $null = $problems.Add("Each user needs firstName, lastName and a valid email (got '$($row.firstName) $($row.lastName) <$($row.email)>').") }
+              else { $users += $row }
+          }
+          # Tokens come as a list of {"token","value"} or as one {"TokenName":"value"} map. (A one-item list arrives
+          # unwrapped, so tell them apart by the "token" property, not by type.)
+          $tokens = @()
+          foreach ($x in @(Get-Prop $in 'tokens')) {
+              if ($null -eq $x -or $x -is [string]) { continue }
+              if ($null -ne (Get-Prop $x 'token')) { $tokens += [ordered]@{ token = (Get-Text $x 'token'); value = (Get-Text $x 'value') } }
+              else { foreach ($p in (Get-Pairs $x)) { $tokens += [ordered]@{ token = $p.Name; value = ([string]$p.Value).Trim() } } }
+          }
+          foreach ($x in $tokens) {
+              $x.token = $x.token.TrimStart('@')
+              if ($x.token -notmatch '^[A-Za-z][A-Za-z0-9_]*$' -or -not $x.value) { $null = $problems.Add("Each token needs a name (letters, digits, underscore) and a value (got '$($x.token)').") }
+          }
+          $forms = @(); foreach ($f in @(Get-Prop $in 'requestForms')) {
+              if ($null -eq $f) { continue }
+              $row = [ordered]@{ subject = (Get-Text $f 'subject'); category = (Get-Text $f 'category'); description = (Get-Text $f 'description') }
+              if (-not $row.subject -or -not $row.category) { $null = $problems.Add("Each request form needs a subject and a category (got '$($row.subject)').") } else { $forms += $row }
+          }
+          $menus = @(); foreach ($m in @(Get-Prop $in 'menuTiles')) {
+              if ($null -eq $m) { continue }
+              $row = [ordered]@{ name = (Get-Text $m 'name'); url = (Get-Text $m 'url'); category = (Get-Text $m 'category') }
+              if (-not $row.name -or $row.url -notmatch '^https?://\S+$' -or -not $row.category) { $null = $problems.Add("Each menu tile needs a name, a category and an http(s) url (got '$($row.name)').") } else { $menus += $row }
+          }
+          $counts = [ordered]@{ users = $users.Count; tokens = $tokens.Count; requestForms = $forms.Count; menuTiles = $menus.Count }
+          foreach ($k in @($limits.Keys)) { if ($counts[$k] -gt $limits[$k]) { $null = $problems.Add("$($counts[$k]) $k is more than the $($limits[$k]) one run can create. Add the rest afterwards with the bulk workflows (Onboard Many Portal Users at Once, Load Your Request Forms into Any Portal).") } }
+          if ($problems.Count) { Stop-Setup ("The setup wasn't started: " + ($problems -join ' ')) }
+
+          $plan = [ordered]@{ company = $company; domain = $domain; companyGroup = $group; users = @($users); tokens = @($tokens); requestForms = @($forms); menuTiles = @($menus) }
+          $planJson = ConvertTo-Json -InputObject $plan -Depth 6 -Compress
+          $parts = @("the company '$($company.name)'")
+          if ($domain) { $parts += "default domain $domain" }
+          if ($group) { $parts += "membership of the company group '$group'" }
+          foreach ($k in @('users', 'tokens', 'requestForms', 'menuTiles')) { if ($counts[$k]) { $parts += "$($counts[$k]) $k" } }
+          $request = "Set up a new CloudRadial company from this plan. Follow SETTING UP A NEW COMPANY in your instructions, create only what the plan lists, and leave out any empty field. Plan (JSON): $planJson"
+          Set-NodeOutput ([ordered]@{
+              status = 'ok'; companyName = $company.name; request = $request; plan = $plan; counts = $counts
+              message = "Ready to set up " + ($parts -join ', ') + '.'
+          })
+        timeoutSeconds: 60
+        retryCount: 0
+        parameters: []
+        aiExtensions: []
+        testInput: |-
+          {
+            "companyName": "Contoso Ltd",
+            "domain": "contoso.com",
+            "companyGroup": "Managed Clients",
+            "accountManager": "alex.kim@examplemsp.com",
+            "users": [
+              {
+                "firstName": "Pat",
+                "lastName": "Lee",
+                "email": "pat.lee@contoso.com"
+              }
+            ],
+            "tokens": [
+              {
+                "token": "SupportPhone",
+                "value": "555-0100"
+              }
+            ],
+            "requestForms": [
+              {
+                "subject": "Request a new laptop",
+                "category": "Hardware",
+                "description": "Tell us who the laptop is for and when they start."
+              }
+            ],
+            "menuTiles": [
+              {
+                "name": "Remote Support",
+                "url": "https://support.examplemsp.com",
+                "category": "Help"
+              }
+            ]
+          }
+    - id: node-agent
+      name: Set up the company
+      type: agent
+      position:
+        x: 520
+        'y': 120
+      properties:
+        agentSlug: cloudradial-ucp-assistant
+        goal: |
+          Write one short sentence before each tool call, and never send an empty message.
+
+          Set up ONE new client company in CloudRadial from the plan in your request, following SETTING UP A NEW
+          COMPANY in your instructions. Create only what the plan lists, in this order: company, default domain,
+          company group membership, users, tokens, request forms, menu tiles. Leave out any field the plan leaves
+          empty, and never invent a value. Menu tiles always get order 0 and editRights 0.
+
+          Do every duplicate check first, in one turn. If the company name or the domain already exists, stop
+          before creating anything and report what matched. If the company group is named but not found, set up
+          everything else, skip the group and say so. Never create a company group unless the plan asks for it.
+
+          After the company is created, read it back by name to get its companyId and use that id for every
+          later create. Make the user, token, form and menu creates in parallel where you can: you stop after 25
+          turns.
+
+          Every create is approval-gated. On a dry run, still do every read and list each record you would
+          create. Never update or delete anything in this run.
+
+          Finish with: the companyId (or "not created"), one line per record (created, would create, skipped
+          and why, or failed and the error), and the manual steps: logo and theme, messaging, the PSA and
+          Microsoft 365 links, security roles, showing each new menu tile to Everyone, and inviting the users.
+        allowedExtensions:
+          - cloudradial-v2-companies
+          - cloudradial-v2-tokens
+          - cloudradial-v2-content
+        model: ''
+        timeoutSeconds: 1800
+        autoApprove: false
+        inputBindingsJson: '{"request":"{{ nodes.node-inputs.output.request }}","companyName":"{{ nodes.node-inputs.output.companyName }}"}'
+        inputSchema: '{"type":"object","properties":{"request":{"type":"string"},"companyName":{"type":"string"}},"required":["request"],"additionalProperties":false}'
+        outputSchema: '{"type":"object","properties":{"companyId":{"type":"string"},"answer":{"type":"string"},"actions":{"type":"array","items":{"type":"string"}},"skipped":{"type":"array","items":{"type":"string"}},"manualSteps":{"type":"array","items":{"type":"string"}}},"required":["companyId","answer"],"additionalProperties":false}'
+    - id: end
+      name: End
+      type: end
+      position:
+        x: 740
+        'y': 120
+  connections:
+    - source: start
+      target: node-inputs
+      sourceHandle: null
+    - source: node-inputs
+      target: node-agent
+      sourceHandle: null
+    - source: node-agent
+      target: end
+      sourceHandle: null
+  startActivityId: start

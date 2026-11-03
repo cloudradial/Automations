@@ -21,7 +21,7 @@ definition:
         script: |
           # === NODE: Run inputs ===
           # Reads the run input and writes the agent's request. The CloudRadial portal has no way to
-          # delete a flexible asset type, so this workflow asks the CloudRadial UCP Assistant to do it
+          # delete a flexible asset type, so this workflow asks the CloudRadial UCP Reporting agent to do it
           # through the API - only when no company has a row in the type.
           #   typeName - the flexible asset type to remove (default "ScalePad Assets", the single type
           #              older ScalePad to CloudRadial Sync versions wrote to)
@@ -57,10 +57,10 @@ definition:
         x: 520
         y: 100
       properties:
-        # Runs the CloudRadial UCP Assistant (import cloudradial-ucp/ 0.1.4 or later first - it needs
+        # Runs the CloudRadial UCP Reporting agent (import cloudradial-ucp-reporting/ first - it needs
         # the cloudradial-v2-compliance extension). The goal limits this run to one delete, and only
         # of an empty type; autoApprove false makes that delete wait in the Inbox for approval.
-        agentSlug: cloudradial-ucp-assistant
+        agentSlug: cloudradial-ucp-reporting
         goal: |
           Write one short sentence before each tool call, and never send an empty message.
 

@@ -35,9 +35,9 @@ Used on the **Upgrade in place**, **Retain** and **Human review** (servers) card
 
 | Part | Price | Cost | When a computer needs it |
 |---|---|---|---|
-| RAM upgrade | 120 | 80 | Memory is recorded and below 7.5 GB. A nominal 8 GB computer reports about 7.8 GB, so it doesn't count. |
+| RAM upgrade | 120 | 80 | Memory is recorded and below `recommendedRamGb` in the refresh standards (8 GB by default). A computer counts only when it reports less than 94% of it, so a nominal 8 GB computer (about 7.8 GB reported) doesn't. |
 | SSD upgrade | 180 | 110 | The endpoint reports no SSD, in a company where at least one endpoint reports an SSD. Servers never get this part. |
-| Warranty extension | 250 | 190 | The warranty has expired or ends within 90 days. |
+| Warranty extension | 250 | 190 | The warranty has expired or ends within `warrantyExpiringDays` (90 days by default). |
 
 - These are the only part names the workflow can match. Other names are ignored with a warning.
 - A part a computer needs but that has no price is listed as not priced and left out of the total.

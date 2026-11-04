@@ -22,6 +22,8 @@ $eps = @(
     @{ companyId = 2; name = 'W11-READY-HDD'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-05-01T00:00:00Z'; expirationDate = '2027-05-01T00:00:00Z'; memory = 6442450944; isSSD = $false },   # Upgrade in place: needs RAM + SSD
     @{ companyId = 2; name = 'RETAIN-PC'; os = 'Windows 11 Pro'; manufacturedDate = '2024-02-01T00:00:00Z'; expirationDate = '2026-01-15T00:00:00Z'; memory = 17179869184; isSSD = $true },   # Retain: needs a warranty extension
     @{ companyId = 2; name = 'W11-READY-8GB'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-06-01T00:00:00Z'; expirationDate = '2027-06-01T00:00:00Z'; memory = 8352567296; isSSD = $true },   # 8 GB reports 7.8 GB: no RAM upgrade
+    @{ companyId = 2; name = 'HEALTHY-8GB'; os = 'Windows 11 Pro'; manufacturedDate = '2025-03-01T00:00:00Z'; expirationDate = '2028-03-01T00:00:00Z'; memory = 8352567296; isSSD = $true },   # 8 GB reports 7.8 GB: healthy, no card
+    @{ companyId = 2; name = 'LOW-4GB'; os = 'Windows 11 Pro'; manufacturedDate = '2025-03-01T00:00:00Z'; expirationDate = '2028-03-01T00:00:00Z'; memory = 4080218931; isSSD = $true },   # 4 GB reports 3.8 GB: Retain with a RAM upgrade, not Replace
     @{ companyId = 4; name = 'NO-SSD-DATA-PC'; os = 'Windows 10 Pro'; windows11Readiness = 'Ready'; manufacturedDate = '2024-06-01T00:00:00Z'; expirationDate = '2027-06-01T00:00:00Z'; memory = 17179869184; isSSD = $false },   # company never reports isSSD true: no SSD upgrade
     @{ companyId = 3; name = 'ORPHAN-PC'; os = 'Windows 10 Pro'; manufacturedDate = '2016-01-01T00:00:00Z' }   # company 3 doesn't exist
 )
@@ -56,6 +58,7 @@ Set-StrictMode -Version Latest   # as on the runner
 Set-StrictMode -Off
 $o = $global:Out
 $o.message
+"standardsApplied: $(@($o.standardsApplied) -join ', ')"
 "optionalFieldsDropped: $($o.optionalFieldsDropped) | pricingApplied: $($o.pricingApplied) | estimatedTotal: $(if ($o.Contains('estimatedTotal')) { $o.estimatedTotal }) | warnings: $(@($o.warnings) -join ' / ')"
 foreach ($r in $o.results) { "  [$($r.companyId)] $($r.category) | $($r.action) | $($r.priority) | id=$($r.productId) | n=$($r.deviceCount) | est=$($r.estimatedPrice) | $($r.note)"; foreach ($b in @($r.priceBreakdown | Where-Object { $_ })) { "        - $b" } }
 foreach ($r in @($o.results | Where-Object { $_.action -eq 'completed' -and $_.productId })) {

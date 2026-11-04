@@ -117,6 +117,7 @@ Do these in order. The workflow won't send anything until step 2 is done.
 | Field | Required | What it does |
 |---|---|---|
 | `toEmail` | Yes | Who gets the audit: one address, a comma list, or a JSON list. |
+| `standards` | No | Your own refresh standards, the same object as Endpoint LifeCycle Manager's [`standards` input](https://github.com/cloudradial/Automations/tree/main/endpoint-lifecycle-manager#adjusting-the-standards). Give both workflows the same values so the email and the Planner cards agree. The email's footer states the ages and memory it graded with. |
 
 Example: `{"toEmail": "team@yourmsp.com, service@yourmsp.com"}`
 

@@ -27,6 +27,13 @@ $DetailLimit = 3   # most urgent computers listed per company; the full list is 
 
 #@@ELM_SHARED@@
 
+# ---- standards (optional "standards" run input, passed on by the Run inputs step) ----
+# The same settings as Endpoint LifeCycle Manager's "standards" input, so this report and the Planner cards agree.
+$warnings = New-Object System.Collections.ArrayList
+$prev = $null; try { $prev = Get-NodeInput } catch { }
+if ($prev -is [string]) { $prev = $(if ($prev.Trim().StartsWith('{')) { $prev | ConvertFrom-Json } else { $null }) }
+$StandardsApplied = @(Set-Standards (Get-Prop $prev 'standards') $warnings)
+
 # ---- 1. companies and account managers ----
 $companies = @(Get-CrAll '/v2/odata/company')
 $names = [ordered]@{}; $am = @{}; $amCheck = 'unavailable'
@@ -106,5 +113,8 @@ Set-NodeOutput ([ordered]@{
     accountManagerCheck = $amCheck
     totals              = $totals
     companies           = @($out)
+    standards           = $Std
+    standardsApplied    = $StandardsApplied
+    warnings            = @($warnings)
     message             = $msg
 })

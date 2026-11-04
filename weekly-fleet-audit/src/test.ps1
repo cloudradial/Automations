@@ -1,4 +1,4 @@
-param([switch]$NoAccountManager, [switch]$Empty, [string]$HtmlOut = '', [switch]$Built)
+param([switch]$NoAccountManager, [switch]$Empty, [string]$HtmlOut = '', [switch]$Built, [string]$StandardsJson = '')
 # Mock harness for audit.ps1 + email.ps1: fake Key Vault, CloudRadial API, and node I/O, in strict mode.
 # Default: assembles audit.ps1 with the shared block from elm.ps1.
 # -Built: runs the scripts actually embedded in ../weekly-fleet-audit.yml (run after node build-audit.js).
@@ -44,7 +44,8 @@ if ($Built) {
 }
 
 Set-StrictMode -Version Latest   # as on the runner
-$global:In = [pscustomobject]@{ toEmail = @('team@example.com'); message = 'x' }
+# The Run inputs step's output: toEmail, plus the standards run input passed on as-is.
+$global:In = [pscustomobject]@{ toEmail = @('team@example.com'); standards = $(if ($StandardsJson) { $StandardsJson | ConvertFrom-Json } else { $null }); message = 'x' }
 & ([scriptblock]::Create($auditSrc))
 $audit = $global:Out
 # Node output reaches the next step as JSON.
@@ -54,6 +55,7 @@ Set-StrictMode -Off
 
 $audit.message
 "amCheck=$($audit.accountManagerCheck) writes=$global:Writes"
+"standardsApplied: $(@($audit.standardsApplied) -join ', ') | warnings: $(@($audit.warnings) -join ' / ')"
 foreach ($c in $audit.companies) { "  [$($c.companyId)] $($c.name) | computers=$($c.computers) other=$($c.otherDevices) crit=$($c.critical) | $(($c.categories.GetEnumerator() | Where-Object { $_.Value } | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', ') | wExp=$($c.warrantyExpired) wUnk=$($c.warrantyUnknown) | am='$($c.accountManager)' | urgent=$(@($c.urgent).Count) more=$($c.moreFlagged)" }
 $e = $global:Out
 "subject: $($e.subject)"
@@ -61,5 +63,6 @@ $e = $global:Out
 # Simulate the Send Audit binding: the body is dropped into a JSON string as-is.
 $bad = @(); if ($e.body -match '"') { $bad += 'double quote' }; if ($e.body -match '\\') { $bad += 'backslash' }; if ($e.body -match '[\r\n]') { $bad += 'newline' }
 try { $null = ('{"body":"' + $e.body + '"}') | ConvertFrom-Json } catch { $bad += 'JSON parse' }
-"binding-safe: $(if ($bad.Count) { 'NO - ' + ($bad -join ', ') } else { 'yes' })"
+"footer: $(if ($e.body -match 'graded with the Endpoint LifeCycle Manager rules([^<]*)<strong>Replace</strong> at ([\d.]+)[^<]*under ([\d.]+) GB') { "rules$($Matches[1])Replace at $($Matches[2]) years, minimum $($Matches[3]) GB" } else { 'NOT FOUND' })"
+"binding-safe: $(if ($bad.Count){ 'NO - ' + ($bad -join ', ') } else { 'yes' })"
 if ($HtmlOut) { Set-Content -Path $HtmlOut -Value $e.body -Encoding utf8; "html -> $HtmlOut" }

@@ -2,6 +2,8 @@
 # Edit this file, then run: node qbr-data-pack/src/build.js
 # Read-only (GET calls only). Counts this client's tickets opened and closed in the last <quarter_days> days and
 # in the same span before it, the tickets open now, and the top 5 categories of the tickets opened this period.
+# It also groups this period's tickets by training topic (Outlook and email, Excel, passwords and sign-in...)
+# from each ticket's category and subject, so the account manager can recommend Academy training.
 # Works with ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk through _shared/psa.ps1.
 # If no PSA is set up, or the client can't be matched in the PSA, this section says "not available" and the run continues.
 # Every call is filtered to this one client's PSA company id.
@@ -31,7 +33,20 @@ $t = [ordered]@{
     currentFrom = (Get-QbrIso $curStart); previousFrom = (Get-QbrIso $prevStart); to = (Get-QbrIso $now)
     openedCurrent = $null; openedPrevious = $null; closedCurrent = $null; closedPrevious = $null; openNow = $null
     categories = @(); categoryLabel = 'category'; categoriesFrom = 0; notes = @()
+    trainingMinTickets = 3; trainingTicketsChecked = 0; trainingTopics = @()
 }
+$tm = 0; if ([int]::TryParse([string](Get-QbrProp $in 'training_min_tickets'), [ref]$tm) -and $tm -ge 1) { $t.trainingMinTickets = $tm }
+# Training topics, matched in each ticket's category and subject. A ticket can count towards more than one topic.
+$TrainingTopics = @(
+    @{ topic = 'Outlook and email'; match = '\boutlook\b|\be-?mails?\b|mailbox|\binbox\b|calendar' },
+    @{ topic = 'Excel'; match = '\bexcel\b|spreadsheet|\.xlsx?\b|\bpivot|\bv?lookup\b|\bxlookup\b|\bformulas?\b' },
+    @{ topic = 'Word'; match = '^\s*word\b|\bms word\b|\bmicrosoft word\b|\bword (document|doc|file|template)s?\b|\.docx?\b' },
+    @{ topic = 'PowerPoint'; match = 'powerpoint|\.pptx?\b' },
+    @{ topic = 'Teams'; match = '\bteams\b' },
+    @{ topic = 'OneDrive and SharePoint'; match = 'one ?drive|sharepoint' },
+    @{ topic = 'Passwords and sign-in'; match = 'password|locked out|lock ?out|\bmfa\b|\b2fa\b|authenticator|two.factor|sign.?in\b|log.?in\b' },
+    @{ topic = 'Phishing and suspicious email'; match = 'phish|suspicious|\bscam|\bspam\b|spoof' }
+)
 $notes = New-Object System.Collections.ArrayList
 # The step's own warnings first, then the ones _shared/psa.ps1 recorded in $PsaState.Warnings (a priority it
 # couldn't set, a write answered with a redirect), each once and in its own words.
@@ -144,7 +159,7 @@ function Get-QbrSyncroRows {
 }
 function Get-QbrSpan { param($Rows, [string]$Field, [datetime]$From, [datetime]$To) return @($Rows | Where-Object { $d = ConvertTo-QbrDate (Get-PsaProp $_ $Field); $null -ne $d -and $d -ge $From -and $d -lt $To }) }
 
-# Category names of the tickets opened this period (up to $MaxPages pages).
+# Category and subject of each ticket opened this period (up to $MaxPages pages): @{ cat; subj } per ticket.
 function Get-QbrCategoryNames {
     $f = Get-QbrIso $curStart; $e = Get-QbrIso $now
     $names = New-Object System.Collections.ArrayList
@@ -153,8 +168,8 @@ function Get-QbrCategoryNames {
             $t.categoryLabel = 'ticket type'
             $cond = "company/id=$pcid and dateEntered>=[$f] and dateEntered<[$e]"
             for ($p = 1; $p -le $MaxPages; $p++) {
-                $rows = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery $cond)&fields=id,type,board&pageSize=1000&page=$p" | Where-Object { $null -ne $_ })
-                foreach ($r in $rows) { $n = [string](Get-PsaPath $r 'type.name'); $null = $names.Add($n) }
+                $rows = @(Invoke-Psa GET "/service/tickets?conditions=$(ConvertTo-PsaQuery $cond)&fields=id,type,board,summary&pageSize=1000&page=$p" | Where-Object { $null -ne $_ })
+                foreach ($r in $rows) { $n = [string](Get-PsaPath $r 'type.name'); $null = $names.Add(@{ cat = $n; subj = [string](Get-PsaProp $r 'summary') }) }
                 if ($rows.Count -lt 1000) { break }
             }
         }
@@ -163,10 +178,10 @@ function Get-QbrCategoryNames {
             $t.categoryLabel = 'issue type'
             $labels = @{}; foreach ($v in @(Get-PsaAtPicklist 'Tickets' 'issueType')) { $labels[[string](Get-PsaProp $v 'value')] = [string](Get-PsaProp $v 'label') }
             $flt = @([ordered]@{ op = 'eq'; field = 'companyID'; value = [long]$pcid }, [ordered]@{ op = 'gte'; field = 'createDate'; value = $f }, [ordered]@{ op = 'lt'; field = 'createDate'; value = $e })
-            $next = "/Tickets/query?search=$(ConvertTo-PsaQuery (([ordered]@{ IncludeFields = @('id', 'issueType'); filter = $flt }) | ConvertTo-Json -Depth 6 -Compress))"
+            $next = "/Tickets/query?search=$(ConvertTo-PsaQuery (([ordered]@{ IncludeFields = @('id', 'issueType', 'title'); filter = $flt }) | ConvertTo-Json -Depth 6 -Compress))"
             for ($p = 1; $p -le $MaxPages -and $next; $p++) {
                 $r = Invoke-Psa GET $next
-                foreach ($x in @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ })) { $it = [string](Get-PsaProp $x 'issueType'); $null = $names.Add($(if ($it -and $labels.ContainsKey($it)) { $labels[$it] } else { '' })) }
+                foreach ($x in @(Get-PsaProp $r 'items' | Where-Object { $null -ne $_ })) { $it = [string](Get-PsaProp $x 'issueType'); $null = $names.Add(@{ cat = $(if ($it -and $labels.ContainsKey($it)) { $labels[$it] } else { '' }); subj = [string](Get-PsaProp $x 'title') }) }
                 $next = [string](Get-PsaPath $r 'pageDetails.nextPageUrl')
             }
         }
@@ -175,7 +190,7 @@ function Get-QbrCategoryNames {
             for ($p = 1; $p -le $MaxPages; $p++) {
                 $r = Invoke-Psa GET "/Tickets?client_id=$pcid&datesearch=dateoccurred&startdate=$(ConvertTo-PsaQuery $f)&enddate=$(ConvertTo-PsaQuery $e)&pageinate=true&page_size=100&page_no=$p"
                 $rows = @(Get-PsaProp $r 'tickets' | Where-Object { $null -ne $_ })
-                foreach ($x in $rows) { $null = $names.Add([string](Get-PsaProp $x 'category_1')) }
+                foreach ($x in $rows) { $null = $names.Add(@{ cat = [string](Get-PsaProp $x 'category_1'); subj = [string](Get-PsaProp $x 'summary') }) }
                 if ($rows.Count -lt 100) { break }
             }
         }
@@ -184,7 +199,7 @@ function Get-QbrCategoryNames {
             for ($p = 1; $p -le $MaxPages; $p++) {
                 $r = Invoke-Psa GET "/servicedesk/tickets?Filter.AccountIds=$pcid&Filter.OpenDateFrom=$(ConvertTo-PsaQuery $f)&Filter.OpenDateTo=$(ConvertTo-PsaQuery $e)&PageSize=100&PageNumber=$p"
                 $rows = @(Get-PsaProp $r 'Result' | Where-Object { $null -ne $_ })
-                foreach ($x in $rows) { $null = $names.Add([string](Get-PsaProp $x 'IssueTypeName')) }
+                foreach ($x in $rows) { $null = $names.Add(@{ cat = [string](Get-PsaProp $x 'IssueTypeName'); subj = [string](Get-PsaProp $x 'Title') }) }   # Unverified: Title on the ticket list.
                 if ($rows.Count -lt 100) { break }
             }
         }
@@ -194,7 +209,7 @@ function Get-QbrCategoryNames {
             for ($p = 1; $p -le $MaxPages; $p++) {
                 $r = Invoke-Psa GET "/search?query=$(ConvertTo-PsaQuery $q)&per_page=100&page=$p"
                 $rows = @(Get-PsaProp $r 'results' | Where-Object { $null -ne $_ })
-                foreach ($x in $rows) { $null = $names.Add([string](Get-PsaProp $x 'type')) }
+                foreach ($x in $rows) { $null = $names.Add(@{ cat = [string](Get-PsaProp $x 'type'); subj = [string](Get-PsaProp $x 'subject') }) }
                 if (-not (Get-PsaProp $r 'next_page')) { break }
             }
         }
@@ -216,7 +231,7 @@ try {
         $t.openNow = @($open.rows).Count
         if ($made.capped -or $done.capped -or $open.capped) { $null = $notes.Add('Syncro returned more than 1,000 tickets for one count, so the counts are lower bounds.') }
         $t.categoryLabel = 'issue type'
-        $catNames = @(Get-QbrSpan $made.rows 'created_at' $curStart $now | ForEach-Object { [string](Get-PsaProp $_ 'problem_type') })
+        $ticketRows = @(Get-QbrSpan $made.rows 'created_at' $curStart $now | ForEach-Object { @{ cat = [string](Get-PsaProp $_ 'problem_type'); subj = [string](Get-PsaProp $_ 'subject') } })
     }
     else {
         $t.openedCurrent = Get-QbrCount 'opened' $curStart $now
@@ -224,10 +239,21 @@ try {
         $t.closedCurrent = Get-QbrCount 'closed' $curStart $now
         $t.closedPrevious = Get-QbrCount 'closed' $prevStart $curStart
         $t.openNow = Get-QbrCount 'open' $now $now
-        $catNames = @()
-        try { $catNames = @(Get-QbrCategoryNames) }
+        $ticketRows = @()
+        try { $ticketRows = @(Get-QbrCategoryNames) }
         catch { $null = $notes.Add("Ticket categories weren't available: $($_.Exception.Message)") }
     }
+    $catNames = @($ticketRows | ForEach-Object { [string]$_.cat })
+    # Training topics: each topic with at least minTickets tickets, most first, with up to 3 example subjects.
+    $t.trainingTicketsChecked = $ticketRows.Count
+    $trainingFound = New-Object System.Collections.ArrayList
+    foreach ($tp in $TrainingTopics) {
+        $topicHits = @($ticketRows | Where-Object { ([string]$_.cat) -match "(?i)$($tp.match)" -or ([string]$_.subj) -match "(?i)$($tp.match)" })
+        if ($topicHits.Count -lt $t.trainingMinTickets) { continue }
+        $examples = @($topicHits | ForEach-Object { ([string]$_.subj).Trim() } | Where-Object { $_ } | Select-Object -Unique -First 3 | ForEach-Object { if ($_.Length -gt 80) { $_.Substring(0, 77) + '...' } else { $_ } })
+        $null = $trainingFound.Add([ordered]@{ topic = $tp.topic; count = $topicHits.Count; examples = (@($examples) -join '; ') })
+    }
+    $t.trainingTopics = @($trainingFound | Sort-Object @{ Expression = { $_.count }; Descending = $true }, @{ Expression = { $_.topic }; Descending = $false })
     $t.available = $true
     $t.categoriesFrom = @($catNames).Count
     $named = @($catNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })

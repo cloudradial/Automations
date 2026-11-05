@@ -17,6 +17,7 @@ These links point at the `main` branch, so they always open the current version.
 | View `exchange.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/exchange.ps1) |
 | View `plan.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/plan.ps1) |
 | View `cloudradial.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/cloudradial.ps1) |
+| View `company.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/company.ps1) |
 | View `inject.js` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/inject.js) |
 | Tests | [tests/](https://github.com/cloudradial/Automations/tree/main/_shared/tests) |
 | All files | [_shared](https://github.com/cloudradial/Automations/tree/main/_shared) |
@@ -35,6 +36,7 @@ AutomationAI runs each PowerShell step as one self-contained script, so a step c
 | `exchange.ps1` | Exchange Online for what Graph can't do (shared mailboxes, distribution lists, forwarding, hiding from the address list): the Exchange admin REST endpoint first, the ExchangeOnlineManagement module as the fallback, and a plain reason when neither works. |
 | `plan.ps1` | The preview/confirm pattern. AutomationAI has no approval step, so a write automation previews its changes and only makes them when the run says `confirm: true`. Used with or without Graph. |
 | `cloudradial.ps1` | The CloudRadial API: calls with retry, paging, one Planner card per key (updated, never duplicated), and reports into Report Archives. |
+| `company.ps1` | Runs a step as the client named in the run input (`company`). It needs the step's **Include all companies** setting on, which import keeps. It matches the name to one AutomationAI company and calls `Set-DefaultCompany`, so the step uses that client's Microsoft 365 and CloudRadial secrets. With no `company` input, the step's own Company setting applies. Needs no other file. |
 | `inject.js` | Pastes the libraries into an automation's `.yml` files. |
 | `tests/` | Strict-mode tests with a mocked Key Vault and mocked web calls. `run.ps1` runs them all. |
 | `package.json` | Pins js-yaml for `inject.js` and the inject test. |

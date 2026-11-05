@@ -19,8 +19,15 @@ function Start-Sleep { param($Seconds) }
 $fail = 0
 function Check { param($Name, [bool]$Ok, $Detail) if ($Ok) { Write-Host "PASS $Name" } else { Write-Host "FAIL $Name :: $Detail"; $script:fail++ } }
 
+# Secrets follow the active company, the way the runner switches them after Set-DefaultCompany.
+# The step's own (default) secrets have no tenant, so the older cases below send tenantId.
+$global:ActiveCompany = ''
+$base = @{ 'CloudRadial-BaseUrl' = 'https://cr.example.com'; 'CloudRadial-PublicKey' = 'p'; 'CloudRadial-PrivateKey' = 'k'; 'M365-ClientID' = '11111111-2222-3333-4444-555555555555'; 'M365-ClientSecret' = 's' }
+$contoso = $base.Clone(); $contoso['M365-TenantID'] = 'aaaaaaaa-0000-0000-0000-00000000c0de'
+$global:SecretsByCompany = @{ '' = $base; 'CON-1' = $contoso }
 function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText, $ErrorAction)
-    @{ 'CloudRadial-BaseUrl' = 'https://cr.example.com'; 'CloudRadial-PublicKey' = 'p'; 'CloudRadial-PrivateKey' = 'k'; 'M365-ClientID' = '11111111-2222-3333-4444-555555555555'; 'M365-ClientSecret' = 's' }[$Name] }
+    $global:SecretsByCompany[$global:ActiveCompany][$Name] }
+function Set-DefaultCompany { param([string]$Company, [string]$Source) $global:ActiveCompany = $Company }
 function Set-NodeOutput { param($o) $global:NodeOut = $o }
 function Get-NodeInput { $global:NodeIn }
 function New-Jwt { param([string[]]$Roles)
@@ -43,6 +50,7 @@ function Invoke-RestMethod { param($Uri, $Method = 'GET', $Headers, $ContentType
 function Invoke-Step { param($In, [string[]]$Roles, [switch]$Deny, [switch]$UploadLost, [string]$UploadFail = '', [object[]]$Existing = @())
     $global:NodeIn = $In; $global:Roles = $Roles; $global:Deny = [bool]$Deny; $global:NodeOut = $null; $global:Calls = @(); $global:Writes = 0
     $global:Uploads = @(); $global:Assessments = @($Existing); $global:UploadLost = [bool]$UploadLost; $global:UploadFail = $UploadFail
+    $global:ActiveCompany = ''
     $err = $null; try { & ([scriptblock]::Create($script)) } catch { $err = $_.Exception.Message }
     return [pscustomobject]@{ err = $err; out = $(if ($null -ne $global:NodeOut) { $global:NodeOut | ConvertTo-Json -Depth 6 | ConvertFrom-Json } else { $null }) }
 }
@@ -78,5 +86,24 @@ Check 'apply: upload 400 stops the run' ($null -ne $r.err -and $r.err -match 'HT
 $today = "Microsoft Secure Score ($(Get-Date -Format 'yyyy-MM-dd'))"
 $r = Invoke-Step $apply @('SecurityEvents.Read.All') -Existing @([pscustomobject]@{ assessmentId = 9; title = $today; type = 20; companyId = 1 })
 Check 'apply: same title already there is skipped, no upload' ($r.out.status -eq 'skipped' -and @($global:Uploads).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+
+# 4. Which client: the company input picks the AutomationAI company, and the tenant comes from its secrets.
+$byName = [pscustomobject]@{ company = 'Contoso Ltd'; companyId = 1; mode = 'plan' }
+$r = Invoke-Step $byName @('SecurityEvents.Read.All')
+Check 'company without Include all companies: error, no Graph call' ($null -ne $r.err -and $r.out.status -eq 'error' -and $r.out.message -match 'Include all companies' -and @($global:Calls).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+$global:companies = @([pscustomobject]@{ externalId = 'CON-1'; secretSuffix = 'con-1'; name = 'Contoso Ltd'; aliases = @(); secretPolicies = @() })
+$r = Invoke-Step $byName @('SecurityEvents.Read.All')
+Check 'company: switches to it and signs in to its saved tenant' ($null -eq $r.err -and $r.out.status -eq 'plan' -and $global:ActiveCompany -eq 'CON-1' -and @($global:Calls)[0] -match 'login\.microsoftonline\.com/aaaaaaaa-0000-0000-0000-00000000c0de/') ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step ([pscustomobject]@{ company = 'Contoso Ltd'; companyId = 1; tenantId = '00000000-0000-0000-0000-000000000001'; mode = 'plan' }) @('SecurityEvents.Read.All')
+Check 'company: a different tenantId is refused before any call' ($null -ne $r.err -and $r.out.message -match "doesn't match the Microsoft 365 tenant saved for the AutomationAI company 'Contoso Ltd'" -and @($global:Calls).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step ([pscustomobject]@{ company = 'contoso ltd'; companyId = 1; tenantId = 'aaaaaaaa-0000-0000-0000-00000000c0de'; mode = 'plan' }) @('SecurityEvents.Read.All')
+Check 'company: the matching tenantId is fine' ($null -eq $r.err -and $r.out.status -eq 'plan') ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step ([pscustomobject]@{ company = 'Tailspin Toys'; companyId = 1; mode = 'plan' }) @('SecurityEvents.Read.All')
+Check 'unknown company: error, nothing switched or called' ($null -ne $r.err -and $r.out.message -match "No AutomationAI company matches 'Tailspin Toys'" -and $global:ActiveCompany -eq '' -and @($global:Calls).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step ([pscustomobject]@{ companyId = 1; mode = 'plan' }) @('SecurityEvents.Read.All')
+Check 'no company and no tenant anywhere: error' ($null -ne $r.err -and $r.out.message -match "No Microsoft 365 tenant for this step's Company setting") ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step ([pscustomobject]@{ company = 'Contoso Ltd'; mode = 'plan' }) @('SecurityEvents.Read.All')
+Check 'missing companyId: error' ($null -ne $r.err -and $r.out.message -match 'Need companyId') ($r | ConvertTo-Json -Compress -Depth 5)
+Remove-Variable -Name companies -Scope Global
 
 if ($fail) { Write-Host "$fail failed"; exit 1 } else { Write-Host 'all passed' }

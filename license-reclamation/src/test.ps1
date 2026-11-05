@@ -199,6 +199,27 @@ Check 'no company found: plain message naming company_id and the secret' ($r.ste
 Set-Scenario
 $r = Invoke-Workflow ([pscustomobject]@{ company_id = 8 })
 Check 'company linked to another tenant: refuses, writes nothing' ($r.error -match 'different Microsoft 365 tenant' -and @(Get-CrWrites).Count -eq 0) $r.error
+
+# ---- 7b. which client's secrets: the run's company input (needs Include all companies) ----
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company = 'Contoso Ltd'; company_id = 7 })
+Check 'company input without Include all companies: stops at the scan, nothing written' ($r.step -eq 'node-scan' -and $r.error -match 'Include all companies' -and @(Get-CrWrites).Count -eq 0) $r.error
+$global:SwitchedTo = New-Object System.Collections.ArrayList
+$global:companies = @([pscustomobject]@{ externalId = 'CON-1'; secretSuffix = 'con-1'; name = 'Contoso Ltd'; aliases = @(); secretPolicies = @() })
+function global:Set-DefaultCompany { param([string]$Company, [string]$Source) $null = $global:SwitchedTo.Add($Company) }
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company = 'contoso ltd'; company_id = 7 })
+Check 'company input: both secret-reading steps switch to it' ($r.out.status -eq 'success' -and ($global:SwitchedTo -join ',') -eq 'CON-1,CON-1') "$($r.error) / $($global:SwitchedTo -join ',')"
+Check 'company input: the card note says whose secrets were used' ($r.out.internal_note -match "secrets from the AutomationAI company 'Contoso Ltd'") $r.out.internal_note
+$global:SwitchedTo.Clear()
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company = 'Tailspin Toys'; company_id = 7 })
+Check 'unknown company: stops at the scan, nothing switched or written' ($r.step -eq 'node-scan' -and $r.error -match "No AutomationAI company matches 'Tailspin Toys'" -and $global:SwitchedTo.Count -eq 0 -and @(Get-CrWrites).Count -eq 0) $r.error
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7 })
+Check 'no company input: keeps the step''s own Company (Routines)' ($r.out.status -eq 'success' -and $global:SwitchedTo.Count -eq 0 -and $r.out.internal_note -match "secrets from the step's Company setting") $r.out.internal_note
+Remove-Variable -Name companies -Scope Global
+Remove-Item function:global:Set-DefaultCompany
 Set-Scenario
 $r = Invoke-Workflow ([pscustomobject]@{ company_id = 99 })
 Check 'unknown company_id: plain message' ($r.error -match 'company 99' -and @(Get-CrWrites).Count -eq 0) $r.error

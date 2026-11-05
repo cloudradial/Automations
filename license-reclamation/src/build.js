@@ -30,10 +30,11 @@ const wf = {
       { id: 'start', name: 'Start', type: 'start', position: { x: 100, y: 120 }, properties: { webhookEnabled: false } },
       step('node-inputs', 'Read inputs', 300, 'inputs.ps1', {
         timeoutSeconds: 60,
-        testInput: JSON.stringify({ days: 60, price_overrides: {}, company_id: '', preview: true }, null, 2),
+        testInput: JSON.stringify({ days: 60, price_overrides: {}, company: '', company_id: '', preview: true }, null, 2),
       }),
-      step('node-scan', 'Find unused licences', 520, 'scan.ps1'),
-      step('node-card', 'Update Planner card', 740, 'card.ps1', { timeoutSeconds: 600 }),
+      // includeAllCompanies lets the step switch to the client the run names (_shared/company.ps1); import keeps it.
+      step('node-scan', 'Find unused licences', 520, 'scan.ps1', { includeAllCompanies: true }),
+      step('node-card', 'Update Planner card', 740, 'card.ps1', { timeoutSeconds: 600, includeAllCompanies: true }),
       { id: 'end', name: 'End', type: 'end', position: { x: 960, y: 120 } },
     ],
     connections: [

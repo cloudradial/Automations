@@ -34,11 +34,11 @@ Microsoft 365 and CloudRadial Planner. No PSA needed.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.1.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy** to the runner that has this client's Microsoft 365 connection.
 4. Add a monthly **Routine** for the workflow, for example at 7am on the 1st. Add it again after any fresh import, because the schedule isn't part of the file.
-5. Make sure the run knows which client it's for: set the client's Microsoft 365 tenant in CloudRadial, or give the runner the client's company number.
+5. Make sure the run knows which client it's for. For a run by hand, name the client (its name in AutomationAI **Companies**) and its CloudRadial company number. For the monthly Routine, set the client as the **Company** on the two steps that read its details, because a Routine sends no input.
 
 Optional: change how many days count as unused (14 to 365), or enter your real prices for any licence.
 
@@ -52,15 +52,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/lic
 
 ## Technical details
 
-**Marketplace ID:** AAI-00048 | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00048 | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `license-reclamation.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0).
+Each version is published as a release, with `license-reclamation.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `license-reclamation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0) |
+| Download `license-reclamation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.1.0) |
 | View the current source | [`license-reclamation.yml`](https://github.com/cloudradial/Automations/blob/main/license-reclamation/license-reclamation.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/license-reclamation/src) |
 | All files in this automation | [license-reclamation](https://github.com/cloudradial/Automations/tree/main/license-reclamation) |
@@ -103,7 +103,7 @@ If the chosen company is linked to a different Microsoft 365 tenant, the run sto
 
 ## Download & import
 
-**Download the workflow:** [`license-reclamation.yml`](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.0.0)
+**Download the workflow:** [`license-reclamation.yml`](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **Deploy** it to the runner that holds this company's Microsoft 365 secrets. Then attach the monthly Routine (see [Import & test](#import--test)). A Routine isn't part of the export, so it has to be added after every fresh import.
 
@@ -119,12 +119,13 @@ Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [requ
 | `CloudRadial-PrivateKey` | CloudRadial API private key |
 | `CloudRadial-CompanyId` | Optional. The CloudRadial company number this runner's tenant belongs to, so a Routine knows which board to use |
 
-### Microsoft 365 secrets stored per company
+### Secrets stored per company
 
-Sometimes a client's Microsoft 365 secrets (`M365-TenantID`, `M365-ClientID` and `M365-ClientSecret`) are saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. In that case, open the workflow in the designer and set **Company** to that client on the step: **Find unused licences**. Then publish and deploy.
+A client's secrets (`M365-TenantID`, `M365-ClientID`, `M365-ClientSecret`, and its CloudRadial ones) can be saved under the company in AutomationAI (**Companies**, policy *Require company*) instead of in the runner vault. A step's **Company** decides whose secrets it reads: the client's Microsoft 365 tenant **and** its CloudRadial portal.
 
-- **Set it again after every import.** Importing a workflow clears the step Company setting, because the `.yml` doesn't carry it.
-- **Without it,** the step uses the runner's shared secrets, so they sign in to the wrong tenant or fail.
+- **`company` in the run input (recommended).** **Find unused licences** and **Update Planner card** ship with **Include all companies** on (`includeAllCompanies: true`, which import keeps). Each one matches `company` to one AutomationAI company and switches to it ([`_shared/company.ps1`](https://github.com/cloudradial/Automations/blob/main/_shared/company.ps1)), so one imported copy serves every client. No match, or more than one, stops the run before anything is read.
+- **A Routine sends no input,** so for a scheduled run set **Company** to the client on both steps in the designer. Import clears that setting, so set it again after every import.
+- **With neither,** the steps use the runner's shared secrets.
 
 ## Required Graph permissions
 
@@ -144,12 +145,13 @@ If Microsoft 365 reports hide user names in the tenant, mailbox activity can't b
 |---|---|---|
 | `days` | `60` | How long a licence must go unused before it is listed (14 to 365). |
 | `price_overrides` | none | A JSON map of SKU part number to monthly price, such as `{"SPB": 20.5, "SPE_E3": 33}`. Use your real cost or add a SKU the table doesn't know. |
+| `company` | none | The AutomationAI company (name, external id or alias) whose Microsoft 365 and CloudRadial secrets to use. When blank, each step's own Company setting applies. See [Secrets stored per company](#secrets-stored-per-company). |
 | `company_id` | none | The CloudRadial company number, for a manual run. When blank, the `CloudRadial-CompanyId` secret or the tenant match is used. |
 | `preview` | `false` | `true` works everything out and returns the result, but leaves the Planner card alone. |
 
 **Why there's no `confirm` input:** this workflow never changes a licence or anything else in Microsoft 365. Its only write is the internal Planner card, which is updated in place, and a Routine sends no input, so a `confirm` that defaults to `false` would stop the monthly run from ever posting. Use `preview: true` to see the result first.
 
-Example manual run: `{"days": 60, "company_id": 7, "preview": true}`
+Example manual run: `{"days": 60, "company": "Contoso Ltd", "company_id": 7, "preview": true}`
 
 ## Import & test
 

@@ -127,7 +127,48 @@ npm test
 
 `npm test` runs `node build.js --check` and then the harness. Both need js-yaml, from `npm install` in `_shared` or from `JS_YAML_PATH`.
 
+## What an Action sends
+
+Captured from live Action runs on the DV tenant in November 2026 (run trigger type `integration`). The body arrives as the Start step's output, already parsed. The values below are placeholders:
+
+```json
+{
+  "subject": "Request a new laptop",
+  "toEmail": null,
+  "laptopModel": "Standard",
+  "accessGroups": [
+    {"id": "f22a3a55-...", "displayName": "Account Management"}
+  ],
+  "ticket": {
+    "id": 12345,
+    "reference": "...",
+    "subject": "Request a new laptop",
+    "description": "...",
+    "estimatedTime": 0,
+    "checklist": []
+  },
+  "company": {
+    "id": 9,
+    "name": "Contoso Ltd",
+    "psaId": 250,
+    "psaIdentifier": "Contoso",
+    "tenantId": "00000000-0000-0000-0000-000000000000"
+  },
+  "user": {
+    "id": "...",
+    "email": "pat.lee@contoso.com",
+    "name": "Pat Lee",
+    "psaId": 101,
+    "psaSiteId": 1
+  }
+}
+```
+
+- **Form answers** sit at the top level, one per question, named by the question's field key. There's no `Ticket.Questions` list, and no `@tokens` are left to replace.
+- **An unanswered question** arrives as `null`, and the email lists it as empty.
+- **A multi-select question**, such as a group picker, arrives as a list of `{id, displayName}`.
+- **`ticket`, `company` and `user`** are always added. `user.email` is the submitter, so the email goes to them when there's no `toEmail` answer.
+
 ## Confirm in your tenant
 
-- **The Action payload shape hasn't been captured live yet.** The recipient search and the value table don't depend on it. Once the first email arrives, record the shape here.
 - Whether the Action integration needs the workflow's webhook enabled, or calls the deployed version some other way. Enabling it does no harm.

@@ -36,7 +36,7 @@ CloudRadial: companies, users, domains, company groups, services, tokens, articl
 
 ## Set it up
 
-1. **Download** the [agent and workflow files](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v2.0.0).
+1. **Download** the [agent and workflow files](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v2.1.0).
 2. In AutomationAI, go to **Agents > Custom > Import** and upload the agent file. Importing it again later replaces the one you have.
 3. Go to **Workflows > Import** and upload `set-up-new-company.yml`.
 4. To set up a client, open **Set Up a New Company**, choose **Run**, and fill in the company name plus anything else you have.
@@ -53,17 +53,17 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/clo
 
 ## Technical details
 
-**Formerly:** CloudRadial UCP Assistant | **Marketplace ID:** AAI-00031 | **Type:** Agent + goal workflow | **Version:** 2.0.0
+**Formerly:** CloudRadial UCP Assistant | **Marketplace ID:** AAI-00031 | **Type:** Agent + goal workflow | **Version:** 2.1.0
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` files attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v2.0.0).
+Each version is published as a release, with this automation's `.yml` files attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v2.1.0).
 
 | What | Link |
 |---|---|
-| View `cloudradial-ucp.agent.yml` (agent 0.2.0) | [GitHub](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/cloudradial-ucp.agent.yml) |
+| View `cloudradial-ucp.agent.yml` (agent 0.2.1) | [GitHub](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/cloudradial-ucp.agent.yml) |
 | View `set-up-new-company.yml` (goal workflow) | [GitHub](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/set-up-new-company.yml) |
-| Download both | [Release](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v2.0.0) |
+| Download both | [Release](https://github.com/cloudradial/Automations/releases/tag/cloudradial-ucp/v2.1.0) |
 | Sibling agent | [CloudRadial UCP Reporting](https://github.com/cloudradial/Automations/tree/main/cloudradial-ucp-reporting) |
 | Used by | [Add Many Client Companies at Once](https://github.com/cloudradial/Automations/tree/main/add-companies-to-portal) |
 | Used by | [Add Many KB Articles at Once](https://github.com/cloudradial/Automations/tree/main/bulk-create-kb-articles) |
@@ -100,14 +100,15 @@ These plugin tools have no extension equivalent: `company_overview` and `count_r
 
 **Read the setup** is a PowerShell step that checks the run input before the agent starts. It stops the run, and names every problem at once, if the company name is missing, an email or domain is malformed, or a list is over the per-run limit. Then it writes one request for the agent.
 
-**Run input** (only `companyName` is required):
+**Run input** (`companyName`, or `company_id` for a company that already exists):
 
 | Field | What it is | Limit |
 |---|---|---|
-| `companyName` | The new company's name | required |
+| `companyName` | The new company's name | required for a new company |
+| `company_id` (or `companyId`) | An existing CloudRadial company to add everything else to, for example one [New Client Onboarding](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding) just created. The company itself is never created or changed, so the company fields below can't be sent with it. | |
 | `domain` | Its default email domain, such as `contoso.com` | |
 | `companyGroup` | An existing company group to add it to | |
-| `accountManager`, `territory`, `psaIdentifier`, `psaKey` | Company fields, set only when given | |
+| `accountManager`, `territory`, `psaIdentifier`, `psaKey` | Company fields, set only when given, and only for a new company | |
 | `users` | `[{"firstName","lastName","email"}]` | 5 |
 | `tokens` | `[{"token","value"}]` or `{"SupportPhone":"555-0100"}` | 5 |
 | `requestForms` | `[{"subject","category","description"}]` | 3 |
@@ -115,11 +116,13 @@ These plugin tools have no extension equivalent: `company_overview` and `count_r
 
 The limits keep one run inside the agent's 25-turn budget. Add more users or forms afterwards with [Onboard Many Portal Users at Once](https://github.com/cloudradial/Automations/tree/main/onboard-users-to-portal) and [Load Your Request Forms into Any Portal](https://github.com/cloudradial/Automations/tree/main/import-service-catalog).
 
-**The agent** checks for an existing company with that name and an existing domain first, and stops if either exists. It creates the company, reads it back for its id, then creates the domain (as the default), the group membership, users, tokens, request forms and menu tiles. It never updates or deletes anything in this run. Its Agent node allows only the companies, tokens and content extensions, and has `autoApprove: false`, so each create waits in the **Inbox** for approval.
+**The agent** checks for an existing company with that name and an existing domain first, and stops if either exists. It creates the company, reads it back for its id, then creates the domain (as the default), the group membership, users, tokens, request forms and menu tiles. With `company_id`, it reads that company instead (and stops if it isn't found), skips the domain or group membership the company already has, stops if another company has the domain, and adds the rest. It never updates or deletes anything in this run. Its Agent node allows only the companies, tokens and content extensions, and has `autoApprove: false`, so each create waits in the **Inbox** for approval.
 
 **Output:** `companyId`, `answer`, `actions` (created or would create), `skipped`, and `manualSteps` (logo and theme, messaging, the PSA and Microsoft 365 links, security roles, showing each new menu tile to Everyone, inviting the users).
 
-**Compared with [New Client Onboarding](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding):** that is a no-AI workflow that creates the company, domain and group membership, opens the onboarding checklist ticket in your PSA and writes a Microsoft 365 baseline report. Use it for your standard onboarding. Use this one when you also want users, tokens, request forms and menu tiles.
+**Compared with [New Client Onboarding](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding):** that is a no-AI workflow that creates the company, domain and group membership, opens the onboarding checklist ticket in your PSA and writes a Microsoft 365 baseline report. Use it for your standard onboarding. Use this one when you also want users, tokens, request forms and menu tiles. To do both, run New Client Onboarding first, then this one with its `company_id`.
+
+**Source:** the Read the setup step is [`src/read-setup.ps1`](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/src/read-setup.ps1), and [`src/build.js`](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/src/build.js) builds `set-up-new-company.yml` from it (`node src/build.js`, or `--check`). Edit those, never the `.yml`. [`src/test.ps1`](https://github.com/cloudradial/Automations/blob/main/cloudradial-ucp/src/test.ps1) runs the step in strict mode.
 
 ## Dry run and going live
 
@@ -130,6 +133,12 @@ The limits keep one run inside the agent's 25-turn budget. Add more users or for
 3. To go back to preview, set it to `true` and re-import.
 
 The change applies to every workflow that uses this agent. Each of them keeps `autoApprove: false`, so even when the agent is live every create still waits in the **Inbox** until you approve it. Keep the repo copy on `true`, so a fresh install always starts in preview.
+
+## What changed in 2.1
+
+- **Set Up a New Company takes `company_id`,** to add users, tokens, forms and tiles to a company that already exists, for example straight after New Client Onboarding. It never creates or changes that company.
+- **Agent 0.2.1:** its setup rules cover an existing company.
+- **Source in the repo:** `src/read-setup.ps1`, `src/build.js` and `src/test.ps1`.
 
 ## What changed in 2.0
 

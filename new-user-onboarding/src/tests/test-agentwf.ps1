@@ -152,4 +152,72 @@ Check 'note: lists hand-off runs (object and JSON text)' ($o.internal_note -matc
 $o = Run 'agentwf-note.ps1' ([ordered]@{ request = $noteReq; access = $null; verify = $null; handoffIntake = [ordered]@{ status = 'none'; handoffs = @() }; handoffProvision = $null })
 Check 'note: no hand-offs -> no hand-off section' ($o.internal_note -notmatch 'Other workflows') $o.internal_note
 
+# --- Send first sign-in ---
+$tid = '00000000-0000-0000-0000-000000000001'
+$global:Created = [DateTime]::UtcNow.ToString('o')
+function Invoke-RestMethod { param($Method, $Uri, $Headers, $Body, $ContentType, $Form)
+    $global:Calls += [pscustomobject]@{ Method = [string]$Method; Uri = [string]$Uri; Body = $(if ($Body -is [string]) { $Body } else { '' }); Headers = $Headers }
+    if ($Uri -like 'https://login.microsoftonline.com/*') { return [pscustomobject]@{ access_token = 'graph-token' } }
+    if ($Method -eq 'Get' -and $Uri -like '*/v1.0/users/sam.starter%40contoso.com*') { return [pscustomobject]@{ id = 'u-new'; userPrincipalName = 'sam.starter@contoso.com'; createdDateTime = $global:Created } }
+    if ($Method -eq 'Get' -and $Uri -like '*/v1.0/users/*') { $ex = [System.Exception]::new('Not Found'); $ex | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{ StatusCode = 404 }); throw $ex }
+    if ($Uri -like '*/v1.0/organization*') { return [pscustomobject]@{ value = @([pscustomobject]@{ verifiedDomains = @([pscustomobject]@{ name = 'contoso.com'; isDefault = $true }) }) } }
+    if ($Method -eq 'Patch' -and $Uri -like '*/v1.0/users/u-new' -and $global:PatchFails) { throw 'Response status code does not indicate success: 403 (Forbidden).' }
+    return [pscustomobject]@{ id = 1 }
+}
+$credReq = (Run 'agentwf-inputs.ps1' ([ordered]@{ firstName = 'Sam'; lastName = 'Starter'; startDate = '2026-11-02'; managerEmail = 'pat.manager@contoso.com'; companyTenantId = $tid; requestedBy = 'pat.manager@contoso.com'; ticketId = '104900'; confirm = 'true' }))
+$prov = [ordered]@{ starters = @([ordered]@{ name = 'Sam Starter'; upn = 'Sam.Starter@contoso.com'; done = @('Created the account') }); summary = 'Account created.' }
+$m365 = @{ 'M365-TenantId' = $tid; 'M365-ClientId' = 'cid'; 'M365-ClientSecret' = 'sec'; 'NewUserOnboarding-NotifySender' = 'it@msp.example' }
+function Mails { return @($global:Calls | Where-Object { $_.Uri -like '*/sendMail' }) }
+function CredRun { param($Req, $Prov) return (Run 'agentwf-credential.ps1' ([ordered]@{ request = $Req; provision = $Prov })) }
+Check 'credential: Read the request stamps receivedUtc and the recipient answer' ($credReq.receivedUtc -and $credReq.fields.managerEmail -eq 'pat.manager@contoso.com') ($credReq | ConvertTo-Json -Compress -Depth 3)
+
+$global:Secrets = $m365.Clone(); $global:PatchFails = $false
+$o = CredRun $credReq $prov
+$patch = @($global:Calls | Where-Object { $_.Method -eq 'Patch' })
+$m = Mails
+Check 'credential: sets a forced-change password on the new account' ($patch.Count -eq 1 -and ($patch[0].Body | ConvertFrom-Json).passwordProfile.forceChangePasswordNextSignIn -eq $true -and $o.tempPassword.Length -eq 16 -and $o.upn -eq 'sam.starter@contoso.com') "$($o.status) $(Show) $(@($o.followUp) -join ' ')"
+Check 'credential: emails it to the manager by default, once' ($m.Count -eq 1 -and $m[0].Body.Contains($o.tempPassword) -and $o.passwordEmailedTo -eq 'pat.manager@contoso.com' -and $o.status -eq 'done') "$($o.status) $(Show) / $(@($o.followUp) -join ' ')"
+
+$r = RoundTrip $credReq; $r.fields | Add-Member -NotePropertyName passwordRecipientEmail -NotePropertyValue 'office@contoso.com'
+$o = CredRun $r $prov
+$m = Mails
+$mgrMail = @($m | Where-Object { ($_.Body | ConvertFrom-Json).message.toRecipients[0].emailAddress.address -eq 'pat.manager@contoso.com' })
+Check 'credential: recipient answer gets the password, manager gets none' ($m.Count -eq 2 -and $o.passwordEmailedTo -eq 'office@contoso.com' -and $mgrMail.Count -eq 1 -and -not $mgrMail[0].Body.Contains($o.tempPassword)) "$(Show) / $(@($o.followUp) -join ' ')"
+
+$r = RoundTrip $credReq; $r.fields | Add-Member -NotePropertyName passwordRecipientEmail -NotePropertyValue 'someone@gmail.com'
+$o = CredRun $r $prov
+Check 'credential: outside address refused, password still set for the note' ($o.passwordEmailedTo -eq '' -and $o.tempPassword -and @(Mails | Where-Object { $_.Body.Contains($o.tempPassword) }).Count -eq 0 -and (@($o.followUp) -join ' ') -match 'AllowExternalPasswordRecipient') "$(Show) / $(@($o.followUp) -join ' ')"
+$global:Secrets = $m365 + @{ 'NewUserOnboarding-AllowExternalPasswordRecipient' = 'true' }
+$o = CredRun $r $prov
+Check 'credential: outside address allowed by the secret' ($o.passwordEmailedTo -eq 'someone@gmail.com') "$(Show) / $(@($o.followUp) -join ' ')"
+
+$global:Secrets = $m365.Clone()
+$r = RoundTrip $credReq; $r.confirm = $false
+$o = CredRun $r $prov
+Check 'credential: preview calls nothing' ($o.status -eq 'preview' -and $global:Calls.Count -eq 0 -and -not $o.tempPassword) "$($o.status) $(Show)"
+$o = CredRun $credReq ([ordered]@{ starters = @([ordered]@{ name = 'Sam Starter' }); summary = 'x' })
+Check 'credential: no upn from Provision -> skipped, no calls' ($o.status -eq 'skipped' -and $global:Calls.Count -eq 0) "$($o.status) $(Show)"
+$o = CredRun $credReq ([ordered]@{ output = ($prov | ConvertTo-Json -Depth 5) })
+Check 'credential: unwraps a wrapped Provision result' ($o.status -eq 'done') "$($o.status) $(@($o.followUp) -join ' ')"
+$r = RoundTrip $credReq; $r.fields.companyTenantId = '99999999-0000-0000-0000-000000000000'
+$o = CredRun $r $prov
+Check 'credential: other tenant -> rejected, nothing changed' ($o.status -eq 'rejected' -and @($global:Calls | Where-Object { $_.Method -eq 'Patch' }).Count -eq 0) "$($o.status) $(Show)"
+$global:Created = [DateTime]::UtcNow.AddDays(-30).ToString('o')
+$o = CredRun $credReq $prov
+Check 'credential: an older account is never changed' ($o.status -eq 'rejected' -and @($global:Calls | Where-Object { $_.Method -eq 'Patch' }).Count -eq 0 -and (@($o.followUp) -join ' ') -match "wasn't created by this run") "$($o.status) $(Show)"
+$global:Created = [DateTime]::UtcNow.ToString('o')
+$o = CredRun $credReq ([ordered]@{ starters = @([ordered]@{ name = 'Someone'; upn = 'ghost@contoso.com' }); summary = 'x' })
+Check 'credential: account not found -> not done, nothing changed' ($o.status -eq 'not_done' -and @($global:Calls | Where-Object { $_.Method -eq 'Patch' }).Count -eq 0) "$($o.status) $(Show)"
+$global:PatchFails = $true
+$o = CredRun $credReq $prov
+Check 'credential: reset refused -> error, no email' ($o.status -eq 'error' -and @(Mails).Count -eq 0 -and -not $o.tempPassword -and (@($o.followUp) -join ' ') -match 'password admin role') "$($o.status) $(Show)"
+$global:PatchFails = $false
+$global:Secrets = @{ 'M365-TenantId' = $tid; 'M365-ClientId' = 'cid'; 'M365-ClientSecret' = 'sec' }
+$o = CredRun $credReq $prov
+Check 'credential: no sender -> follow-up, password in the note' (@(Mails).Count -eq 0 -and $o.tempPassword -and (@($o.followUp) -join ' ') -match 'NewUserOnboarding-NotifySender') "$($o.status) $(@($o.followUp) -join ' ')"
+
+# Note the ticket carries the first sign-in result and the password.
+$o = Run 'agentwf-note.ps1' ([ordered]@{ request = $noteReq; access = $null; verify = '{"summary":"Ready."}'; credential = [ordered]@{ status = 'done'; upn = 'sam.starter@contoso.com'; tempPassword = 'Temp-Pass-123!'; passwordEmailedTo = 'pat.manager@contoso.com'; actions = @('Emailed the sign-in name and temporary password to pat.manager@contoso.com'); warnings = @(); followUp = @() } })
+Check 'note: first sign-in section and password' ($o.internal_note -match 'First sign-in:' -and $o.internal_note -match 'also emailed to pat.manager@contoso.com;.*Temp-Pass-123!') $o.internal_note
+
 if ($fail) { Write-Host "$fail failed"; exit 1 } else { Write-Host 'all passed' }

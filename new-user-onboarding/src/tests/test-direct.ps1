@@ -112,6 +112,23 @@ $b = $base.Clone(); $b['confirm'] = 'true'
 $o = Invoke-Direct $b @{}
 Check 'webhook: body confirm still works' ($o.confirm -and $o.confirmSource -eq 'request' -and $o.source -eq 'webhook' -and $o.status -eq 'ok') "$($o.confirm) $($o.confirmSource) $($o.source) $($o.status)"
 
+# --- Who gets the temporary password by email ---
+$o = Invoke-Direct $base @{}
+Check 'password: no answer -> emailed to the manager, one email' ((Plan $o) -match 'Email the sign-in name and temporary password to manager@contoso.com' -and (Plan $o) -notmatch 'that the account is ready' -and $o.passwordTo -eq 'manager@contoso.com') (Plan $o)
+$o = Invoke-Direct ($base + @{ passwordRecipientEmail = 'Office.Admin@Contoso.com' }) @{}
+Check 'password: tenant-domain recipient, manager told separately' ($o.passwordTo -eq 'office.admin@contoso.com' -and (Plan $o) -match 'temporary password to office.admin@contoso.com' -and (Plan $o) -match 'Email the manager \(manager@contoso.com\) that the account is ready') (Plan $o)
+$o = Invoke-Direct ($base + @{ passwordRecipientEmail = 'sam.personal@gmail.com' }) @{}
+Check 'password: outside address refused by default' ($o.passwordTo -eq '' -and (Plan $o) -notmatch 'temporary password to' -and (@($o.followUp) -join ' ') -match 'Onboarding-AllowExternalPasswordRecipient') "$(Plan $o) / $(@($o.followUp) -join ' ')"
+$o = Invoke-Direct ($base + @{ passwordRecipientEmail = 'sam.personal@gmail.com' }) @{ 'Onboarding-AllowExternalPasswordRecipient' = 'true' }
+Check 'password: outside address allowed by the secret' ($o.passwordTo -eq 'sam.personal@gmail.com') "$($o.passwordTo) / $(Plan $o)"
+$o = Invoke-Direct ($base + @{ passwordRecipientEmail = 'not-an-address' }) @{}
+Check 'password: invalid address -> follow-up, not emailed' ($o.passwordTo -eq '' -and (@($o.followUp) -join ' ') -match "isn't a valid email address") (@($o.followUp) -join ' ')
+$b2 = $base.Clone(); $b2.Remove('managerEmail')
+$o = Invoke-Direct $b2 @{}
+Check 'password: no manager, no answer -> note only' ($o.passwordTo -eq '' -and (@($o.warnings) -join ' ') -match 'only be in the internal note') (@($o.warnings) -join ' ')
+$o = Invoke-Direct ($base + @{ sendPasswordTo = '@sendPasswordTo' }) @{}
+Check 'password: unset @token answer falls back to the manager' ($o.passwordTo -eq 'manager@contoso.com') $o.passwordTo
+
 # Agent workflow: Read the request puts the manager in the briefing.
 $global:NodeIn = (Get-Content -Raw (Join-Path $dir 'agentwf-test.json') | ConvertFrom-Json)
 & ([scriptblock]::Create((Get-Content -Raw (Join-Path $dir 'agentwf-inputs.ps1'))))

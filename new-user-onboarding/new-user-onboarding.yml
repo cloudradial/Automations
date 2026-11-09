@@ -96,6 +96,7 @@ definition:
           $formNames = [ordered]@{
               firstName = @('firstName'); lastName = @('lastName'); department = @('department'); jobTitle = @('jobTitle')
               managerEmail = @('managerEmail', 'manager'); officeLocation = @('officeLocation'); startDate = @('startDate')
+              passwordRecipientEmail = @('passwordRecipientEmail', 'sendPasswordTo', 'temporaryPasswordRecipient')
               mirrorFromUser = @('mirrorFromUser', 'modelAccessFrom', 'modelTheNewUsersAccountAccessFrom')
               software = @('software', 'softwareLicenses'); needsM365License = @('needsM365License'); m365License = @('m365License')
               securityGroups = @('securityGroups', 'companyFileAccess'); vpnRequired = @('vpnRequired', 'isVpnRemoteAccessRequired'); otherAdditions = @('otherAdditions')
@@ -111,6 +112,7 @@ definition:
               requestedByOfficeId = 'Requester Microsoft 365 id'; requestedByPsaId = 'Requester PSA contact'; requestedByIsAdmin = 'Requester is a portal admin'
               firstName = 'First name'; lastName = 'Last name'; department = 'Department'; jobTitle = 'Job title'
               managerEmail = 'Manager'; officeLocation = 'Office location'; startDate = 'Start date'; mirrorFromUser = 'Mirror access from'
+              passwordRecipientEmail = 'Send the temporary password to'
               software = 'Software'; needsM365License = 'Needs a Microsoft 365 licence'; m365License = 'Microsoft 365 licence'
               securityGroups = 'Security groups'; vpnRequired = 'VPN required'; otherAdditions = 'Other access'
               needsEmail = 'Needs an email account'; email = 'Email address'; mailGroups = 'Mail groups'
@@ -148,7 +150,7 @@ definition:
           Set-NodeOutput ([ordered]@{
               briefing = $briefing; starter = $name; startDate = [string]$fields['startDate']; ticketId = [string]$fields['ticketId']
               hasStartDate = [bool]$fields['startDate']; fields = $fields; confirm = [bool]$confirmSource; confirmSource = $confirmSource; psa = $psa
-              source = $source; request = $in
+              source = $source; request = $in; receivedUtc = [DateTime]::UtcNow.ToString('o')
               message = "Request read for $(if ($name) { $name } else { 'an unnamed starter' })$(if (-not $fields['startDate']) { ' - no start date, so intake will report it as blocked' })$(if (-not $confirmSource) { '. Preview only: nothing will be written' })."
           })
         timeoutSeconds: 60
@@ -302,15 +304,152 @@ definition:
         agentSlug: new-user-onboarding
         goal: |
           Stage: provision. Create the new account, licence, mailbox and the approved access from the
-          access plan in your context. Hand the first credential over only through the configured
-          1Password vault - stop rather than send it by email or chat. Never change an existing user.
-          If an earlier stage reported the starter blocked, do nothing and pass the block on.
-        allowedExtensions: [microsoft-entra-id, microsoft-365, 1password-business]
+          access plan in your context. Create the account with a long random password and a change
+          forced at first sign-in, and never repeat, store or send that password: the next step sets
+          the first sign-in password itself and emails it. Put the new account's sign-in name in the
+          starter's upn field. Never change an existing user. If an earlier stage reported the
+          starter blocked, do nothing and pass the block on.
+        allowedExtensions: [microsoft-entra-id, microsoft-365]
         model: ""
         timeoutSeconds: 1800
         # false = every account, licence and group change waits for approval in the Inbox.
         autoApprove: false
         inputBindingsJson: '{"stage":"provision","briefing":"{{ nodes.node-inputs.output.briefing }}","context":"{{ nodes.node-access.output }}"}'
+    - id: node-credential
+      name: Send first sign-in
+      type: powershell-script
+      position:
+        x: 1270
+        y: 360
+      properties:
+        script: |
+          # === NODE: Send first sign-in ===
+          # The agent creates the account but never sees or sends a password. This step sets the first sign-in password on the
+          # account Provision created, then emails the sign-in name and that temporary password to the form's "Send the temporary
+          # password to" answer, else the manager. A manager who isn't that recipient gets an account-ready email with no password.
+          # Allowed recipients: the manager, the requester, or any address on one of the client tenant's verified domains. Any
+          # other address only when the NewUserOnboarding-AllowExternalPasswordRecipient secret is true, because the answer is
+          # typed by whoever fills in the form. The password also goes in the ticket note (Note the ticket).
+          # Safety: runs only when the request is confirmed; the request's tenant must be this runner's tenant; the account must
+          # have been created after this run read the request, so an existing user is never changed. Mail goes from the mailbox
+          # in NewUserOnboarding-NotifySender (or Onboarding-NotifySender). Without one, the password is in the ticket note only.
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function List { param($v) return @($v | Where-Object { $null -ne $_ -and [string]$_ -ne '' }) }
+          # An Agent node's output may be the result object, JSON text, or the result wrapped in output/result/response.
+          function Get-AgentResult { param($v)
+              for ($i = 0; $i -lt 4; $i++) {
+                  if ($v -is [string]) { $t = $v.Trim(); if ($t.StartsWith('{')) { try { $v = $t | ConvertFrom-Json } catch { return $v } } else { return $v } }
+                  if ($null -eq $v) { return $null }
+                  if ($null -ne (Get-Prop $v 'starters') -or $null -ne (Get-Prop $v 'summary')) { return $v }
+                  $next = $null; foreach ($k in @('output', 'result', 'response')) { $x = Get-Prop $v $k; if ($null -ne $x) { $next = $x; break } }
+                  if ($null -eq $next) { return $v }
+                  $v = $next
+              }
+              return $v
+          }
+          function Get-Secret { param([string[]]$Names) foreach ($n in $Names) { $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue } catch { $v = $null }; $v = ([string]$v).Trim(); if ($v) { return $v } }; return '' }
+          function Invoke-Graph { param($Method, $Path, $Body, $Headers) $p = @{ Method = $Method; Uri = "https://graph.microsoft.com$Path"; Headers = $Headers }; if ($null -ne $Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 10) }; Invoke-RestMethod @p }
+          function Get-GraphStatus { param($Err) try { return [int]$Err.Exception.Response.StatusCode } catch { return 0 } }
+          function New-TempPassword { param([int]$Length = 16) $U = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; $L = 'abcdefghijkmnpqrstuvwxyz'; $D = '23456789'; $S = '!@#$%^&*-_=+'; $all = $U + $L + $D + $S; $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $pick = { param($set) $b = New-Object 'System.Byte[]' 1; $rng.GetBytes($b); $set[[int]($b[0] % $set.Length)] }; $chars = @((& $pick $U), (& $pick $L), (& $pick $D), (& $pick $S)); for ($i = $chars.Count; $i -lt $Length; $i++) { $chars += (& $pick $all) }; ($chars | Sort-Object { Get-Random }) -join '' }
+          function Out-Result { param($Status, $Message, $Upn = '', $Password = '', $EmailedTo = '')
+              Set-NodeOutput ([ordered]@{ status = $Status; upn = $Upn; tempPassword = $Password; passwordEmailedTo = $EmailedTo; actions = $actions; warnings = $warnings; followUp = $followUp; message = $Message }) }
+
+          $in = Get-NodeInput
+          $req = Get-Prop $in 'request'
+          $fields = Get-Prop $req 'fields'
+          function F { param($n) return ([string](Get-Prop $fields $n)).Trim() }
+          $actions = @(); $warnings = @(); $followUp = @()
+          $name = $(if ([string](Get-Prop $req 'starter')) { [string](Get-Prop $req 'starter') } else { 'the new starter' })
+          $mgr = (F 'managerEmail').ToLowerInvariant()
+          $pwTo = (F 'passwordRecipientEmail').ToLowerInvariant(); if (-not $pwTo) { $pwTo = $mgr }
+
+          # --- The account Provision created ---
+          $prov = Get-AgentResult (Get-Prop $in 'provision')
+          $upns = @()
+          if ($null -ne $prov -and $prov -isnot [string]) { $upns = @(@(List (Get-Prop $prov 'starters')) | ForEach-Object { ([string](Get-Prop $_ 'upn')).Trim().ToLowerInvariant() } | Where-Object { $_ -match '^[^@\s]+@[^@\s]+\.[^@\s]+$' } | Select-Object -Unique) }
+
+          if (-not [bool](Get-Prop $req 'confirm')) {
+              Out-Result 'preview' "Preview only: would set a first sign-in password on the new account$(if ($pwTo) { " and email it to $pwTo" } else { ' (no recipient: it would only be in the ticket note)' })."
+              return
+          }
+          if ($upns.Count -eq 0) { $followUp += "Provision didn't report a new account (upn), so no first sign-in password was set or emailed. A technician must hand over the first sign-in for $name."; Out-Result 'skipped' $followUp[-1]; return }
+          if ($upns.Count -gt 1) { $followUp += "Provision reported more than one account ($($upns -join ', ')), so no password was set. A technician must hand over the first sign-in."; Out-Result 'skipped' $followUp[-1]; return }
+          $upn = $upns[0]
+
+          # --- Microsoft Graph, for this client's tenant only ---
+          $tenantId = Get-Secret @('M365-TenantId', 'M365-TenantID', 'Entra-TenantID', 'Graph-TenantId')
+          $clientId = Get-Secret @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId')
+          $clientSecret = Get-Secret @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret')
+          if (-not $tenantId -or -not $clientId -or -not $clientSecret) { $followUp += "Microsoft 365 app secrets are missing from the runner's Key Vault, so no first sign-in password was set for $upn. Add M365-TenantId, M365-ClientId and M365-ClientSecret, or hand it over by hand."; Out-Result 'not_done' $followUp[-1] $upn; return }
+          $reqTenant = (F 'companyTenantId').ToLowerInvariant()
+          if ($reqTenant -ne $tenantId.ToLowerInvariant()) { $followUp += "The request's Microsoft 365 tenant $(if ($reqTenant) { "($reqTenant) isn't this runner's tenant" } else { "wasn't sent" }), so no password was set for $upn. A technician must hand over the first sign-in."; Out-Result 'rejected' $followUp[-1] $upn; return }
+          try {
+              $tok = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" -Body @{ client_id = $clientId; client_secret = $clientSecret; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' }
+              $H = @{ Authorization = "Bearer $($tok.access_token)"; 'Content-Type' = 'application/json' }
+          } catch { $followUp += "Couldn't get a Microsoft Graph token, so no password was set for ${upn}: $($_.Exception.Message)"; Out-Result 'error' $followUp[-1] $upn; return }
+
+          # --- Never an existing user: the account must be newer than this run's request ---
+          try { $u = Invoke-Graph 'Get' "/v1.0/users/$([uri]::EscapeDataString($upn))?`$select=id,userPrincipalName,createdDateTime" $null $H }
+          catch { $followUp += "$(if ((Get-GraphStatus $_) -eq 404) { "$upn doesn't exist in the tenant" } else { "Couldn't read ${upn}: $($_.Exception.Message)" }), so no password was set."; Out-Result 'not_done' $followUp[-1] $upn; return }
+          $received = [DateTime]::MinValue; $since = [DateTime]::UtcNow.AddHours(-24)
+          if ([DateTime]::TryParse([string](Get-Prop $req 'receivedUtc'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$received)) { $since = $received.AddMinutes(-10) }
+          $created = [DateTime]::MinValue
+          $createdOk = [DateTime]::TryParse([string](Get-Prop $u 'createdDateTime'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$created)
+          if (-not $createdOk -or $created -lt $since) { $followUp += "$upn wasn't created by this run, so its password was not changed. Existing users are never changed."; Out-Result 'rejected' $followUp[-1] $upn; return }
+
+          # --- Set the first sign-in password ---
+          $tempPassword = New-TempPassword 16
+          try { Invoke-Graph 'Patch' "/v1.0/users/$([string](Get-Prop $u 'id'))" @{ passwordProfile = @{ password = $tempPassword; forceChangePasswordNextSignIn = $true } } $H | Out-Null }
+          catch { $followUp += "Couldn't set the first sign-in password on ${upn}: $($_.Exception.Message). The app needs a password admin role (see the README). A technician must hand over the first sign-in."; Out-Result 'error' $followUp[-1] $upn; return }
+          $actions += "Set the first sign-in password on $upn (change forced at first sign-in)"
+
+          # --- Who may receive it ---
+          $allowedTo = ''
+          if ($pwTo) {
+              $domains = @()
+              try { $org = Invoke-Graph 'Get' '/v1.0/organization?$select=verifiedDomains' $null $H; $domains = @(@(List (Get-Prop $org 'value')) | ForEach-Object { @($_.verifiedDomains) } | ForEach-Object { ([string]$_.name).ToLowerInvariant() }) } catch { $warnings += "Couldn't read the tenant's domains: $($_.Exception.Message)" }
+              $known = @($mgr, (F 'requestedBy').ToLowerInvariant()) | Where-Object { $_ }
+              $allowExternal = @('true', 'yes', 'y', '1') -contains (Get-Secret @('NewUserOnboarding-AllowExternalPasswordRecipient', 'Onboarding-AllowExternalPasswordRecipient')).ToLowerInvariant()
+              if ($pwTo -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { $followUp += "The temporary password wasn't emailed: '$pwTo' isn't a valid email address. It's in the ticket note." }
+              elseif ($known -contains $pwTo -or $domains -contains $pwTo.Split('@')[1] -or $allowExternal) { $allowedTo = $pwTo }
+              else { $followUp += "The temporary password wasn't emailed to $pwTo, because it isn't the manager, the requester or an address on this client's domains. Set NewUserOnboarding-AllowExternalPasswordRecipient to true to allow outside addresses. It's in the ticket note." }
+          } else { $warnings += 'No manager or password recipient was given, so the temporary password is only in the ticket note.' }
+
+          # --- Email it, and tell a manager who isn't the recipient ---
+          $start = $(if ((F 'startDate')) { F 'startDate' } else { 'not given' })
+          $ticketId = [string](Get-Prop $req 'ticketId'); $ref = $(if ($ticketId) { " Reference: ticket $ticketId." } else { '' })
+          $sends = @()
+          if ($allowedTo) { $sends += @{ to = $allowedTo; subject = "First sign-in details for $name"; password = $true; what = "the temporary password to $allowedTo"; done = "Emailed the sign-in name and temporary password to $allowedTo"
+              text = "Hello,`n`nA Microsoft 365 account has been created for $name.`n`nSign-in name: $upn`nTemporary password: $tempPassword`nStart date: $start`n`nPlease give these details to $name on their first day. They must choose a new password the first time they sign in. Don't forward this email, and delete it once the details have been handed over.$ref" } }
+          if ($mgr -and $mgr -ne $allowedTo) { $sends += @{ to = $mgr; subject = "Account ready for $name"; password = $false; what = "the manager ($mgr)"; done = "Emailed the manager ($mgr) that the account is ready"
+              text = "Hello,`n`nA Microsoft 365 account has been created for your new starter, $name.`n`nSign-in name: $upn`nStart date: $start`n`n$(if ($allowedTo) { "The first sign-in details were emailed to $allowedTo." } else { 'Your IT team will share the first sign-in details before the start date.' })$ref" } }
+          $emailedTo = ''
+          if ($sends.Count) {
+              $sender = Get-Secret @('NewUserOnboarding-NotifySender', 'Onboarding-NotifySender')
+              if (-not $sender) { foreach ($s in $sends) { $followUp += "Didn't email $($s.what): add a NewUserOnboarding-NotifySender secret (a mailbox to send from) to turn this on.$(if ($s.password) { " It's in the ticket note." })" } }
+              else {
+                  foreach ($s in $sends) {
+                      $mail = @{ message = @{ subject = $s.subject; body = @{ contentType = 'Text'; content = $s.text }; toRecipients = @(@{ emailAddress = @{ address = $s.to } }) }; saveToSentItems = $false }
+                      try {
+                          Invoke-RestMethod -Method Post -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($sender))/sendMail" -Headers $H -Body ($mail | ConvertTo-Json -Depth 8) | Out-Null
+                          $actions += $s.done
+                          if ($s.password) { $emailedTo = $s.to }
+                      } catch { $followUp += "Couldn't email $($s.what): $($_.Exception.Message)$(if ($s.password) { " It's in the ticket note." })" }
+                  }
+              }
+          }
+          Out-Result $(if ($followUp.Count) { 'partial' } else { 'done' }) "$($actions -join '. ')." $upn $tempPassword $emailedTo
+        timeoutSeconds: 300
+        retryCount: 0
+        # Sets the first sign-in password on the account Provision created and emails it. Only when confirmed.
+        parameters:
+          - name: request
+            expression: '{{ nodes.node-inputs.output }}'
+          - name: provision
+            expression: '{{ nodes.node-provision.output }}'
+        aiExtensions: []
     - id: node-handoff-provision
       name: Hand off after provision
       type: powershell-script
@@ -426,8 +565,8 @@ definition:
       properties:
         script: |
           # === NODE: Note the ticket ===
-          # Turns the Verify result (plus quote requests and anything needing approval) into one
-          # internal note, and posts it to the form's ticket in the PSA named by the psa input or
+          # Turns the Verify result (plus quote requests, anything needing approval, and the first
+          # sign-in result with the temporary password) into one internal note, and posts it to the form's ticket in the PSA named by the psa input or
           # the PSA-Type secret. Posts only when the run input had confirm true; otherwise it just
           # returns internal_note.
           $ErrorActionPreference = 'Stop'
@@ -1997,6 +2136,14 @@ definition:
               $lines += ''; $lines += 'Other workflows for this request (each run reports its own result):'
               $lines += @($ho | ForEach-Object { " - $(Get-Prop $_ 'message')" })
           }
+          # First sign-in: what Send first sign-in did, and the temporary password for the technicians.
+          $cred = Get-Prop $in 'credential'; if ($cred -is [string] -and $cred.Trim().StartsWith('{')) { $cred = $cred | ConvertFrom-Json }
+          if ($null -ne $cred -and $cred -isnot [string]) {
+              $credLines = @(@(List (Get-Prop $cred 'actions')) | ForEach-Object { " - $_" }) + @(@(List (Get-Prop $cred 'followUp')) | ForEach-Object { " - Needs a technician: $_" }) + @(@(List (Get-Prop $cred 'warnings')) | ForEach-Object { " - Warning: $_" })
+              if ($credLines.Count) { $lines += ''; $lines += 'First sign-in:'; $lines += $credLines }
+              $pw = [string](Get-Prop $cred 'tempPassword'); $emailedTo = [string](Get-Prop $cred 'passwordEmailedTo')
+              if ($pw) { $lines += ''; $lines += "Temporary password for $(Get-Prop $cred 'upn') ($(if ($emailedTo) { "also emailed to $emailedTo" } else { 'not emailed: give it to the starter yourself' }); they must change it at first sign-in): $pw" }
+          }
           $internal = $lines -join "`n"
 
           $posted = $false; $psaName = ''
@@ -2035,6 +2182,8 @@ definition:
             expression: '{{ nodes.node-handoff-intake.output }}'
           - name: handoffProvision
             expression: '{{ nodes.node-handoff-provision.output }}'
+          - name: credential
+            expression: '{{ nodes.node-credential.output }}'
         aiExtensions: []
     - id: end
       name: End
@@ -2062,6 +2211,9 @@ definition:
       target: node-provision
       sourceHandle: null
     - source: node-provision
+      target: node-credential
+      sourceHandle: null
+    - source: node-credential
       target: node-handoff-provision
       sourceHandle: null
     - source: node-handoff-provision

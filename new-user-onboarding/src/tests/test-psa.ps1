@@ -11,6 +11,8 @@ function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText)
     if ($global:Secrets.Contains($Name)) { return $global:Secrets[$Name] }; return $null }
 function Invoke-RestMethod { param($Method, $Uri, $Headers, $Body, $ContentType, $Form)
     $global:Calls += [pscustomobject]@{ Method = [string]$Method; Uri = [string]$Uri; Body = $(if ($Body -is [string]) { $Body } else { '' }); Headers = $Headers }
+    if ($Uri -like 'https://login.microsoftonline.com/*') { return [pscustomobject]@{ access_token = 'graph-token' } }
+    if ($Uri -like '*/sendMail' -and $Uri -like '*fail*') { throw 'Response status code does not indicate success: 403 (Forbidden).' }
     if ($Uri -like '*/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
     if ($Uri -like '*/v2/security/authenticate') { return [pscustomobject]@{ Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }
     if ($Uri -like '*/TicketNotes/entityInformation/fields') { return [pscustomobject]@{ fields = @(
@@ -132,6 +134,37 @@ $s = New-PsaState @{ companyPsaId = '42' }; $s.ticketId = '12345'
 $global:Secrets = @{ 'PSA-Type' = 'connectwise'; 'CW-ServiceBoard' = 'Service Desk' } + $mockSecrets['connectwise']
 $o = Run 'node-node-psa.ps1' $s
 Check 'ticket given -> nothing created' ($global:Calls.Count -eq 0 -and $o.ticketId -eq '12345') (Show)
+
+# --- Direct workflow: the first sign-in email ---
+$m365 = @{ 'M365-TenantId' = 'tid'; 'M365-ClientId' = 'cid'; 'M365-ClientSecret' = 'sec' }
+$mailState = RoundTrip $psaState; $mailState.ticketId = '12345'; $mailState.managerMail = 'manager@contoso.com'
+$mailState | Add-Member -NotePropertyName passwordTo -NotePropertyValue 'manager@contoso.com'
+$mailState | Add-Member -NotePropertyName tempPassword -NotePropertyValue 'Temp-Pass-123!'
+$mailState.fields | Add-Member -NotePropertyName startDate -NotePropertyValue '2026-10-12'
+function Mails { return @($global:Calls | Where-Object { $_.Uri -like '*/sendMail' }) }
+$global:Secrets = @{ 'Onboarding-NotifySender' = 'it@msp.example' } + $m365
+$o = Run 'node-node-psa.ps1' $mailState
+$m = Mails
+Check 'mail: manager is the recipient -> one email with the password' ($m.Count -eq 1 -and $m[0].Uri -like '*/users/it%40msp.example/sendMail' -and $m[0].Body -match 'Temp-Pass-123!' -and $m[0].Body -match 'manager@contoso.com' -and $o.passwordEmailedTo -eq 'manager@contoso.com') "$(Show) / $(@($o.followUp) -join ' ')"
+$s = RoundTrip $mailState; $s.passwordTo = 'office.admin@contoso.com'
+$o = Run 'node-node-psa.ps1' $s
+$m = Mails
+$toAdmin = @($m | Where-Object { $_.Body -match 'office.admin@contoso.com' -and $_.Body -match 'Temp-Pass-123!' })
+$toMgr = @($m | Where-Object { ($_.Body | ConvertFrom-Json).message.toRecipients[0].emailAddress.address -eq 'manager@contoso.com' })
+Check 'mail: other recipient gets the password, manager gets no password' ($m.Count -eq 2 -and $toAdmin.Count -eq 1 -and $toMgr.Count -eq 1 -and $toMgr[0].Body -notmatch 'Temp-Pass' -and $toMgr[0].Body -match 'emailed to office.admin@contoso.com') (@($m | ForEach-Object { $_.Body }) -join ' || ')
+$global:Secrets = $m365.Clone()
+$o = Run 'node-node-psa.ps1' $mailState
+Check 'mail: no sender -> follow-up, no email' (@(Mails).Count -eq 0 -and (@($o.followUp) -join ' ') -match 'Onboarding-NotifySender' -and (@($o.followUp) -join ' ') -match 'in the internal note' -and -not $o.passwordEmailedTo) "$(Show) / $(@($o.followUp) -join ' ')"
+$global:Secrets = @{ 'Onboarding-NotifySender' = 'fail@msp.example' } + $m365
+$o = Run 'node-node-psa.ps1' $mailState
+Check 'mail: send refused -> follow-up, not marked emailed' ((@($o.followUp) -join ' ') -match "Couldn't email the temporary password" -and -not $o.passwordEmailedTo) (@($o.followUp) -join ' ')
+# The finish note says where the password went, and the client reply says it was emailed.
+$s = RoundTrip $finishState; $s | Add-Member -NotePropertyName passwordEmailedTo -NotePropertyValue 'manager@contoso.com'
+$global:Secrets = @{}
+$o = Run 'node-node-finish.ps1' $s
+Check 'finish: note says the password was also emailed' ($o.internal_note -match 'also emailed to manager@contoso.com;.*not-a-real-password' -and $o.public_note -match 'emailed to manager@contoso.com' -and $o.public_note -notmatch 'not-a-real-password') "$($o.internal_note) / $($o.public_note)"
+$o = Run 'node-node-finish.ps1' $finishState
+Check 'finish: not emailed -> note says give it yourself' ($o.internal_note -match 'not emailed: give it to the starter yourself') $o.internal_note
 
 # --- Agent workflow: Note the ticket ---
 $verify = '{"starters":[{"name":"Sam Starter","startDate":"2026-10-12","ready":false,"done":["Account sam.starter@contoso.com exists"],"awaitingHuman":["Quote: Laptop - new starter, no spare device"],"skipped":[]}],"summary":"Sam Starter is not ready yet: the laptop is waiting on a quote."}'

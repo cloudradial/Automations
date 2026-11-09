@@ -24,6 +24,7 @@ The "Field ID" column is the value to set on each question. The first seven rows
 | 1 | Department | text | `department` | `department` | intake, access plan |
 | 1 | Job Title | text | `jobTitle` | `jobTitle` | intake, access plan |
 | 1 | **Manager** *(new question)* | user lookup | `managerEmail` | `managerEmail` | intake, provision (sets the manager and emails them) |
+| 1 | **Send the temporary password to** *(new question, optional)* | email | `passwordRecipientEmail` | `passwordRecipientEmail` | first sign-in email (blank = the manager) |
 | 3 | New User Email | email (shown when email = Yes) | `email` | `email` | provision |
 | 3 | Security Groups | multi-choice: **replace the stock choices** (see below) | `companyFileAccess` | `securityGroups` | access plan |
 | 3 | Mail Distribution Groups | multi-choice (from `@MailGroups`) | `mailGroups` | `mailGroups` | access plan |
@@ -46,6 +47,7 @@ The "Field ID" column is the value to set on each question. The first seven rows
 ### Choices that have to match the tenant
 
 - **Manager.** This is a new user-lookup question on page 1. The direct workflow looks the value up in Microsoft Graph, so it has to arrive as the manager's email or UPN, not their display name. Check this on the first test submission.
+- **Send the temporary password to.** Optional email question on page 1, like Microsoft 365's option to send the password to another email. Leave it blank and the sign-in name and temporary password go to the manager. The address must be the manager, the requester, or on one of the client's own email domains. Any other address (a personal mailbox, say) is refused unless the runner secret `Onboarding-AllowExternalPasswordRecipient` (direct workflow) or `NewUserOnboarding-AllowExternalPasswordRecipient` (agent workflow) is `true`.
 - **Security Groups.** The stock choices (Administrators, Users, Editors, Owners) aren't real groups. The direct workflow looks each choice up by its exact Entra display name. *Administrators* is always blocked as protected, and the others are skipped as not found. Either replace the choices with the client's real group names, or remove the question and let the agent workflow plan access from **Model the new user's account access from**.
 - **Microsoft 365 License.** Each choice must be one of these names, a SKU part number such as `SPB`, or a SKU id. Any other choice stops the direct workflow before it creates anything:
   - Microsoft 365 Business Basic
@@ -112,6 +114,7 @@ Token rules from the same article that matter here:
   "department": "@department",
   "jobTitle": "@jobTitle",
   "managerEmail": "@managerEmail",
+  "passwordRecipientEmail": "@passwordRecipientEmail",
   "officeLocation": "@officeLocation",
   "startDate": "@startDate",
   "mirrorFromUser": "@modelAccessFrom",
@@ -137,7 +140,7 @@ Every value is quoted, so an empty or multi-choice answer still produces valid J
 
 ## Where to make the form changes
 
-Make the Field ID, Manager question and choice changes in the **package source** for *Add a New User*. Subscribed portals then pick them up. Don't edit the form in a client portal: in the Westgate Tech Services portal it's subscribed content, and **Edit → Continue** detaches it, so it stops receiving package updates.
+Make the Field ID changes, the new Manager and Send the temporary password to questions, and the choice changes in the **package source** for *Add a New User*. Subscribed portals then pick them up. Don't edit the form in a client portal: in the Westgate Tech Services portal it's subscribed content, and **Edit → Continue** detaches it, so it stops receiving package updates.
 
 ## Confirm before relying on it
 

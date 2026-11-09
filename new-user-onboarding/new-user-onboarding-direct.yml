@@ -86,6 +86,7 @@ definition:
             department        = Get-Field @('department')
             jobTitle          = Get-Field @('jobTitle', 'title')
             managerEmail      = Get-Field @('managerEmail', 'managerUpn', 'manager')
+            passwordRecipient = Get-Field @('passwordRecipientEmail', 'sendPasswordTo', 'temporaryPasswordRecipient')
             licenseSku        = Get-Field @('licenseSku', 'licenseSkuId', 'm365License')
             needsLicense      = Test-Yes (Get-Field @('needsM365License')) $true
             groups            = ((@(Get-Field @('groups', 'groupIds'); Get-Field @('securityGroups', 'companyFileAccess'); Get-Field @('mailGroups', 'mailDistributionGroups')) | Where-Object { $_ }) -join ', ')
@@ -252,6 +253,22 @@ definition:
             catch { Add-To $state 'warnings' "Manager $mgr wasn't found in the tenant, so no manager will be set or notified." }
         }
 
+        # --- Who gets the temporary password by email ---
+        # The form's "Send the temporary password to" answer, else the manager. Allowed: the manager, the requester, or
+        # any address on one of this tenant's verified domains. Any other address (a personal mailbox, say) only when the
+        # Onboarding-AllowExternalPasswordRecipient secret is true, because the answer is typed by whoever fills in the form.
+        $state['passwordTo'] = ''
+        $pwTo = (F 'passwordRecipient').Trim().ToLowerInvariant()
+        if ($pwTo -eq '') { $pwTo = ([string]$state['managerMail']).ToLowerInvariant() }
+        if ($pwTo -ne '') {
+            $okDomains = @($domains | ForEach-Object { ([string]$_.name).ToLowerInvariant() })
+            $known = @(([string]$state['managerMail']).ToLowerInvariant(), (F 'submittedByUpn').ToLowerInvariant()) | Where-Object { $_ }
+            $allowExternal = @('true', 'yes', 'y', '1') -contains ([string](Get-KvSecret @('Onboarding-AllowExternalPasswordRecipient'))).Trim().ToLowerInvariant()
+            if ($pwTo -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { Add-To $state 'followUp' "The temporary password won't be emailed: '$pwTo' isn't a valid email address. It will be in the internal note." }
+            elseif ($known -contains $pwTo -or $okDomains -contains $pwTo.Split('@')[1] -or $allowExternal) { $state['passwordTo'] = $pwTo }
+            else { Add-To $state 'followUp' "The temporary password won't be emailed to $pwTo, because it isn't the manager, the requester or an address on this client's domains. Set Onboarding-AllowExternalPasswordRecipient to true to allow outside addresses. It will be in the internal note." }
+        } else { Add-To $state 'warnings' 'No manager or password recipient was given, so the temporary password will only be in the internal note.' }
+
         # --- Licence: must exist and have a free seat. Never buys. ---
         $state['skuId'] = ''; $state['skuName'] = ''; $state['hasExchange'] = $false
         $sku = F 'licenseSku'
@@ -332,7 +349,8 @@ definition:
         foreach ($g in $plannedGroups) { $plan += "Add to group $($g.name)" }
         if ($state['crCompanyId']) { $plan += "Create CloudRadial portal user in $($state['crCompanyName'])" }
         if ([string]$state['ticketId']) { $plan += "Add an internal note to PSA ticket $($state['ticketId'])" } else { $plan += 'Create an onboarding ticket and note it (ConnectWise only; with another PSA it is left for a technician)' }
-        if ($state['managerMail']) { $plan += "Email the manager ($($state['managerMail'])) that the account is ready (no password in the email)" }
+        if ($state['passwordTo']) { $plan += "Email the sign-in name and temporary password to $($state['passwordTo'])" }
+        if ($state['managerMail'] -and ([string]$state['managerMail']).ToLowerInvariant() -ne $state['passwordTo']) { $plan += "Email the manager ($($state['managerMail'])) that the account is ready (no password in the email)" }
         $state['plan'] = $plan
         Add-To $state 'actions' "Checked tenant, sign-in name, licence and groups: $upn is free to create"
 
@@ -496,8 +514,9 @@ definition:
         # === NODE: PSA ticket and manager ===
         # Uses the form's ticket when there is one. Without one, it creates the ticket through the shared
         # PSA library, in any of the six PSAs, on the PSA-ServiceQueue board or queue (ConnectWise also
-        # reads CW-ServiceBoard). A ConnectWise create answered with a redirect is found, never made twice. Emails the manager that the account exists, from the
-        # mailbox in the optional Onboarding-NotifySender secret. The email never contains the password.
+        # reads CW-ServiceBoard). A ConnectWise create answered with a redirect is found, never made twice. From the mailbox in
+        # the optional Onboarding-NotifySender secret, emails the sign-in name and temporary password to the recipient Check
+        # and plan approved, and tells a manager who isn't that recipient that the account exists (no password).
         $ErrorActionPreference = 'Stop'
         Set-StrictMode -Version Latest
         function Get-Prop { param($o, $n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -2060,19 +2079,36 @@ definition:
             }
         }
 
-        # --- Notify the manager (optional) ---
-        $mgr = [string]$state['managerMail']
-        if ($mgr) {
+        # --- Email the first sign-in details, and tell the manager (optional) ---
+        # The temporary password goes to the recipient Check and plan approved (the form's "Send the temporary password
+        # to" answer, else the manager). A manager who isn't that recipient gets an account-ready email with no password.
+        $mgr = [string]$state['managerMail']; $pwTo = [string]$state['passwordTo']; $state['passwordEmailedTo'] = ''
+        $start = $(if ((F 'startDate')) { F 'startDate' } else { 'not given' })
+        $ref = $(if ([string]$state['ticketId']) { " Reference: ticket $($state['ticketId'])." } else { '' })
+        $sends = @()
+        if ($pwTo -and [string]$state['tempPassword']) {
+            $text = "Hello,`n`nA Microsoft 365 account has been created for $(F 'displayName').`n`nSign-in name: $($state['upn'])`nTemporary password: $($state['tempPassword'])`nStart date: $start`n`nPlease give these details to $(F 'displayName') on their first day. They must choose a new password the first time they sign in. Don't forward this email, and delete it once the details have been handed over.$ref"
+            $sends += @{ to = $pwTo; subject = "First sign-in details for $(F 'displayName')"; text = $text; done = "Emailed the sign-in name and temporary password to $pwTo"; what = "the temporary password to $pwTo"; password = $true }
+        }
+        if ($mgr -and $mgr.ToLowerInvariant() -ne $pwTo) {
+            $text = "Hello,`n`nA Microsoft 365 account has been created for your new starter, $(F 'displayName').`n`nSign-in name: $($state['upn'])`nStart date: $start`n`n$(if ($pwTo) { "The first sign-in details were emailed to $pwTo." } else { 'Your IT team will share the first sign-in details before the start date.' })$ref"
+            $sends += @{ to = $mgr; subject = "Account ready for $(F 'displayName')"; text = $text; done = "Emailed the manager ($mgr) that the account is ready"; what = "the manager ($mgr)"; password = $false }
+        }
+        if ($sends.Count) {
             $sender = Get-KvSecret @('Onboarding-NotifySender')
-            if (-not $sender) { Add-To $state 'followUp' "The manager ($mgr) was not emailed. Add an Onboarding-NotifySender secret (a mailbox to send from) to turn this on." }
+            if (-not $sender) { foreach ($s in $sends) { Add-To $state 'followUp' "Didn't email $($s.what): add an Onboarding-NotifySender secret (a mailbox to send from) to turn this on.$(if ($s.password) { ' The temporary password is in the internal note.' })" } }
             else {
-                $text = "Hello,`n`nA Microsoft 365 account has been created for your new starter, $(F 'displayName').`n`nSign-in name: $($state['upn'])`nStart date: $(if ((F 'startDate')) { F 'startDate' } else { 'not given' })`n`nYour IT team will share the first sign-in details securely before the start date.$(if ([string]$state['ticketId']) { " Reference: ticket $($state['ticketId'])." })"
-                $mail = @{ message = @{ subject = "Account ready for $(F 'displayName')"; body = @{ contentType = 'Text'; content = $text }; toRecipients = @(@{ emailAddress = @{ address = $mgr } }) }; saveToSentItems = $false }
-                try {
-                    $H = Get-GraphHeaders
-                    Invoke-RestMethod -Method Post -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($sender))/sendMail" -Headers $H -Body ($mail | ConvertTo-Json -Depth 8) | Out-Null
-                    Add-To $state 'actions' "Emailed the manager ($mgr) that the account is ready"
-                } catch { Add-To $state 'followUp' "Couldn't email the manager ($mgr): $($_.Exception.Message)" }
+                try { $H = Get-GraphHeaders } catch { $H = $null; foreach ($s in $sends) { Add-To $state 'followUp' "Couldn't email $($s.what): no Microsoft Graph token ($($_.Exception.Message))." } }
+                if ($H) {
+                    foreach ($s in $sends) {
+                        $mail = @{ message = @{ subject = $s.subject; body = @{ contentType = 'Text'; content = $s.text }; toRecipients = @(@{ emailAddress = @{ address = $s.to } }) }; saveToSentItems = $false }
+                        try {
+                            Invoke-RestMethod -Method Post -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($sender))/sendMail" -Headers $H -Body ($mail | ConvertTo-Json -Depth 8) | Out-Null
+                            Add-To $state 'actions' $s.done
+                            if ($s.password) { $state['passwordEmailedTo'] = $s.to }
+                        } catch { Add-To $state 'followUp' "Couldn't email $($s.what): $($_.Exception.Message)$(if ($s.password) { ' The temporary password is in the internal note.' })" }
+                    }
+                }
             }
         }
         Set-NodeOutput $state
@@ -2089,7 +2125,8 @@ definition:
     properties:
       script: |-
         # === NODE: Internal note and result ===
-        # Builds the output contract. The temporary password goes only in internal_note. When confirm
+        # Builds the output contract. Of the outputs, only internal_note holds the temporary password (the step before
+        # may also have emailed it to the approved recipient). When confirm
         # was true and there's a ticket, internal_note is also posted to the ticket as an internal
         # note, in the PSA named by the psa input or the PSA-Type secret. A preview (confirm false)
         # posts nothing.
@@ -3633,11 +3670,12 @@ definition:
         if ($actions.Count) { $lines += ''; $lines += 'Done:'; $lines += @($actions | ForEach-Object { " - $_" }) }
         if ($followUp.Count) { $lines += ''; $lines += 'Needs a technician:'; $lines += @($followUp | ForEach-Object { " - $_" }) }
         if ($warnings.Count) { $lines += ''; $lines += 'Warnings:'; $lines += @($warnings | ForEach-Object { " - $_" }) }
-        if ([string]$state['tempPassword']) { $lines += ''; $lines += "Temporary password (give it to the starter out of band; they must change it at first sign-in): $($state['tempPassword'])" }
+        $emailedTo = [string](Get-Prop $state 'passwordEmailedTo')
+        if ([string]$state['tempPassword']) { $lines += ''; $lines += "Temporary password ($(if ($emailedTo) { "also emailed to $emailedTo" } else { 'not emailed: give it to the starter yourself' }); they must change it at first sign-in): $($state['tempPassword'])" }
         $internal = $lines -join "`n"
 
         $public = switch ($status) {
-            'success' { "The account for $name is set up. Your IT team will share the first sign-in details securely before the start date." }
+            'success' { "The account for $name is set up. $(if ($emailedTo) { "The first sign-in details were emailed to $emailedTo." } else { 'Your IT team will share the first sign-in details before the start date.' })" }
             'pending_confirmation' { "Your request for $name has been received and is waiting for a technician to confirm it." }
             'incomplete' { $(if ($created) { "The account for $name has been created. A technician is finishing a few remaining steps and will follow up." } else { "We couldn't finish setting up $name automatically. A technician will follow up." }) }
             default { "We couldn't set up $name automatically. A technician will follow up." }

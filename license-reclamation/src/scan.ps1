@@ -198,6 +198,7 @@ Set-NodeOutput ([ordered]@{
         company         = [string](Get-GraphProp $in 'company')
         company_id      = [int](Get-GraphProp $in 'company_id')
         preview         = [bool](Get-GraphProp $in 'preview')
+        client_visible  = [bool](Get-GraphProp $in 'client_visible')
         tenantId        = $tenantId
         checkedOn       = $now.ToString('yyyy-MM-dd')
         licensedUsers   = $licensedUsers

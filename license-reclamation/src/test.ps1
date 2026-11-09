@@ -150,6 +150,22 @@ $r = Invoke-Workflow ([pscustomobject]@{ company_id = 7 })
 $w = @(Get-CrWrites)
 Check 'update: PATCH the existing card found by key' ($r.out.cardAction -eq 'updated' -and $w.Count -eq 1 -and $w[0].Method -eq 'PATCH' -and $w[0].Uri -like '*/v2/product/321') (Show-Calls)
 Check 'update: subject reset and card reopened' ((Get-Patch $w[0] 'subject') -eq 'Reclaim unused Microsoft 365 licences' -and (Get-Patch $w[0] 'status') -eq 0) $w[0].Body
+Check 'update without client_visible: visibility left alone' (-not ($w[0].Body -match 'isClientVisible') -and $r.out.clientVisible -eq $false) $w[0].Body
+
+# ---- 4b. client_visible ----
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7; client_visible = $true })
+$post = @(Get-CrWrites)
+Check 'client_visible: new card is shown to the client' ($post.Count -eq 1 -and ($post[0].Body | ConvertFrom-Json).isClientVisible -eq $true -and $r.out.clientVisible -eq $true) $(if ($post.Count) { $post[0].Body } else { $r.error })
+Check 'client_visible: message says the card is shown to the client' ($r.out.message -match "board for review and shown to the client\.") $r.out.message
+Check 'client_visible: internal details stay in notes, not the body' (($post[0].Body | ConvertFrom-Json).body -notmatch 'Internal:' -and ($post[0].Body | ConvertFrom-Json).notes -match '^Internal:') ''
+Set-Scenario @{ cards = @(@{ productId = 321; companyId = 7; subject = 'Reclaim unused Microsoft 365 licences'; body = 'x' }) }
+$r = Invoke-Workflow ([pscustomobject]@{ trigger = [pscustomobject]@{ company_id = '7'; client_visible = 'yes' } })
+$w = @(Get-CrWrites)
+Check 'client_visible "yes" (text): existing card patched to visible' ($w.Count -eq 1 -and (Get-Patch $w[0] 'isClientVisible') -eq $true) $(if ($w.Count) { $w[0].Body } else { $r.error })
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7; client_visible = 'true'; preview = 'true' })
+Check 'client_visible with preview: still writes nothing' ($r.out.status -eq 'pending_confirmation' -and @(Get-CrWrites).Count -eq 0 -and $r.out.message -match 'shown to the client') $r.out.message
 
 # ---- 5. nothing reclaimable ----
 $active = @((U 'Alex Active' 'alex@contoso.com' $true 400 5 @('SPB')))

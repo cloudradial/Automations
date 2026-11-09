@@ -7,6 +7,7 @@
 #                    secrets the next steps use; blank keeps each step's own Company setting
 #   company_id       CloudRadial company id; when blank, the CloudRadial-CompanyId secret or the tenant match is used
 #   preview          optional; true works everything out but leaves the Planner card alone
+#   client_visible   optional; true also shows the card to the client in their portal (default false: internal only)
 # Read-only: nothing in this workflow removes or changes a licence.
 
 function Get-LrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -67,6 +68,11 @@ $preview = $false
 $pv = Get-LrProp $raw 'preview'
 if (-not (Test-LrBlank $pv)) { $preview = ([string]$pv).Trim() -match '^(?i)(true|yes|1)$' }
 
+# client_visible
+$clientVisible = $false
+$cv = Get-LrProp $raw 'client_visible'; if (Test-LrBlank $cv) { $cv = Get-LrProp $raw 'clientVisible' }
+if (-not (Test-LrBlank $cv)) { $clientVisible = ([string]$cv).Trim() -match '^(?i)(true|yes|1)$' }
+
 # company (AutomationAI)
 $runCompany = ''
 $rc = Get-LrProp $raw 'company'
@@ -79,4 +85,5 @@ Set-NodeOutput ([ordered]@{
         company         = $runCompany
         company_id      = $companyId
         preview         = $preview
+        client_visible  = $clientVisible
     })

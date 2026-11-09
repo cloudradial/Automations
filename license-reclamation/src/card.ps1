@@ -26,6 +26,8 @@ $CardKey = 'license-reclamation'
 $MaxRows = 50
 $days = [int](Get-CrProp $in 'days')
 $preview = [bool](Get-CrProp $in 'preview')
+# client_visible shows the card to the client too. Left out, an existing card keeps the visibility it has.
+$clientVisible = [bool](Get-CrProp $in 'client_visible')
 $tenantId = [string](Get-CrProp $in 'tenantId')
 $checkedOn = [string](Get-CrProp $in 'checkedOn')
 $users = @(Get-CrProp $in 'users' | Where-Object { $null -ne $_ })
@@ -87,6 +89,7 @@ if (-not $users.Count) {
     }
     $body = "<p>This CloudRadial Planner card tracks unused Microsoft 365 licences at $(Enc $companyName).</p><p>As of $(Enc $checkedOn), every paid licence was used in the last $days days, so there is nothing to reclaim this month.</p><p>This card is updated each month by the License Reclamation automation.</p>"
     $fields = [ordered]@{ body = $body; summary = 'No unused Microsoft 365 licences this month.'; notes = $internal; status = 40; priority = -1 }
+    if ($clientVisible) { $fields.isClientVisible = $true }
     $r = Set-CrPlannerCard -CompanyId $companyId -Subject $CardSubject -Key $CardKey -Existing $cards -Fields $fields -Preview:$preview
     $done = if ($preview) { "Preview only: the Planner card would be updated to say so." } else { 'The Planner card was updated to say so.' }
     Set-NodeOutput ([ordered]@{ status = $(if ($preview) { 'pending_confirmation' } else { 'success' }); message = "$msg $done"; public_note = ''; internal_note = $internal; ticket_id = ''
@@ -121,13 +124,17 @@ foreach ($w in $warnings) { $null = $sb.Append("<p>Note: $(Enc $w)</p>") }
 $null = $sb.Append('<p>This card is updated each month by the License Reclamation automation.</p>')
 
 $fields = [ordered]@{ body = $sb.ToString(); summary = $summary; notes = $internal; status = 0; priority = $(if ($saving -ge 100 -or $disabledCount -gt 0) { 1 } else { 0 }) }
+if ($clientVisible) { $fields.isClientVisible = $true }
 try { $r = Set-CrPlannerCard -CompanyId $companyId -Subject $CardSubject -Key $CardKey -Existing $cards -Fields $fields -Preview:$preview }
 catch { Stop-LrCard "Couldn't write the Planner card for $($companyName): $($_.Exception.Message)" }
 if ($r.optionalFieldsDropped) { $null = $warnings.Add('This portal did not accept the internal notes field, so the card was written without it.') }
 
 $verb = switch ($r.action) { 'created' { 'added to' } 'updated' { 'updated on' } 'would-create' { 'would be added to' } default { 'would be updated on' } }
-$msg = "$summary The CloudRadial Planner card '$CardSubject' was $verb $companyName's board for review. No licence was changed."
-if ($preview) { $msg = "Preview only: $summary The CloudRadial Planner card '$CardSubject' $verb $companyName's board when this runs without preview. No licence was changed." }
+$shown = if ($clientVisible) { ' and shown to the client' } else { '' }
+# Possessive that reads right for names ending in s ("Fabrikam Services' board").
+$whose = if ($companyName -match 's$') { "$companyName'" } else { "$companyName's" }
+$msg = "$summary The CloudRadial Planner card '$CardSubject' was $verb $whose board for review$shown. No licence was changed."
+if ($preview) { $msg = "Preview only: $summary The CloudRadial Planner card '$CardSubject' $verb $whose board$shown when this runs without preview. No licence was changed." }
 Set-NodeOutput ([ordered]@{
         status        = $(if ($preview) { 'pending_confirmation' } else { 'success' })
         message       = $msg
@@ -140,6 +147,7 @@ Set-NodeOutput ([ordered]@{
         companyName   = $companyName
         cardAction    = $r.action
         productId     = [string]$r.productId
+        clientVisible = $clientVisible
         licenceCount  = $licenceCount
         monthlySaving = $saving
         users         = $users

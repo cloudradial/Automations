@@ -33,7 +33,7 @@ CloudRadial UCP service request forms (the new **Action** question, or the old A
 1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/ucp-webhook-echo/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it.
 3. Add the Postmark details to the runner (see the [technical details](https://github.com/cloudradial/Automations/tree/main/ucp-webhook-echo#install)).
-4. Turn on the workflow's webhook (**Properties > Webhook**), then **Publish** and **Deploy** it.
+4. **Publish** and **Deploy** it. An Action question doesn't need the webhook. Turn it on (**Properties > Webhook**) only if you test with an old Automation that uses a Webhook activity.
 5. In a test service request form, add an **Action** question and pick **UCP Webhook Echo**. Optionally add a short-text question with the field key `toEmail` so the tester chooses where the email goes.
 
 **Test it.** Run it from **Test** in AutomationAI with its built-in test input, with `toEmail` changed to your address. The email should flag one value, `@SomeFieldId`, which is deliberately left unreplaced.
@@ -95,7 +95,7 @@ If neither is found, the run ends `incomplete` and the reason is in the output.
    | `Postmark-FromEmail` | Yes | A verified Postmark sender |
    | `Postmark-ApiUrl` | No | Defaults to `https://api.postmarkapp.com` |
 
-3. Enable the webhook (**Properties → Webhook**), then **Publish** and **Deploy** to that runner.
+3. **Publish** and **Deploy** to that runner. The webhook ships off, and an Action question doesn't need it. Enable it (**Properties → Webhook**) only for the old Webhook activity below.
 
 ## Trigger it from UCP
 
@@ -108,6 +108,7 @@ If neither is found, the run ends `incomplete` and the reason is in the output.
 
 **Old Automation with a Webhook activity:**
 
+- Enable the workflow's webhook first, then publish and redeploy.
 - POST to `https://automationai.cloudradial.com/api/hooks/<tenantId>/<hookId>`.
 - Content Type: `application/json`.
 - Headers: `{"X-Crauto-Webhook-Secret": "<secret>"}`.
@@ -169,6 +170,6 @@ Captured from live Action runs on the DV tenant in November 2026 (run trigger ty
 - **A multi-select question**, such as a group picker, arrives as a list of `{id, displayName}`.
 - **`ticket`, `company` and `user`** are always added. `user.email` is the submitter, so the email goes to them when there's no `toEmail` answer.
 
-## Confirm in your tenant
+## Webhook and Actions
 
-- Whether the Action integration needs the workflow's webhook enabled, or calls the deployed version some other way. Enabling it does no harm.
+An Action question runs the deployed version directly, so it doesn't need the workflow's webhook. On the DV tenant in October 2026, Add CC to Ticket, Password Reset and New User Onboarding (Direct) all ran successfully from Action questions on versions with the webhook off. Only the old Webhook activity uses the webhook URL.

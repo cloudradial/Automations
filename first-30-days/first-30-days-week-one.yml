@@ -576,7 +576,7 @@ definition:
 
           # One create. In preview it only records what it would do; in live it records the result CloudRadial gave.
           function Invoke-PcCreate {
-              param([string]$What, [string]$Path, $Body, $Fallback = $null, [string]$FallbackStep = '')
+              param([string]$What, [string]$Path, $Body, $Fallback = $null, [string]$FallbackStep = '', [string]$HintWhen = '', [string]$Hint = '')
               if (-not $pc.live) { $null = $pc.done.Add("Would create $What"); return $true }
               try { $null = Invoke-CrApi -Path $Path -Method POST -Body $Body; $null = $pc.done.Add("Created $What"); return $true }
               catch {
@@ -589,6 +589,9 @@ definition:
                       }
                       catch { $err = [string]$_.Exception.Message }
                   }
+                  # One line: CloudRadial's error body arrives as indented JSON.
+                  $err = ($err -replace '\s+', ' ').Trim()
+                  if ($HintWhen -and $err -match $HintWhen) { $err = "$err $Hint" }
                   $null = $pc.failed.Add("$($What): $err"); return $false
               }
           }
@@ -657,7 +660,11 @@ definition:
                       else { $null = $pc.skipped.Add("user $name <$email>: already a user in company $at"); $null = $pc.warnings.Add("$email is already a portal user in another company ($at), so it wasn't added to $companyName.") }
                       continue
                   }
-                  $null = Invoke-PcCreate "user $name <$email>" '/v2/user' ([ordered]@{ companyId = $companyId; email = $email; firstName = (Get-PcText $u 'firstName'); lastName = (Get-PcText $u 'lastName') })
+                  # A deleted portal user keeps its email but is hidden from the list above, so the create hits a
+                  # database error (seen live 2026-11-09). Say so, because the error itself doesn't.
+                  $null = Invoke-PcCreate "user $name <$email>" '/v2/user' ([ordered]@{ companyId = $companyId; email = $email; firstName = (Get-PcText $u 'firstName'); lastName = (Get-PcText $u 'lastName') }) `
+                      -HintWhen '(?i)database error|already (exists|in use)|duplicate' `
+                      -Hint 'This email probably belongs to a deleted portal user, which still holds it. Restore that user in CloudRadial, or use another email.'
               }
               catch { $null = $pc.failed.Add("user $name <$email>: $($_.Exception.Message)") }
           }

@@ -106,7 +106,7 @@ Example:
 }
 ```
 
-**What counts as already there:** a domain any company has, a group membership, a user email anywhere in the portal (a user in another company is skipped with a warning, never moved), a token name, a request form subject or a menu tile name in this company. Request forms are added with self-approval off, the subject appended, sent to the PSA, and the button text REQUEST. If a portal won't take the Everyone group on a new tile, the tile is added without it and a manual step says so.
+**What counts as already there:** a domain any company has, a group membership, a user email anywhere in the portal (a user in another company is skipped with a warning, never moved), a token name, a request form subject or a menu tile name in this company. Request forms are added with self-approval off, the subject appended, sent to the PSA, and the button text REQUEST. If a portal won't take the Everyone group on a new tile, the tile is added without it and a manual step says so. A user deleted from the portal still holds their email, so adding that email again fails; the summary says so. Restore the user in CloudRadial instead.
 
 ## Output
 

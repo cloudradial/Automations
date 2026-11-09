@@ -154,6 +154,7 @@ function Reset-Cr {
         catalog             = @([pscustomobject]@{ companyCatalogId = 1; companyId = 7; subject = 'Request a new laptop' })
         menu                = @()
         failPost            = ''
+        failMessage         = 'HTTP 400 Bad Request'
         refuseGroups        = $false
     }
 }
@@ -163,7 +164,7 @@ function Invoke-RestMethod {
     if ($Method -eq 'POST') {
         $path = ([uri]$Uri).AbsolutePath
         $b = $Body | ConvertFrom-Json
-        if ($global:Cr.failPost -and $path -eq $global:Cr.failPost) { throw 'HTTP 400 Bad Request' }
+        if ($global:Cr.failPost -and $path -eq $global:Cr.failPost) { throw $global:Cr.failMessage }
         if ($path -eq '/v2/menu' -and $global:Cr.refuseGroups -and $null -ne $b.PSObject.Properties['groups']) { throw 'HTTP 400 groups' }
         $null = $global:Cr.posts.Add([pscustomobject]@{ path = $path; body = $b })
         return [pscustomobject]@{ success = $true; data = $b }
@@ -230,6 +231,14 @@ Check 'portal: a failed create is reported, never called created' ($r.out.status
 Check 'portal: tile added without groups when refused, with a manual step' (@($r.out.actions) -contains "Created menu tile 'Remote Support'" -and @($r.out.manualSteps) -contains "Show the menu tile 'Remote Support' to Everyone.") (@($r.out.manualSteps) -join ' | ')
 $sumR = Invoke-Step 'node-summary' ([pscustomobject]@{ plan = $planLive; setup = $r.out; score = $scoreOk; card = $cardOk })
 Check 'summary: failed portal records flagged' ($sumR.out.status -eq 'incomplete' -and $sumR.out.summary -match '1 failed\.' -and $sumR.out.summary -match '    - Failed user Pat Lee' -and @(@($sumR.out.warnings) -match "couldn't be added").Count -eq 1) "$($sumR.out.summary) | $(@($sumR.out.warnings) -join ' | ')"
+Check 'portal: a plain failure carries no deleted-user hint' (@(@($r.out.failed) -match 'deleted portal user').Count -eq 0) (@($r.out.failed) -join ' | ')
+
+# The error CloudRadial gave live (2026-11-09) when the email belonged to a soft-deleted user: indented JSON.
+Reset-Cr; $global:Cr.failPost = '/v2/user'
+$global:Cr.failMessage = "CloudRadial POST /v2/user failed (HTTP 400): `n{`n  `"success`": false,`n  `"message`": `"Failed to create user due to a database error. Check logs for details.`"`n}"
+$r = Invoke-Step 'node-portal' ([pscustomobject]@{ plan = $planLive; setup = $checkOut })
+$f = [string]@(@($r.out.failed) -match '^user Pat Lee')[0]
+Check 'portal: database error on a user explains the deleted-user cause, on one line' ($f -match 'database error' -and $f -match 'deleted portal user' -and $f -notmatch "`n") $f
 
 Reset-Cr; $global:Cr.company = @()
 $r = Invoke-Step 'node-portal' ([pscustomobject]@{ plan = $planLive; setup = $checkOut })

@@ -2855,6 +2855,18 @@ definition:
 
           $companyId = [int](Get-QbrProp $in 'companyId')
           $companyName = [string](Get-QbrProp $in 'companyName')
+          # The section another automation added to this quarter's card (found as Set-CrPlannerCard finds it: by subject or key),
+          # from the paragraph holding value-review:start to the one holding value-review:end. '' when there's none.
+          function Get-QbrKeptSection {
+              param($Cards, [string]$Subject, [string]$Key)
+              $card = @($Cards | Where-Object { $null -ne $_ -and (([string](Get-QbrProp $_ 'subject')).Trim() -ieq $Subject -or ([string](Get-QbrProp $_ 'body')).Contains($Key)) }) | Select-Object -First 1
+              $body = [string](Get-QbrProp $card 'body')
+              $s = $body.IndexOf('value-review:start'); if ($s -lt 0) { return '' }
+              $e = $body.IndexOf('value-review:end', $s); if ($e -lt 0) { return '' }
+              $from = $body.LastIndexOf('<p', $s); $to = $body.IndexOf('</p>', $e)
+              if ($from -lt 0 -or $to -lt 0) { return '' }
+              return $body.Substring($from, $to + 4 - $from)
+          }
           if ($companyId -le 0) { Stop-QbrCard 'The earlier steps did not say which company this is for, so no card was written.' }
           $preview = [bool](Get-QbrProp $in 'preview')
           $days = [int](Get-QbrProp $in 'quarter_days'); if ($days -le 0) { $days = 90 }
@@ -2995,7 +3007,7 @@ definition:
           $shown = @(foreach ($sec in @($dev, $tix, $lic, $dom, $cert, $plan)) { [string](Get-QbrProp $sec 'reason') })
           $cardNotes = @($warnings | Where-Object { $_ -and $shown -notcontains $_ })
           foreach ($w in $cardNotes) { $null = $sb.Append("<p>Note: $(Enc $w)</p>") }
-          $null = $sb.Append("<p>This card is prepared by the QBR Data Pack automation and updated in place if it runs again this quarter.</p>")
+          $Footer = "<p>This card is prepared by the QBR Data Pack automation and updated in place if it runs again this quarter.</p>"
 
           $summary = "Numbers for the $quarterLabel review: $(if ($headline.Count) { ($headline -join ', ') } else { 'see the card for details' })."
           $psaLine = if ($tixAvailable) { "$([string](Get-QbrProp $tix 'psaName')) company $([string](Get-QbrProp $tix 'psaCompanyId')) (matched by $([string](Get-QbrProp $tix 'matchedBy')))" } else { 'not used' }
@@ -3007,7 +3019,12 @@ definition:
           $cards = @()
           try { $cards = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId" | Where-Object { $null -ne $_ -and [int](Get-QbrProp $_ 'companyId') -eq $companyId }) }
           catch { Stop-QbrCard "Couldn't read the Planner cards for $($companyName): $($_.Exception.Message)" }
-          $fields = [ordered]@{ body = $sb.ToString(); summary = $summary; notes = $internal; status = 0; priority = 0 }
+          # Another automation (Value Review) can add its own section to this card, between paragraphs holding
+          # value-review:start and value-review:end. A refresh keeps that section, just above the footer.
+          $kept = Get-QbrKeptSection $cards $CardSubject $CardKey
+          if ($kept) { $null = $warnings.Add('The Value review section already on the card was kept.') }
+          $cardBody = $sb.ToString() + $kept + $Footer
+          $fields = [ordered]@{ body = $cardBody; summary = $summary; notes = $internal; status = 0; priority = 0 }
           $r = $null
           try { $r = Set-CrPlannerCard -CompanyId $companyId -Subject $CardSubject -Key $CardKey -Existing $cards -Fields $fields -Preview:$preview }
           catch { Stop-QbrCard "Couldn't write the Planner card for $($companyName): $($_.Exception.Message)" }
@@ -3031,7 +3048,7 @@ definition:
                   cardAction    = $r.action
                   productId     = [string]$r.productId
                   cardSubject   = $CardSubject
-                  cardBody      = $sb.ToString()
+                  cardBody      = $cardBody
                   devices       = $dev
                   tickets       = $tix
                   licences      = $lic

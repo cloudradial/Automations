@@ -3,6 +3,8 @@
 # Reads the run input (manual run or Routine). A Routine sends no input, so every field has a default.
 #   days             inactivity threshold in days (default 60, 14 to 365)
 #   price_overrides  optional JSON map of skuPartNumber to monthly price, e.g. {"SPB": 20.5}
+#   company          optional AutomationAI company (name, external id or alias) whose Microsoft 365 and CloudRadial
+#                    secrets the next steps use; blank keeps each step's own Company setting
 #   company_id       CloudRadial company id; when blank, the CloudRadial-CompanyId secret or the tenant match is used
 #   preview          optional; true works everything out but leaves the Planner card alone
 # Read-only: nothing in this workflow removes or changes a licence.
@@ -65,10 +67,16 @@ $preview = $false
 $pv = Get-LrProp $raw 'preview'
 if (-not (Test-LrBlank $pv)) { $preview = ([string]$pv).Trim() -match '^(?i)(true|yes|1)$' }
 
+# company (AutomationAI)
+$runCompany = ''
+$rc = Get-LrProp $raw 'company'
+if (-not (Test-LrBlank $rc)) { $runCompany = ([string]$rc).Trim() }
+
 Set-NodeOutput ([ordered]@{
         status          = 'ok'
         days            = $days
         price_overrides = $overrides
+        company         = $runCompany
         company_id      = $companyId
         preview         = $preview
     })

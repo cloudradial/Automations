@@ -75,6 +75,9 @@ $OtherCards = @(
     @{ productId = 13; companyId = 7; subject = 'Plan backup'; body = 'x'; status = 'In_Planning'; isDeleted = $false })
 $Companies = @(@{ companyId = 7; name = 'Contoso Ltd'; psaKey = 250; psaIdentifier = 'ContosoLtd' }, @{ companyId = 8; name = 'Fabrikam'; psaKey = 260; psaIdentifier = 'Fabrikam' })
 $CatList = @('Email', 'Email', 'Email', 'Email', 'Email', 'Printing', 'Printing', 'Printing', 'Network', 'Network', '', 'Security')
+# Ticket subjects at the same index. Training topics from category + subject (minimum 3): Outlook and email 6
+# (5 Email tickets + the suspicious email), Excel 3. Passwords and sign-in 1 and Phishing 1 only show with a lower minimum.
+$SubjList = @('Outlook keeps asking for my password', 'Shared mailbox missing', 'Excel file will not open', 'Excel crashes when saving', 'VLOOKUP formula broken in spreadsheet', 'Printer offline', 'Paper jam on floor 2', 'Cannot print PDF', 'Wi-Fi drops in meeting room', 'VPN not connecting', 'New starter laptop', 'Suspicious email from a supplier')
 $SkuList = @(
     @{ skuId = 's1'; skuPartNumber = 'SPB'; appliesTo = 'User'; consumedUnits = 47; prepaidUnits = @{ enabled = 50; warning = 0; suspended = 0 } },
     @{ skuId = 's2'; skuPartNumber = 'EXCHANGESTANDARD'; appliesTo = 'User'; consumedUnits = 10; prepaidUnits = @{ enabled = 10; warning = 0; suspended = 0 } },
@@ -83,7 +86,7 @@ $SkuList = @(
 # Syncro has to be listed: 38 created this period, 34 the one before; 40 and 36 resolved; 7 open.
 function SyncroRows { param([int]$Cur, [int]$Prev, [string]$Field)
     $i = 0
-    @(1..$Cur | ForEach-Object { $i++; @{ id = $i; customer_id = 250; problem_type = $CatList[$i % $CatList.Count]; $Field = (Iso (1 + ($_ % 80))) } }) + @(1..$Prev | ForEach-Object { $i++; @{ id = $i; customer_id = 250; problem_type = 'Old'; $Field = (Iso (95 + ($_ % 80))) } })
+    @(1..$Cur | ForEach-Object { $i++; @{ id = $i; customer_id = 250; problem_type = $CatList[$i % $CatList.Count]; subject = $SubjList[$i % $SubjList.Count]; $Field = (Iso (1 + ($_ % 80))) } }) + @(1..$Prev | ForEach-Object { $i++; @{ id = $i; customer_id = 250; problem_type = 'Old'; $Field = (Iso (95 + ($_ % 80))) } })
 }
 
 $CrBase = 'https://api.example-msp.test'
@@ -152,7 +155,7 @@ function Set-Scenario {
             if ($u -match '/company/companies\?') { return (ConvertTo-NodeJson @($T.psaCompanyRows)) }
             if ($u -notmatch 'company/id=250\b') { throw "ConnectWise call not filtered to company 250: $u" }
             if ($u -match '/service/tickets/count\?') { $k = if ($u -match 'closedFlag=false') { 'open' } elseif ($u -match 'closedDate') { 'closed' } else { 'opened' }; return [pscustomobject]@{ count = (Pick $k $u) } }
-            if ($u -match '/service/tickets\?') { return (ConvertTo-NodeJson @($CatList | ForEach-Object { @{ id = 1; type = $(if ($_) { @{ id = 1; name = $_ } } else { $null }); board = @{ name = 'Help Desk' } } })) }
+            if ($u -match '/service/tickets\?') { return (ConvertTo-NodeJson @(0..($CatList.Count - 1) | ForEach-Object { $c1 = $CatList[$_]; @{ id = 1; type = $(if ($c1) { @{ id = 1; name = $c1 } } else { $null }); board = @{ name = 'Help Desk' }; summary = $SubjList[$_] } })) }
         }
         if ($u -like 'https://at.example-msp.test/*') {
             if ($u -match '/Tickets/entityInformation/fields') { return (ConvertTo-NodeJson @{ fields = @(@{ name = 'status'; picklistValues = @(@{ value = 1; label = 'New'; isActive = $true }, @{ value = 5; label = 'Complete'; isActive = $true }) }, @{ name = 'issueType'; picklistValues = @(@{ value = 1; label = 'Email'; isActive = $true }, @{ value = 2; label = 'Printing'; isActive = $true }, @{ value = 3; label = 'Network'; isActive = $true }, @{ value = 4; label = 'Security'; isActive = $true }) }) }) }
@@ -161,13 +164,13 @@ function Set-Scenario {
             $j = $search | ConvertFrom-Json
             if (-not @($j.filter | Where-Object { $_.field -eq 'companyID' -and $_.value -eq 250 }).Count) { throw "Autotask call not filtered to company 250: $u" }
             if ($u -match '/Tickets/query/count') { $k = if (@($j.filter | Where-Object { $_.op -eq 'noteq' -and $_.field -eq 'status' -and $_.value -eq 5 }).Count) { 'open' } elseif ($search -match 'completedDate') { 'closed' } else { 'opened' }; return [pscustomobject]@{ queryCount = (Pick $k $search) } }
-            if ($u -match '/Tickets/query\?') { $map = @{ Email = 1; Printing = 2; Network = 3; Security = 4 }; return (ConvertTo-NodeJson @{ items = @($CatList | ForEach-Object { @{ id = 1; issueType = $(if ($_) { $map[$_] } else { $null }) } }); pageDetails = @{ nextPageUrl = $null } }) }
+            if ($u -match '/Tickets/query\?') { $map = @{ Email = 1; Printing = 2; Network = 3; Security = 4 }; return (ConvertTo-NodeJson @{ items = @(0..($CatList.Count - 1) | ForEach-Object { $c1 = $CatList[$_]; @{ id = 1; issueType = $(if ($c1) { $map[$c1] } else { $null }); title = $SubjList[$_] } }); pageDetails = @{ nextPageUrl = $null } }) }
         }
         if ($u -like 'https://halo.example-msp.test/*') {
             if ($u -like '*/auth/token') { return [pscustomobject]@{ access_token = 'halo-token' } }
             if ($u -match '/api/Client\?') { return (ConvertTo-NodeJson @{ clients = @($T.psaCompanyRows) }) }
             if ($u -notmatch 'client_id=250\b') { throw "HaloPSA call not filtered to client 250: $u" }
-            if ($u -match 'page_size=100') { return (ConvertTo-NodeJson @{ record_count = 12; tickets = @($CatList | ForEach-Object { @{ id = 1; category_1 = $_ } }) }) }
+            if ($u -match 'page_size=100') { return (ConvertTo-NodeJson @{ record_count = 12; tickets = @(0..($CatList.Count - 1) | ForEach-Object { @{ id = 1; category_1 = $CatList[$_]; summary = $SubjList[$_] } }) }) }
             $k = if ($u -match 'open_only=true') { 'open' } elseif ($u -match 'dateclosed') { 'closed' } else { 'opened' }
             return [pscustomobject]@{ record_count = (Pick $k $u); tickets = @() }
         }
@@ -175,7 +178,7 @@ function Set-Scenario {
             if ($u -like '*/security/authenticate') { return [pscustomobject]@{ Success = $true; Result = [pscustomobject]@{ AccessToken = 'bms-token' } } }
             if ($u -match '/crm/accounts') { return (ConvertTo-NodeJson @{ Result = @($T.psaCompanyRows) }) }
             if ($u -notmatch 'Filter\.AccountIds=250\b') { throw "Kaseya BMS call not filtered to account 250: $u" }
-            if ($u -match 'PageSize=100') { return (ConvertTo-NodeJson @{ Success = $true; TotalRecords = 12; Result = @($CatList | ForEach-Object { @{ Id = 1; IssueTypeName = $_ } }) }) }
+            if ($u -match 'PageSize=100') { return (ConvertTo-NodeJson @{ Success = $true; TotalRecords = 12; Result = @(0..($CatList.Count - 1) | ForEach-Object { @{ Id = 1; IssueTypeName = $CatList[$_]; Title = $SubjList[$_] } }) }) }
             $k = if ($u -match 'ExcludeCompleted=true') { 'open' } elseif ($u -match 'CompletedDateFrom') { 'closed' } else { 'opened' }
             return [pscustomobject]@{ Success = $true; TotalRecords = (Pick $k $u); Result = @() }
         }
@@ -191,7 +194,7 @@ function Set-Scenario {
             if ($u -match '/organizations/autocomplete') { return (ConvertTo-NodeJson @{ organizations = @($T.psaCompanyRows) }) }
             if ($u -notmatch 'organization:250\b') { throw "Zendesk call not filtered to organization 250: $u" }
             if ($u -match '/search/count\?') { $k = if ($u -match 'status<solved') { 'open' } elseif ($u -match 'solved>') { 'closed' } else { 'opened' }; return [pscustomobject]@{ count = (Pick $k $u) } }
-            if ($u -match '/search\?') { return (ConvertTo-NodeJson @{ results = @($CatList | ForEach-Object { @{ id = 1; type = $(if ($_) { $_ } else { $null }) } }); next_page = $null }) }
+            if ($u -match '/search\?') { return (ConvertTo-NodeJson @{ results = @(0..($CatList.Count - 1) | ForEach-Object { $c1 = $CatList[$_]; @{ id = 1; type = $(if ($c1) { $c1 } else { $null }); subject = $SubjList[$_] } }); next_page = $null }) }
         }
         throw "Unmocked call: $($c.Method) $u"
     }
@@ -234,9 +237,14 @@ Check 'card: licence sentence and table, free SKU left out' ($body -match 'Micro
 Check 'card: domains and certificates (deleted domain left out)' ($body -match '1 domain has expired or will expire within 60 days, and 1 certificate has expired or will expire within 30 days' -and $body -match 'contoso\.com' -and $body -match 'portal\.contoso\.com' -and $body -notmatch 'old-contoso') $body
 Check 'card: other open Planner cards counted (completed left out)' ($body -match 'There are 2 other open cards on this Planner board') $body
 Check 'card: no other client''s data' ($body -notmatch 'Fabrikam|FABRIKAM|fabrikam') $body
-Check 'card: plain summary' ($card.summary -eq "Numbers for the $QLabel review: 8 devices (3 aged 5 years or more), 38 tickets opened in 90 days, 4 unassigned licences, 2 domains or certificates expiring soon.") $card.summary
+Check 'card: plain summary' ($card.summary -eq "Numbers for the $QLabel review: 8 devices (3 aged 5 years or more), 38 tickets opened in 90 days, training topics: Outlook and email, Excel, 4 unassigned licences, 2 domains or certificates expiring soon.") $card.summary
 Check 'card: never says Microsoft Planner or Teams' ($body -notmatch 'Microsoft Planner|Teams') $body
 Check 'card: no em dashes' ($body -notmatch [char]0x2014 -and $r.out.message -notmatch [char]0x2014) ''
+Check 'card: training sentence names the topics and suggests Academy courses' ($body -match 'Training opportunity: this period there were 6 tickets about Outlook and email and 3 tickets about Excel\. Recommending Academy courses on these topics' ) $body
+Check 'card: training table with example subjects' ($body -match '<td>Excel</td><td>3</td><td>Excel file will not open; Excel crashes when saving; VLOOKUP formula broken in spreadsheet</td>' -and $body -match '<td>Outlook and email</td><td>6</td>') $body
+Check 'card: below the minimum, no training row' ($body -notmatch '<td>Passwords and sign-in</td>' -and $body -notmatch '<td>Phishing and suspicious email</td>') $body
+Check 'ConnectWise: the ticket list asks for the summary' (@($Mock.Calls | Where-Object { $_.Uri -like '*/service/tickets?*' -and [uri]::UnescapeDataString($_.Uri) -match 'fields=id,type,board,summary' }).Count -ge 1) (Show-Calls)
+Check 'output: training topics are a flat list (survives step hand-off)' (@($r.out.tickets.trainingTopics).Count -eq 2 -and @($r.out.tickets.trainingTopics)[0].topic -eq 'Outlook and email' -and @($r.out.tickets.trainingTopics)[0].examples -is [string] -and $r.out.tickets.trainingMinTickets -eq 3 -and $r.out.tickets.trainingTicketsChecked -eq 12) ($r.out.tickets | ConvertTo-Json -Depth 5 -Compress)
 Check 'output: sections carried to the end' ($r.out.tickets.openedCurrent -eq 38 -and $r.out.devices.total -eq 8 -and $r.out.licences.available -and $r.out.tickets.matchedBy -match 'psaKey') ($r.out.tickets | ConvertTo-Json -Compress)
 
 # ---- 3. same quarter re-run updates; last quarter's card is left alone ----
@@ -267,8 +275,26 @@ foreach ($p in @('autotask', 'halopsa', 'kaseyabms', 'syncro', 'zendesk')) {
     Check "$($p): ticket counts" ($r.out.status -eq 'success' -and $t.available -and $t.openedCurrent -eq 38 -and $t.openedPrevious -eq 34 -and $t.closedCurrent -eq 40 -and $t.closedPrevious -eq 36 -and $t.openNow -eq 7) ("$($r.error) " + ($t | ConvertTo-Json -Compress -Depth 4))
     $topName = if ($p -eq 'syncro') { @($t.categories)[0].name } else { 'Email' }
     Check "$($p): top category Email first" (@($t.categories).Count -gt 0 -and @($t.categories)[0].name -eq 'Email' -and $topName -eq 'Email') ($t.categories | ConvertTo-Json -Compress)
+    Check "$($p): training topics from the subject field" (@($t.trainingTopics | Where-Object { $_.topic -eq 'Excel' -and [int]$_.count -ge 3 }).Count -eq 1) ($t.trainingTopics | ConvertTo-Json -Compress)
     Check "$($p): one card write, no PSA writes" (@(Get-CrWrites).Count -eq 1 -and @(Get-OtherWrites).Count -eq 0) (Show-Calls)
 }
+
+# ---- 4b. training minimum and open recommendations ----
+Set-Scenario
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7; training_min_tickets = 1; preview = $true })
+Check 'training_min_tickets 1: passwords and phishing appear too' (@($r.out.tickets.trainingTopics | Where-Object { $_.topic -in @('Passwords and sign-in', 'Phishing and suspicious email') }).Count -eq 2 -and $r.out.cardBody -match '<td>Passwords and sign-in</td><td>1</td><td>Outlook keeps asking for my password</td>') ($r.out.tickets.trainingTopics | ConvertTo-Json -Compress)
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7; training_min_tickets = 0 })
+Check 'training_min_tickets 0: rejected' ($r.step -eq 'node-inputs' -and $r.error -match 'training_min_tickets') $r.error
+$TOpp = @(
+    @{ productId = 21; companyId = 7; subject = 'Upgrade firewall'; summary = 'Firewall is end of life.'; body = 'x'; status = 'Proposed'; priority = 0; monthlyUnitPrice = 50; monthlyUnits = 2; isDeleted = $false },
+    @{ productId = 22; companyId = 7; subject = 'Endpoint Warranty Renewal'; summary = '2 computers are out of warranty.'; body = 'x'; status = 'Proposed'; priority = 0; isDeleted = $false },
+    @{ productId = 23; companyId = 7; subject = 'Endpoint Hardware Refresh - Replace'; summary = '3 computers to replace.'; body = 'x'; status = 'Proposed'; priority = 1; projectUnitPrice = 4200; projectUnits = 1; isDeleted = $false },
+    @{ productId = 24; companyId = 7; subject = 'Old idea'; summary = 'Done.'; body = 'x'; status = 'Completed'; priority = 1; isDeleted = $false })
+Set-Scenario 'connectwise' @{ cards = $TOpp }
+$r = Invoke-Workflow ([pscustomobject]@{ company_id = 7; preview = $true })
+$b = [string]$r.out.cardBody
+Check 'open recommendations: listed, refresh and warranty first, completed left out' ($b -match 'There are 3 other open cards on this Planner board\. They are listed below as recommendations to talk through\.' -and $b.IndexOf('Endpoint Hardware Refresh - Replace') -lt $b.IndexOf('Endpoint Warranty Renewal') -and $b.IndexOf('Endpoint Warranty Renewal') -lt $b.IndexOf('<td>Upgrade firewall') -and $b -notmatch 'Old idea') $b
+Check 'open recommendations: priority, summary and estimates' ($b -match '<td>Endpoint Hardware Refresh - Replace</td><td>High</td><td>3 computers to replace\.</td><td>4,200 one-off</td>' -and $b -match '<td>Upgrade firewall</td><td>Medium</td><td>Firewall is end of life\.</td><td>100 a month</td>' -and $b -match '<td>Endpoint Warranty Renewal</td><td>Medium</td><td>2 computers are out of warranty\.</td><td></td>') $b
 
 # ---- 5. PSA not available: the run carries on ----
 Set-Scenario ''

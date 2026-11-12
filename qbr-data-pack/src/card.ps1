@@ -103,6 +103,7 @@ function Get-QbrTrend {
     return ", $(if ($c -gt $p) { 'up' } else { 'down' }) $pct% from $p in the previous period"
 }
 $tixAvailable = ($null -ne $tix -and [bool](Get-QbrProp $tix 'available'))
+$topics = @()
 if ($tixAvailable) {
     $oc = Get-QbrProp $tix 'openedCurrent'; $op = Get-QbrProp $tix 'openedPrevious'; $cc = Get-QbrProp $tix 'closedCurrent'; $cp = Get-QbrProp $tix 'closedPrevious'; $on = Get-QbrProp $tix 'openNow'
     $label = [string](Get-QbrProp $tix 'categoryLabel'); $cats = @(Get-QbrProp $tix 'categories' | Where-Object { $null -ne $_ })
@@ -112,6 +113,14 @@ if ($tixAvailable) {
     if ($cats.Count) { $s += " The most common $(Enc $label) was $(Enc (Get-QbrProp $cats[0] 'name')) ($(Get-QbrCount (Get-QbrProp $cats[0] 'count') 'ticket' 'tickets'))." }
     $null = $sb.Append("<p>$s</p>")
     if ($null -ne $oc) { $null = $headline.Add("$(Get-QbrCount $oc 'ticket' 'tickets') opened in $days days") }
+    # Training opportunities: topics that came up in several tickets, for the account manager to suggest Academy courses.
+    $topics = @(Get-QbrProp $tix 'trainingTopics' | Where-Object { $null -ne $_ })
+    if ($topics.Count) {
+        $bits = @($topics | ForEach-Object { "$(Get-QbrCount (Get-QbrProp $_ 'count') 'ticket' 'tickets') about $(Enc (Get-QbrProp $_ 'topic'))" })
+        $list = if ($bits.Count -eq 1) { $bits[0] } else { (@($bits | Select-Object -First ($bits.Count - 1)) -join ', ') + ' and ' + $bits[-1] }
+        $null = $sb.Append("<p>Training opportunity: this period there were $list. Recommending Academy courses on $(if ($topics.Count -eq 1) { 'this topic' } else { 'these topics' }) could help users solve these themselves and cut repeat tickets.</p>")
+        $null = $headline.Add("training topics: $((@($topics | Select-Object -First 3 | ForEach-Object { [string](Get-QbrProp $_ 'topic') })) -join ', ')")
+    }
 }
 else { $why = [string](Get-QbrProp $tix 'reason'); if (-not $why) { $why = 'Ticket trends from the PSA are not available.' }; $null = $sb.Append("<p>$(Enc $why)</p>") }
 
@@ -147,7 +156,12 @@ if ($null -ne $cert -and [bool](Get-QbrProp $cert 'available')) {
 else { $expParts += 'certificate expiry dates were not available' }
 $es = ($expParts -join ', and ')
 $null = $sb.Append("<p>$($es.Substring(0, 1).ToUpperInvariant())$($es.Substring(1)).")
-if ($null -ne $plan -and [bool](Get-QbrProp $plan 'available')) { $po = [int](Get-QbrProp $plan 'open'); $null = $sb.Append(" There $(if ($po -eq 1) { 'is 1 other open card' } else { "are $po other open cards" }) on this Planner board.") }
+$openList = @()
+if ($null -ne $plan -and [bool](Get-QbrProp $plan 'available')) {
+    $po = [int](Get-QbrProp $plan 'open'); $null = $sb.Append(" There $(if ($po -eq 1) { 'is 1 other open card' } else { "are $po other open cards" }) on this Planner board.")
+    $openList = @(Get-QbrProp $plan 'openCards' | Where-Object { $null -ne $_ })
+    if ($openList.Count) { $null = $sb.Append(" $(if ($openList.Count -eq 1) { 'It is' } else { 'They are' }) listed below as recommendations to talk through.") }
+}
 $null = $sb.Append('</p>')
 if ($domItems.Count + $certItems.Count) { $null = $headline.Add("$(Get-QbrCount ($domItems.Count + $certItems.Count) 'domain or certificate' 'domains or certificates') expiring soon") }
 
@@ -175,6 +189,9 @@ if ($tixAvailable) {
         Add-QbrTable $sb "Tickets opened this period, top 5 by $lbl" @(($lbl.Substring(0, 1).ToUpperInvariant() + $lbl.Substring(1)), 'Tickets') @($cats | ForEach-Object { , @([string](Get-QbrProp $_ 'name'), [string](Get-QbrProp $_ 'count')) })
     }
     foreach ($n in @(Get-QbrProp $tix 'notes' | Where-Object { $_ })) { $null = $sb.Append("<p>$(Enc $n)</p>") }
+    if ($topics.Count) {
+        Add-QbrTable $sb 'Training opportunities (tickets opened this period)' @('Topic', 'Tickets', 'For example') @($topics | ForEach-Object { , @([string](Get-QbrProp $_ 'topic'), [string](Get-QbrProp $_ 'count'), [string](Get-QbrProp $_ 'examples')) })
+    }
 }
 if ($licAvailable -and $skus.Count) {
     Add-QbrTable $sb 'Microsoft 365 licences' @('Licence', 'Purchased', 'Assigned', 'Unassigned') @($skus | Select-Object -First 15 | ForEach-Object { , @([string](Get-QbrProp $_ 'name'), [string](Get-QbrProp $_ 'purchased'), [string](Get-QbrProp $_ 'assigned'), [string](Get-QbrProp $_ 'unassigned')) })
@@ -183,6 +200,16 @@ if ($licAvailable -and $skus.Count) {
 if ($domItems.Count + $certItems.Count) {
     $rows = @(@($domItems | ForEach-Object { , @('Domain', [string](Get-QbrProp $_ 'name'), [string](Get-QbrProp $_ 'expires'), $(if ([int](Get-QbrProp $_ 'daysLeft') -lt 0) { 'Expired' } else { [string](Get-QbrProp $_ 'daysLeft') })) }) + @($certItems | ForEach-Object { , @('Certificate', [string](Get-QbrProp $_ 'name'), [string](Get-QbrProp $_ 'expires'), $(if ([int](Get-QbrProp $_ 'daysLeft') -lt 0) { 'Expired' } else { [string](Get-QbrProp $_ 'daysLeft') })) }))
     Add-QbrTable $sb 'Expiring domains and certificates' @('Type', 'Name', 'Expires', 'Days left') $rows
+}
+if ($openList.Count) {
+    # Estimates are the card's own prices; CloudRadial stores a number with no currency.
+    $fmtMoney = { param($v) $dv = 0.0; if (-not [double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float, $ci, [ref]$dv) -or $dv -le 0) { return '' }; return $dv.ToString($(if ($dv -eq [Math]::Floor($dv)) { 'N0' } else { 'N2' }), $ci) }
+    $rows = @($openList | Select-Object -First 15 | ForEach-Object {
+            $oneOffText = & $fmtMoney (Get-QbrProp $_ 'oneOff'); $monthlyText = & $fmtMoney (Get-QbrProp $_ 'monthly')
+            , @([string](Get-QbrProp $_ 'subject'), [string](Get-QbrProp $_ 'priority'), [string](Get-QbrProp $_ 'summary'), ((@($(if ($oneOffText) { "$oneOffText one-off" }), $(if ($monthlyText) { "$monthlyText a month" })) | Where-Object { $_ }) -join ', '))
+        })
+    Add-QbrTable $sb 'Open recommendations on this Planner board' @('Card', 'Priority', 'Summary', 'Estimate') $rows
+    if ($openList.Count -gt 15) { $null = $sb.Append("<p>$($openList.Count - 15) more open cards are on the board.</p>") }
 }
 # Section reasons are already said in their own paragraph; any other warning goes at the end as a note.
 $shown = @(foreach ($sec in @($dev, $tix, $lic, $dom, $cert, $plan)) { [string](Get-QbrProp $sec 'reason') })

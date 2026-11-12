@@ -1,8 +1,8 @@
 # Endpoint Refresh Standards
 
-Owner: vCIO / Lifecycle · Effective: 2026-10-02 · Used by: Endpoint LifeCycle Manager
+Owner: vCIO / Lifecycle · Effective: 2026-11-04 · Used by: Endpoint LifeCycle Manager
 
-> **These are the default standards.** They match what the Endpoint LifeCycle Manager workflow does out of the box. Change the values to your own before you upload this file to Knowledge. Keep the headings and the setting names, because the agent searches by them. Each section restates the values it uses, so a section still makes sense when it's retrieved on its own.
+> **These are the default standards.** They match what the Endpoint LifeCycle Manager workflow does out of the box. To use your own, change the values in **Standard values**, then copy them into the [Run input](#run-input) block at the end and paste it into the workflow's Routine input: the workflow reads its standards from the run input, not from this file. Keep the headings and the setting names. Each section restates the values it uses, so a section still makes sense when it's read on its own.
 
 ## Standard values
 
@@ -75,6 +75,7 @@ Warranty comes from the endpoint's `expirationDate`:
 - A value of 0 or a blank value means **unknown**, not low. A computer is never flagged because its RAM is unknown.
 - Below `minimumRamGb` (4 GB) is under the minimum specification.
 - Below `recommendedRamGb` (8 GB) is enough to put an otherwise healthy computer on the Retain card for a targeted upgrade.
+- Computers report a little less memory than they have, because some is reserved: a nominal 8 GB computer reports about 7.8 GB. So a computer is below a RAM setting only when it reports less than 94% of it: under 3.76 GB for 4 GB, under 7.52 GB for 8 GB.
 
 ## Category rules for physical computers
 
@@ -152,6 +153,33 @@ This applies only when the run sets `scheduleOnRoadmap` to true. Cards go on the
 - **Keep consistent:**
   - `planAgeYears` < `mediumAgeYears` < `replaceAgeYears` < `criticalAgeYears`
   - `minimumRamGb` ≤ `recommendedRamGb`
+  - `vmMinimumRamGb` ≤ `vmRecommendedRamGb`
   - `macosHardEndOfLife` < `macosMinimumSupported`
-- **When a new OS loses support,** for example a future macOS version, update the `windowsUnsupported` list or the macOS values, and the macOS table above.
-- **Keep the headings and setting names.** The agent searches by them, and future workflow support for Knowledge will read the **Standard values** table by setting name.
+
+  If the run input breaks one of these, the workflow ignores all of it, uses the defaults, and says so in its warnings.
+- **When a new OS loses support,** for example a future macOS version, update the macOS values and the macOS table above. `windowsSupported` and `windowsUnsupported` describe the built-in Windows rule; they can't be changed from the run input.
+- **Keep the headings and setting names.** The run input uses the same setting names.
+
+## Run input
+
+Paste this into the Endpoint LifeCycle Manager Routine input, next to `pricing` if you use it, and into the Weekly Fleet Audit run input, so the cards and the email agree. List only the settings you change; the rest keep their defaults. Each value is a positive number. These are the defaults:
+
+```json
+{
+  "standards": {
+    "replaceAgeYears": 5,
+    "planAgeYears": 3,
+    "mediumAgeYears": 4.5,
+    "criticalAgeYears": 7,
+    "warrantyExpiringDays": 90,
+    "minimumRamGb": 4,
+    "recommendedRamGb": 8,
+    "vmMinimumRamGb": 4,
+    "vmRecommendedRamGb": 8,
+    "macosMinimumSupported": 14,
+    "macosHardEndOfLife": 12
+  }
+}
+```
+
+Run once with `"mode": "plan"` added, and check `standardsApplied` and `warnings` in the output before writing cards.

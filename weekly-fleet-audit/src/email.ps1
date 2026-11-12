@@ -103,7 +103,12 @@ else {
     }
 }
 
-W "<p style='margin-top:24px;padding-top:12px;border-top:1px solid $line;font-size:12px;color:$muted;line-height:1.5'>Computers are graded with the Endpoint LifeCycle Manager rules: <strong>Replace</strong> at 5 or more years old, on an unsupported operating system that can't take Windows 11, or under 4 GB of memory. <strong>Plan replacement</strong> at 3 or more years. <strong>Critical</strong> means 7 or more years old, Windows 10 or older, macOS 12 or older, or under 4 GB of memory. Servers and virtual machines are listed separately.$(if ($orph) { " $(if ($orph -eq 1) { '1 endpoint belongs to a deleted company and was' } else { "$orph endpoints belong to deleted companies and were" }) left out." }) This report is read-only: nothing in CloudRadial was changed.</p>"
+# The standards the audit graded with (its defaults, or the "standards" run input).
+$std = Get-Prop $a 'standards'
+function StdVal { param([string]$k, [string]$def) $v = Get-Prop $std $k; $n = 0.0; if ($null -ne $v -and [double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float, $ci, [ref]$n)) { $n.ToString('0.##', $ci) } else { $def } }
+$sRep = StdVal 'replaceAgeYears' '5'; $sPlan = StdVal 'planAgeYears' '3'; $sCrit = StdVal 'criticalAgeYears' '7'; $sMin = StdVal 'minimumRamGb' '4'; $sMac = StdVal 'macosHardEndOfLife' '12'
+$custom = @(Get-Prop $a 'standardsApplied' | Where-Object { $_ }).Count -gt 0
+W "<p style='margin-top:24px;padding-top:12px;border-top:1px solid $line;font-size:12px;color:$muted;line-height:1.5'>Computers are graded with the Endpoint LifeCycle Manager rules$(if ($custom) { ', using your own standards' }): <strong>Replace</strong> at $sRep or more years old, on an unsupported operating system that can't take Windows 11, or under $sMin GB of memory. <strong>Plan replacement</strong> at $sPlan or more years. <strong>Critical</strong> means $sCrit or more years old, Windows 10 or older, macOS $sMac or older, or under $sMin GB of memory. Servers and virtual machines are listed separately.$(if ($orph) { " $(if ($orph -eq 1) { '1 endpoint belongs to a deleted company and was' } else { "$orph endpoints belong to deleted companies and were" }) left out." }) This report is read-only: nothing in CloudRadial was changed.</p>"
 W "</div></body></html>"
 
 # One line, and nothing that would break the JSON string the Send Audit binding puts it in.

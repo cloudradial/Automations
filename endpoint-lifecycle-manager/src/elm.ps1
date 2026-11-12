@@ -5,7 +5,7 @@
 #  Plan replacement, Upgrade in place, Retain, Needs data, Human review,
 #  Virtual machines). Same rules as the Endpoint LifeCycle Manager agent,
 #  but deterministic: no model, no turn limit, any AI provider.
-#  Run input (all optional): {"companyIds": "1,4,7", "mode": "plan", "pricing": {...}}
+#  Run input (all optional): {"companyIds": "1,4,7", "mode": "plan", "pricing": {...}, "standards": {...}}
 #  Secrets (runner Key Vault): CloudRadial-BaseUrl, CloudRadial-PublicKey,
 #  CloudRadial-PrivateKey.
 # =====================================================================
@@ -151,6 +151,46 @@ function Friendly { param([datetime]$d) $d.ToString('d MMM yyyy', $ci) }
 # which sets currentlyInstalled and leaves status alone.
 function Test-Completed { param($card) $s = [string](Get-Prop $card 'status'); return ($s -eq '40' -or $s -match '(?i)^completed$' -or [string](Get-Prop $card 'currentlyInstalled') -eq 'True') }
 
+# ---- refresh standards ----
+# The defaults match the Standard values table in knowledge/endpoint-refresh-standards.md. A "standards" run input
+# overrides any of them, by the same setting names (Set-Standards). The rules below read them from $Std.
+$Std = [ordered]@{
+    replaceAgeYears = 5.0; planAgeYears = 3.0; mediumAgeYears = 4.5; criticalAgeYears = 7.0; warrantyExpiringDays = 90.0
+    minimumRamGb = 4.0; recommendedRamGb = 8.0; vmMinimumRamGb = 4.0; vmRecommendedRamGb = 8.0
+    macosMinimumSupported = 14.0; macosHardEndOfLife = 12.0
+}
+# Applies a "standards" object (or JSON text) to $Std in place. Unknown names and values that aren't positive numbers
+# are ignored with a warning. If the result breaks the order the rules depend on, nothing is changed.
+# Returns the settings that changed, as "name = value".
+function Set-Standards { param($s, [System.Collections.IList]$warn)
+    if ($s -is [string]) {
+        if (-not $s.Trim()) { return @() }
+        try { $s = $s | ConvertFrom-Json } catch { $null = $warn.Add("The standards input isn't valid JSON, so the default standards were used."); return @() }
+    }
+    if ($null -eq $s) { return @() }
+    $pairs = if ($s -is [System.Collections.IDictionary]) { @($s.GetEnumerator() | ForEach-Object { @{ k = ([string]$_.Key).Trim(); v = $_.Value } }) } else { @($s.PSObject.Properties | ForEach-Object { @{ k = $_.Name.Trim(); v = $_.Value } }) }
+    $new = [ordered]@{}; foreach ($k in @($Std.Keys)) { $new[$k] = $Std[$k] }
+    foreach ($p in $pairs) {
+        $key = @(@($Std.Keys) | Where-Object { $_ -eq $p.k })
+        if (-not $key.Count) { $null = $warn.Add("Standard '$($p.k)' isn't one the workflow can change (use $(@($Std.Keys) -join ', ')), so it was ignored."); continue }
+        $d = 0.0
+        if ($null -eq $p.v -or $p.v -is [bool] -or -not [double]::TryParse([string]$p.v, [System.Globalization.NumberStyles]::Float, $ci, [ref]$d) -or $d -le 0) { $null = $warn.Add("Standard '$($key[0])' isn't a positive number, so the default ($($Std[$key[0]])) was used."); continue }
+        $new[$key[0]] = $d
+    }
+    $bad = @()
+    if (-not ($new.planAgeYears -lt $new.mediumAgeYears -and $new.mediumAgeYears -lt $new.replaceAgeYears -and $new.replaceAgeYears -lt $new.criticalAgeYears)) { $bad += 'planAgeYears < mediumAgeYears < replaceAgeYears < criticalAgeYears' }
+    if ($new.minimumRamGb -gt $new.recommendedRamGb) { $bad += 'minimumRamGb <= recommendedRamGb' }
+    if ($new.vmMinimumRamGb -gt $new.vmRecommendedRamGb) { $bad += 'vmMinimumRamGb <= vmRecommendedRamGb' }
+    if ($new.macosHardEndOfLife -ge $new.macosMinimumSupported) { $bad += 'macosHardEndOfLife < macosMinimumSupported' }
+    if ($bad.Count) { $null = $warn.Add("The standards input breaks $(if ($bad.Count -eq 1) { 'this rule' } else { 'these rules' }): $($bad -join '; '). The default standards were used."); return @() }
+    $changed = New-Object System.Collections.ArrayList
+    foreach ($k in @($new.Keys)) { if ($new[$k] -ne $Std[$k]) { $Std[$k] = $new[$k]; $null = $changed.Add("$k = $($new[$k].ToString($ci))") } }
+    return @($changed)
+}
+# Reported memory leaves out hardware-reserved memory: a nominal 8 GB computer reports about 7.8 GB. So a computer is
+# below a RAM standard only when it reports less than 94% of it (under 7.52 GB for 8 GB, under 3.76 GB for 4 GB).
+function Test-RamBelow { param($ram, [double]$gb) return ($null -ne $ram -and $ram -lt [math]::Round($gb * 0.94, 2)) }
+
 # ---- rules (identical to the agent's decision tracks) ----
 function Get-Age { param($ep)
     foreach ($f in @('manufacturedDate', 'biosDate', 'cpuDate')) { $d = Parse-Date (Get-Prop $ep $f); if ($d) { return @{ years = [math]::Round(($runDate - $d).TotalDays / 365.25, 1); estimated = ($f -ne 'manufacturedDate') } } }
@@ -160,23 +200,23 @@ function Get-Warranty { param($ep)
     $d = Parse-Date (Get-Prop $ep 'expirationDate')
     if (-not $d) { return @{ status = 'unknown'; date = $null } }
     if ($d -lt $runDate) { return @{ status = 'expired'; date = $d } }
-    if ($d -le $runDate.AddDays(90)) { return @{ status = 'expiring'; date = $d } }
+    if ($d -le $runDate.AddDays($Std.warrantyExpiringDays)) { return @{ status = 'expiring'; date = $d } }
     return @{ status = 'active'; date = $d }
 }
 function Get-OsType { param([string]$os) if ($os -match '(?i)windows') { 'windows' } elseif ($os -match '(?i)mac\s?os|os x') { 'macos' } else { 'other' } }
 function Get-MacMajor { param([string]$os) if ($os -match '(?i)mac\s?os[^\d]*(\d+)') { [int]$Matches[1] } else { $null } }
 function Get-OsSupport { param([string]$os, [string]$type)
     if ($type -eq 'windows') { if ($os -match '(?i)windows\s*11') { return 'supported' }; if ($os -match '(?i)windows\s*(10|8|7|xp|vista)') { return 'unsupported' }; return 'unknown' }
-    if ($type -eq 'macos') { $m = Get-MacMajor $os; if ($null -eq $m) { return 'unknown' }; if ($m -ge 14) { return 'supported' }; return 'unsupported' }
+    if ($type -eq 'macos') { $m = Get-MacMajor $os; if ($null -eq $m) { return 'unknown' }; if ($m -ge $Std.macosMinimumSupported) { return 'supported' }; return 'unsupported' }
     return 'unknown'
 }
 function Get-RamGb { param($ep) $b = 0.0; if ([double]::TryParse([string](Get-Prop $ep 'memory'), [System.Globalization.NumberStyles]::Float, $ci, [ref]$b) -and $b -gt 0) { [math]::Round($b / 1073741824, 1) } else { $null } }
 function Get-Tier { param([string]$mode, $age, [string]$war, [string]$sup, [string]$type, $macMajor, $ram)
-    if ($mode -eq 'vm') { if ($sup -eq 'unsupported' -or ($null -ne $ram -and $ram -lt 4)) { return 'High' }; return 'Low' }
-    $hardEol = ($type -eq 'windows' -and $sup -eq 'unsupported') -or ($type -eq 'macos' -and $null -ne $macMajor -and $macMajor -le 12)
-    if (($null -ne $age -and $age -ge 7) -or $hardEol -or ($null -ne $ram -and $ram -lt 4)) { return 'Critical' }
-    if (($null -ne $age -and $age -ge 5) -or $war -eq 'expired' -or $sup -eq 'unsupported') { return 'High' }
-    if (($null -ne $age -and $age -ge 4.5) -or $war -eq 'expiring') { return 'Medium' }
+    if ($mode -eq 'vm') { if ($sup -eq 'unsupported' -or (Test-RamBelow $ram $Std.vmMinimumRamGb)) { return 'High' }; return 'Low' }
+    $hardEol = ($type -eq 'windows' -and $sup -eq 'unsupported') -or ($type -eq 'macos' -and $null -ne $macMajor -and $macMajor -le $Std.macosHardEndOfLife)
+    if (($null -ne $age -and $age -ge $Std.criticalAgeYears) -or $hardEol -or (Test-RamBelow $ram $Std.minimumRamGb)) { return 'Critical' }
+    if (($null -ne $age -and $age -ge $Std.replaceAgeYears) -or $war -eq 'expired' -or $sup -eq 'unsupported') { return 'High' }
+    if (($null -ne $age -and $age -ge $Std.mediumAgeYears) -or $war -eq 'expiring') { return 'Medium' }
     return 'Low'
 }
 function Get-Assessment { param($ep)
@@ -198,17 +238,17 @@ function Get-Assessment { param($ep)
         return @{ flagged = $true; category = 'Human review'; tier = (Get-Tier 'std' $age $war.status $sup $type $mac $ram); line = "$lead $ageTxt $warTxt.$osTxt A technician should review this server and decide the next step." }
     }
     if ([bool](Get-Prop $ep 'isVirtual')) {
-        $act = if ($sup -eq 'unsupported') { 'upgrade or rebuild the guest operating system onto Windows 11' } elseif ($null -ne $ram -and $ram -lt 4) { 'increase its assigned memory' } elseif ($null -ne $ram -and $ram -lt 8) { 'review and tune its assigned resources' } else { $null }
+        $act = if ($sup -eq 'unsupported') { 'upgrade or rebuild the guest operating system onto Windows 11' } elseif (Test-RamBelow $ram $Std.vmMinimumRamGb) { 'increase its assigned memory' } elseif (Test-RamBelow $ram $Std.vmRecommendedRamGb) { 'review and tune its assigned resources' } else { $null }
         if (-not $act) { return @{ flagged = $false } }   # healthy VM - not carded; unknown memory is not low
         return @{ flagged = $true; category = 'Virtual machines'; tier = (Get-Tier 'vm' $age $war.status $sup $type $mac $ram); line = "$lead is a virtual machine running $(if ($os) { Enc $os } else { 'an unknown operating system' }). Recommended action: $act." }
     }
-    $rec = if (($null -ne $age -and $age -ge 5) -or ($sup -eq 'unsupported' -and -not $w11) -or ($null -ne $ram -and $ram -lt 4)) { 'Replace' }
+    $rec = if (($null -ne $age -and $age -ge $Std.replaceAgeYears) -or ($sup -eq 'unsupported' -and -not $w11) -or (Test-RamBelow $ram $Std.minimumRamGb)) { 'Replace' }
         elseif ($sup -eq 'unsupported' -and $w11) { 'Upgrade in place' }
-        elseif ($null -ne $age -and $age -ge 3) { 'Plan replacement' }
+        elseif ($null -ne $age -and $age -ge $Std.planAgeYears) { 'Plan replacement' }
         elseif ($null -ne $age) { 'Retain' }
         elseif ($war.status -eq 'unknown' -and $sup -eq 'unknown') { 'Needs data' }
         else { 'Retain' }
-    $flag = switch ($rec) { 'Retain' { ($war.status -in @('expired', 'expiring')) -or ($null -ne $ram -and $ram -lt 8) } default { $true } }
+    $flag = switch ($rec) { 'Retain' { ($war.status -in @('expired', 'expiring')) -or (Test-RamBelow $ram $Std.recommendedRamGb) } default { $true } }
     if (-not $flag) { return @{ flagged = $false } }
     $act = switch ($rec) {
         'Replace' { 'replace this computer' }; 'Upgrade in place' { 'upgrade it to Windows 11 in place; the hardware is capable' }
@@ -218,6 +258,11 @@ function Get-Assessment { param($ep)
     return @{ flagged = $true; category = $rec; tier = (Get-Tier 'std' $age $war.status $sup $type $mac $ram); line = "$lead $ageTxt $warTxt.$osTxt Recommended action: $act." }
 }
 # ---- shared: end ----
+
+# ---- standards (optional run input) ----
+# "standards": { "replaceAgeYears": 6, "recommendedRamGb": 16 } - any setting from the Standard values table in
+# knowledge/endpoint-refresh-standards.md. Settings left out keep their defaults.
+$StandardsApplied = @(Set-Standards (Get-Prop $in 'standards') $warnings)
 
 function Get-Summary { param([string]$category, [int]$n, [string]$top, $tierCounts)
     $noun = if ($category -eq 'Human review') { if ($n -eq 1) { 'server needs' } else { 'servers need' } } elseif ($category -eq 'Virtual machines') { if ($n -eq 1) { 'virtual machine needs' } else { 'virtual machines need' } } else { if ($n -eq 1) { 'computer is' } else { 'computers are' } }
@@ -268,11 +313,11 @@ function Get-ReplacementEstimate { param($devices)
 # Upgrade in place, Retain, Human review: the parts a device's data shows it needs. Virtual machines have no hardware to buy.
 # Live data: isSSD is false on every endpoint of a company that doesn't collect it, so it's trusted only where some endpoint
 # reports true. Servers report false even with SSDs (RAID/virtual disks), so they never get an SSD line.
-# Nominal 8 GB machines report about 7.8 GB (reserved memory), so the RAM line is below 7.5 GB.
+# RAM: below recommendedRamGb, allowing for reserved memory (Test-RamBelow), so a nominal 8 GB machine doesn't count.
 function Get-PartNeeds { param($ep, [string]$cat, [bool]$ssdCollected)
     $needs = New-Object System.Collections.ArrayList
     if ($cat -notin @('Upgrade in place', 'Retain', 'Human review')) { return @($needs) }
-    $ram = Get-RamGb $ep; if ($null -ne $ram -and $ram -lt 7.5) { $null = $needs.Add('RAM upgrade') }   # unknown memory is not low
+    $ram = Get-RamGb $ep; if (Test-RamBelow $ram $Std.recommendedRamGb) { $null = $needs.Add('RAM upgrade') }   # unknown memory is not low
     if ($ssdCollected -and $cat -ne 'Human review' -and [string](Get-Prop $ep 'isSSD') -eq 'False') { $null = $needs.Add('SSD upgrade') }
     if ((Get-Warranty $ep).status -in @('expired', 'expiring')) { $null = $needs.Add('Warranty extension') }
     return @($needs)
@@ -481,6 +526,7 @@ foreach ($k in $counts.Keys) { $out[$k] = $counts[$k] }
 $out.optionalFieldsDropped = $state.optionalDropped
 $out.pricingApplied = ($null -ne $Pricing)
 if ($null -ne $Pricing) { $out.estimatedTotal = [math]::Round($state.estimatedTotal, 2) }
+$out.standardsApplied = $StandardsApplied
 $out.warnings = @($warnings)
 $out.results = @($results)
 $out.message = "Endpoint LifeCycle Manager$verb for $scope : $($counts.evaluated) computers evaluated, $($counts.flaggedEndpoints) on cards, $($counts.excludedNonComputer) non-computers excluded$(if ($counts.orphanedEndpoints) { ", $($counts.orphanedEndpoints) skipped from deleted companies" }). Cards: $($counts.cardsCreated) created, $($counts.cardsUpdated) updated, $($counts.cardsCompleted) closed, $($counts.errors) errors."

@@ -1,0 +1,273 @@
+{
+  "name": "New Client Onboarding (Form)",
+  "description": "Run by the Onboard a New Client portal form: creates the client in the PSA and in CloudRadial and links the two, adds the email domain, opens the onboarding ticket, sets up the portal (primary contact, report archive folders), creates the Datto RMM site and adds the company to the All company group, then reports back on the request ticket.",
+  "version": "1.0.0",
+  "exportedFrom": "tenant workflow v0.0.6",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "name": "Start",
+        "type": "start",
+        "position": {
+          "x": 100,
+          "y": 200
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "node-inputs",
+        "name": "Read inputs",
+        "type": "powershell-script",
+        "position": {
+          "x": 280,
+          "y": 200
+        },
+        "properties": {
+          "script": "@file:node-inputs.ps1",
+          "timeoutSeconds": 60,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": [],
+          "testInput": "{\n  \"company_name\": \"Contoso Ltd\",\n  \"primary_domain\": \"contoso.com\",\n  \"psa_company_id\": \"\",\n  \"company_group\": \"\",\n  \"account_manager\": \"\",\n  \"territory\": \"\",\n  \"company_id\": \"\",\n  \"ticket_id\": \"\",\n  \"checklist\": \"\",\n  \"ticket_queue\": \"\",\n  \"tenant_id\": \"\",\n  \"include_m365\": true,\n  \"psa\": \"\",\n  \"confirm\": false,\n  \"create_psa_company\": true,\n  \"primary_contact_name\": \"\",\n  \"primary_contact_email\": \"\",\n  \"agreement_type\": \"\",\n  \"agreement_name\": \"\"\n}"
+        }
+      },
+      {
+        "id": "node-check",
+        "name": "Check CloudRadial and the PSA",
+        "type": "powershell-script",
+        "position": {
+          "x": 413.5,
+          "y": 96
+        },
+        "properties": {
+          "script": "@file:node-check.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "node-m365",
+        "name": "Microsoft 365 baseline preview",
+        "type": "powershell-script",
+        "position": {
+          "x": 665.5,
+          "y": 257
+        },
+        "properties": {
+          "script": "@file:node-m365.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "node-apply",
+        "name": "Create the company and open the ticket",
+        "type": "powershell-script",
+        "position": {
+          "x": 876,
+          "y": 111.5
+        },
+        "properties": {
+          "script": "@file:node-apply.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "node-datto",
+        "name": "Create Datto RMM site",
+        "type": "powershell-script",
+        "position": {
+          "x": 1396,
+          "y": 391.5
+        },
+        "properties": {
+          "script": "@file:node-datto.ps1",
+          "timeoutSeconds": 60,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "prep",
+              "expression": "{{ nodes.node-portal-prep.output }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "node-group",
+        "name": "Add to the All company group",
+        "type": "powershell-script",
+        "position": {
+          "x": 1656,
+          "y": 391.5
+        },
+        "properties": {
+          "script": "@file:node-group.ps1",
+          "timeoutSeconds": 60,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "prep",
+              "expression": "{{ nodes.node-portal-prep.output }}"
+            },
+            {
+              "name": "groupName",
+              "expression": "All"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "node-report",
+        "name": "Report back on the request",
+        "type": "powershell-script",
+        "position": {
+          "x": 1776,
+          "y": 111.5
+        },
+        "properties": {
+          "script": "@file:node-report.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "trigger",
+              "expression": "{{ nodes.trigger.output }}"
+            },
+            {
+              "name": "apply",
+              "expression": "{{ nodes.node-apply.output }}"
+            },
+            {
+              "name": "agent",
+              "expression": "{{ nodes.node-portal-agent.output }}"
+            },
+            {
+              "name": "datto",
+              "expression": "{{ nodes.node-datto.output }}"
+            },
+            {
+              "name": "group",
+              "expression": "{{ nodes.node-group.output }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "type": "end",
+        "position": {
+          "x": 1656,
+          "y": 231.5
+        }
+      },
+      {
+        "id": "node-portal-prep",
+        "name": "Hand off to portal setup",
+        "type": "powershell-script",
+        "position": {
+          "x": 1136,
+          "y": 231.5
+        },
+        "properties": {
+          "script": "@file:node-portal-prep.ps1",
+          "timeoutSeconds": 60,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "node-portal-agent",
+        "name": "UCP Agent: set up the portal",
+        "type": "agent",
+        "position": {
+          "x": 1396,
+          "y": 231.5
+        },
+        "properties": {
+          "goal": "@file:node-portal-agent.goal.md",
+          "model": "",
+          "allowedExtensions": [
+            "cloudradial-v2-companies",
+            "cloudradial-v2-compliance",
+            "cloudradial-v2-content",
+            "cloudradial-v2-tokens"
+          ],
+          "timeoutSeconds": 900,
+          "autoApprove": true,
+          "agentSlug": "new-client-portal-setup",
+          "inputSchema": "{\"type\":\"object\",\"properties\":{\"skip\":{\"type\":\"string\"},\"confirm\":{\"type\":\"boolean\"},\"companyId\":{\"type\":\"integer\"},\"companyName\":{\"type\":\"string\"},\"primaryDomain\":{\"type\":\"string\"},\"primaryContactName\":{\"type\":\"string\"},\"primaryContactEmail\":{\"type\":\"string\"},\"products\":{\"type\":\"string\"},\"psaCompanyId\":{\"type\":\"string\"},\"ticketId\":{\"type\":\"string\"},\"createMessage\":{\"type\":\"string\"}},\"required\":[],\"additionalProperties\":true}",
+          "outputSchema": "\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"status\\\":{\\\"type\\\":\\\"string\\\",\\\"enum\\\":[\\\"success\\\",\\\"preview\\\",\\\"skipped\\\",\\\"error\\\"]},\\\"actions\\\":{\\\"type\\\":\\\"array\\\",\\\"items\\\":{\\\"type\\\":\\\"string\\\"}},\\\"planned\\\":{\\\"type\\\":\\\"array\\\",\\\"items\\\":{\\\"type\\\":\\\"string\\\"}},\\\"skipped\\\":{\\\"type\\\":\\\"array\\\",\\\"items\\\":{\\\"type\\\":\\\"string\\\"}},\\\"dayOneContent\\\":{\\\"type\\\":\\\"array\\\",\\\"items\\\":{\\\"type\\\":\\\"string\\\"}},\\\"summary\\\":{\\\"type\\\":\\\"string\\\"}},\\\"required\\\":[\\\"status\\\",\\\"summary\\\"]}\""
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "node-inputs",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-inputs",
+        "target": "node-check",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-check",
+        "target": "node-m365",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-m365",
+        "target": "node-apply",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-apply",
+        "target": "node-portal-prep",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-portal-prep",
+        "target": "node-portal-agent",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-report",
+        "target": "end",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-portal-agent",
+        "target": "node-datto",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-datto",
+        "target": "node-group",
+        "sourceHandle": null
+      },
+      {
+        "source": "node-group",
+        "target": "node-report",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

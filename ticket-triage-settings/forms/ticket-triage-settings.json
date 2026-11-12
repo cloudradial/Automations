@@ -1,0 +1,85 @@
+{
+  "item": {
+    "catalogUsage": "Request",
+    "category": "Client Onboarding",
+    "description": "Choose how new tickets from your portal forms are triaged: the board, the priority, whether AI sets the Type and Subtype, and whether an internal note is added. Leave the client blank to set it for all clients.",
+    "subject": "Ticket Triage Settings",
+    "shortDescription": "Set how new tickets are triaged",
+    "icon": "fa fa-plus-circle",
+    "iconColor": "#2563eb",
+    "isAllowedCompanyChanges": false,
+    "isFileUpload": false,
+    "isNeedsApproval": false,
+    "isShowPrice": false,
+    "isShowMonthly": false,
+    "order": 0,
+    "price": 0,
+    "estimatedTime": 0,
+    "selectText": "ORDER",
+    "isPartnerManaged": false,
+    "isSignature": false,
+    "isAppendSubject": true,
+    "isSendSubmitter": false,
+    "isIncludeDescription": true,
+    "isSendToPsa": true,
+    "isSelfApproval": true,
+    "hideActionButtons": false
+  },
+  "questions": [
+    {
+      "label": "Subject",
+      "defaultValue": "Ticket Triage Settings",
+      "order": 10,
+      "type": "Comment",
+      "isSubject": true,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Board",
+      "order": 20,
+      "type": "PSABoardField",
+      "isRequired": true,
+      "jsonId": "triageBoard",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Priority",
+      "order": 30,
+      "type": "PSAPriorityField",
+      "jsonId": "triagePriority",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Let AI set the Type and Subtype",
+      "options": "Yes,No",
+      "defaultValue": "Yes",
+      "order": 40,
+      "type": "MultiChoiceField",
+      "jsonId": "triageAiType",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Add an internal note",
+      "options": "Yes,No",
+      "defaultValue": "Yes",
+      "order": 50,
+      "type": "MultiChoiceField",
+      "jsonId": "triageNote",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Apply to one client only (leave blank for all clients)",
+      "order": 60,
+      "type": "TextField",
+      "jsonId": "triageCompany",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Save the settings",
+      "defaultValue": "workflow:<id of your imported Ticket Triage: Save Settings workflow>",
+      "order": 70,
+      "type": "Action",
+      "isIncludeInTicket": true
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "item": {
+    "catalogUsage": "Request",
+    "category": "Operations",
+    "description": "Run the Value Review: adds Endpoint Lifecycle Planner cards and a QBR prep card from PSA ticket stats, then posts a branded summary review to the client's Report Archives.",
+    "subject": "Client Value Review",
+    "shortDescription": "Value Review Report to Report Archive",
+    "icon": "fmd fm-ReportAdd",
+    "isAllowedCompanyChanges": false,
+    "isFileUpload": false,
+    "isNeedsApproval": false,
+    "isShowPrice": false,
+    "isShowMonthly": false,
+    "order": 0,
+    "price": 0,
+    "psaBoard": "@DefaultBoard",
+    "psaStatus": "@DefaultStatus",
+    "psaPriority": "@DefaultPriority",
+    "estimatedTime": 0,
+    "selectText": "Value Review Report",
+    "isPartnerManaged": false,
+    "isSignature": false,
+    "isAppendSubject": true,
+    "teamsPartnerWebhook": "@DefaultPartnerTeams",
+    "teamsWebhook": "@DefaultTeams",
+    "isSendSubmitter": false,
+    "isIncludeDescription": true,
+    "isSendToPsa": true,
+    "isSelfApproval": true,
+    "hideActionButtons": false,
+    "groups": "Everyone"
+  },
+  "questions": [
+    {
+      "label": "Subject",
+      "defaultValue": "@CompanyName Value Review",
+      "order": 10,
+      "type": "Comment",
+      "isSubject": true,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Review Timeframe",
+      "options": "30 Days,60 Days,90 Days",
+      "order": 20,
+      "type": "MultiChoiceDropdown",
+      "jsonId": "reviewTimeframe",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Build the value review",
+      "defaultValue": "workflow:<id of your imported Client Value Review workflow>",
+      "order": 30,
+      "type": "Action",
+      "isIncludeInTicket": true
+    }
+  ]
+}

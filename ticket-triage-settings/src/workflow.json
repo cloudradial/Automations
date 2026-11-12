@@ -1,0 +1,69 @@
+{
+  "name": "Ticket Triage: Save Settings",
+  "description": "Run by the Ticket Triage Settings portal form: checks the board and priority exist in ConnectWise and saves them as the TicketTriageSettings token, for all clients or one client, so Ticket Triage (Form) uses them.",
+  "version": "1.0.0",
+  "exportedFrom": "tenant workflow v0.0.2",
+  "definition": {
+    "schemaVersion": 1,
+    "startActivityId": "start",
+    "activities": [
+      {
+        "id": "start",
+        "name": "Start",
+        "type": "start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "save",
+        "name": "Check and save the triage settings",
+        "type": "powershell-script",
+        "position": {
+          "x": 340,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:save.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "trigger",
+              "expression": "{{ nodes.trigger.output }}"
+            }
+          ],
+          "aiExtensions": [
+            "connectwise-manage"
+          ],
+          "testInput": ""
+        }
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "type": "end",
+        "position": {
+          "x": 640,
+          "y": 80
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "save",
+        "sourceHandle": null
+      },
+      {
+        "source": "save",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ]
+  }
+}

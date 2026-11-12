@@ -1,0 +1,52 @@
+{
+  "item": {
+    "catalogUsage": "Request",
+    "category": "Operations",
+    "description": "Reviews the client's Microsoft 365 tenant: creates an assessment from Microsoft Secure Score, and adds Planner cards for unused licenses, accounts without MFA and stale accounts.",
+    "subject": "Microsoft Tenant Review",
+    "shortDescription": "Secure Score assessment and license, MFA and stale account review",
+    "icon": "fab fa-microsoft",
+    "iconColor": "#ffffff",
+    "isAllowedCompanyChanges": false,
+    "isFileUpload": false,
+    "isNeedsApproval": false,
+    "isShowPrice": false,
+    "isShowMonthly": false,
+    "order": 0,
+    "price": 0,
+    "psaBoard": "@DefaultBoard",
+    "psaStatus": "@DefaultStatus",
+    "psaPriority": "@DefaultPriority",
+    "estimatedTime": 0,
+    "selectText": "Microsoft Tenant Review",
+    "isPartnerManaged": false,
+    "isSignature": false,
+    "isAppendSubject": true,
+    "teamsPartnerWebhook": "@DefaultPartnerTeams",
+    "teamsWebhook": "@DefaultTeams",
+    "isSendSubmitter": false,
+    "isIncludeDescription": true,
+    "isSendToPsa": true,
+    "isSelfApproval": true,
+    "hideActionButtons": false,
+    "groups": "Everyone"
+  },
+  "questions": [
+    {
+      "label": "Subject",
+      "info": "Enter a subject for reference.",
+      "defaultValue": "@CompanyName Microsoft 365 Tenant Review",
+      "order": 10,
+      "type": "Comment",
+      "isSubject": true,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Run the tenant review",
+      "defaultValue": "workflow:<id of your imported Microsoft Tenant Review workflow>",
+      "order": 20,
+      "type": "Action",
+      "isIncludeInTicket": true
+    }
+  ]
+}

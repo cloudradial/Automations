@@ -1,0 +1,104 @@
+{
+  "name": "Microsoft Tenant Review",
+  "description": "Run by the Microsoft Tenant Review portal form: creates a client assessment from Microsoft Secure Score, then conversational Planner cards for unused Microsoft 365 licenses, accounts without MFA and stale accounts. Takes the client and tenant from the ticket.",
+  "version": "1.0.0",
+  "exportedFrom": "tenant workflow v0.0.6",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "name": "Start",
+        "type": "start",
+        "position": {
+          "x": 100,
+          "y": 100
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "secure-score",
+        "name": "Secure Score assessment",
+        "type": "powershell-script",
+        "position": {
+          "x": 320,
+          "y": 120
+        },
+        "properties": {
+          "script": "@file:secure-score.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "companyId",
+              "expression": "{{ nodes.trigger.output.company.id }}"
+            },
+            {
+              "name": "tenantId",
+              "expression": "{{ nodes.trigger.output.company.tenantId }}"
+            },
+            {
+              "name": "companyName",
+              "expression": "{{ nodes.trigger.output.company.name }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "tenant-cards",
+        "name": "License and MFA review",
+        "type": "powershell-script",
+        "position": {
+          "x": 620,
+          "y": 120
+        },
+        "properties": {
+          "script": "@file:tenant-cards.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "companyId",
+              "expression": "{{ nodes.trigger.output.company.id }}"
+            },
+            {
+              "name": "tenantId",
+              "expression": "{{ nodes.trigger.output.company.tenantId }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "type": "end",
+        "position": {
+          "x": 1040,
+          "y": 100
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "secure-score",
+        "sourceHandle": null
+      },
+      {
+        "source": "tenant-cards",
+        "target": "end",
+        "sourceHandle": null
+      },
+      {
+        "source": "secure-score",
+        "target": "tenant-cards",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

@@ -1,0 +1,308 @@
+{
+  "name": "Client Value Review",
+  "description": "Run by the Client Value Review portal form: builds a branded 30, 60 or 90 day value review from PSA ticket stats, adds Endpoint Lifecycle Planner cards and a QBR prep card, then posts the review to the client's Report Archives.",
+  "version": "1.0.0",
+  "exportedFrom": "tenant workflow v0.0.14",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "name": "Start",
+        "type": "start",
+        "position": {
+          "x": 80,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "build-review",
+        "name": "Build Review Data",
+        "type": "powershell-script",
+        "position": {
+          "x": 219.35483870967744,
+          "y": 321.2903225806452
+        },
+        "properties": {
+          "script": "@file:build-review.ps1",
+          "timeoutSeconds": 1200,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "trigger",
+              "expression": "{{ nodes.trigger.output }}"
+            }
+          ],
+          "aiExtensions": [
+            "connectwise-manage"
+          ]
+        }
+      },
+      {
+        "id": "lookup-cr-company",
+        "name": "Lookup CloudRadial Company",
+        "type": "powershell-script",
+        "position": {
+          "x": 510.9677419354839,
+          "y": -214.19354838709677
+        },
+        "properties": {
+          "script": "@file:lookup-cr-company.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "companyName",
+              "expression": "{{ nodes.build-review.output.companyName }}"
+            },
+            {
+              "name": "stopAfterBuild",
+              "expression": "{{ nodes.build-review.output.stopAfterBuild }}"
+            },
+            {
+              "name": "cwCompanyName",
+              "expression": "{{ nodes.build-review.output.cwCompanyName }}"
+            },
+            {
+              "name": "cwIdentifier",
+              "expression": "{{ nodes.build-review.output.cwIdentifier }}"
+            },
+            {
+              "name": "psaCompanyId",
+              "expression": "{{ nodes.build-review.output.psaCompanyId }}"
+            }
+          ],
+          "aiExtensions": [
+            "cloudradial-v2-companies"
+          ]
+        }
+      },
+      {
+        "id": "qbr-card",
+        "name": "Add to QBR prep card",
+        "type": "powershell-script",
+        "position": {
+          "x": 809,
+          "y": 285
+        },
+        "properties": {
+          "script": "@file:qbr-card.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "crCompanyId",
+              "expression": "{{ nodes.lookup-cr-company.output.crCompanyId }}"
+            },
+            {
+              "name": "companyName",
+              "expression": "{{ nodes.build-review.output.companyName }}"
+            },
+            {
+              "name": "periodStart",
+              "expression": "{{ nodes.build-review.output.periodStart }}"
+            },
+            {
+              "name": "periodEnd",
+              "expression": "{{ nodes.build-review.output.periodEnd }}"
+            },
+            {
+              "name": "kpis",
+              "expression": "{{ nodes.build-review.output.kpis }}"
+            },
+            {
+              "name": "qbrHtml",
+              "expression": "{{ nodes.build-review.output.qbrHtml }}"
+            },
+            {
+              "name": "lifecycle",
+              "expression": "{{ nodes.lifecycle.output }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "lifecycle",
+        "name": "Endpoint lifecycle cards",
+        "type": "powershell-script",
+        "position": {
+          "x": 1400,
+          "y": 120
+        },
+        "properties": {
+          "script": "@file:lifecycle.ps1",
+          "timeoutSeconds": 1800,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "companyId",
+              "expression": "{{ nodes.lookup-cr-company.output.crCompanyId }}"
+            },
+            {
+              "name": "brand",
+              "expression": "{{ nodes.build-review.output.brand }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "finalize-review",
+        "name": "Finalize Review Outputs",
+        "type": "powershell-script",
+        "position": {
+          "x": 2000,
+          "y": 245.1612903225806
+        },
+        "properties": {
+          "script": "@file:finalize-review.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "companyName",
+              "expression": "{{ nodes.build-review.output.companyName }}"
+            },
+            {
+              "name": "periodStart",
+              "expression": "{{ nodes.build-review.output.periodStart }}"
+            },
+            {
+              "name": "periodEnd",
+              "expression": "{{ nodes.build-review.output.periodEnd }}"
+            },
+            {
+              "name": "internalSubject",
+              "expression": "{{ nodes.build-review.output.internalSubject }}"
+            },
+            {
+              "name": "clientReportHtmlBase",
+              "expression": "{{ nodes.build-review.output.clientReportHtmlBase }}"
+            },
+            {
+              "name": "internalSectionsHtml",
+              "expression": "{{ nodes.build-review.output.internalSectionsHtml }}"
+            },
+            {
+              "name": "buildGaps",
+              "expression": "{{ nodes.build-review.output.gaps }}"
+            },
+            {
+              "name": "cwMatchCount",
+              "expression": "{{ nodes.build-review.output.cwMatchCount }}"
+            },
+            {
+              "name": "cwMatches",
+              "expression": "{{ nodes.build-review.output.cwMatches }}"
+            },
+            {
+              "name": "lookupArchiveGapText",
+              "expression": "{{ nodes.lookup-cr-company.output.archiveGapText }}"
+            },
+            {
+              "name": "flags",
+              "expression": "{{ nodes.build-review.output.flags }}"
+            },
+            {
+              "name": "lifecycle",
+              "expression": "{{ nodes.lifecycle.output }}"
+            },
+            {
+              "name": "brand",
+              "expression": "{{ nodes.build-review.output.brand }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "post-archive",
+        "name": "Post to Report Archive",
+        "type": "powershell-script",
+        "position": {
+          "x": 2300,
+          "y": 245.1612903225806
+        },
+        "properties": {
+          "script": "@file:post-archive.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "crCompanyId",
+              "expression": "{{ nodes.lookup-cr-company.output.crCompanyId }}"
+            },
+            {
+              "name": "clientReportHtml",
+              "expression": "{{ nodes.finalize-review.output.clientReportHtml }}"
+            },
+            {
+              "name": "companyName",
+              "expression": "{{ nodes.build-review.output.companyName }}"
+            },
+            {
+              "name": "periodStart",
+              "expression": "{{ nodes.build-review.output.periodStart }}"
+            },
+            {
+              "name": "periodEnd",
+              "expression": "{{ nodes.build-review.output.periodEnd }}"
+            }
+          ],
+          "aiExtensions": []
+        }
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "type": "end",
+        "position": {
+          "x": 1520,
+          "y": 80
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "build-review",
+        "sourceHandle": null
+      },
+      {
+        "source": "build-review",
+        "target": "lookup-cr-company",
+        "sourceHandle": null
+      },
+      {
+        "source": "finalize-review",
+        "target": "post-archive",
+        "sourceHandle": null
+      },
+      {
+        "source": "post-archive",
+        "target": "end",
+        "sourceHandle": null
+      },
+      {
+        "source": "lookup-cr-company",
+        "target": "lifecycle",
+        "sourceHandle": null
+      },
+      {
+        "source": "lifecycle",
+        "target": "qbr-card",
+        "sourceHandle": null
+      },
+      {
+        "source": "qbr-card",
+        "target": "finalize-review",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

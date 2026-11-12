@@ -1,0 +1,80 @@
+{
+  "item": {
+    "catalogUsage": "Problem",
+    "category": "Computer",
+    "description": "Use this option if your ticket relates to something happening with your computer.",
+    "subject": "Computer Issue",
+    "icon": "fal fa-life-ring",
+    "iconColor": "#0A357B",
+    "isAllowedCompanyChanges": false,
+    "isFileUpload": true,
+    "isNeedsApproval": false,
+    "isShowPrice": false,
+    "isShowMonthly": false,
+    "order": 0,
+    "price": 0,
+    "psaBoard": "@DefaultBoard",
+    "psaStatus": "@DefaultStatus",
+    "psaPriority": "@DefaultPriority",
+    "estimatedTime": 0,
+    "isPartnerManaged": false,
+    "isSignature": false,
+    "isAppendSubject": true,
+    "teamsPartnerWebhook": "@DefaultPartnerTeams",
+    "teamsWebhook": "@DefaultTeams",
+    "isSendSubmitter": false,
+    "isIncludeDescription": false,
+    "isSendToPsa": true,
+    "isSelfApproval": false,
+    "hideActionButtons": false,
+    "groups": "Everyone"
+  },
+  "questions": [
+    {
+      "label": "Please briefly describe your issue.",
+      "info": "Give a short summary of the issue you're experiencing.",
+      "order": 10,
+      "type": "TextField",
+      "isRequired": true,
+      "isSubject": true,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Which computer is affected?",
+      "placeholder": "e.g. the computer name, or \"my laptop\"",
+      "type": "TextField",
+      "jsonId": "affectedComputer",
+      "order": 20,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "When did this start?",
+      "type": "DateField",
+      "jsonId": "startDate",
+      "order": 30,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Who is affected?",
+      "placeholder": "Your name, or everyone who has the issue",
+      "type": "TextField",
+      "jsonId": "affectedUser",
+      "order": 40,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Anything else we should know?",
+      "type": "MemoField",
+      "jsonId": "comments",
+      "order": 50,
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Triage this ticket",
+      "defaultValue": "workflow:<id of your imported Ticket Triage (Form) workflow>",
+      "order": 60,
+      "type": "Action",
+      "isIncludeInTicket": true
+    }
+  ]
+}

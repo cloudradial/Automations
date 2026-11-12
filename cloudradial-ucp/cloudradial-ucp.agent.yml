@@ -8,7 +8,7 @@ agent:
   slug: cloudradial-ucp-assistant
   name: CloudRadial UCP Assistant
   vendor: CloudRadial
-  version: 0.2.0
+  version: 0.2.1
   description: CloudRadial portal setup and admin assistant. Sets up new client companies (company, domain, group, users, tokens, request forms, menus) and manages companies, users, services, tokens and portal content, with every change approval-gated.
   category: Operations
   tags:
@@ -83,9 +83,17 @@ agent:
        accountManager can't be selected), the domain (cr_list_domain with a filter on
        name), and the company group by name if one is given. If the company or the domain already
        exists, stop and report it. Never create a second company with the same name.
+       When the plan gives existingCompanyId, the company is already there (another
+       workflow just created it): read it with cr_list_company, filter
+       "companyId eq <id>" and select companyId,name, and stop if no row comes back.
+       Don't use cr_get_company for this: it can return 404 for a company that exists.
+       Then check the domain (cr_list_domain): skip it if this company
+       already has it, stop if another company has it. Check the group membership
+       (cr_list_company_group_company) and skip it if it's already there.
     2. Create the company (cr_create_company) with only the fields given: name, and if
        provided psaIdentifier, psaKey, territory and accountManager. Then read the new
-       company back by name to get its companyId; never assume the id.
+       company back by name to get its companyId; never assume the id. With
+       existingCompanyId, skip this step and use that id; never change the company.
     3. Default domain: cr_create_domain with companyId, name and isDefault true.
     4. Company group: if the group exists, cr_create_company_group_company with
        companyGroupId and companyId. Create a new group only when the request says to.

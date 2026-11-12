@@ -1,0 +1,123 @@
+{
+  "name": "Ticket Triage (Form)",
+  "description": "Run by an Action on any portal request or problem form: moves the new ticket to the triage board, sets the priority, lets AI pick the Type and Subtype from that board's list, and adds an internal note explaining the choice. ConnectWise PSA.",
+  "version": "1.0.0",
+  "exportedFrom": "tenant workflow v0.0.3",
+  "definition": {
+    "schemaVersion": 1,
+    "startActivityId": "start",
+    "activities": [
+      {
+        "id": "start",
+        "name": "Start",
+        "type": "start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "read",
+        "name": "Read the ticket and board",
+        "type": "powershell-script",
+        "position": {
+          "x": 340,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:read.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "trigger",
+              "expression": "{{ nodes.trigger.output }}"
+            }
+          ],
+          "aiExtensions": [
+            "connectwise-manage"
+          ],
+          "testInput": ""
+        }
+      },
+      {
+        "id": "pick",
+        "name": "Pick the type and subtype",
+        "type": "ai-prompt",
+        "position": {
+          "x": 640,
+          "y": 80
+        },
+        "properties": {
+          "promptTemplate": "@file:pick.prompt.md",
+          "systemMessage": "@file:pick.system.md",
+          "maxTokens": 300,
+          "outputKey": "pick",
+          "parameters": []
+        }
+      },
+      {
+        "id": "apply",
+        "name": "Apply the triage",
+        "type": "powershell-script",
+        "position": {
+          "x": 940,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:apply.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "read",
+              "expression": "{{ nodes.read.output }}"
+            },
+            {
+              "name": "pick",
+              "expression": "{{ nodes.pick.output.pick }}"
+            }
+          ],
+          "aiExtensions": [
+            "connectwise-manage"
+          ],
+          "testInput": ""
+        }
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "type": "end",
+        "position": {
+          "x": 1240,
+          "y": 80
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "read",
+        "sourceHandle": null
+      },
+      {
+        "source": "read",
+        "target": "pick",
+        "sourceHandle": null
+      },
+      {
+        "source": "pick",
+        "target": "apply",
+        "sourceHandle": null
+      },
+      {
+        "source": "apply",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "item": {
+    "catalogUsage": "Request",
+    "category": "Client Onboarding",
+    "description": "<p>Adds the client and their email domain to the portal, creates them in ConnectWise and links the two, and gives the primary contact their first portal login.</p>",
+    "subject": "Onboard a New Client",
+    "shortDescription": "Add a new client to the portal and ConnectWise with their first user.",
+    "thankYou": "<p>Thanks. The client is being set up now. They will appear in the portal and ConnectWise in a few minutes.</p>",
+    "icon": "fa fa-plus-circle",
+    "iconColor": "#2563eb",
+    "isAllowedCompanyChanges": false,
+    "isFileUpload": false,
+    "isNeedsApproval": false,
+    "isShowPrice": false,
+    "isShowMonthly": false,
+    "order": 1,
+    "price": 0,
+    "psaBoard": "@DefaultBoard",
+    "estimatedTime": 0,
+    "selectText": "ORDER",
+    "isPartnerManaged": false,
+    "isSignature": false,
+    "isAppendSubject": true,
+    "isSendSubmitter": false,
+    "isIncludeDescription": true,
+    "isSendToPsa": true,
+    "isSelfApproval": true,
+    "hideActionButtons": false
+  },
+  "questions": [
+    {
+      "label": "Company name",
+      "order": 10,
+      "type": "TextField",
+      "jsonId": "companyName",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Email domain",
+      "order": 20,
+      "type": "TextField",
+      "jsonId": "emailDomain",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Primary contact name",
+      "order": 30,
+      "type": "TextField",
+      "jsonId": "primaryContactName",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Primary contact email",
+      "order": 40,
+      "type": "EmailField",
+      "jsonId": "primaryContactEmail",
+      "isIncludeInTicket": true
+    },
+    {
+      "label": "Set up the client",
+      "defaultValue": "workflow:<id of your imported New Client Onboarding (Form) workflow>",
+      "order": 50,
+      "type": "Action",
+      "isIncludeInTicket": true
+    }
+  ]
+}

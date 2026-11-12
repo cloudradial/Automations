@@ -1,0 +1,69 @@
+{
+  "name": "ConnectWise Board Types Setup",
+  "description": "Run once by hand: adds a standard set of Type > Subtype pairs (Email > Outlook, Printer > Not Printing and so on) to one ConnectWise board, reusing what exists. Never renames or deletes. Gives Ticket Triage (Form) a clean list to pick from.",
+  "version": "1.0.0",
+  "exportedFrom": "tenant workflow v0.0.2",
+  "definition": {
+    "schemaVersion": 1,
+    "startActivityId": "start",
+    "activities": [
+      {
+        "id": "start",
+        "name": "Start",
+        "type": "start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "setup",
+        "name": "Set up board types and subtypes",
+        "type": "powershell-script",
+        "position": {
+          "x": 340,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:setup.ps1",
+          "timeoutSeconds": 900,
+          "retryCount": 0,
+          "parameters": [
+            {
+              "name": "trigger",
+              "expression": "{{ nodes.trigger.output }}"
+            }
+          ],
+          "aiExtensions": [
+            "connectwise-manage"
+          ],
+          "testInput": ""
+        }
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "type": "end",
+        "position": {
+          "x": 640,
+          "y": 80
+        }
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "setup",
+        "sourceHandle": null
+      },
+      {
+        "source": "setup",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ]
+  }
+}

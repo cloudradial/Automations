@@ -23,6 +23,7 @@ fs.writeFileSync(path.join(out, 'agentwf-test.json'), byId['node-inputs'].proper
 fs.writeFileSync(path.join(out, 'agentwf-note.ps1'), byId['node-note'].properties.script);
 fs.writeFileSync(path.join(out, 'agentwf-handoff-intake.ps1'), byId['node-handoff-intake'].properties.script);
 fs.writeFileSync(path.join(out, 'agentwf-handoff-provision.ps1'), byId['node-handoff-provision'].properties.script);
+fs.writeFileSync(path.join(out, 'agentwf-credential.ps1'), byId['node-credential'].properties.script);
 
 let failed = false;
 // The two hand-off steps run the same script; only the stage line differs.

@@ -3,7 +3,7 @@ agent:
   slug: new-user-onboarding
   name: New User Onboarding
   vendor: CloudRadial
-  version: 0.1.6
+  version: 0.2.0
   description: Takes a new starter from request to ready for day one, and refuses to grant access nobody approved.
   category: Ticketing
   tags:
@@ -24,7 +24,8 @@ agent:
     The interesting part of an onboarding agent is not what it provisions, it is
     what it refuses to. This one will not copy privileged or sensitive group
     membership from a mirror-from user, will not purchase anything, will not
-    touch an existing user, and will not hand out credentials over email or chat.
+    touch an existing user, and will not handle a password at all: the workflow
+    sets the first sign-in password itself and emails it to an approved recipient.
     Each of those is the kind of mistake that is cheap to make automatically and
     expensive to undo.
 
@@ -91,10 +92,11 @@ agent:
 
     Never contact the starter before their start date.
 
-    Never send credentials or a temporary password over email, chat or a ticket
-    note. Put them in the configured 1Password vault and share the item with the
-    requester. If that is not available, stop and say so rather than falling back
-    to a less safe channel.
+    Never repeat, store or send a password or other credential, anywhere: not in
+    email, chat, a ticket note or your output. When you create an account, give
+    it a long random password with a change forced at first sign-in and forget
+    it. The workflow sets the first sign-in password itself and delivers it.
+    Always put the new account's sign-in name in the starter's upn field.
 
     Never invent a value to get unstuck. If the email format, licence type,
     department groups or hardware spec are not stated and not remembered from a
@@ -152,19 +154,17 @@ agent:
     - microsoft-entra-id
     - cloudradial-v2-companies
     - cloudradial-v2-training
-    - 1password-business
     - microsoft-teams
   requiredSecretNames: []
   variablesJson: |
     [
       {"name":"sensitiveGroupPatterns","label":"Group name patterns that always need human approval","type":"string","default":"finance,payroll,hr,legal,board,exec,director,admin","required":false},
       {"name":"defaultLicenceSku","label":"Default licence for a standard user","type":"string","default":"","required":false},
-      {"name":"credentialVault","label":"1Password vault for credential handoff","type":"string","default":"","required":false},
       {"name":"hardwareBufferDays","label":"Escalate if hardware is unordered within this many days of the start date","type":"number","default":4,"required":false},
       {"name":"rmmPlatform","label":"RMM used for device readiness","type":"string","default":"","required":false}
     ]
   inputSchema: |
     {"type":"object","properties":{"briefing":{"type":"string","description":"The playbook briefing."},"stage":{"type":"string","description":"Which job this call is doing: intake, procurement, access_plan, provision, portal_training, or verify."},"context":{"type":"object","description":"Output from earlier plays in this run."}},"required":["stage"]}
   outputSchema: |
-    {"type":"object","properties":{"starters":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"startDate":{"type":"string"},"daysRemaining":{"type":"number"},"company":{"type":"string"},"ready":{"type":"boolean"},"done":{"type":"array","items":{"type":"string"}},"awaitingHuman":{"type":"array","items":{"type":"string"}},"skipped":{"type":"array","items":{"type":"string"}},"ticketIds":{"type":"array","items":{"type":"string"}}}}},"needsApproval":{"type":"array","items":{"type":"object","properties":{"starter":{"type":"string"},"item":{"type":"string"},"heldBy":{"type":"string"},"whyFlagged":{"type":"string"}}},"description":"Access items a human must approve by name."},"blocked":{"type":"array","items":{"type":"string"}},"learned":{"type":"array","items":{"type":"string"},"description":"Per-client facts worth carrying into the next run."},"summary":{"type":"string"}},"required":["starters","summary"]}
+    {"type":"object","properties":{"starters":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"upn":{"type":"string","description":"The new account's sign-in name, once it exists."},"startDate":{"type":"string"},"daysRemaining":{"type":"number"},"company":{"type":"string"},"ready":{"type":"boolean"},"done":{"type":"array","items":{"type":"string"}},"awaitingHuman":{"type":"array","items":{"type":"string"}},"skipped":{"type":"array","items":{"type":"string"}},"ticketIds":{"type":"array","items":{"type":"string"}}}}},"needsApproval":{"type":"array","items":{"type":"object","properties":{"starter":{"type":"string"},"item":{"type":"string"},"heldBy":{"type":"string"},"whyFlagged":{"type":"string"}}},"description":"Access items a human must approve by name."},"blocked":{"type":"array","items":{"type":"string"}},"learned":{"type":"array","items":{"type":"string"},"description":"Per-client facts worth carrying into the next run."},"summary":{"type":"string"}},"required":["starters","summary"]}
   dryRunDefault: true

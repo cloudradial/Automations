@@ -120,12 +120,28 @@ catch {
 $out.devices = $dev
 
 # ---- Planner cards already on the board (open ones, not counting QBR cards) ----
-$plan = [ordered]@{ available = $true; reason = ''; open = 0; total = 0 }
+# The open ones are listed on the QBR card as the recommendations to talk through: hardware refresh and
+# warranty renewal cards first, then by priority.
+$plan = [ordered]@{ available = $true; reason = ''; open = 0; total = 0; openCards = @() }
+function Get-QbrMoney { param($Price, $Units) $p = 0.0; $u = 1.0; if (-not [double]::TryParse([string]$Price, [System.Globalization.NumberStyles]::Float, $ci, [ref]$p) -or $p -le 0) { return 0.0 }; if ([double]::TryParse([string]$Units, [System.Globalization.NumberStyles]::Float, $ci, [ref]$u) -and $u -gt 0) { return $p * $u }; return $p }
 try {
     $cards = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $companyId" | Where-Object { $null -ne $_ -and [int](Get-QbrProp $_ 'companyId') -eq $companyId -and -not [bool](Get-QbrProp $_ 'isDeleted') })
     $cards = @($cards | Where-Object { -not ([string](Get-QbrProp $_ 'body')).Contains('qbr-data-pack') })
     $plan.total = $cards.Count
-    $plan.open = @($cards | Where-Object { [string](Get-QbrProp $_ 'status') -notmatch '^(?i)(40|50|60|completed|client_declined|archive)$' }).Count
+    $openCards = @($cards | Where-Object { [string](Get-QbrProp $_ 'status') -notmatch '^(?i)(40|50|60|completed|client_declined|archive)$' })
+    $plan.open = $openCards.Count
+    $plan.openCards = @($openCards | ForEach-Object {
+            $subj = ([string](Get-QbrProp $_ 'subject')).Trim()
+            $pr = 0; [void][int]::TryParse([string](Get-QbrProp $_ 'priority'), [ref]$pr)
+            [ordered]@{
+                subject  = $subj
+                summary  = ([string](Get-QbrProp $_ 'summary')).Trim()
+                priority = $(if ($pr -ge 1) { 'High' } elseif ($pr -le -1) { 'Low' } else { 'Medium' })
+                oneOff   = [Math]::Round((Get-QbrMoney (Get-QbrProp $_ 'projectUnitPrice') (Get-QbrProp $_ 'projectUnits')), 2)
+                monthly  = [Math]::Round((Get-QbrMoney (Get-QbrProp $_ 'monthlyUnitPrice') (Get-QbrProp $_ 'monthlyUnits')), 2)
+                rank     = $(if ($subj -like 'Endpoint Hardware Refresh - *' -or $subj -eq 'Endpoint Warranty Renewal') { 0 } else { 1 }) * 10 - $pr
+            }
+        } | Sort-Object @{ Expression = { $_.rank } }, @{ Expression = { $_.subject } })
 }
 catch { $plan.available = $false; $plan.reason = "Couldn't read the Planner cards: $($_.Exception.Message)"; $null = $warnings.Add($plan.reason) }
 $out.planner = $plan

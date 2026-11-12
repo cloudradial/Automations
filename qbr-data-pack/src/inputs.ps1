@@ -6,6 +6,7 @@
 #   preview         true works everything out but leaves the Planner card alone (default false)
 #   psa             optional; overrides the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro, zendesk)
 #   psa_company_id  optional; the PSA's own id for this client, when CloudRadial's PSA link is missing or wrong
+#   training_min_tickets  how many tickets about one topic (Outlook, Excel, passwords...) make it a training opportunity (default 3, 1 to 100)
 # Read-only: the only write in this workflow is one internal CloudRadial Planner card.
 
 function Get-QbrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
@@ -58,6 +59,14 @@ if (-not (Test-QbrBlank $pc)) {
     if ($psaCompanyId -notmatch '^\d+$') { Stop-QbrInput "The psa_company_id input must be the PSA's numeric company id, such as 250. It was '$pc'." }
 }
 
+# training_min_tickets
+$trainingMin = 3
+$tm = Get-QbrProp $raw 'training_min_tickets'
+if (-not (Test-QbrBlank $tm)) {
+    $n = 0
+    if (-not [int]::TryParse(([string]$tm).Trim(), [ref]$n) -or $n -lt 1 -or $n -gt 100) { Stop-QbrInput "The training_min_tickets input must be a whole number from 1 to 100, such as 3. It was '$tm'." }
+    $trainingMin = $n
+}
 $now = (Get-Date).ToUniversalTime()
 $q = [int][Math]::Ceiling($now.Month / 3)
 Set-NodeOutput ([ordered]@{
@@ -67,6 +76,7 @@ Set-NodeOutput ([ordered]@{
         preview        = $preview
         psa            = $psa
         psa_company_id = $psaCompanyId
+        training_min_tickets = $trainingMin
         runAt          = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
         quarterLabel   = "Q$q $($now.Year)"
         quarterKey     = "$($now.Year)-Q$q"

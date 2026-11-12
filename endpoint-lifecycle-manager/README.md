@@ -108,7 +108,7 @@ Use it when the CloudRadial portal is the source of truth. To bring ScalePad Lif
 | File | Type | Role |
 |---|---|---|
 | [`endpoint-lifecycle-manager.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) | `automationsWorkflow` | **Use this one.** One PowerShell step, no AI: reads endpoints, sorts them, and writes the cards through the CloudRadial API. |
-| [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | Optional. The same rules as an AI agent (slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.3), for asking questions in the AI Playground. |
+| [`endpoint-lifecycle-manager.agent.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) | `automationsAgent` | Optional. The same rules as an AI agent (slug `endpoint-warranty-refresh-advisor-planner-cards`, v0.4.4), for asking questions in the AI Playground. |
 | [`endpoint-lifecycle-manager-ai.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) | `automationsWorkflow` | Optional. Runs the agent with a goal. It handles up to 3 companies per run and is subject to the runner's 25-turn limit, so prefer the PowerShell workflow for scheduled runs. |
 | [`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) | Knowledge | The refresh standards in plain language: age, warranty, OS support, RAM, category rules, priority tiers and roadmap quarters, with one table of adjustable values. See [Adjusting the standards](#adjusting-the-standards). |
 | [`knowledge/endpoint-refresh-pricing.md`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) | Knowledge | Your pricing in plain language: replacement models, upgrade and repair parts, labour hours and rate, with the matching Routine input to paste. See [Pricing the cards](#pricing-the-cards). |
@@ -132,8 +132,8 @@ All optional. Send them as the run's Trigger input or the Routine input.
 | `plannerCategory` / `plannerProductCategoryId` | `Efficiency` / `7` | The Planner category for the cards. |
 | `closeEmptyCards` | `true` | Close a card when its category has no computers left. |
 | `scheduleOnRoadmap` | `false` | Put cards on the Planner roadmap by urgency (Critical and High, Human review and Needs data in the next quarter; Medium the one after; Low the third). |
-
 | `pricing` | none | Your approved models, parts, labour hours and rate, so cards carry an estimated cost. See [Pricing the cards](#pricing-the-cards). |
+| `standards` | the defaults | Your own refresh standards (ages, warranty window, RAM, macOS versions) by setting name. See [Adjusting the standards](#adjusting-the-standards). |
 
 Example: `{"companyIds": "1,4", "mode": "plan"}`
 
@@ -182,9 +182,9 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   
   Add a `"Windows"` or `"Mac"` entry as a fallback for computers whose type isn't recorded. Computers with no matching model are listed as not priced and left out of the total.
 - **Upgrade in place, Retain and Human review cards are priced from `parts` and `labourHours`.** Each computer gets the parts its data shows it needs:
-  - **`RAM upgrade`:** memory is recorded and below 7.5 GB. An 8 GB computer reports about 7.8 GB because some memory is reserved, so it doesn't count. Unknown memory doesn't count either.
+  - **`RAM upgrade`:** memory is recorded and below `recommendedRamGb` (8 GB by default). Computers report a little less than they have because some memory is reserved (an 8 GB computer reports about 7.8 GB), so a computer only counts as below a RAM standard when it reports less than 94% of it: under 7.52 GB for 8 GB. Unknown memory doesn't count.
   - **`SSD upgrade`:** the endpoint says it has no SSD. Many agents don't collect this and report "no SSD" for everything, so it only counts in a company where at least one endpoint reports an SSD. Servers usually report "no SSD" even when they have one (RAID or virtual disks), so servers never get an SSD line.
-  - **`Warranty extension`:** the warranty has expired or ends within 90 days.
+  - **`Warranty extension`:** the warranty has expired or ends within `warrantyExpiringDays` (90 by default).
   
   These are the only part names the workflow can match. Others are ignored with a warning.
 - **Labour hours** are multiplied by `hourlyRate`. You can set two kinds:
@@ -207,7 +207,7 @@ Every MSP has its own approved models and rates, so cards carry no prices until 
   - each card's `estimatedPrice` and `priceBreakdown` (which model, parts and labour each card was priced at, and what wasn't priced), so a `plan` run shows the pricing before anything is written
   - any `warnings`, for example a model or part with no valid price, an unrecognised part name, or labour hours with no `hourlyRate`
 
-Keep your prices in [`knowledge/endpoint-refresh-pricing.md`](knowledge/endpoint-refresh-pricing.md): edit its tables, then copy its **Run input** block into the Routine input. The workflow reads the Routine input today. Reading the pricing straight from Knowledge, alongside the [refresh standards](knowledge/endpoint-refresh-standards.md), will come once workflows and agents can use Knowledge for it.
+Keep your prices in [`knowledge/endpoint-refresh-pricing.md`](knowledge/endpoint-refresh-pricing.md): edit its tables, then copy its **Run input** block into the Routine input, next to your `standards` if you set any.
 
 ## What it does
 
@@ -226,10 +226,21 @@ The run output lists every card with its action (`created`, `updated`, `reopened
 
 [`knowledge/endpoint-refresh-standards.md`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) holds every threshold and rule the workflow uses, so you can review or change your refresh standards in one place. Its **Standard values** table lists each setting, such as `replaceAgeYears` = 5 and `minimumRamGb` = 4.
 
-1. Edit the values to your own standards. Keep the headings and setting names: the agent searches by them.
-2. Upload the file to a Knowledge folder, for example **Lifecycle Standards**.
+1. Edit the values in the **Standard values** table to your own standards. Keep the headings and setting names.
+2. Copy the changed values into the file's **Run input** block, then paste it into the workflow's Routine input next to `pricing`. Only the settings you change need to be there; the rest keep their defaults.
+3. Optionally, upload the file to a Knowledge folder, for example **Lifecycle Standards**, so your team can read it there.
 
-**What reads it today.** The file documents the defaults built into the PowerShell workflow, but the workflow doesn't read Knowledge yet. It will use the **Standard values** table once workflows can read Knowledge. Until then, to change how the workflow grades devices, change `src/elm.ps1` (see below) and keep this file in step. The agent version is still self-contained and doesn't search Knowledge either.
+```json
+{ "standards": { "replaceAgeYears": 6, "planAgeYears": 4, "mediumAgeYears": 5, "recommendedRamGb": 16 } }
+```
+
+- **Settings:** `replaceAgeYears`, `planAgeYears`, `mediumAgeYears`, `criticalAgeYears`, `warrantyExpiringDays`, `minimumRamGb`, `recommendedRamGb`, `vmMinimumRamGb`, `vmRecommendedRamGb`, `macosMinimumSupported`, `macosHardEndOfLife`. Each takes a positive number. The supported Windows versions aren't a setting.
+- **Checks:** an unknown name or a value that isn't a positive number is ignored with a warning. If the values break the order the rules need (`planAgeYears` < `mediumAgeYears` < `replaceAgeYears` < `criticalAgeYears`, `minimumRamGb` ≤ `recommendedRamGb`, `vmMinimumRamGb` ≤ `vmRecommendedRamGb`, `macosHardEndOfLife` < `macosMinimumSupported`), the whole input is ignored with a warning and the defaults are used. Run with `"mode": "plan"` first to check.
+- **The run output** lists `standardsApplied`, the settings that differ from the defaults.
+- **Weekly Fleet Audit** takes the same `standards` input, so give it the same values to keep the email and the cards in step.
+- **RAM allowance:** computers report a little less memory than they have, so a computer is below a RAM setting only when it reports less than 94% of it. A nominal 8 GB computer (about 7.8 GB reported) meets an 8 GB standard.
+
+**Why it isn't read from Knowledge.** Workflows can only reach Knowledge through grounding on an AI step, and grounding passes short excerpts (about 280 characters each), not the whole table. A test on 2026-11-04 read none of the table's rows, so the workflow takes the values from the run input instead. The agent version is self-contained and doesn't search Knowledge either.
 
 ## Changing the workflow
 

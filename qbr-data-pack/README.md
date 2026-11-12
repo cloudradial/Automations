@@ -8,9 +8,10 @@ Before a quarterly business review, one run gathers a client's key numbers and p
 
 - **Devices:** how many workstations, servers and virtual machines; how old they are; warranties expired or ending soon; operating systems that no longer get security updates; devices that haven't checked in for 30 days; and how many workstations are due for replacement.
 - **Tickets:** tickets opened and closed this period compared with the period before, tickets open now, and the top 5 categories.
+- **Training opportunities:** topics that keep coming up in tickets, such as Outlook, Excel or passwords, with example tickets, so you can suggest Academy courses that help users fix them themselves.
 - **Microsoft 365 licences:** purchased, assigned and unassigned for each paid licence (optional).
 - **Expiring items:** domains expiring within 60 days and certificates within 30 days.
-- **Other open cards** on the client's board.
+- **Open recommendations:** the other open cards on the client's board, with their priority, summary and estimate, hardware refresh and warranty renewal cards first. They're the talking points for the review.
 
 If something can't be read, the card says so in a sentence and the rest is still posted. Your clients don't see the card unless you choose to make it visible.
 
@@ -38,7 +39,7 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk for ticket tr
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.1.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy** to the runner that holds your connections.
 4. If a client's Microsoft 365 connection is saved under that company in AutomationAI, open the workflow, set **Company** to that client on the **Read Microsoft 365 licences** step, then publish and deploy again. Do this after every import.
@@ -57,17 +58,17 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/qbr
 
 ## Technical details
 
-**Marketplace ID:** AAI-00065 | **Type:** Workflow (PowerShell, no AI, read-only except one internal Planner card) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00065 | **Type:** Workflow (PowerShell, no AI, read-only except one internal Planner card) | **Version:** 1.1.0
 
 Before a quarterly business review, one run gathers a client's device age and warranty picture, ticket trends from your PSA, Microsoft 365 licence usage, and expiring domains and certificates, and puts them on one internal CloudRadial Planner card for the vCIO. Nothing else is changed anywhere.
 
 ## Files
 
-Each version is published as a release, with `qbr-data-pack.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0).
+Each version is published as a release, with `qbr-data-pack.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `qbr-data-pack.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0) |
+| Download `qbr-data-pack.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.1.0) |
 | View the current source | [`qbr-data-pack.yml`](https://github.com/cloudradial/Automations/blob/main/qbr-data-pack/qbr-data-pack.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/qbr-data-pack/src) |
 | All files in this automation | [qbr-data-pack](https://github.com/cloudradial/Automations/tree/main/qbr-data-pack) |
@@ -79,18 +80,19 @@ A per-company AutomationAI workflow with five PowerShell steps and no AI, so it 
 
 `Start → Read inputs → Read CloudRadial data → Read PSA ticket trends → Read Microsoft 365 licences → Post QBR-prep card → End`
 
-1. **Read inputs** reads `company_id`, `quarter_days`, `preview`, `psa` and `psa_company_id`. A Routine sends no input, so every field has a default.
+1. **Read inputs** reads `company_id`, `quarter_days`, `preview`, `psa`, `psa_company_id` and `training_min_tickets`. A Routine sends no input, so every field has a default.
 2. **Read CloudRadial data** finds the company, then reads only that company's records:
    - **Devices:** the count of workstations, servers and virtual machines; physical devices by age (under 3, 3 to 5, 5 to 7, 7 or more years, unknown); warranty expired, ending within 90 days, active or unknown; operating systems that no longer get security updates; devices that haven't checked in for 30 days; and how many workstations are due for replacement. Age, warranty, operating system support and "due for replacement" use the same rules as [Endpoint LifeCycle Manager](../endpoint-lifecycle-manager/) (age from the manufacture date, else the BIOS or processor date, shown as estimated).
-   - **Planner:** how many other open cards are on the company's board.
+   - **Planner:** the other open cards on the company's board (Completed, Declined and Archived are left out, and so is the QBR card itself), each with its subject, summary, priority and estimate. The estimate is the card's one-off price times units, and its monthly price times units. Endpoint LifeCycle Manager (`Endpoint Hardware Refresh - ...`) and warranty renewal (`Endpoint Warranty Renewal`) cards come first, then the rest by priority.
    - **Domains** that have expired or expire within 60 days, and **certificates** that have expired or expire within 30 days.
 3. **Read PSA ticket trends** counts this client's tickets opened and closed in the last `quarter_days` days and in the same span before it, the tickets open now, and the top 5 categories of the tickets opened this period. It works with ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, using GET calls only.
+   - **Training opportunities.** Each ticket opened this period is checked, by its category and its subject, against eight topics: Outlook and email, Excel, Word, PowerPoint, Teams, OneDrive and SharePoint, passwords and sign-in, and phishing and suspicious email. A ticket can count towards more than one. A topic with at least `training_min_tickets` tickets (3 by default) is listed with its count and up to 3 example subjects. The subject comes from `summary` (ConnectWise, HaloPSA), `title` (Autotask), `Title` (Kaseya BMS) or `subject` (Zendesk, Syncro), from the same tickets the top categories are counted from.
    - The client is found in the PSA by `psa_company_id`, then by the PSA link on the CloudRadial company, then by an exact name match. If none matches, or no PSA is set up, this section says "not available" and the run carries on.
    - "Category" is the ticket type (ConnectWise, Zendesk), issue type (Autotask, Kaseya BMS, Syncro) or category (HaloPSA).
 4. **Read Microsoft 365 licences** (optional) reads the tenant's subscriptions and shows licences purchased, assigned and unassigned per paid SKU. Free and trial SKUs are left out. It is skipped with a note on the card when the runner has no Microsoft 365 secrets, when the app lacks `Organization.Read.All`, or when the tenant can't be confirmed as this client's (see below).
 5. **Post QBR-prep card** writes one CloudRadial Planner card on the company's board with the subject **QBR prep: Q4 2026** (the quarter the run falls in) and the stable key `qbr-data-pack:2026-Q4`.
    - A second run in the same quarter updates that card instead of adding another, even if someone renamed it. Next quarter's run makes a new card and leaves this one alone.
-   - The card opens with plain sentences (devices, tickets, licences, expiring items, other open cards), then compact tables. Anything that couldn't be read is said in a sentence instead of a table.
+   - The card opens with plain sentences (devices, tickets, training opportunities, licences, expiring items, other open cards), then compact tables, including **Training opportunities** and **Open recommendations on this Planner board**. The summary line names up to 3 training topics. Anything that couldn't be read is said in a sentence instead of a table.
    - It is created internal only (not client visible), open, medium priority. If you make it visible, later updates leave that setting alone.
 
 ### Which company the card goes to
@@ -112,7 +114,7 @@ With neither, the run stops with a plain message and writes nothing.
 
 ## Download & import
 
-**Download the workflow:** [`qbr-data-pack.yml`](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.0.0)
+**Download the workflow:** [`qbr-data-pack.yml`](https://github.com/cloudradial/Automations/releases/tag/qbr-data-pack/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **Deploy** it to the runner that holds them. To prepare every QBR automatically, attach a Routine (see [Import & test](#import--test)). A Routine isn't part of the export, so it has to be added after every fresh import.
 
@@ -154,6 +156,7 @@ Only needed for the optional licence section. Add this application permission to
 | `preview` | `false` | `true` gathers everything and returns the card text in `cardBody`, but writes nothing. |
 | `psa` | none | Overrides the `PSA-Type` secret for this run. |
 | `psa_company_id` | none | The PSA's own numeric id for this client, when CloudRadial's PSA link is missing or wrong. |
+| `training_min_tickets` | `3` | How many tickets about one topic make it a training opportunity (1 to 100). |
 
 **Why there's no `confirm` input:** this workflow never changes anything in CloudRadial, the PSA or Microsoft 365. Its only write is one internal Planner card, which is updated in place, and a Routine sends no input, so a `confirm` that defaults to `false` would stop a scheduled run from ever posting. Use `preview: true` to see the card first.
 
@@ -180,9 +183,9 @@ Each has an `Unverified` comment in `src/psa-tickets.ps1`. Check them on the fir
 
 - **CloudRadial:** that `psaKey` on the company is the PSA's own company id for every PSA (it is used before a name match).
 - **ConnectWise:** date conditions in square brackets on `dateEntered` and `closedDate`.
-- **Autotask:** the `queryCount` field name, `completedDate` as the closed date, and `IncludeFields` with `pageDetails.nextPageUrl` paging.
-- **HaloPSA:** the `datesearch` values `dateoccurred` and `dateclosed`, `closed_only`, and `category_1` on the ticket list.
-- **Kaseya BMS:** `Filter.AccountIds`, `Filter.OpenDate*`, `Filter.CompletedDate*`, `Filter.ExcludeCompleted` and `TotalRecords`, taken from the public Swagger.
+- **Autotask:** the `queryCount` field name, `completedDate` as the closed date, and `IncludeFields` (now with `title`) with `pageDetails.nextPageUrl` paging.
+- **HaloPSA:** the `datesearch` values `dateoccurred` and `dateclosed`, `closed_only`, and `category_1` and `summary` on the ticket list.
+- **Kaseya BMS:** `Title` on the ticket list (the subject used for training topics), `Filter.AccountIds`, `Filter.OpenDate*`, `Filter.CompletedDate*`, `Filter.ExcludeCompleted` and `TotalRecords`, taken from the public Swagger.
 - **Syncro:** `customer_id`, `created_after` and `resolved_after` (from the Swagger); counts are worked out from the listed tickets, up to 1,000 per count.
 - **Zendesk:** `organization:<id>` with `created>` and `solved>` times in a search count.
 

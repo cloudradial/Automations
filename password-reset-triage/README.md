@@ -129,6 +129,14 @@ must never auto-reset an admin.
 - `pending_confirmation` → `public_note` is *"someone will reach out shortly to confirm"*; no password changed.
 - `incomplete` → generic `public_note`, reason in `internal_note`.
 
+**Run status.** When a safety gate holds the request (no requester, no target email, user not found, guest,
+disabled, privileged role), the run **succeeds** with `status: incomplete`, so the run list only shows
+real failures. Setup and API errors (an invalid payload, missing `M365-*` secrets, a failed token request or
+Graph call, a failed reset) still **fail** the run, with the same `incomplete` notes in the failed step's output.
+
+**Test locally:** `pwsh -NoProfile -File password-reset-triage/src/test.ps1` (needs js-yaml on `NODE_PATH`)
+runs every step in strict mode with Graph mocked.
+
 **Posting the note to the ticket:** the workflow returns `public_note`/`internal_note`; ServiceAI (which owns
 the PSA connection) posts them. If you want the workflow to write the ticket note itself (matching the
 self-service workflow's direct-PSA-API note), tell me the PSA + secret names and I'll add that step.

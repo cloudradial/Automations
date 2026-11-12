@@ -30,8 +30,10 @@ definition:
         # answer written into its Halo custom field. CloudRadial's own ticket submission can't fill Halo custom fields,
         # so Halo rejects a form whose ticket type has mandatory ones ("First Name is mandatory", verified 2026-10-19);
         # this creates the ticket through Halo's API instead. The form runs with Send to PSA off.
-        # Input: the form submission as CloudRadial sends it ({User, Company, Ticket: {TicketSubject, TicketDescription,
-        # Questions: [{Id, Label, Value}]}}), a flat body, or either wrapped in {trigger: ...}. Each answer is found by its
+        # Input: the form's AutomationAI Action payload (each answer as a top-level key by Field ID, next to ticket
+        # {id, subject, description}, company {psaId} and user {email, psaId}; seen 2026-10-30), CloudRadial's webhook
+        # shape ({User, Company, Ticket: {TicketSubject, TicketDescription, Questions: [{Id, Label, Value}]}}), a flat
+        # body, or any of them wrapped in {trigger: ...}. Each answer is found by its
         # question's Field ID, which is the Halo custom field name (CFfirstName). The template comes from the answer
         # "haloTemplateId", a templateId input, or the form's subject matching a template name.
         # A form submission creates the ticket; a manual run previews it unless confirm is true.
@@ -1592,7 +1594,8 @@ definition:
         $fieldsObj = Get-Prop $raw 'fields'
         if ($null -ne $fieldsObj -and $fieldsObj -isnot [string]) { if ($fieldsObj -is [System.Collections.IDictionary]) { foreach ($k in @($fieldsObj.Keys)) { & $put ([string]$k) $fieldsObj[$k] } } else { foreach ($p in $fieldsObj.PSObject.Properties) { & $put $p.Name $p.Value } } }
         $crTicket = Get-Prop $raw 'Ticket'; $crUser = Get-Prop $raw 'User'; $crCompany = Get-Prop $raw 'Company'
-        $fromForm = $false
+        # The Action payload has no Questions list, but its company {psaId} or ticket {subject} marks a real submission.
+        $fromForm = ($null -ne (Get-Prop $crCompany 'psaId')) -or ($null -ne (Get-Prop $crTicket 'subject'))
         foreach ($q in @(Get-Prop $crTicket 'Questions')) { $qid = [string](Get-Prop $q 'Id'); if ($qid) { $fromForm = $true; & $put $qid (Get-Prop $q 'Value') } }
         # A value is missing when blank, a CloudRadial token nobody filled ("@CFfirstName"), or a placeholder.
         function Get-Answer {
@@ -1609,11 +1612,13 @@ definition:
             return ''
         }
         $templateIdText = Get-Answer @('haloTemplateId', 'templateId', 'template_id')
-        $companyPsaId = Get-Answer @('companyPsaId', 'company_psa_id', 'clientId', 'client_id'); if (-not $companyPsaId) { $companyPsaId = [string](Get-Prop $crCompany 'CompanyPsaId') }
-        $userPsaId = Get-Answer @('userPsaId', 'user_psa_id', 'userId', 'user_id'); if (-not $userPsaId) { $userPsaId = [string](Get-Prop $crUser 'UserPsaId') }
-        $userEmail = Get-Answer @('userEmail', 'requester_email'); if (-not $userEmail) { $userEmail = [string](Get-Prop $crUser 'UserEmail') }
-        $subject = Get-Answer @('subject', 'ticketSubject'); if (-not $subject) { $subject = [string](Get-Prop $crTicket 'TicketSubject') }
-        $description = Get-Answer @('description', 'ticketDescription'); if (-not $description) { $description = [string](Get-Prop $crTicket 'TicketDescription') }
+        $companyPsaId = Get-Answer @('companyPsaId', 'company_psa_id', 'clientId', 'client_id'); if (-not $companyPsaId) { $companyPsaId = [string](Get-First $crCompany @('CompanyPsaId', 'psaId')) }
+        $userPsaId = Get-Answer @('userPsaId', 'user_psa_id', 'userId', 'user_id'); if (-not $userPsaId) { $userPsaId = [string](Get-First $crUser @('UserPsaId', 'psaId')) }
+        $userEmail = Get-Answer @('userEmail', 'requester_email'); if (-not $userEmail) { $userEmail = [string](Get-First $crUser @('UserEmail', 'email')) }
+        $subject = Get-Answer @('subject', 'ticketSubject'); if (-not $subject) { $subject = [string](Get-First $crTicket @('TicketSubject', 'subject')) }
+        # The Action's ticket.description is the form's own description text, so the requester's "Anything else" box
+        # (Field ID details, added by the migration) comes first.
+        $description = Get-Answer @('description', 'ticketDescription', 'details'); if (-not $description) { $description = [string](Get-First $crTicket @('TicketDescription', 'description')) }
         $confirmText = (Get-Answer @('confirm', 'approvedToWrite')).ToLowerInvariant()
         $confirm = if ($confirmText) { @('true', 'yes', '1', 'y') -contains $confirmText } else { $fromForm }
         if ($templateIdText -and $templateIdText -notmatch '^\d+$') { Stop-Run 'incomplete' "haloTemplateId must be a Halo template number; '$templateIdText' isn't." }

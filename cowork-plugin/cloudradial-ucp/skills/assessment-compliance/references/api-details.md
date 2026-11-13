@@ -1,8 +1,9 @@
 # Assessment Export: API Details
 
 Concrete query patterns for the `cloudradial-ucp` MCP server. All OData params are passed **without**
-the leading `$` (the server adds it). Default page `top=100`, max `200`. The API returns no next-page
-link: keep paging until a page comes back shorter than `top`.
+the leading `$` (the server adds it). Default page `top=100`, max `200`. Pass `all_pages: true` to read
+every row (pages of 200, stops at `max_records`, default 5000, and says if it stopped early); otherwise keep
+paging until a page comes back shorter than `top`.
 
 Assessment rows use `title` (not `name`), `dateConducted` (not `dateCompleted`) and `totalScore`,
 `maxScore`, `compliantScore`, `partialScore` (nullable numbers; blank until the assessment is scored). There is no `score`
@@ -64,10 +65,17 @@ search_companies
 
 ## 5. Question-level detail
 
-The API has no question-level data. Its metadata has no assessment question, answer or run entity
-(`/v2/odata/assessmentRun` and `/v2/odata/assessmentQuestion` don't exist), and `assessment` rows
-are summary-level only. For per-question responses, use the portal's per-run Excel export or Word
-report, and say so.
+Since the November 2026 API update, question-level data is available (not yet tested at scale):
+
+- `assessment_lifecycle` with `action: "get"` and `assessment_id`: one assessment or run with its
+  scores and its non-deleted questions (by category, then order), each with its current answer
+  (`value`, `textValue`), notes and flag.
+- `list_resources` with `resource_type: "assessment_question"`: question rows across assessments
+  (`assessmentQuestionId`, `assessmentId`, `companyId`, `assessmentType`, `assessmentTitle`,
+  `updateKey`, ...). Filter by `assessmentId` or `companyId` and use `all_pages: true`.
+
+Read one row first and use the field names it returns. If a result looks incomplete, compare with the
+portal's per-run Excel export and say so.
 
 ## 6. Scoring reference (for gap counting)
 

@@ -15452,7 +15452,9 @@ var StdioServerTransport = class {
 };
 
 // src/tools.ts
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { basename } from "node:path";
+import { createHash as createHash2 } from "node:crypto";
 
 // src/secure-storage.ts
 import { createRequire } from "node:module";
@@ -15667,14 +15669,31 @@ var RESOURCE_MAP = {
   // No OData listing
   company_group_company: { odataPath: "companygroupcompany", itemPath: "companygroupcompany", idParam: "" },
   // Composite key
-  course_lesson_history: { odataPath: "courselessonhistory", itemPath: "courselessonhistory", idParam: "" }
+  course_lesson_history: { odataPath: "courselessonhistory", itemPath: "courselessonhistory", idParam: "" },
   // Composite key
+  // Added in 2.7.0 (v2 API, 2026-11)
+  archive_folder: { odataPath: "archivefolder", itemPath: "archivefolder", idParam: "id" },
+  // OData key companyReportFolderId
+  banner: { odataPath: "banner", itemPath: "banner", idParam: "id" },
+  // Partner-level; targeted by companyGroups
+  dashboard: { odataPath: "dashboard", itemPath: "dashboard", idParam: "id" },
+  // Widgets via raw_api_call
+  portal_message: { odataPath: "message", itemPath: "message", idParam: "id" },
+  signal_message: { odataPath: "signalmessage", itemPath: "signalmessage", idParam: "id" },
+  // Writes only through the signal_message tool
+  article_feedback: { odataPath: "articlefeedback", itemPath: "", idParam: "" },
+  // List/count only
+  assessment_question: { odataPath: "assessmentquestion", itemPath: "", idParam: "" }
+  // List/count only
 };
 async function callApiMultipart(path, dataJson, file) {
+  return callApiForm(path, { data: dataJson }, [{ field: "file", ...file }]);
+}
+async function callApiForm(path, fields, files) {
   const { authHeader, baseUrl } = getAuthContext();
   const form = new FormData();
-  form.append("data", dataJson);
-  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
+  for (const [k, v] of Object.entries(fields)) if (v !== void 0) form.append(k, v);
+  for (const f of files) form.append(f.field, new Blob([new Uint8Array(f.bytes)], { type: f.contentType }), f.name);
   const resp = await fetch(new URL(path, baseUrl).toString(), {
     method: "POST",
     headers: { Authorization: authHeader, Accept: "application/json" },
@@ -15686,7 +15705,10 @@ async function callApiMultipart(path, dataJson, file) {
     data = text ? JSON.parse(text) : null;
   } catch {
   }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}: ${text.slice(0, 500)}`);
+  if (!resp.ok) throw new CloudRadialApiError("POST", path, resp.status, data);
+  if (data && typeof data === "object" && !Array.isArray(data) && "data" in data && "success" in data) {
+    data = data.data;
+  }
   return { status: resp.status, data };
 }
 async function callApi(method, path, query, body) {
@@ -15703,7 +15725,7 @@ async function callApi(method, path, query, body) {
   };
   const init = { method, headers };
   if (body !== void 0 && ["POST", "PUT", "PATCH"].includes(method)) {
-    headers["Content-Type"] = "application/json";
+    headers["Content-Type"] = method === "PATCH" && Array.isArray(body) ? "application/json-patch+json" : "application/json";
     init.body = JSON.stringify(body);
   }
   const resp = await fetch(url.toString(), init);
@@ -16017,7 +16039,10 @@ var COMPANY_SCOPED = /* @__PURE__ */ new Set([
   "domain",
   "user",
   "application_user",
-  "token"
+  "token",
+  "dashboard",
+  "portal_message",
+  "archive_folder"
 ]);
 var ODATA_KEY = {
   catalog_question: { set: "catalogquestion", key: "companyCatalogQuestionId" },
@@ -16027,7 +16052,10 @@ var ODATA_KEY = {
   application_user: { set: "user", key: "userId", quoted: true },
   // No single-item GET in the API: get_resource reads these through OData.
   assessment: { set: "assessment", key: "assessmentId" },
-  course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" }
+  course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" },
+  dashboard: { set: "dashboard", key: "dashboardId" },
+  portal_message: { set: "message", key: "messageId" },
+  archive_folder: { set: "archivefolder", key: "companyReportFolderId" }
 };
 var USER_SELECT = "userId,email,firstName,lastName,userName,phoneNumber,companyId,displayName,department,title,country,streetAddress,city,state,postalCode,mobilePhone,isDeleted,dateCreated,dateModified,psaKey,psaSiteKey,psaChildAccountKey";
 async function odataByKey(resourceType, id, select) {
@@ -16072,19 +16100,175 @@ var NOT_IN_API = {
     delete: "The API can't delete a flexible_asset_field."
   },
   course_enrollment: {
-    put: "course_enrollment has no PUT; use PATCH (the default).",
-    delete: "The API can't delete a course enrollment."
-  }
+    put: "course_enrollment has no PUT; use PATCH (the default)."
+  },
+  archive_folder: { put: "archive_folder has no PUT; use PATCH (the default)." }
+};
+var WRITE_TOOL = {
+  signal_message: "Signal messages are sent, edited, resolved and retracted with the signal_message tool, which previews the audience before anything is sent.",
+  article_feedback: "article_feedback is read-only (list_resources and count_resources).",
+  assessment_question: "assessment_question is read-only here. Change questions with assessment_import."
 };
 var ASSESSMENT_HINT = "Assessments have no single-item write API. Create or refresh one with assessment_import; read one with get_resource or list_resources.";
 var COMPANY_ID_PARAM = {
   type: "string",
-  description: "Company the item belongs to, sent as ?companyId=. Used by catalog_question, course_lesson, course_lesson_history, domain, user, application_user and token; looked up automatically if omitted (except course_lesson_history and token). For company_group_company it is the path key instead."
+  description: "Company the item belongs to, sent as ?companyId=. Used by catalog_question, course_lesson, course_lesson_history, domain, user, application_user, token, dashboard, portal_message and archive_folder; looked up automatically if omitted (except course_lesson_history and token). For company_group_company it is the path key instead."
 };
 var CUSTOM_PROPERTY_PARAMS = {
   serial_number: { type: "string", description: "endpoint_custom_property: the endpoint's serial number" },
   property_name: { type: "string", description: "endpoint_custom_property: the property name" }
 };
+var CONTENT_TYPES = {
+  pdf: "application/pdf",
+  csv: "text/csv",
+  txt: "text/plain",
+  htm: "text/html",
+  html: "text/html",
+  json: "application/json",
+  xml: "application/xml",
+  zip: "application/zip",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  doc: "application/msword",
+  xls: "application/vnd.ms-excel",
+  ppt: "application/vnd.ms-powerpoint",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  eml: "message/rfc822",
+  msg: "application/vnd.ms-outlook"
+};
+function contentTypeFor(path) {
+  const ext = (path.split(".").pop() ?? "").toLowerCase();
+  return CONTENT_TYPES[ext] ?? "application/octet-stream";
+}
+async function resolveArchiveFolder(companyId, args) {
+  const given = str(args, "archive_id");
+  if (given) {
+    const f = (await callApi("GET", `/v2/archivefolder/${encodeURIComponent(given)}`, { companyId: String(companyId) })).data;
+    return { id: Number(given), name: String(f?.name ?? ""), created: false };
+  }
+  const name = str(args, "folder_name");
+  if (!name) throw new Error("Give archive_id or folder_name.");
+  const list = await callApi("GET", "/v2/odata/archivefolder", {
+    $filter: `companyId eq ${companyId}`,
+    $select: "companyReportFolderId,companyId,name",
+    $top: "200"
+  });
+  const rows = list.data?.value ?? [];
+  const hit = rows.find((f) => String(f.name ?? "").trim().toLowerCase() === name.trim().toLowerCase());
+  if (hit) return { id: Number(hit.companyReportFolderId), name: String(hit.name), created: false };
+  if (args.create_folder !== true) {
+    const names = rows.map((f) => f.name).join(", ") || "none";
+    throw new Error(`Company ${companyId} has no archive folder named "${name}". Its folders: ${names}. Set create_folder=true to create it.`);
+  }
+  const body = { companyId, name: name.trim() };
+  if (str(args, "category")) body.category = str(args, "category");
+  if (str(args, "alert_keywords")) body.alertKeywords = str(args, "alert_keywords");
+  if (str(args, "required_keywords")) body.requiredKeywords = str(args, "required_keywords");
+  if (args.warn_on_past_days !== void 0) body.warnOnPastDays = Number(args.warn_on_past_days);
+  if (args.retain_for_days !== void 0) body.retainForDays = Number(args.retain_for_days);
+  const created = (await callApi("POST", "/v2/archivefolder", void 0, body)).data;
+  const newId = created?.archiveFolderId ?? created?.companyReportFolderId ?? created?.id;
+  if (newId === void 0 || newId === null) throw new Error(`Created folder "${name}", but the response had no folder id: ${JSON.stringify(created).slice(0, 200)}`);
+  return { id: Number(newId), name: name.trim(), created: true };
+}
+function checkSignalContent(b) {
+  const title = b.title === void 0 || b.title === null ? "" : String(b.title);
+  if (!title.trim()) throw new Error("title is required.");
+  if (title.length > 200) throw new Error("title must be 200 characters or less.");
+  if (b.body && String(b.body).length > 2e3) throw new Error("body must be 2,000 characters or less.");
+  if (b.deepLinkUrl && !/^https:\/\/\S+$/i.test(String(b.deepLinkUrl))) throw new Error("deep_link_url must be an absolute https:// URL.");
+  if (b.deepLinkLabel && String(b.deepLinkLabel).length > 100) throw new Error("deep_link_label must be 100 characters or less.");
+  const p = b.priority === void 0 || b.priority === null ? 0 : Number(b.priority);
+  if (![0, 1, 2].includes(p)) throw new Error("priority must be 0 (info), 1 (important) or 2 (urgent).");
+  if (p > 0 && !b.expiresAt) throw new Error("Important and urgent messages need expires_at.");
+  if (b.expiresAt) {
+    const t = Date.parse(String(b.expiresAt));
+    if (isNaN(t)) throw new Error("expires_at must be an ISO 8601 date-time.");
+    if (t - Date.now() > 90 * 864e5) throw new Error("expires_at can be at most 90 days ahead.");
+  }
+}
+function signalPublishBody(args) {
+  const arr = (k) => Array.isArray(args[k]) ? args[k] : void 0;
+  const companyIds = arr("company_ids")?.map(Number);
+  const groupIds = arr("group_ids")?.map(Number);
+  const users = arr("user_ids")?.map(String);
+  const roles = arr("role_ids")?.map(String);
+  const all = args.all_companies === true;
+  if (!all && !companyIds?.length && !groupIds?.length) {
+    throw new Error("Choose who gets it: company_ids, group_ids or all_companies=true.");
+  }
+  if ((users?.length ?? 0) > 500 || (roles?.length ?? 0) > 500) throw new Error("user_ids and role_ids are limited to 500 each.");
+  if (args.deep_link_label && !args.deep_link_url) throw new Error("deep_link_label needs deep_link_url.");
+  const body = {
+    ...companyIds?.length ? { companyIds } : {},
+    ...groupIds?.length ? { groupIds } : {},
+    ...all ? { allCompanies: true } : {},
+    ...users?.length ? { users } : {},
+    ...roles?.length ? { roles } : {},
+    title: str(args, "title"),
+    ...str(args, "body") ? { body: str(args, "body") } : {},
+    priority: args.priority === void 0 || args.priority === null ? 0 : Number(args.priority),
+    ...str(args, "expires_at") ? { expiresAt: str(args, "expires_at") } : {},
+    ...str(args, "due_at") ? { dueAt: str(args, "due_at") } : {},
+    ...str(args, "scheduled_send_at") ? { scheduledSendAt: str(args, "scheduled_send_at") } : {},
+    ...str(args, "deep_link_url") ? { deepLinkUrl: str(args, "deep_link_url") } : {},
+    ...str(args, "deep_link_label") ? { deepLinkLabel: str(args, "deep_link_label") } : {},
+    ...args.ack_required === true ? { ackRequired: true } : {}
+  };
+  checkSignalContent(body);
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  body.dedupeKey = str(args, "dedupe_key") || "ucp-" + createHash2("sha256").update(JSON.stringify(body) + day).digest("hex").slice(0, 40);
+  if (String(body.dedupeKey).length > 200) throw new Error("dedupe_key must be 200 characters or less.");
+  return body;
+}
+async function assessmentCompany(id, given) {
+  if (given) return given;
+  const row = await odataByKey("assessment", id);
+  if (!row) throw new Error(`Assessment ${id} not found.`);
+  return String(row.companyId);
+}
+async function deleteAssessment(args) {
+  const id = requireStr(args, "id");
+  if (!/^\d+$/.test(id)) throw new Error(`assessment id must be a number, got "${id}"`);
+  const companyId = await assessmentCompany(id, str(args, "company_id"));
+  const query = { companyId };
+  if (args.include_runs === true) query.includeRuns = "true";
+  const r = await callApi("DELETE", `/v2/assessment/${id}`, query);
+  return r.data ?? { deleted: true, assessmentId: Number(id), runsDeleted: args.include_runs === true };
+}
+var PAGE = 200;
+async function listAllPages(path, query, maxRecords) {
+  if (!Number.isFinite(maxRecords) || maxRecords < 1) throw new Error("max_records must be a positive number.");
+  const rows = [];
+  let next = path;
+  let q = { ...query, $top: String(PAGE), $skip: "0" };
+  let pages = 0;
+  while (next) {
+    const r = await callApi("GET", next, q);
+    const body = r.data;
+    const page = Array.isArray(body?.value) ? body.value : [];
+    rows.push(...page);
+    pages++;
+    if (rows.length >= maxRecords) {
+      const more = page.length === PAGE || !!body?.["@odata.nextLink"];
+      return more ? { value: rows.slice(0, maxRecords), truncated: true, note: `Stopped at max_records=${maxRecords}; more rows match. Narrow the filter or raise max_records.` } : rows.slice(0, maxRecords);
+    }
+    if (body?.["@odata.nextLink"]) {
+      next = body["@odata.nextLink"];
+      q = void 0;
+    } else if (page.length === PAGE && q) {
+      q = { ...q, $skip: String(Number(q.$skip ?? 0) + PAGE) };
+    } else {
+      next = void 0;
+    }
+    if (pages > 500) throw new Error("Paging stopped after 500 pages; narrow the filter.");
+  }
+  return rows;
+}
 function requireResource(args) {
   const resourceType = requireStr(args, "resource_type");
   const config2 = RESOURCE_MAP[resourceType];
@@ -16097,7 +16281,7 @@ function requireResource(args) {
 }
 var tools = [
   // -------------------------------------------------------------------------
-  // Setup / credential management tools — call these first
+  // Setup / credential management tools: call these first
   // -------------------------------------------------------------------------
   {
     name: "setup_status",
@@ -16196,7 +16380,7 @@ var tools = [
   },
   {
     name: "list_resources",
-    description: "List any of 30 resource types with OData filtering, sorting, and pagination. ALWAYS paginates: defaults to top=100 if not specified to avoid hammering the API. Resource API caps each page at 200. To get more, increment `skip` (page through) or pair with `count_resources` to know the total. Note: application_user has no OData listing and will error here \u2014 use get_resource instead.",
+    description: "List any listable resource type with OData filtering, sorting, and pagination. One page by default: top=100 if not specified, and the API caps a page at 200. To read every matching row, set all_pages=true: the tool follows @odata.nextLink (or walks $skip) in pages of 200 until done or max_records (default 5000) is reached, and says so if it stopped early. Otherwise page with `skip`, or pair with `count_resources` for the total. application_user has no OData listing; use get_resource.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16204,10 +16388,12 @@ var tools = [
         filter: { type: "string", description: "OData $filter expression" },
         select: { type: "string", description: "OData $select (comma-separated field list)" },
         orderby: { type: "string", description: "OData $orderby (e.g. 'dateCreated desc')" },
-        top: { type: "string", description: "OData $top \u2014 page size. Defaults to 100, max 200." },
-        skip: { type: "string", description: "OData $skip \u2014 offset for pagination (use with top to walk pages)." },
+        top: { type: "string", description: "OData $top: page size. Defaults to 100, max 200." },
+        skip: { type: "string", description: "OData $skip: offset for pagination (use with top to walk pages)." },
         expand: { type: "string", description: "OData $expand" },
-        search: { type: "string", description: "OData $search" }
+        search: { type: "string", description: "OData $search" },
+        all_pages: { type: "boolean", description: "Read every matching row (pages of 200) instead of one page. Ignores top and skip." },
+        max_records: { type: "integer", description: "With all_pages: stop after this many rows (default 5000)." }
       },
       required: ["resource_type"]
     },
@@ -16215,6 +16401,15 @@ var tools = [
       const { resourceType, config: config2 } = requireResource(args);
       if (!config2.odataPath) {
         throw new Error(`${resourceType} does not support listing (no OData endpoint). Use get_resource with a specific ID.`);
+      }
+      if (args.all_pages === true) {
+        return listAllPages(`/v2/odata/${config2.odataPath}`, {
+          $filter: str(args, "filter"),
+          $select: str(args, "select") ?? (resourceType === "user" ? USER_SELECT : void 0),
+          $orderby: str(args, "orderby"),
+          $expand: str(args, "expand"),
+          $search: str(args, "search")
+        }, args.max_records === void 0 || args.max_records === null ? 5e3 : Number(args.max_records));
       }
       const query = {
         $filter: str(args, "filter"),
@@ -16323,7 +16518,7 @@ var tools = [
   },
   {
     name: "create_resource",
-    description: "Create a new resource. `data` is the resource body sent to CloudRadial; include every field the API requires for that type (e.g. article: subject, body, companyId, datePublished). endpoint_custom_property needs serial_number, with data {name, value, dataType}. Assessments are created with assessment_import, not here.",
+    description: "Create a new resource. `data` is the resource body sent to CloudRadial; include every field the API requires for that type (e.g. article: subject, body, companyId, datePublished). endpoint_custom_property needs serial_number, with data {name, value, dataType}. banner: {title, style 1-4 (1 green, 2 amber, 3 red, 4 blue), placement 1 sidebar or 2 top, companyGroups (group NAMES; empty means no company sees it), showOnHome/Login/Report/Request, publishDate, expireDate}. portal_message: {companyId, subject, category, author, body, priority 0/10/20, showAsAlert}. dashboard: {companyId, title}. archive_folder: {companyId, name, alertKeywords, requiredKeywords, warnOnPastDays, retainForDays}. Assessments are created with assessment_import; Signal messages with signal_message; report files with archive_upload.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16337,6 +16532,7 @@ var tools = [
       const { resourceType, config: config2 } = requireResource(args);
       const data = args.data || {};
       if (resourceType === "assessment") throw new Error(ASSESSMENT_HINT);
+      if (WRITE_TOOL[resourceType]) throw new Error(WRITE_TOOL[resourceType]);
       if (resourceType === "endpoint_custom_property") {
         const result2 = await callApi("POST", customPropertyPath(args, false), void 0, data);
         return result2.data;
@@ -16349,7 +16545,7 @@ var tools = [
   },
   {
     name: "update_resource",
-    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the traits to change as data.traits; only traits the asset already has can be changed, and traits left out are kept. company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
+    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the traits to change as data.traits; only traits the asset already has can be changed, and traits left out are kept. company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import or assessment_lifecycle) and flexible_asset_field updates. Signal messages are edited with signal_message.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16370,6 +16566,7 @@ var tools = [
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
       if (resourceType === "assessment") throw new Error(ASSESSMENT_HINT);
+      if (WRITE_TOOL[resourceType]) throw new Error(WRITE_TOOL[resourceType]);
       if (!config2.itemPath) throw new Error(`update is not supported for ${resourceType}`);
       const method = (str(args, "method") || "PATCH").toUpperCase();
       if (!["PUT", "PATCH"].includes(method)) {
@@ -16406,12 +16603,12 @@ var tools = [
       } else if (resourceType === "endpoint_custom_property") {
         path = customPropertyPath(args, true);
       } else if (resourceType === "company_group_company") {
-        throw new Error("company_group_company has no update endpoint \u2014 use create_resource or delete_resource");
+        throw new Error("company_group_company has no update endpoint; use create_resource or delete_resource");
       } else {
         itemId = requireStr(args, "id");
         path = `/v2/${config2.itemPath}/${itemId}`;
       }
-      const query = await itemCompanyQuery(resourceType, args, itemId);
+      const query = resourceType === "archive_folder" ? void 0 : await itemCompanyQuery(resourceType, args, itemId);
       const body = method === "PATCH" ? [
         ...Object.entries(data).map(([key, value]) => ({
           op: "replace",
@@ -16426,7 +16623,7 @@ var tools = [
   },
   {
     name: "delete_resource",
-    description: "Delete a resource by ID. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), company_group_company (company_group_id + company_id), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). Not possible in the API: assessment, course_enrollment and flexible_asset_field deletes.",
+    description: "Delete a resource by ID. Deletes can't be undone through the API: confirm the exact item with the user first. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), company_group_company (company_group_id + company_id), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). assessment: soft-deletes an assessment (20), template (10) or archived assessment (50); its runs are kept unless include_runs=true. A run (30) is deleted with assessment_lifecycle action=delete_run. course_enrollment: removes the user from the course; they can be enrolled again. Not possible in the API: flexible_asset_field deletes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16439,13 +16636,15 @@ var tools = [
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
+        include_runs: { type: "boolean", description: "assessment only: also delete the assessment's runs (default false)" },
         ...CUSTOM_PROPERTY_PARAMS
       },
       required: ["resource_type"]
     },
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
-      if (resourceType === "assessment") throw new Error("The API can't delete an assessment; remove it in the portal.");
+      if (resourceType === "assessment") return deleteAssessment(args);
+      if (WRITE_TOOL[resourceType]) throw new Error(WRITE_TOOL[resourceType]);
       if (!config2.itemPath) throw new Error(`delete is not supported for ${resourceType}`);
       const blocked = NOT_IN_API[resourceType]?.delete;
       if (blocked) throw new Error(blocked);
@@ -16516,7 +16715,7 @@ var tools = [
   },
   {
     name: "manage_tokens",
-    description: "Manage CloudRadial replacement tokens: the named values (like @SupportPhone) that portal forms, articles and automations fill in. These are NOT API keys. Tokens live at partner level (company_id 0, the default) or on one company (company_id > 0), and a company token overrides the partner token of the same name. action = list | get | create (creates or updates; needs token_name and value) | revoke (deletes).",
+    description: "Manage CloudRadial replacement tokens: the named values (like @SupportPhone) that portal forms, articles and automations fill in. These are NOT API keys. Tokens live at partner level (company_id 0, the default) or on one company (company_id > 0), and a company token overrides the partner token of the same name. action = list | get | create (creates or updates; needs token_name and value) | revoke (deletes). revoke always needs an explicit company_id: a company's token, or 0 for the partner token, which also needs confirm_partner_level=true because it removes the default every client falls back to. Names are case-sensitive.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16526,7 +16725,8 @@ var tools = [
         value: { type: "string", description: "Token value for create (empty string allowed as a placeholder)" },
         type: { type: "string", description: "Optional token type for create: None, String or Automation" },
         token_id: { type: "string", description: "Deprecated alias for token_name" },
-        data: { type: "object", description: "Deprecated: raw body {companyId, token, value, type} for create" }
+        data: { type: "object", description: "Deprecated: raw body {companyId, token, value, type} for create" },
+        confirm_partner_level: { type: "boolean", description: "revoke with company_id 0 only: set true after the user confirms deleting the partner-level token" }
       },
       required: ["action"]
     },
@@ -16554,6 +16754,12 @@ var tools = [
           return result.data;
         }
         case "revoke": {
+          if (args.company_id === void 0 || args.company_id === null || str(args, "company_id") === "") {
+            throw new Error("revoke needs company_id: the company whose token to delete, or 0 for the partner-level token.");
+          }
+          if (companyId === "0" && args.confirm_partner_level !== true) {
+            throw new Error(`This deletes the PARTNER-level token "${decodeURIComponent(nameOf())}", the default every company without its own token falls back to. Confirm with the user, then call again with confirm_partner_level=true.`);
+          }
           const result = await callApi("DELETE", `/v2/token/${nameOf()}`, { companyId });
           return result.data ?? { deleted: true };
         }
@@ -16718,8 +16924,290 @@ var tools = [
     }
   },
   {
+    name: "archive_upload",
+    description: "Upload one or more local report files (PDF, XLSX, DOCX, CSV, ZIP and other types the portal accepts) into a client company's report archive, the way uploading in the portal does. Each file becomes its own archive item with the file attached, and is checked against the folder's alert and required keywords, so folder alerts keep working. Pick the folder by archive_id, or by folder_name (case-insensitive) within company_id; with create_folder=true a missing folder is created first (name, category, alert/required keywords, warn_on_past_days, retain_for_days). Each file and the whole request must be 128 MB or less; a rejected file means nothing from the request was saved. This writes to the client's portal: confirm the company, folder and files with the user first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        company_id: { type: "integer", description: "Client company that owns the folder" },
+        archive_id: { type: "integer", description: "Folder id (companyReportFolderId). Give this or folder_name." },
+        folder_name: { type: "string", description: "Folder name within the company, matched case-insensitively" },
+        create_folder: { type: "boolean", description: "Create folder_name if the company doesn't have it (default false)" },
+        category: { type: "string", description: "New folder only: category, e.g. Backups" },
+        alert_keywords: { type: "string", description: "New folder only: comma-separated; a report containing any of them raises an alert" },
+        required_keywords: { type: "string", description: "New folder only: comma-separated; a report containing none of them raises an alert" },
+        warn_on_past_days: { type: "integer", description: "New folder only: folder goes into error if nothing arrives in this many days (0 = off)" },
+        retain_for_days: { type: "integer", description: "New folder only: keep items this many days (0 = forever)" },
+        file_paths: { type: "array", items: { type: "string" }, description: "Local files to upload; each becomes one archive item" },
+        subject: { type: "string", description: "Optional, up to 255 characters, applied to every item. Defaults to each file's name." },
+        body: { type: "string", description: "Optional text stored on every item (checked against the folder's keywords)" },
+        is_html: { type: "boolean", description: "Set true if body is HTML" }
+      },
+      required: ["company_id", "file_paths"]
+    },
+    handler: async (args) => {
+      const companyId = Number(requireStr(args, "company_id"));
+      if (!Number.isInteger(companyId) || companyId <= 0) throw new Error("company_id must be a client company id.");
+      const paths = Array.isArray(args.file_paths) ? args.file_paths.map(String) : [];
+      if (paths.length === 0) throw new Error("file_paths needs at least one file.");
+      const subject = str(args, "subject");
+      if (subject && subject.length > 255) throw new Error("subject must be 255 characters or less.");
+      const MAX = 128 * 1024 * 1024;
+      let total = 0;
+      const files = paths.map((p) => {
+        let size;
+        try {
+          size = statSync(p).size;
+        } catch {
+          throw new Error(`File not found: ${p}`);
+        }
+        if (size === 0) throw new Error(`File is empty: ${p}`);
+        if (size > MAX) throw new Error(`File is over 128 MB: ${p}`);
+        total += size;
+        return { field: "files", bytes: new Uint8Array(readFileSync(p)), name: basename(p), contentType: contentTypeFor(p) };
+      });
+      if (total > MAX) throw new Error(`The files add up to over 128 MB (${Math.round(total / 1048576)} MB). Upload them in smaller batches.`);
+      const folder = await resolveArchiveFolder(companyId, args);
+      const r = await callApiForm("/v2/archiveitem/upload", {
+        archiveId: String(folder.id),
+        subject,
+        body: str(args, "body"),
+        isHtml: args.is_html === true ? "true" : void 0
+      }, files);
+      const d = r.data ?? {};
+      return {
+        companyId,
+        archiveId: folder.id,
+        folderName: folder.name,
+        folderCreated: folder.created,
+        uploaded: (d.items ?? []).map((i) => ({
+          archiveItemId: i.archiveItemId,
+          subject: i.subject,
+          isError: i.isError,
+          files: (i.attachments ?? []).map((a) => ({ fileName: a.fileName, bytes: a.length }))
+        })),
+        ...d.items ? {} : { result: r.data },
+        note: "An item flagged isError matched the folder's alert keywords (or none of its required keywords); that is the folder working as designed."
+      };
+    }
+  },
+  {
+    name: "signal_message",
+    description: `Signal desktop notices: messages that appear on client users' desktops through the Signal client and browser extension, optionally with a button (deep link) and an acknowledgement. action = estimate | send | list | get | recipients | edit | resolve | retract. send previews first: without confirmed=true it only returns the audience estimate and the message, and sends nothing. Show that preview to the user, then call again with confirmed=true. Target with company_ids, group_ids or all_companies, narrowed by user_ids and/or role_ids (each at most 500; every targeted user must belong to a targeted company). priority 0 info, 1 important, 2 urgent; important and urgent need expires_at. expires_at defaults to 14 days and can be at most 90. deep_link_url must be an absolute https:// URL. A dedupe key is added automatically (same message, audience and day), so a retried send returns the existing message instead of a second one. edit, resolve and retract need the message id and use the version you last read (read automatically if omitted); a stale version is refused with 409. If Signal isn't enabled for the partner, every call returns 404 "Signal is not enabled for this partner."`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["estimate", "send", "list", "get", "recipients", "edit", "resolve", "retract"] },
+        id: { type: "integer", description: "signalMessageId for get, recipients, edit, resolve, retract" },
+        version: { type: "integer", description: "edit/resolve/retract: the version last read" },
+        confirmed: { type: "boolean", description: "send only: true after the user approved the preview" },
+        company_ids: { type: "array", items: { type: "integer" } },
+        group_ids: { type: "array", items: { type: "integer" }, description: "Company group ids" },
+        all_companies: { type: "boolean" },
+        user_ids: { type: "array", items: { type: "string" }, description: "userId values (GUIDs) from user_lookup" },
+        role_ids: { type: "array", items: { type: "string" } },
+        title: { type: "string", description: "Up to 200 characters" },
+        body: { type: "string", description: "Up to 2,000 characters" },
+        priority: { type: "integer", enum: [0, 1, 2] },
+        expires_at: { type: "string", description: "UTC ISO 8601" },
+        due_at: { type: "string", description: "Informational due date (UTC ISO 8601)" },
+        scheduled_send_at: { type: "string", description: "Send later instead of now (UTC ISO 8601)" },
+        deep_link_url: { type: "string" },
+        deep_link_label: { type: "string", description: "Button text, up to 100 characters (default Open Link)" },
+        ack_required: { type: "boolean" },
+        dedupe_key: { type: "string", description: "Optional: your own key instead of the automatic one" },
+        filter: { type: "string", description: "list: OData $filter" },
+        top: { type: "integer", description: "list: rows (default 25, max 200); recipients: page size (default 100)" },
+        skip: { type: "integer", description: "recipients: offset" },
+        acked_only: { type: "boolean", description: "recipients: only people who acknowledged" },
+        search: { type: "string", description: "recipients: name or email search" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const id = () => {
+        const v = requireStr(args, "id");
+        if (!/^\d+$/.test(v)) throw new Error("id must be a signalMessageId number.");
+        return v;
+      };
+      switch (action) {
+        case "list": {
+          const top = Math.min(Number(args.top ?? 25), 200);
+          const r = await callApi("GET", "/v2/odata/signalmessage", {
+            $filter: str(args, "filter"),
+            $orderby: "signalMessageId desc",
+            $top: String(top)
+          });
+          return r.data?.value ?? r.data;
+        }
+        case "get":
+          return (await callApi("GET", `/v2/signalmessage/${id()}`)).data;
+        case "recipients": {
+          const r = await callApi("GET", `/v2/signalmessage/${id()}/recipient`, {
+            ackedOnly: args.acked_only === true ? "true" : void 0,
+            search: str(args, "search"),
+            skip: str(args, "skip"),
+            take: String(args.top ?? 100)
+          });
+          return r.data;
+        }
+        case "estimate":
+        case "send": {
+          const body = signalPublishBody(args);
+          const est = (await callApi("POST", "/v2/signalmessage/estimate", void 0, body)).data;
+          if (action === "estimate" || args.confirmed !== true) {
+            return {
+              sent: false,
+              estimate: est,
+              message: body,
+              ...est && est.users === 0 ? { warning: "This targeting reaches nobody. Check that each user belongs to one of the targeted companies." } : {},
+              next: action === "send" ? "Show this to the user. Nothing was sent. Call again with confirmed=true to send." : void 0
+            };
+          }
+          if (est && est.users === 0) throw new Error("Not sent: the targeting reaches 0 users.");
+          const r = await callApi("POST", "/v2/signalmessage", void 0, body);
+          return { sent: true, estimate: est, result: r.data };
+        }
+        case "edit": {
+          const msgId = id();
+          const cur = (await callApi("GET", `/v2/signalmessage/${msgId}`)).data;
+          const pick2 = (arg, field) => args[arg] !== void 0 ? args[arg] : cur?.[field];
+          const PRIORITY = { info: 0, important: 1, urgent: 2 };
+          const prio = pick2("priority", "priority");
+          const priority = typeof prio === "string" && isNaN(Number(prio)) ? PRIORITY[prio.toLowerCase()] ?? prio : prio;
+          const edit = {
+            version: args.version ?? cur?.version,
+            title: pick2("title", "title"),
+            body: pick2("body", "body"),
+            priority,
+            deepLinkUrl: pick2("deep_link_url", "deepLinkUrl"),
+            deepLinkLabel: pick2("deep_link_label", "deepLinkLabel"),
+            dueAt: pick2("due_at", "dueAt"),
+            ackRequired: pick2("ack_required", "ackRequired"),
+            expiresAt: pick2("expires_at", "expiresAt")
+          };
+          checkSignalContent(edit);
+          return (await callApi("PUT", `/v2/signalmessage/${msgId}`, void 0, edit)).data;
+        }
+        case "resolve":
+        case "retract": {
+          const msgId = id();
+          let version2 = args.version;
+          if (version2 === void 0 || version2 === null) {
+            version2 = (await callApi("GET", `/v2/signalmessage/${msgId}`)).data?.version;
+          }
+          return (await callApi("POST", `/v2/signalmessage/${msgId}/${action}`, void 0, { version: version2 })).data;
+        }
+        default:
+          throw new Error("action must be one of: estimate, send, list, get, recipients, edit, resolve, retract");
+      }
+    }
+  },
+  {
+    name: "m365_secure_score",
+    description: "Microsoft Secure Score from CloudRadial's daily Microsoft 365 sync (read-only; the API never calls Microsoft itself, so today's changes show after the next sync). With company_id: that company's tenant, its current score and percentage, and the improvement actions worth the most points (top, default 5), each with Microsoft's cost, user impact, license tier and a link to the setting. Without company_id: every linked tenant ranked from lowest to highest percentage, for a roll-up across clients. Tenants with companyId null aren't linked to a company yet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        company_id: { type: "integer", description: "Client company; omit for the roll-up across all tenants" },
+        top: { type: "integer", description: "How many improvement actions to return (default 5, 0 for all)" }
+      }
+    },
+    handler: async (args) => {
+      const tenantsRes = await callApi("GET", "/v2/m365/tenant");
+      const tenants = Array.isArray(tenantsRes.data) ? tenantsRes.data : [];
+      const pct = (t) => typeof t.secureScorePercentage === "number" ? Math.round(t.secureScorePercentage * 1e3) / 10 : null;
+      const companyArg = str(args, "company_id");
+      if (!companyArg) {
+        const rows = tenants.map((t) => ({ companyId: t.companyId ?? null, tenant: t.name, domain: t.domainName, licensedUsers: t.licensedUsers, score: t.secureScore, max: t.secureScoreMax, percent: pct(t) })).sort((a, b) => (a.percent ?? 101) - (b.percent ?? 101));
+        return { tenants: rows.length, unlinked: rows.filter((r) => r.companyId === null).length, ranking: rows };
+      }
+      const matches = tenants.filter((t) => String(t.companyId) === companyArg);
+      if (matches.length === 0) {
+        throw new Error(`No Microsoft tenant is linked to company ${companyArg}. Link it in the portal, then wait for the next daily sync.`);
+      }
+      const top = args.top === void 0 || args.top === null ? 5 : Number(args.top);
+      const out = [];
+      for (const t of matches) {
+        const detail = (await callApi("GET", `/v2/m365/tenant/${t.microsoftTenantId}/securescore`)).data;
+        const controls = (detail?.controls ?? []).filter((c) => !c.deprecated && Number(c.maxScore) > Number(c.score)).map((c) => ({
+          title: c.title,
+          service: c.service,
+          category: c.category,
+          pointsAvailable: Math.round((Number(c.maxScore) - Number(c.score)) * 100) / 100,
+          implementationCost: c.implementationCost,
+          userImpact: c.userImpact,
+          tier: c.tier,
+          actionUrl: c.actionUrl
+        })).sort((a, b) => b.pointsAvailable - a.pointsAvailable);
+        out.push({
+          tenant: t.name,
+          domain: t.domainName,
+          microsoftTenantId: t.microsoftTenantId,
+          licensedUsers: t.licensedUsers,
+          score: detail?.currentScore ?? t.secureScore,
+          max: detail?.maxScore ?? t.secureScoreMax,
+          percent: pct(t),
+          scoreDate: detail?.scoreDate,
+          cached: detail?.cached,
+          ...detail?.cached === false ? { note: "No score stored in the last 7 days; check the tenant's connection in the portal." } : {},
+          actionsWithPointsAvailable: controls.length,
+          topActions: top === 0 ? controls : controls.slice(0, top)
+        });
+      }
+      return { companyId: Number(companyArg), tenants: out };
+    }
+  },
+  {
+    name: "assessment_lifecycle",
+    description: "Work with an existing assessment beyond importing questions. action = get (the assessment with its scores and questions) | run (create a run: a point-in-time copy, like the portal's Run) | archive | unarchive | delete_run (soft-delete one run). To delete an assessment or template, use delete_resource with resource_type=assessment. These write to the portal: confirm with the user first. company_id is looked up when omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["get", "run", "archive", "unarchive", "delete_run"] },
+        assessment_id: { type: "integer" },
+        company_id: { type: "integer", description: "Looked up from the assessment when omitted" },
+        name: { type: "string", description: "run: the run's title (default: assessment title plus today's date)" },
+        run_id: { type: "integer", description: "delete_run: the run's assessmentId" }
+      },
+      required: ["action", "assessment_id"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const id = requireStr(args, "assessment_id");
+      if (!/^\d+$/.test(id)) throw new Error("assessment_id must be a number.");
+      if (action === "get") return (await callApi("GET", `/v2/assessment/${id}`)).data;
+      const companyId = await assessmentCompany(id, str(args, "company_id"));
+      switch (action) {
+        case "run": {
+          let name = str(args, "name");
+          if (!name) {
+            const row = await odataByKey("assessment", id);
+            name = `${String(row?.title ?? "Assessment")} - ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`;
+          }
+          const r = await callApi("POST", `/v2/assessment/${id}/run`, void 0, { companyId: Number(companyId), name });
+          return r.data ?? { run: true, name };
+        }
+        case "archive":
+        case "unarchive": {
+          const r = await callApi("POST", `/v2/assessment/${id}/${action}`, { companyId });
+          return r.data ?? { [action === "archive" ? "archived" : "unarchived"]: true };
+        }
+        case "delete_run": {
+          const runId = requireStr(args, "run_id");
+          if (!/^\d+$/.test(runId)) throw new Error("run_id must be a number.");
+          const r = await callApi("DELETE", `/v2/assessment/${id}/run/${runId}`, { companyId });
+          return r.data ?? { deleted: true, runId: Number(runId) };
+        }
+        default:
+          throw new Error("action must be one of: get, run, archive, unarchive, delete_run");
+      }
+    }
+  },
+  {
     name: "raw_api_call",
-    description: "Direct call to the CloudRadial API for advanced/custom use cases. Provide the path (e.g. '/v2/odata/company') and optional method, query, body.",
+    description: "Direct call to the CloudRadial API for advanced/custom use cases. Provide the path (e.g. '/v2/odata/company') and optional method, query, body. A PATCH body must be a JSON Patch array ([{op, path, value}]); it is sent as application/json-patch+json. Useful for routes without their own tool, e.g. dashboard widgets: GET /v2/dashboard/widget-types, POST /v2/dashboard/{id}/widget?companyId=, PUT /v2/dashboard/{id}/widgets.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16752,7 +17240,7 @@ var tools = [
 
 // src/index.ts
 var server = new Server(
-  { name: "cloudradial-ucp", version: "2.6.4" },
+  { name: "cloudradial-ucp", version: "2.7.0" },
   { capabilities: { tools: {} } }
 );
 var toolByName = new Map(tools.map((t) => [t.name, t]));

@@ -25,7 +25,7 @@ test('MCP status is safe without native storage and key arguments are no longer 
     await request('initialize',{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'test',version:'1'}});
     child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
     const {tools} = await request('tools/list',{});
-    assert.equal(tools.length,19);
+    assert.equal(tools.length,23);
     assert.ok(tools.find(tool=>tool.name==='setup_secure_storage'));
     assert.deepEqual(tools.find(tool=>tool.name==='configure_credentials').inputSchema.properties,{});
     const response=await request('tools/call',{name:'setup_status',arguments:{}});

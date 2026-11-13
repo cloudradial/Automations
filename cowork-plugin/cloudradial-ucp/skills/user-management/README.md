@@ -61,7 +61,7 @@ email and when they enrolled.
 
 **What you get:** Users matched against course enrollments.
 
-**Good to know:** Deleting a user leaves their enrollments behind, so the skill only counts current users.
+**Good to know:** Deleting a user leaves their enrollments behind, so the skill only counts current users and can offer to remove the leftovers.
 
 ## Good to know
 

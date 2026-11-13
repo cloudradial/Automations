@@ -28,26 +28,30 @@ to the `setup` skill before doing CloudRadial work.
 | `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
-| `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
+| `list_resources` | List any listable resource type with OData filtering; `all_pages: true` reads every page | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
 | `assessment_import` | Create or refresh an assessment from a question list or a template-layout .xlsx (`template_id` copy currently adds nothing; use the portal) | `company_id` + one source |
-| `raw_api_call` | Direct API call for advanced cases | `path` |
+| `raw_api_call` | Direct API call for advanced cases (a PATCH body is a JSON Patch array) | `path` |
+| `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
+| `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
+| `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
+| `assessment_lifecycle` | Read a full assessment, run it, archive/unarchive it, or delete one run | `action`, `assessment_id` |
 
 ### OData parameter conventions
 
 For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`:
 `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when
 forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API).
-Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
+Max page is 200. To read every matching row, pass `all_pages: true`: the server follows the API's next-page link (or walks `skip`), stops at `max_records` (default 5000) and says so if it stopped early. Without it, increment `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -85,8 +89,11 @@ Filter on `type eq 20` to match what the portal lists, or `type eq 30` for the h
 `status` is a plain integer in the API with undocumented codes, so don't filter on it server-side;
 show it as-is or compare it client-side.
 
-**Notes:** `get_resource` works by `assessmentId`. There is no update or delete for assessments, and
-no question-level API: rows are summary-level only (one row per assessment/run, not per question).
+**Notes:** `get_resource` works by `assessmentId` and returns the summary row. `assessment_lifecycle`
+(`action: "get"`) returns the assessment with its questions and answers; `run`, `archive`,
+`unarchive` and `delete_run` work on it too. Delete an assessment or template with `delete_resource`
+(`resource_type: "assessment"`; its runs are kept unless `include_runs: true`). There is still no
+single-item update: change questions and answers with `assessment_import`.
 `select` works with real field names (for example `assessmentId,companyId,title,type,status,dateConducted,totalScore,maxScore`), which keeps large lists readable. A misspelled field returns HTTP 400; filter on `assessmentId`, not `id`.
 
 ### flexible_asset
@@ -183,20 +190,21 @@ Use `assessment_import`, which uploads the questions (as an assessment, `type` 2
      adds no questions, with or without `apply_to` (tested with two different templates on a live
      portal). Don't use it. To start from a template, either apply the template in the portal, or
      import the questions with `questions` or `file_path`. Tell the user plainly if they ask for
-     per-server or per-user copies; the portal is the only way today.
+     per-server or per-user copies; the portal is the only way today. The November 2026 API docs
+     say both assessments must belong to the **same company**; earlier tests may have crossed
+     companies, so this is being retested. Until then, keep treating it as not working.
 4. To refresh an assessment that already exists, pass `assessment_id`. The upload updates it in
    place and matches questions by `Update Key`.
    - **A failed create can still leave an empty assessment.** If the upload returns an error,
      list the company's assessments by title before retrying: a row with the same title and
-     `maxScore` 0 is a leftover shell. The API can't delete it, so tell the user to delete it in the
-     portal, and pass its `assessmentId` on the retry instead of creating a third copy.
-   - The API has no way to read question-level data or update keys back. Keep the `Update Key`
-     names you used so later refreshes match.
-   - **Runs (type 30) can't be created through the v2 API.** The portal's Run button calls the
-     portal's internal API (`POST <portal>/api/assessments/run`, body `{id, name}`), which copies the
-     assessment, answers included, into a linked run. The AutomationAI Microsoft Security Assessment
-     workflow does this after a read-only check that the portal accepts the API key. Otherwise tell
-     the user to click Run in the portal.
+     `maxScore` 0 is a leftover shell. Pass its `assessmentId` on the retry instead of creating a
+     third copy, or offer to delete it with `delete_resource` after the user confirms.
+   - Read questions and their update keys back with `assessment_lifecycle` (`action: "get"`).
+     Keep the `Update Key` names you used so later refreshes match.
+   - **Run it** with `assessment_lifecycle` (`action: "run"`): a point-in-time copy, answers
+     included, like the portal's Run button. The run's title defaults to the assessment title plus
+     today's date. Confirm with the user first. `archive`, `unarchive` and `delete_run` work the
+     same way.
 5. Report the `assessmentId` and how many questions went in. The client completes the assessment
    in the portal.
 
@@ -205,9 +213,20 @@ questions", "Turn this spreadsheet into an assessment for company 42", "Copy our
 template into Contoso's new assessment, one set of questions per server" (the last one is portal-only
 today; see `template_id` above).
 
-For Microsoft Secure Score specifically, the AutomationAI workflow
-[Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment)
-reads Secure Score from Graph and builds the assessment on its own.
+### Microsoft Secure Score
+
+`m365_secure_score` reads Secure Score from CloudRadial's daily Microsoft 365 sync (read-only; the
+API never calls Microsoft, so today's changes show after the next sync).
+
+- With `company_id`: the company's tenant, score, percentage, and the improvement actions worth the
+  most points (`top`, default 5), each with Microsoft's implementation cost, user impact, license tier
+  and a link to the setting. Sort quick wins (low cost, low impact) from bigger projects.
+- Without `company_id`: every linked tenant, lowest percentage first.
+- "No Microsoft tenant is linked" means the company isn't linked in the portal yet.
+- To turn the top actions into an assessment the client works through, build questions from them
+  (one per action, `Update Key` = the action title) and use `assessment_import`. The AutomationAI
+  workflow [Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment)
+  does the same on a schedule.
 
 ---
 
@@ -274,11 +293,16 @@ For a single known customer, `search_companies` is fine. Join the map so every r
 The `assessment` list resource does not expose per-question responses, failed/"Not Compliant"
 answers, or linked PSA tickets. Two paths:
 
-1. **The API has no question-level data.** There is no assessment question or answer entity in the
-   v2 API, so don't probe `raw_api_call` for one.
-2. **Portal export.** The reliable source is the per-run **Excel export** (Compliance > Assessments > run > three-dot menu > Export)
-   or the **Word report** (run > Recommendations > Report). Tell the user rather than inventing
-   question-level figures from the summary score: see the honesty note below.
+1. **Through the API (new in 2.7.0, not yet tested at scale).** `assessment_lifecycle` with
+   `action: "get"` returns one assessment or run with its scores and its questions, each with its
+   current answer (`value`, `textValue`), notes and flag. For many assessments at once,
+   `list_resources` on `assessment_question` (filter by `assessmentId` or `companyId`,
+   `all_pages: true`) lists question rows (`assessmentQuestionId`, `assessmentId`, `companyId`,
+   `updateKey` and more). Read one row first and use the field names it returns; don't guess them.
+2. **Portal export.** The per-run **Excel export** (Compliance > Assessments > run > three-dot menu >
+   Export) or the **Word report** (run > Recommendations > Report) is still the reference if the API
+   result looks incomplete. Never invent question-level figures from the summary score: see the
+   honesty note below.
 
 ### Step 4: Build the outputs
 

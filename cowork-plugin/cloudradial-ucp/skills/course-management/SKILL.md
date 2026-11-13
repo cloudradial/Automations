@@ -24,22 +24,26 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
-| `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
+| `list_resources` | List any listable resource type with OData filtering; `all_pages: true` reads every page | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
-| `raw_api_call` | Direct API call for advanced cases | `path` |
+| `raw_api_call` | Direct API call for advanced cases (a PATCH body is a JSON Patch array) | `path` |
+| `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
+| `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
+| `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
+| `assessment_lifecycle` | Read a full assessment, run it, archive/unarchive it, or delete one run | `action`, `assessment_id` |
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200. To read every matching row, pass `all_pages: true`: the server follows the API's next-page link (or walks `skip`), stops at `max_records` (default 5000) and says so if it stopped early. Without it, increment `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -66,7 +70,7 @@ Training course containers. Key fields: `courseId`, `companyId`, `name` (NOT `ti
 Individual lessons within a course. Key fields: `courseLessonId`, `courseId`, `companyId`, `title`, `overview`, `text` (HTML body content), `category`, `order`. Creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`. Pass `company_id` to `get_resource`, `update_resource` and `delete_resource` for a lesson (the tool looks it up if you leave it out). PATCH of lesson fields (`title`, `overview`, `text`, `order`) works.
 
 ### course_enrollment
-Enrollment records tracking user progress. List rows (`list_resources`) have `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `currentLessonId`, `dateEnrolled`, `dateLastAccess`, `dateCompleted`, `isExpired`, `courseName`. **There is no `isCompleted` on list rows**: filtering or selecting it returns HTTP 400, so treat `dateCompleted ne null` as completed. `courseenrollment_for_user` returns a different shape with `isCompleted` and `applicationUserId` instead of `userId`. There is no score field: a score passed to `courseenrollment_complete` isn't stored on the enrollment (per-lesson scores live in `course_lesson_history`). Deleting a user leaves their enrollments behind, still pointing at the deleted user, and the API can't delete enrollments. Create with `courseId` and `userId`. `get_resource` works by `courseEnrollmentId`; the API can't delete an enrollment.
+Enrollment records tracking user progress. List rows (`list_resources`) have `courseEnrollmentId`, `courseId`, `companyId`, `userId`, `currentLessonId`, `dateEnrolled`, `dateLastAccess`, `dateCompleted`, `isExpired`, `courseName`. **There is no `isCompleted` on list rows**: filtering or selecting it returns HTTP 400, so treat `dateCompleted ne null` as completed. `courseenrollment_for_user` returns a different shape with `isCompleted` and `applicationUserId` instead of `userId`. There is no score field: a score passed to `courseenrollment_complete` isn't stored on the enrollment (per-lesson scores live in `course_lesson_history`). Deleting a user leaves their enrollments behind, still pointing at the deleted user; remove those with `delete_resource` (`resource_type: "course_enrollment"`, `id: <courseEnrollmentId>`). Deleting an enrollment soft-deletes it: the user leaves the course, it drops out of the enrollment list, and they can be enrolled again with `create_resource`. Always confirm first. Create with `courseId` and `userId`. `get_resource` works by `courseEnrollmentId`.
 
 ### course_lesson_history
 Per-lesson progress for one user: which lessons they finished and their score. Composite key: `courseId`, `applicationUserId` (a string), `courseLessonId`. Create body requires `companyId`, `courseId`, `applicationUserId`, `courseLessonId`, `completedScore`. List with `list_resources` and `filter: "courseId eq 372"` (add `and applicationUserId eq '<id>'` for one user). Use it to answer "which lesson did Sam stop at" or to record lesson completions migrated from another training tool.
@@ -127,3 +131,10 @@ Building a course is a two-step process: create the course container, then creat
 3. Calculate completion rates
 4. Identify users who haven't started required courses
 5. Present as an actionable summary
+
+### Remove someone from a course
+
+1. Find the enrollment: `courseenrollment_for_user` (course + user), or `list_resources` on `course_enrollment` filtered by `courseId`.
+2. Show the user the person, course, enrollment date and progress, and say that progress is lost.
+3. After an explicit yes, `delete_resource` with `resource_type: "course_enrollment"` and the `courseEnrollmentId`.
+4. To clean up after deleted users, list enrollments for the company, match `userId` against current users (`user_lookup` by `company_id`), and offer to delete the orphans in one confirmed batch.

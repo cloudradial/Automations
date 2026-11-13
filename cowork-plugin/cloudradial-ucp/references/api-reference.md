@@ -1,4 +1,4 @@
-# CloudRadial API V2 — Quick Reference
+# CloudRadial API V2: Quick Reference
 
 Base URL: https://api.us.cloudradial.com
 Auth: HTTP Basic (public key = username, private key = password)
@@ -9,9 +9,9 @@ OpenAPI: 3.0.1
 - **Creates:** a `*Request` schema's **REQUIRED** fields are what `create_resource` must send (for example `ArticleRequest`: `body`, `companyId`, `datePublished`, `subject`). Entity schemas (no `Request` suffix) give the field names to use in OData `filter`, `select` and `orderby`.
 - **Updates:** `update_resource` sends PATCH by default and turns `data` into a JSON Patch document, so only the fields you pass change. `method: "PUT"` sends the whole `*Request` body and clears anything you leave out.
 - **Errors:** every HTTP 4xx/5xx comes back as a tool error.
-- **Lists:** OData lists stop at 200 rows with no next-page link. Page with `top`/`skip` until a page is shorter than `top`.
+- **Lists:** OData pages hold at most 200 rows (1,000 for Token; `$top` up to 1,000 for Certificate and Token). `list_resources` with `all_pages: true` follows `@odata.nextLink` when the API sends one, or walks `skip`, until done.
 - **Enums:** OData returns enum fields as names (`enclosure: "Desktop"`), while writes take the integer codes listed under Enumerations.
-- **Assessments:** there is no `POST /v2/assessment` and no question-level API. Create or refresh with `assessment_import`. `type` is 10 template, 20 assessment (the only type the portal lists), 30 run.
+- **Assessments:** there is no `POST /v2/assessment`; create or refresh with `assessment_import`. Since November 2026: `GET /v2/assessment/{id}` returns questions and answers, `/v2/odata/assessmentquestion` lists questions, `DELETE /v2/assessment/{id}` (`companyId`, optional `includeRuns`) soft-deletes, and `POST /v2/assessment/{id}/run`, `/archive`, `/unarchive` and `DELETE /v2/assessment/{id}/run/{runId}` exist (`assessment_lifecycle`). `type` is 10 template, 20 assessment (the only type the portal lists), 30 run, 50 archived.
 - **Endpoint custom properties:** `EndpointCustomProperty` keys on `companyEndpointId` and has no `companyId`. Single-property calls go by serial number and property name.
 - **Tickets:** the API has no ticket endpoints.
 - **Deleted companies leave records behind.** Users, endpoints, feedback, assessments, certificates and archive items from deleted companies still appear in lists. For any cross-company report, list companies first and keep only rows whose `companyId` is in that list. Feedback rows keep the company name from when they were submitted, so group by `companyId`, not `companyName`. The stored `endpointCount` on a company can be stale; count endpoint rows instead.
@@ -19,15 +19,17 @@ OpenAPI: 3.0.1
 - **Course PATCH paths** follow the GET-by-ID shape, not `CourseRequest`: `/shortDescripiton` (misspelled) works, and fields under `settings` (`passScore`, `externalCourseUrl`, `courseImageUrl`, `prerequisites`) aren't saved (UCP-1969).
 - **Assessment answers** in `assessment_import` are score numbers (`"2"` to `"-2"`); see `skills/assessment-compliance/references/assessment-template-columns.md`.
 - **The `service` resource is the agent's inventory of Windows services**, not a service catalog. Request forms are `catalog`.
-- **Menu PATCH returns HTTP 415.** Update a menu with `method: "PUT"` and the full body (including `groups`).
+- **PATCH is JSON Patch.** Every PATCH route takes an array of operations sent as `application/json-patch+json`. Before 2.7.0 the plugin sent `application/json`, which is why menu PATCH returned HTTP 415; fixed, not yet retested live. PUT with the full body still works for menus.
 - **Feedback** supports create, PATCH (including changing `companyId`) and delete. `feedbackRating` accepted the name `"Positive"` on write and saved it as 1.
 - **PATCH confirmed working (live test):** endpoint `expirationDate` and `manufacturedDate`, company group `group` (rename), catalog question `label` and `isRequired`, quickstart, certificate, course lesson.
 - **Catalog create defaults:** left out, `isSelfApproval`, `isAppendSubject` and `isSendToPsa` save as true and `selectText` as `"ORDER"`.
 - **Flexible asset types:** deleting a type removes its fields; fields themselves can't be updated or deleted.
 - **Planner timeline** placement comes from `estimatedStartDate`/`estimatedEndDate`; `scheduledQuarter` stays 0.
-- **`POST /v2/assessment/import-template` is a no-op** right now: it returns success but copies no questions (with or without `applyTo`). Use the portal or `assessment_import` with questions/xlsx.
+- **`POST /v2/assessment/import-template` copied nothing in testing**: it returned success but no questions (with or without `applyTo`). The November 2026 docs say both assessments must belong to the same company, so this is being retested. Until then, use the portal or `assessment_import` with questions/xlsx.
 - **`$select` on `/v2/odata/assessment` works** with real field names; filter by `assessmentId`, not `id`.
-- **Archive items** are text/HTML only through the API; there is no attachment upload endpoint.
+- **Archive items:** `POST /v2/archiveitem/upload` (multipart: `archiveId`, repeated `files`, optional `subject`, `body`, `isHtml`; 128 MB per file and per request) attaches files, one item per file (`archive_upload`). `POST /v2/archiveitem` still creates text/HTML items. Folders: `/v2/archivefolder` (create, GET/DELETE with `companyId`, PATCH without it).
+- **Course enrollments** can be deleted (`DELETE /v2/courseenrollment/{id}`, soft delete; the user can be enrolled again).
+- **New in November 2026:** banners (`/v2/banner`, partner-level, shown by company group names), dashboards and widgets (`/v2/dashboard`, `companyId` on single-item calls), portal messages (`/v2/message`), Signal messages (`/v2/signalmessage`, plus `estimate`, `recipient`, `resolve`, `retract`), Microsoft 365 (`/v2/m365/tenant`, `/v2/m365/tenant/{id}/securescore`). The schemas below predate these; see the live Swagger at https://api.us.cloudradial.com/swagger/index.html for their fields.
 - **Endpoint applications:** `version` is an integer; the readable version goes in `display`.
 - **Feedback moves:** changing `companyId` also updates `companyName` and `companyPsaId`. `feedbackRating` takes `Positive`, `Neutral`, `Negative`.
 
@@ -57,12 +59,12 @@ OpenAPI: 3.0.1
 - `downloadLink`: string (nullable)
 
 ### ArchiveItemRequest
-- `companyId`: integer [int32] **REQUIRED** — Tenant company ID
-- `archiveId`: integer [int32] **REQUIRED** — Parent archive (folder) ID
-- `subject`: string (max 255) **REQUIRED** — Item subject / filename
-- `text`: string (nullable) — Optional body text / contents
-- `isHtml`: boolean — Whether the CloudRadial.API.Models.Requests.ArchiveItemRequest.Text contains HTML
-- `isError`: boolean — Mark item as error
+- `companyId`: integer [int32] **REQUIRED**: Tenant company ID
+- `archiveId`: integer [int32] **REQUIRED**: Parent archive (folder) ID
+- `subject`: string (max 255) **REQUIRED**: Item subject / filename
+- `text`: string (nullable): Optional body text / contents
+- `isHtml`: boolean: Whether the CloudRadial.API.Models.Requests.ArchiveItemRequest.Text contains HTML
+- `isError`: boolean: Mark item as error
 
 ### ArchiveItemResponse
 - `archiveItemId`: integer [int32]
@@ -92,33 +94,33 @@ OpenAPI: 3.0.1
 - `company`: Company
 
 ### ArticleRequest
-- `companyId`: integer [int32] **REQUIRED** — Company ID for tenant isolation
-- `subject`: string (max 500) **REQUIRED** — Article subject/title
-- `category`: string (nullable) (max 200) — Article category
-- `datePublished`: string [date-time] **REQUIRED** — Publication date
-- `body`: string **REQUIRED** — Article body content
-- `author`: string (nullable) (max 200) — Article author
-- `isFavorite`: boolean — Whether article is pinned to top of category
-- `isFrontPage`: boolean — Whether article is pinned on front page
-- `url`: string (nullable) (max 1000) — External URL if article links to external content
+- `companyId`: integer [int32] **REQUIRED**: Company ID for tenant isolation
+- `subject`: string (max 500) **REQUIRED**: Article subject/title
+- `category`: string (nullable) (max 200): Article category
+- `datePublished`: string [date-time] **REQUIRED**: Publication date
+- `body`: string **REQUIRED**: Article body content
+- `author`: string (nullable) (max 200): Article author
+- `isFavorite`: boolean: Whether article is pinned to top of category
+- `isFrontPage`: boolean: Whether article is pinned on front page
+- `url`: string (nullable) (max 1000): External URL if article links to external content
 
 ### ArticleResponse
-- `articleId`: integer [int32] — Article ID
-- `companyId`: integer [int32] — Company ID
-- `subject`: string (nullable) — Article subject/title
-- `category`: string (nullable) — Article category
-- `datePublished`: string [date-time] — Publication date
-- `body`: string (nullable) — Article body content
-- `author`: string (nullable) — Article author
-- `isFavorite`: boolean — Whether article is pinned to top of category
-- `isFrontPage`: boolean — Whether article is pinned on front page
-- `viewToken`: string [uuid] — View token for article access
-- `url`: string (nullable) — External URL if article links to external content
-- `updateKey`: string [uuid] — Update key for article synchronization
-- `dateCreated`: string [date-time] — Date the article was created
-- `dateModified`: string [date-time] — Date the article was last modified
-- `isSubscribed`: boolean — Whether the article is subscribed
-- `isPartnerManaged`: boolean (nullable) — Whether the article is partner managed
+- `articleId`: integer [int32]: Article ID
+- `companyId`: integer [int32]: Company ID
+- `subject`: string (nullable): Article subject/title
+- `category`: string (nullable): Article category
+- `datePublished`: string [date-time]: Publication date
+- `body`: string (nullable): Article body content
+- `author`: string (nullable): Article author
+- `isFavorite`: boolean: Whether article is pinned to top of category
+- `isFrontPage`: boolean: Whether article is pinned on front page
+- `viewToken`: string [uuid]: View token for article access
+- `url`: string (nullable): External URL if article links to external content
+- `updateKey`: string [uuid]: Update key for article synchronization
+- `dateCreated`: string [date-time]: Date the article was created
+- `dateModified`: string [date-time]: Date the article was last modified
+- `isSubscribed`: boolean: Whether the article is subscribed
+- `isPartnerManaged`: boolean (nullable): Whether the article is partner managed
 
 ### Assessment
 - `assessmentId`: integer [int32]
@@ -153,9 +155,9 @@ OpenAPI: 3.0.1
 - `isDeleted`: boolean
 
 ### AssessmentImportTemplateRequest
-- `assessmentId`: integer [int32] **REQUIRED** — The destination assessment ID to import questions into.
-- `templateId`: integer [int32] **REQUIRED** — The source template assessment ID to copy questions from.
-- `applyTo`: string (nullable) — Optional scope to apply template to: "server", "endpoint", "user" or anything else for a single copy.
+- `assessmentId`: integer [int32] **REQUIRED**: The destination assessment ID to import questions into.
+- `templateId`: integer [int32] **REQUIRED**: The source template assessment ID to copy questions from.
+- `applyTo`: string (nullable): Optional scope to apply template to: "server", "endpoint", "user" or anything else for a single copy.
 
 ### Catalog
 - `companyCatalogId`: integer [int32]
@@ -291,8 +293,8 @@ OpenAPI: 3.0.1
 
 ### CatalogQuestionResponseStandardAPIResponse
 - `data`: CatalogQuestionResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### Certificate
 - `id`: integer [int32]
@@ -349,8 +351,8 @@ OpenAPI: 3.0.1
 
 ### CertificateResponseStandardAPIResponse
 - `data`: CertificateResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### Company
 - `companyId`: integer [int32]
@@ -541,8 +543,8 @@ OpenAPI: 3.0.1
 
 ### CompanyCatalogResponseStandardAPIResponse
 - `data`: CompanyCatalogResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### CompanyCatalogTagRequest
 - `tag`: string (max 255) **REQUIRED**
@@ -606,8 +608,8 @@ OpenAPI: 3.0.1
 
 ### CompanyDomainResponseStandardAPIResponse
 - `data`: CompanyDomainResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### CompanyGroup
 - `companyGroupId`: integer [int32]
@@ -628,31 +630,31 @@ OpenAPI: 3.0.1
 - `companyGroup`: CompanyGroup
 
 ### CompanyGroupCompanyRequest
-- `companyGroupId`: integer [int32] **REQUIRED** — Company Group ID
-- `companyId`: integer [int32] **REQUIRED** — Company ID
+- `companyGroupId`: integer [int32] **REQUIRED**: Company Group ID
+- `companyId`: integer [int32] **REQUIRED**: Company ID
 
 ### CompanyGroupCompanyResponse
-- `companyGroupId`: integer [int32] — Company Group ID (part of composite key)
-- `companyId`: integer [int32] — Company ID (part of composite key)
-- `dateCreated`: string [date-time] — Date the group was created
-- `dateModified`: string [date-time] — Date the group was last modified
+- `companyGroupId`: integer [int32]: Company Group ID (part of composite key)
+- `companyId`: integer [int32]: Company ID (part of composite key)
+- `dateCreated`: string [date-time]: Date the group was created
+- `dateModified`: string [date-time]: Date the group was last modified
 
 ### CompanyGroupRequest
 - `group`: string (max 100) **REQUIRED**
 
 ### CompanyGroupResponse
-- `companyGroupId`: integer [int32] — Company Group ID
+- `companyGroupId`: integer [int32]: Company Group ID
 - `group`: string (nullable)
 - `dateCreated`: string [date-time]
 - `dateModified`: string [date-time]
 
 ### CompanyRequest
-- `name`: string **REQUIRED** — Company name
-- `partnerId`: integer [int32] (nullable) — ID of the partner this company belongs to (optional)
-- `psaKey`: integer [int64] — PSA Key for the company (optional)
-- `psaIdentifier`: string (nullable) — PSA Identifier for the company (optional)
-- `territory`: string (nullable) — Territory assigned to the company (optional)
-- `accountManager`: string (nullable) — Account manager for the company (optional)
+- `name`: string **REQUIRED**: Company name
+- `partnerId`: integer [int32] (nullable): ID of the partner this company belongs to (optional)
+- `psaKey`: integer [int64]: PSA Key for the company (optional)
+- `psaIdentifier`: string (nullable): PSA Identifier for the company (optional)
+- `territory`: string (nullable): Territory assigned to the company (optional)
+- `accountManager`: string (nullable): Account manager for the company (optional)
 
 ### Course
 - `courseId`: integer [int32]
@@ -679,8 +681,8 @@ OpenAPI: 3.0.1
 - `company`: Company
 
 ### CourseCompletionRequest
-- `score`: integer [int32] (nullable) — Optional score achieved in the course (percentage)
-- `comment`: string (nullable) — Optional comment or feedback about the course
+- `score`: integer [int32] (nullable): Optional score achieved in the course (percentage)
+- `comment`: string (nullable): Optional comment or feedback about the course
 - `completionDate`: string [date-time] (nullable)
 
 ### CourseEnrollment
@@ -700,8 +702,8 @@ OpenAPI: 3.0.1
 - `course`: Course
 
 ### CourseEnrollmentRequest
-- `courseId`: integer [int32] **REQUIRED** — The ID of the course to enroll in
-- `userId`: string **REQUIRED** — The ID of the user to enroll in the course
+- `courseId`: integer [int32] **REQUIRED**: The ID of the course to enroll in
+- `userId`: string **REQUIRED**: The ID of the user to enroll in the course
 
 ### CourseLesson
 - `courseLessonId`: integer [int32]
@@ -740,16 +742,16 @@ OpenAPI: 3.0.1
 - `completedScore`: integer [int32] **REQUIRED**
 
 ### CourseLessonHistoryResponse
-- `courseLessonHistoryId`: string (nullable) — Course lesson history composite key identifier (for client reference)
+- `courseLessonHistoryId`: string (nullable): Course lesson history composite key identifier (for client reference)
 Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
-- `courseId`: integer [int32] — Course ID
-- `applicationUserId`: string (nullable) — Application User ID
-- `courseLessonId`: integer [int32] — Course lesson ID
-- `companyId`: integer [int32] — Company ID
-- `completedScore`: integer [int32] — Completed score for the lesson
-- `dateCreated`: string [date-time] — Date the history record was created
-- `dateModified`: string [date-time] — Date the history record was last modified
-- `isDeleted`: boolean — Whether the history record is soft deleted
+- `courseId`: integer [int32]: Course ID
+- `applicationUserId`: string (nullable): Application User ID
+- `courseLessonId`: integer [int32]: Course lesson ID
+- `companyId`: integer [int32]: Company ID
+- `completedScore`: integer [int32]: Completed score for the lesson
+- `dateCreated`: string [date-time]: Date the history record was created
+- `dateModified`: string [date-time]: Date the history record was last modified
+- `isDeleted`: boolean: Whether the history record is soft deleted
 
 ### CourseLessonRequest
 - `companyId`: integer [int32] **REQUIRED**
@@ -761,36 +763,36 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `order`: integer [int32]
 
 ### CourseLessonResponse
-- `courseLessonId`: integer [int32] — Course lesson ID
-- `courseId`: integer [int32] — Course ID
-- `companyId`: integer [int32] — Company ID
-- `title`: string (nullable) — Lesson title
-- `overview`: string (nullable) — Lesson overview
-- `category`: string (nullable) — Lesson category
-- `text`: string (nullable) — Lesson content text
-- `order`: integer [int32] — Lesson order within the course
-- `updateKey`: string [uuid] — Update key for lesson synchronization
-- `dateCreated`: string [date-time] — Date the lesson was created
-- `dateModified`: string [date-time] — Date the lesson was last modified
-- `isDeleted`: boolean — Whether the lesson is soft deleted
+- `courseLessonId`: integer [int32]: Course lesson ID
+- `courseId`: integer [int32]: Course ID
+- `companyId`: integer [int32]: Company ID
+- `title`: string (nullable): Lesson title
+- `overview`: string (nullable): Lesson overview
+- `category`: string (nullable): Lesson category
+- `text`: string (nullable): Lesson content text
+- `order`: integer [int32]: Lesson order within the course
+- `updateKey`: string [uuid]: Update key for lesson synchronization
+- `dateCreated`: string [date-time]: Date the lesson was created
+- `dateModified`: string [date-time]: Date the lesson was last modified
+- `isDeleted`: boolean: Whether the lesson is soft deleted
 
 ### CourseRequest
-- `name`: string **REQUIRED** — Name of the course
-- `description`: string **REQUIRED** — Detailed description of the course
-- `shortDescription`: string **REQUIRED** — Short description of the course
-- `category`: string **REQUIRED** — Category of the course
-- `estimatedTime`: integer [int32] **REQUIRED** — Estimated time to complete the course (in minutes)
-- `isRequired`: boolean — Whether the course is required
-- `validMonths`: integer [int32] — Number of months before certification expires (0 for never)
-- `isFrontPage`: boolean — Whether the course should appear on the front page
-- `externalCourseId`: string (nullable) — External course ID if applicable
-- `isExternalFreeCourse`: boolean — Whether the external course is free
-- `passScore`: integer [int32] — Passing score for the course (percentage)
-- `externalCourseUrl`: string (nullable) — URL for external course content if applicable
-- `courseImageUrl`: string (nullable) — URL for the course image if applicable
+- `name`: string **REQUIRED**: Name of the course
+- `description`: string **REQUIRED**: Detailed description of the course
+- `shortDescription`: string **REQUIRED**: Short description of the course
+- `category`: string **REQUIRED**: Category of the course
+- `estimatedTime`: integer [int32] **REQUIRED**: Estimated time to complete the course (in minutes)
+- `isRequired`: boolean: Whether the course is required
+- `validMonths`: integer [int32]: Number of months before certification expires (0 for never)
+- `isFrontPage`: boolean: Whether the course should appear on the front page
+- `externalCourseId`: string (nullable): External course ID if applicable
+- `isExternalFreeCourse`: boolean: Whether the external course is free
+- `passScore`: integer [int32]: Passing score for the course (percentage)
+- `externalCourseUrl`: string (nullable): URL for external course content if applicable
+- `courseImageUrl`: string (nullable): URL for the course image if applicable
 - `companyId`: integer [int32]
-- `prerequisites`: array (nullable) — List of prerequisite course IDs
-- `groups`: array (nullable) — List of groups to associate with the course
+- `prerequisites`: array (nullable): List of prerequisite course IDs
+- `groups`: array (nullable): List of groups to associate with the course
 
 ### CreateFlexibleAssetFieldRequest
 - `flexibleAssetTypeId`: integer [int32] **REQUIRED**
@@ -917,55 +919,55 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `companyId`: integer [int32]
 
 ### EndpointApplicationRequest
-- `companyId`: integer [int32] **REQUIRED** — The company ID for tenant isolation
-- `endpointId`: integer [int32] **REQUIRED** — The company endpoint ID
-- `name`: string (nullable) — The name of the application
-- `publisher`: string **REQUIRED** — The publisher of the application
-- `readme`: string (nullable) — The readme information
-- `helpURL`: string (nullable) — The help URL
-- `helpPhone`: string (nullable) — The help phone number
-- `aboutURL`: string (nullable) — The about URL
-- `updateURL`: string (nullable) — The update URL
-- `comments`: string (nullable) — Comments about the application
-- `category`: string (nullable) — The category of the application
-- `isCloudStorage`: boolean — Whether the application is cloud storage
+- `companyId`: integer [int32] **REQUIRED**: The company ID for tenant isolation
+- `endpointId`: integer [int32] **REQUIRED**: The company endpoint ID
+- `name`: string (nullable): The name of the application
+- `publisher`: string **REQUIRED**: The publisher of the application
+- `readme`: string (nullable): The readme information
+- `helpURL`: string (nullable): The help URL
+- `helpPhone`: string (nullable): The help phone number
+- `aboutURL`: string (nullable): The about URL
+- `updateURL`: string (nullable): The update URL
+- `comments`: string (nullable): Comments about the application
+- `category`: string (nullable): The category of the application
+- `isCloudStorage`: boolean: Whether the application is cloud storage
 - `platformType`: EndpointPlatformType
-- `estimatedSize`: integer [int32] — The estimated size of the application
-- `installPath`: string (nullable) — The install path of the application
-- `uninstallPath`: string (nullable) — The uninstall path of the application
-- `modifyPath`: string (nullable) — The modify path of the application
-- `installDate`: string [date-time] (nullable) — The install date of the application
-- `display`: string (nullable) — The display version of the application
-- `major`: integer [int32] — The major version number
-- `minor`: integer [int32] — The minor version number
-- `version`: integer [int32] — The version number
+- `estimatedSize`: integer [int32]: The estimated size of the application
+- `installPath`: string (nullable): The install path of the application
+- `uninstallPath`: string (nullable): The uninstall path of the application
+- `modifyPath`: string (nullable): The modify path of the application
+- `installDate`: string [date-time] (nullable): The install date of the application
+- `display`: string (nullable): The display version of the application
+- `major`: integer [int32]: The major version number
+- `minor`: integer [int32]: The minor version number
+- `version`: integer [int32]: The version number
 
 ### EndpointApplicationResponse
-- `endpointApplicationId`: integer [int32] — The unique identifier for the endpoint application
-- `dateCreated`: string [date-time] — The date the endpoint application was created
-- `dateModified`: string [date-time] — The date the endpoint application was last modified
-- `companyId`: integer [int32] **REQUIRED** — The company ID for tenant isolation
-- `endpointId`: integer [int32] **REQUIRED** — The company endpoint ID
-- `name`: string (nullable) — The name of the application
-- `publisher`: string **REQUIRED** — The publisher of the application
-- `readme`: string (nullable) — The readme information
-- `helpURL`: string (nullable) — The help URL
-- `helpPhone`: string (nullable) — The help phone number
-- `aboutURL`: string (nullable) — The about URL
-- `updateURL`: string (nullable) — The update URL
-- `comments`: string (nullable) — Comments about the application
-- `category`: string (nullable) — The category of the application
-- `isCloudStorage`: boolean — Whether the application is cloud storage
+- `endpointApplicationId`: integer [int32]: The unique identifier for the endpoint application
+- `dateCreated`: string [date-time]: The date the endpoint application was created
+- `dateModified`: string [date-time]: The date the endpoint application was last modified
+- `companyId`: integer [int32] **REQUIRED**: The company ID for tenant isolation
+- `endpointId`: integer [int32] **REQUIRED**: The company endpoint ID
+- `name`: string (nullable): The name of the application
+- `publisher`: string **REQUIRED**: The publisher of the application
+- `readme`: string (nullable): The readme information
+- `helpURL`: string (nullable): The help URL
+- `helpPhone`: string (nullable): The help phone number
+- `aboutURL`: string (nullable): The about URL
+- `updateURL`: string (nullable): The update URL
+- `comments`: string (nullable): Comments about the application
+- `category`: string (nullable): The category of the application
+- `isCloudStorage`: boolean: Whether the application is cloud storage
 - `platformType`: EndpointPlatformType
-- `estimatedSize`: integer [int32] — The estimated size of the application
-- `installPath`: string (nullable) — The install path of the application
-- `uninstallPath`: string (nullable) — The uninstall path of the application
-- `modifyPath`: string (nullable) — The modify path of the application
-- `installDate`: string [date-time] (nullable) — The install date of the application
-- `display`: string (nullable) — The display version of the application
-- `major`: integer [int32] — The major version number
-- `minor`: integer [int32] — The minor version number
-- `version`: integer [int32] — The version number
+- `estimatedSize`: integer [int32]: The estimated size of the application
+- `installPath`: string (nullable): The install path of the application
+- `uninstallPath`: string (nullable): The uninstall path of the application
+- `modifyPath`: string (nullable): The modify path of the application
+- `installDate`: string [date-time] (nullable): The install date of the application
+- `display`: string (nullable): The display version of the application
+- `major`: integer [int32]: The major version number
+- `minor`: integer [int32]: The minor version number
+- `version`: integer [int32]: The version number
 
 ### EndpointAuditPolicy
 - `endpointAuditPolicyId`: integer [int32] **REQUIRED**
@@ -1177,8 +1179,8 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 
 ### FeedbackResponseStandardAPIResponse
 - `data`: FeedbackResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### FlexibleAsset
 - `id`: integer [int32]
@@ -1366,8 +1368,8 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 
 ### MediaResponseStandardAPIResponse
 - `data`: MediaResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### Menu
 - `companyMenuId`: integer [int32]
@@ -1395,47 +1397,47 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `tags`: string (nullable)
 
 ### MenuRequest
-- `companyId`: integer [int32] **REQUIRED** — Company ID for tenant isolation
-- `applicationUserId`: string (nullable) — Application User ID (optional for personal menu items)
-- `editRights`: integer [int32] **REQUIRED** — Edit rights level
-- `name`: string (max 500) **REQUIRED** — Menu item name
-- `url`: string (max 2000) **REQUIRED** — Menu item URL
-- `category`: string (max 200) **REQUIRED** — Menu category
-- `color`: string (nullable) (max 50) — Menu item color
-- `icon`: string (nullable) (max 100) — Menu item icon
-- `iconColor`: string (nullable) (max 50) — Menu item icon color
-- `iconUrl`: string (nullable) (max 2000) — Menu item icon URL
-- `instructions`: string (nullable) — Menu item instructions
-- `order`: integer [int32] **REQUIRED** — Menu item display order
+- `companyId`: integer [int32] **REQUIRED**: Company ID for tenant isolation
+- `applicationUserId`: string (nullable): Application User ID (optional for personal menu items)
+- `editRights`: integer [int32] **REQUIRED**: Edit rights level
+- `name`: string (max 500) **REQUIRED**: Menu item name
+- `url`: string (max 2000) **REQUIRED**: Menu item URL
+- `category`: string (max 200) **REQUIRED**: Menu category
+- `color`: string (nullable) (max 50): Menu item color
+- `icon`: string (nullable) (max 100): Menu item icon
+- `iconColor`: string (nullable) (max 50): Menu item icon color
+- `iconUrl`: string (nullable) (max 2000): Menu item icon URL
+- `instructions`: string (nullable): Menu item instructions
+- `order`: integer [int32] **REQUIRED**: Menu item display order
 - `source`: DataSource
-- `toolTip`: string (nullable) (max 500) — Menu item tooltip
-- `groups`: array (nullable) — List of group names associated with this menu item
+- `toolTip`: string (nullable) (max 500): Menu item tooltip
+- `groups`: array (nullable): List of group names associated with this menu item
 
 ### MenuResponse
-- `companyMenuId`: integer [int32] — Menu ID
-- `companyId`: integer [int32] — Company ID
-- `applicationUserId`: string (nullable) — Application User ID (for personal menu items)
-- `editRights`: integer [int32] — Edit rights level
-- `name`: string (nullable) — Menu item name
-- `url`: string (nullable) — Menu item URL
-- `category`: string (nullable) — Menu category
-- `color`: string (nullable) — Menu item color
-- `icon`: string (nullable) — Menu item icon
-- `iconColor`: string (nullable) — Menu item icon color
-- `iconUrl`: string (nullable) — Menu item icon URL
-- `instructions`: string (nullable) — Menu item instructions
-- `order`: integer [int32] — Menu item display order
+- `companyMenuId`: integer [int32]: Menu ID
+- `companyId`: integer [int32]: Company ID
+- `applicationUserId`: string (nullable): Application User ID (for personal menu items)
+- `editRights`: integer [int32]: Edit rights level
+- `name`: string (nullable): Menu item name
+- `url`: string (nullable): Menu item URL
+- `category`: string (nullable): Menu category
+- `color`: string (nullable): Menu item color
+- `icon`: string (nullable): Menu item icon
+- `iconColor`: string (nullable): Menu item icon color
+- `iconUrl`: string (nullable): Menu item icon URL
+- `instructions`: string (nullable): Menu item instructions
+- `order`: integer [int32]: Menu item display order
 - `source`: DataSource
-- `toolTip`: string (nullable) — Menu item tooltip
-- `dateCreated`: string [date-time] — Date created
-- `dateModified`: string [date-time] — Date modified
-- `isDeleted`: boolean — Whether the item is deleted
-- `updateKey`: string [uuid] — Update key for optimistic concurrency
-- `isSubscribed`: boolean — Whether the item is subscribed
-- `isPartnerManaged`: boolean (nullable) — Whether the item is partner managed
-- `createdBy`: string (nullable) — Created by user
-- `modifiedBy`: string (nullable) — Modified by user
-- `groups`: array (nullable) — List of group names associated with this menu item
+- `toolTip`: string (nullable): Menu item tooltip
+- `dateCreated`: string [date-time]: Date created
+- `dateModified`: string [date-time]: Date modified
+- `isDeleted`: boolean: Whether the item is deleted
+- `updateKey`: string [uuid]: Update key for optimistic concurrency
+- `isSubscribed`: boolean: Whether the item is subscribed
+- `isPartnerManaged`: boolean (nullable): Whether the item is partner managed
+- `createdBy`: string (nullable): Created by user
+- `modifiedBy`: string (nullable): Modified by user
+- `groups`: array (nullable): List of group names associated with this menu item
 
 ### Operation
 - `value`: object (nullable)
@@ -1503,11 +1505,11 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `company`: Company
 
 ### ProductCategoryRequest
-- `productCategoryId`: integer [int32] (nullable) — Optional: If provided, updates existing category. If null, creates new category.
-- `name`: string **REQUIRED** — Required: Category name
-- `order`: integer [int32] — Display order for the category
-- `color`: string (nullable) — Optional: Category color (hex code)
-- `body`: string (nullable) — Optional: Category description/body
+- `productCategoryId`: integer [int32] (nullable): Optional: If provided, updates existing category. If null, creates new category.
+- `name`: string **REQUIRED**: Required: Category name
+- `order`: integer [int32]: Display order for the category
+- `color`: string (nullable): Optional: Category color (hex code)
+- `body`: string (nullable): Optional: Category description/body
 
 ### ProductRequest
 - `companyId`: integer [int32] **REQUIRED**
@@ -1561,7 +1563,7 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `estimatedEndDate`: string [date-time] (nullable)
 - `productType`: integer [int32]
 - `quarterOffset`: integer [int32]
-- `tags`: array (nullable) — List of tags to associate with the product
+- `tags`: array (nullable): List of tags to associate with the product
 - `categoryData`: ProductCategoryRequest
 
 ### ProductResponse
@@ -1618,15 +1620,15 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `estimatedEndDate`: string [date-time] (nullable)
 - `productType`: integer [int32]
 - `quarterOffset`: integer [int32]
-- `tags`: array (nullable) — List of tags associated with the product
+- `tags`: array (nullable): List of tags associated with the product
 - `dateCreated`: string [date-time]
 - `dateModified`: string [date-time]
 - `isDeleted`: boolean
 
 ### ProductResponseStandardAPIResponse
 - `data`: ProductResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### Quickstart
 - `quickstartId`: integer [int32]
@@ -1649,19 +1651,19 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `company`: Company
 
 ### QuickstartRequest
-- `companyId`: integer [int32] **REQUIRED** — Company ID for tenant isolation
-- `subject`: string (max 500) **REQUIRED** — Quickstart subject/title
-- `description`: string **REQUIRED** — Short description
-- `category`: string (max 200) **REQUIRED** — Category
-- `body`: string (nullable) — Body content (used when IsText is true)
-- `icon`: string **REQUIRED** — Icon name
-- `iconColor`: string **REQUIRED** — Icon color
-- `iconUrl`: string (nullable) — Icon URL
-- `datePublished`: string [date-time] **REQUIRED** — Publication date
-- `isText`: boolean **REQUIRED** — Indicates if this quickstart stores text content in Body
-- `isFavorite`: boolean — Pinned/favorite flag
-- `length`: integer [int64] (nullable) — Total payload length in bytes for non-text content. If IsText, it's derived from Body length.
-- `contentType`: string (nullable) (max 100) — MIME content type, required for non-text content
+- `companyId`: integer [int32] **REQUIRED**: Company ID for tenant isolation
+- `subject`: string (max 500) **REQUIRED**: Quickstart subject/title
+- `description`: string **REQUIRED**: Short description
+- `category`: string (max 200) **REQUIRED**: Category
+- `body`: string (nullable): Body content (used when IsText is true)
+- `icon`: string **REQUIRED**: Icon name
+- `iconColor`: string **REQUIRED**: Icon color
+- `iconUrl`: string (nullable): Icon URL
+- `datePublished`: string [date-time] **REQUIRED**: Publication date
+- `isText`: boolean **REQUIRED**: Indicates if this quickstart stores text content in Body
+- `isFavorite`: boolean: Pinned/favorite flag
+- `length`: integer [int64] (nullable): Total payload length in bytes for non-text content. If IsText, it's derived from Body length.
+- `contentType`: string (nullable) (max 100): MIME content type, required for non-text content
 
 ### QuickstartResponse
 - `quickstartId`: integer [int32]
@@ -1705,50 +1707,50 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `service`: Service
 
 ### ServiceInstallRequest
-- `endpointId`: integer [int32] **REQUIRED** — The endpoint ID
-- `serviceId`: integer [int32] **REQUIRED** — The service ID
-- `status`: string (nullable) (max 100) — The status of the service installation
-- `startupType`: string (nullable) (max 100) — The startup type of the service
-- `fullVersion`: string (nullable) (max 50) — The full version of the service
-- `version`: integer [int32] (nullable) — The version number
-- `major`: integer [int32] (nullable) — The major version number
-- `minor`: integer [int32] (nullable) — The minor version number
+- `endpointId`: integer [int32] **REQUIRED**: The endpoint ID
+- `serviceId`: integer [int32] **REQUIRED**: The service ID
+- `status`: string (nullable) (max 100): The status of the service installation
+- `startupType`: string (nullable) (max 100): The startup type of the service
+- `fullVersion`: string (nullable) (max 50): The full version of the service
+- `version`: integer [int32] (nullable): The version number
+- `major`: integer [int32] (nullable): The major version number
+- `minor`: integer [int32] (nullable): The minor version number
 
 ### ServiceInstallResponse
-- `endpointId`: integer [int32] — The endpoint ID
-- `serviceId`: integer [int32] — The service ID
-- `status`: string (nullable) — The status of the service installation
-- `startupType`: string (nullable) — The startup type of the service
-- `fullVersion`: string (nullable) — The full version of the service
-- `version`: integer [int32] (nullable) — The version number
-- `major`: integer [int32] (nullable) — The major version number
-- `minor`: integer [int32] (nullable) — The minor version number
+- `endpointId`: integer [int32]: The endpoint ID
+- `serviceId`: integer [int32]: The service ID
+- `status`: string (nullable): The status of the service installation
+- `startupType`: string (nullable): The startup type of the service
+- `fullVersion`: string (nullable): The full version of the service
+- `version`: integer [int32] (nullable): The version number
+- `major`: integer [int32] (nullable): The major version number
+- `minor`: integer [int32] (nullable): The minor version number
 
 ### ServiceInstallUpdateRequest
-- `status`: string (nullable) (max 100) — The status of the service installation
-- `startupType`: string (nullable) (max 100) — The startup type of the service
-- `fullVersion`: string (nullable) (max 50) — The full version of the service
-- `version`: integer [int32] (nullable) — The version number
-- `major`: integer [int32] (nullable) — The major version number
-- `minor`: integer [int32] (nullable) — The minor version number
-- `companyId`: integer [int32] **REQUIRED** — The company ID for tenant scoping
+- `status`: string (nullable) (max 100): The status of the service installation
+- `startupType`: string (nullable) (max 100): The startup type of the service
+- `fullVersion`: string (nullable) (max 50): The full version of the service
+- `version`: integer [int32] (nullable): The version number
+- `major`: integer [int32] (nullable): The major version number
+- `minor`: integer [int32] (nullable): The minor version number
+- `companyId`: integer [int32] **REQUIRED**: The company ID for tenant scoping
 - `endpointId`: integer [int32]
 - `serviceId`: integer [int32]
 
 ### ServiceRequest
-- `companyId`: integer [int32] **REQUIRED** — Company ID that owns this service
-- `name`: string (max 100) **REQUIRED** — Name of the service
-- `description`: string (nullable) (max 500) — Description of the service
-- `category`: string (nullable) (max 100) — Category of the service
+- `companyId`: integer [int32] **REQUIRED**: Company ID that owns this service
+- `name`: string (max 100) **REQUIRED**: Name of the service
+- `description`: string (nullable) (max 500): Description of the service
+- `category`: string (nullable) (max 100): Category of the service
 
 ### ServiceResponse
-- `serviceId`: integer [int32] — Service ID
-- `companyId`: integer [int32] — Company ID that owns this service
-- `name`: string (nullable) — Name of the service
-- `description`: string (nullable) — Description of the service
-- `category`: string (nullable) — Category of the service
-- `dateCreated`: string [date-time] — Date when the service was created
-- `dateModified`: string [date-time] — Date when the service was last modified
+- `serviceId`: integer [int32]: Service ID
+- `companyId`: integer [int32]: Company ID that owns this service
+- `name`: string (nullable): Name of the service
+- `description`: string (nullable): Description of the service
+- `category`: string (nullable): Category of the service
+- `dateCreated`: string [date-time]: Date when the service was created
+- `dateModified`: string [date-time]: Date when the service was last modified
 
 ### StandardAPIResponse
 - `success`: boolean
@@ -1764,26 +1766,26 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `company`: Company
 
 ### TokenRequest
-- `companyId`: integer [int32] **REQUIRED** — Company ID (0 for partner-level tokens, >0 for company-level tokens)
-- `token`: string (max 255) **REQUIRED** — Token name (case-sensitive)
-- `value`: string **REQUIRED** — Token value (empty string allowed for placeholder tokens)
+- `companyId`: integer [int32] **REQUIRED**: Company ID (0 for partner-level tokens, >0 for company-level tokens)
+- `token`: string (max 255) **REQUIRED**: Token name (case-sensitive)
+- `value`: string **REQUIRED**: Token value (empty string allowed for placeholder tokens)
 - `type`: VariableType
 
 ### TokenResponse
-- `companyId`: integer [int32] — Company ID (0 for partner-level tokens, >0 for company-level tokens)
-- `token`: string (nullable) — Token name
-- `value`: string (nullable) — Token value
+- `companyId`: integer [int32]: Company ID (0 for partner-level tokens, >0 for company-level tokens)
+- `token`: string (nullable): Token name
+- `value`: string (nullable): Token value
 - `type`: VariableType
 
 ### TokenResponseListStandardAPIResponse
-- `data`: array (nullable) — The return data
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `data`: array (nullable): The return data
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### TokenResponseStandardAPIResponse
 - `data`: TokenResponse
-- `success`: boolean — The status of the API call if not success
-- `message`: string (nullable) — Any relevant messages for the consumer
+- `success`: boolean: The status of the API call if not success
+- `message`: string (nullable): Any relevant messages for the consumer
 
 ### User
 - `userId`: string (nullable)
@@ -1812,50 +1814,50 @@ Format: {CourseId}-{ApplicationUserId}-{CourseLessonId}
 - `company`: Company
 
 ### UserRequest
-- `email`: string [email] **REQUIRED** — User's email address
-- `companyId`: integer [int32] **REQUIRED** — The ID of the company this user belongs to.
-- `firstName`: string **REQUIRED** — User's first name
-- `lastName`: string **REQUIRED** — User's last name
-- `userName`: string (nullable) — User's username (optional)
-- `phoneNumber`: string (nullable) — User's phone number (optional)
-- `mobilePhone`: string (nullable) — User's mobile phone (optional)
-- `department`: string (nullable) — User's department (optional)
-- `title`: string (nullable) — User's title (optional)
-- `country`: string (nullable) — User's country (optional)
-- `streetAddress`: string (nullable) — User's street address (optional)
-- `city`: string (nullable) — User's city (optional)
-- `state`: string (nullable) — User's state (optional)
-- `postalCode`: string (nullable) — User's postal code (optional)
-- `isShowInDirectory`: boolean — Whether to show the user in directory
-- `isPartnerAdminUser`: boolean — Whether the user is a partner admin
-- `is365Active`: boolean — Whether the user has an active Microsoft 365 account
-- `isCompliance`: boolean — Whether the user is compliant
-- `isDigestOptIn`: boolean — Whether the user should receive digest emails (frontend naming)
-- `isDirectOptIn`: boolean — Whether the user should receive direct messages
-- `isOfficeStrongAuthentication`: boolean — Whether the user has multi-factor authentication enabled
-- `psaKey`: integer [int64] — User's PSA Key
-- `psaSiteKey`: integer [int64] — User's PSA Site Key
-- `psaChildAccountKey`: integer [int64] — User's PSA Child Account Key
-- `isLoginDisabled`: boolean — Whether the user login is disabled
+- `email`: string [email] **REQUIRED**: User's email address
+- `companyId`: integer [int32] **REQUIRED**: The ID of the company this user belongs to.
+- `firstName`: string **REQUIRED**: User's first name
+- `lastName`: string **REQUIRED**: User's last name
+- `userName`: string (nullable): User's username (optional)
+- `phoneNumber`: string (nullable): User's phone number (optional)
+- `mobilePhone`: string (nullable): User's mobile phone (optional)
+- `department`: string (nullable): User's department (optional)
+- `title`: string (nullable): User's title (optional)
+- `country`: string (nullable): User's country (optional)
+- `streetAddress`: string (nullable): User's street address (optional)
+- `city`: string (nullable): User's city (optional)
+- `state`: string (nullable): User's state (optional)
+- `postalCode`: string (nullable): User's postal code (optional)
+- `isShowInDirectory`: boolean: Whether to show the user in directory
+- `isPartnerAdminUser`: boolean: Whether the user is a partner admin
+- `is365Active`: boolean: Whether the user has an active Microsoft 365 account
+- `isCompliance`: boolean: Whether the user is compliant
+- `isDigestOptIn`: boolean: Whether the user should receive digest emails (frontend naming)
+- `isDirectOptIn`: boolean: Whether the user should receive direct messages
+- `isOfficeStrongAuthentication`: boolean: Whether the user has multi-factor authentication enabled
+- `psaKey`: integer [int64]: User's PSA Key
+- `psaSiteKey`: integer [int64]: User's PSA Site Key
+- `psaChildAccountKey`: integer [int64]: User's PSA Child Account Key
+- `isLoginDisabled`: boolean: Whether the user login is disabled
 - `priorityStatus`: ApplicationUserPriorityType
 - `source`: DataSource
-- `ticketBoardOverride`: string (nullable) (max 4000) — User's ticket board override
-- `ticketStatusOverride`: string (nullable) (max 4000) — User's ticket status override
+- `ticketBoardOverride`: string (nullable) (max 4000): User's ticket board override
+- `ticketStatusOverride`: string (nullable) (max 4000): User's ticket status override
 
 ### UserResponseDto
-- `userId`: string (nullable) — The unique identifier for the user
-- `applicationUserId`: string (nullable) — The application user identifier (alias for UserId for API consistency)
-- `email`: string (nullable) — Email address of the user
-- `firstName`: string (nullable) — First name of the user
-- `lastName`: string (nullable) — Last name of the user
-- `userName`: string (nullable) — Username of the user
-- `phoneNumber`: string (nullable) — Phone number of the user
-- `companyId`: integer [int32] — Company ID the user belongs to
-- `displayName`: string (nullable) — Display name (typically FirstName + LastName)
-- `psaKey`: integer [int64] — PSA Key identifier for the user
-- `psaSiteKey`: integer [int64] — PSA Site Key identifier for the user
-- `psaChildAccountKey`: integer [int64] — PSA Child Account Key identifier for the user
-- `supportPin`: string (nullable) — Support PIN used to verify the user's identity over the phone
+- `userId`: string (nullable): The unique identifier for the user
+- `applicationUserId`: string (nullable): The application user identifier (alias for UserId for API consistency)
+- `email`: string (nullable): Email address of the user
+- `firstName`: string (nullable): First name of the user
+- `lastName`: string (nullable): Last name of the user
+- `userName`: string (nullable): Username of the user
+- `phoneNumber`: string (nullable): Phone number of the user
+- `companyId`: integer [int32]: Company ID the user belongs to
+- `displayName`: string (nullable): Display name (typically FirstName + LastName)
+- `psaKey`: integer [int64]: PSA Key identifier for the user
+- `psaSiteKey`: integer [int64]: PSA Site Key identifier for the user
+- `psaChildAccountKey`: integer [int64]: PSA Child Account Key identifier for the user
+- `supportPin`: string (nullable): Support PIN used to verify the user's identity over the phone
 
 ## Enumerations
 

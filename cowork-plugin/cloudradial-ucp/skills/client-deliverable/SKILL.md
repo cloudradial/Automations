@@ -43,6 +43,8 @@ Call `setup_status`. If it returns `configured: false`, defer to the `setup` ski
 | Goals (parent of initiatives) | Planner Category, or an Assessment | No Goal object exists |
 | Budget (multi-year, stacked chart) | Planner items priced by line | Partial, no chart |
 | Maturity index (DMI) | Assessment score, transparent | Different model, see below |
+| Microsoft security posture | Secure Score from the Microsoft 365 sync (`m365_secure_score`) | Ships today, read-only |
+| Delivering the PDF | Report archive upload (`archive_upload`) plus an optional Signal notice | Ships today |
 
 State the gaps out loud. A partner who discovers the missing budget chart during
 their own QBR loses more trust than one who was told up front.
@@ -201,6 +203,25 @@ per-QBR shared link, so call it out.
 Re-read the created items with `list_resources` and compute the totals yourself rather
 than trusting the intended values. Report project total, monthly recurring, quarterly
 and annual figures.
+
+### 9. Add Microsoft Secure Score (optional)
+
+Call `m365_secure_score` with the company's `company_id`. Put the score and percentage in the
+deliverable's security section, and the top improvement actions as candidate roadmap items (one
+Planner item per action the client agrees to, with Microsoft's `actionUrl` in the body). Say the score
+is as of CloudRadial's last daily sync. If no tenant is linked to the company, say so and skip the
+section; don't estimate a score.
+
+### 10. Publish and announce (optional)
+
+The Report Layout PDF is exported in the portal (step 7). Once the user has that PDF:
+
+1. **Publish it** to the client's report archive with `archive_upload` (for example folder
+   "Business Reviews", `create_folder: true` if it doesn't exist). Show the company, folder and file,
+   and upload only after the user confirms.
+2. **Tell the client** with `signal_message`: an info notice to the client's contacts with a button
+   to the portal's reports page. Follow the `client-communications` skill: preview first, send only
+   after an explicit yes.
 
 ## Mapping a DMI or maturity score
 

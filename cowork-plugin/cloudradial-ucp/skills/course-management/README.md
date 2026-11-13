@@ -61,7 +61,19 @@ date, and who is still in progress.
 
 **What you get:** Enrollments with completion dates.
 
-**Good to know:** Enrollments can't be deleted through the API, and a completion score isn't stored on them.
+**Good to know:** A completion score isn't stored on the enrollment.
+
+### Remove someone from a course
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+Remove Sam from the phishing course at Contoso. Show me Sam's enrollment and
+progress first, and only remove it when I confirm.
+```
+
+**What you get:** Sam off the course roster; Sam can be enrolled again later.
+
+**Good to know:** The same prompt works for enrollments left behind by deleted users: ask to clean up Contoso's orphaned enrollments.
 
 ### Find where someone stopped
 `Per-company` · `Read-only` · **Tested**

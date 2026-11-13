@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Build ONE universal, pure-JS cloudradial-ucp.plugin.
 //
-// The plugin is platform-agnostic JavaScript (no native keyring binary — see
+// The plugin is platform-agnostic JavaScript (no native keyring binary; see
 // cloudradial-ucp-mcp/src/keyring-safe.ts), so a single artifact runs on every
 // OS. This replaces the previous six-per-OS native build; the release workflow
 // publishes this one file, which is also what README's direct-download links to.
@@ -89,4 +89,4 @@ zip.writeZip(artifact);
 }
 
 const size = (statSync(artifact).size / 1024 / 1024).toFixed(2);
-console.log(`\nBuilt: cloudradial-ucp.plugin (${size} MB) — one file for every OS.`);
+console.log(`\nBuilt: cloudradial-ucp.plugin (${size} MB), one file for every OS.`);

@@ -8,7 +8,7 @@ import {
 import { tools } from "./tools.js";
 
 const server = new Server(
-  { name: "cloudradial-ucp", version: "2.6.4" },
+  { name: "cloudradial-ucp", version: "2.7.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -48,7 +48,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  // Log to stderr — stdout is reserved for MCP protocol messages.
+  // Log to stderr: stdout is reserved for MCP protocol messages.
   console.error("cloudradial-ucp MCP server running on stdio");
 }
 

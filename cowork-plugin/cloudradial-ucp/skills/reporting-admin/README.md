@@ -51,16 +51,17 @@ text first and only publish it when I confirm.
 **What you get:** A published quickstart guide.
 
 ### Archive a report
-`Per-company` · `Writes to the portal` · **Partly works**
+`Per-company` · `Writes to the portal` · **Not yet tested**
 
 ```
-Save this month's backup summary to Contoso's Backup Reports archive folder
-as an HTML report. Show me the content before you save it.
+Upload this month's backup summary PDF to Contoso's Backup Reports archive
+folder. Show me the company, folder and file first, and only upload when I
+confirm.
 ```
 
-**What you get:** An archive item with the report as HTML text.
+**What you get:** An archive item with the PDF attached, as if you'd uploaded it in the portal.
 
-**Good to know:** The API can't attach a file to an archive item. Upload PDFs in the portal.
+**Good to know:** For batches, new folders and overdue checks, see [Report Archive](../report-archive).
 
 ### Add an image to the media library
 `Partner-wide` · `Writes to the portal` · **Tested**
@@ -91,5 +92,6 @@ Count all companies with a raw API call to /v2/odata/company/$count.
 
 ## Related skills
 
+- [Report Archive](../report-archive): upload report files, set up folders, find overdue reports.
 - [Assessment & Compliance](../assessment-compliance): for assessment-related archive reports.
 - [Endpoint Reporting](../endpoint-reporting): for endpoint audit archives.

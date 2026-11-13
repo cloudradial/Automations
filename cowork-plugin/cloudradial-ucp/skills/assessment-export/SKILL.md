@@ -36,8 +36,9 @@ as a tool error, not as data.
 
 For `list_resources` / `count_resources`, pass OData params **without** the leading `$`: `filter`,
 `select`, `orderby`, `top`, `skip`. The server adds the `$`. Default page is `top=100`, max `200`.
-The API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than
-`top`. For `assessment`, `select` works with real field names and keeps rows small (a full row is
+To read every assessment across a large tenant (several hundred rows or more), pass `all_pages: true`:
+the server reads pages of 200 until done, stops at `max_records` (default 5000) and says so if it stopped
+early. Without it, keep incrementing `skip` until a page comes back shorter than `top`. For `assessment`, `select` works with real field names and keeps rows small (a full row is
 about 1,800 characters).
 
 ## The `assessment` resource
@@ -56,9 +57,9 @@ nullable numbers (blank until scored).
 
 `status` is a plain integer with undocumented codes, so don't filter on it server-side.
 
-**Important:** `get_resource` works by `assessmentId`, but the resource returns **summary-level data
-only** (one row per assessment/run, not per question). The API has no question or answer entity. See
-"Getting question-level detail" below before promising it.
+**Important:** `get_resource` and `list_resources` on `assessment` return **summary-level data**
+(one row per assessment/run, not per question). Question-level data comes from `assessment_lifecycle`
+or `assessment_question`; see "Getting question-level detail" below before promising it.
 
 ## Scoring model (how to quantify gaps)
 
@@ -120,11 +121,24 @@ Join the map onto your assessment rows so every row has a readable **Customer na
 The `assessment` list resource does not expose per-question responses, failed/"Not Compliant"
 answers, or linked PSA tickets. Two paths:
 
-1. **The API has no question-level data.** There is no assessment question or answer entity in the
-   v2 API, so don't probe `raw_api_call` for one.
-2. **Portal export.** The reliable source is the per-run **Excel export** (Compliance > Assessments > run > three-dot menu >
-   Export) or the **Word report** (run > Recommendations > Report). State this to the user rather
-   than inventing question-level figures from the summary data: see the honesty note below.
+1. **Through the API (new in 2.7.0, not yet tested at scale).** `assessment_lifecycle` with
+   `action: "get"` returns one assessment or run with its scores and its questions, each with its
+   current answer (`value`, `textValue`), notes and flag. For many assessments at once,
+   `list_resources` on `assessment_question` (filter by `assessmentId` or `companyId`,
+   `all_pages: true`) lists question rows (`assessmentQuestionId`, `assessmentId`, `companyId`,
+   `updateKey` and more). Read one row first and use the field names it returns; don't guess them.
+2. **Portal export.** The per-run **Excel export** (Compliance > Assessments > run > three-dot menu >
+   Export) or the **Word report** (run > Recommendations > Report) is still the reference if the API
+   result looks incomplete. Never invent question-level figures from the summary score: see the
+   honesty note below.
+
+### Step 3b: Microsoft Secure Score next to assessment scores (optional)
+
+When the user wants Secure Score in the roll-up, call `m365_secure_score` with no `company_id`. It
+returns every linked Microsoft tenant ranked lowest percentage first, with `companyId` (null when the
+tenant isn't linked to a company yet). Join on `companyId` and add a Secure Score % column. Say the
+score is as of CloudRadial's last daily sync, and list unlinked tenants separately instead of
+guessing their company.
 
 ### Step 4: Build the outputs
 

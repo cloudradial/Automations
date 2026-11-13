@@ -94,14 +94,27 @@ Invoke-WithLib @('cloudradial.ps1') {
     Check 'Set-CrPlannerCard: create retries without optional fields' ($r.action -eq 'created' -and $r.optionalFieldsDropped -and (Get-LastCall).Body -notmatch '"notes"') (Get-LastCall).Body
 }
 
-# --- Report Archives ---
-$archives = New-Object System.Collections.ArrayList
-$null = $archives.Add([pscustomobject]@{ id = 5; companyId = 99; name = 'Weekly Fleet Audit' })   # another company, same name
+# --- Report Archives (v2 archive folder API) ---
+# The mock folder list answers the company filter the way the API does: only that company's folders.
+$folders = New-Object System.Collections.ArrayList
+$null = $folders.Add([pscustomobject]@{ companyReportFolderId = 5; companyId = 99; name = 'Weekly Fleet Audit' })   # another company, same name
 $items = New-Object System.Collections.ArrayList
+$ArchState = @{ dupOnCreate = $false; unwrapped = $false }
 Reset-Mock $Sec.Clone() {
     param($c, $n)
-    if ($c.Method -eq 'GET' -and $c.Uri -like '*/api/beta/archive?*') { return @($archives) }
-    if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/api/beta/archive") { $b = $c.Body | ConvertFrom-Json; $null = $archives.Add([pscustomobject]@{ id = 31; companyId = $b.companyId; name = $b.name; inboundAddress = 'x@reports.example' }); return [pscustomobject]@{ success = $true } }
+    $u = [uri]::UnescapeDataString($c.Uri)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/v2/odata/archivefolder*') {
+        $cid = [regex]::Match($u, 'companyId eq (\d+)').Groups[1].Value
+        return [pscustomobject]@{ value = @($folders | Where-Object { [string]$_.companyId -eq $cid }) }
+    }
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/v2/archivefolder") {
+        $b = $c.Body | ConvertFrom-Json
+        if ($ArchState.unwrapped) { return [pscustomobject]@{ archiveFolderId = 33; companyId = $b.companyId; name = $b.name; inboundEmailAddress = 'z@reports.example' } }
+        if ($ArchState.dupOnCreate) { $null = $folders.Add([pscustomobject]@{ companyReportFolderId = 32; companyId = $b.companyId; name = $b.name }); New-HttpError 400 '{"success":false,"message":"A folder with this name already exists."}' }
+        $null = $folders.Add([pscustomobject]@{ companyReportFolderId = 31; companyId = $b.companyId; name = $b.name; inboundEmailAddress = 'x@reports.example' })
+        return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ archiveFolderId = 31; companyId = $b.companyId; name = $b.name; inboundEmailAddress = 'x@reports.example' } }
+    }
+    if ($c.Uri -like '*/api/beta/archive*') { throw 'the legacy archive route must not be used when v2 answers' }
     if ($c.Method -eq 'GET' -and $c.Uri -like '*/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @($items) } }
     if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/v2/archiveitem") { $null = $items.Add([pscustomobject]@{ companyReportItemId = 401; subject = ($c.Body | ConvertFrom-Json).subject }); return [pscustomobject]@{ companyReportItemId = 401 } }
     return $null
@@ -110,17 +123,62 @@ Invoke-WithLib @('cloudradial.ps1') {
     $null = Connect-Cr
     $r = Add-CrArchiveReport -CompanyId 7 -ArchiveName 'Weekly Fleet Audit' -Subject 'Fleet audit - Contoso' -Html '<p>All good.</p>' -Preview
     Check 'Add-CrArchiveReport: preview writes nothing' ($r.action -eq 'would-write' -and @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) (Show-Calls)
+    $list = @(Get-Calls 'GET' '*/v2/odata/archivefolder*')
+    Check 'Get-CrArchive: lists folders through v2, filtered to the company' ($list.Count -ge 1 -and [uri]::UnescapeDataString($list[0].Uri) -like '*$filter=companyId eq 7*') (Show-Calls)
     $r = Add-CrArchiveReport -CompanyId 7 -ArchiveName 'Weekly Fleet Audit' -Subject 'Fleet audit - Contoso' -Html '<p>All good.</p>'
-    $create = @(Get-Calls 'POST' "$CrBase/api/beta/archive")
+    $create = @(Get-Calls 'POST' "$CrBase/v2/archivefolder")
     $post = @(Get-Calls 'POST' "$CrBase/v2/archiveitem")
     $b = Read-Body $post[0]
-    Check 'Add-CrArchiveReport: creates the company''s archive (ignores another company''s)' ($create.Count -eq 1 -and (Read-Body $create[0]).companyId -eq 7 -and $r.archiveId -eq 31) (Show-Calls)
+    Check 'Add-CrArchiveReport: creates the company''s folder through v2 (ignores another company''s)' ($create.Count -eq 1 -and (Read-Body $create[0]).companyId -eq 7 -and (Read-Body $create[0]).name -eq 'Weekly Fleet Audit' -and (Read-Body $create[0]).category -eq 'AutomationAI' -and $r.archiveId -eq 31) (Show-Calls)
     Check 'Add-CrArchiveReport: posts an HTML item into it' ($post.Count -eq 1 -and $b.archiveId -eq 31 -and $b.companyId -eq 7 -and $b.isHtml -eq $true -and $b.subject -eq 'Fleet audit - Contoso' -and $r.action -eq 'created' -and $r.location -match 'admins only') $post[0].Body
-    Check 'Add-CrArchiveReport: never writes a KB article' (@($Mock.Calls | Where-Object { $_.Uri -like '*/article*' }).Count -eq 0) (Show-Calls)
+    Check 'Add-CrArchiveReport: never writes a KB article or uses the legacy route' (@($Mock.Calls | Where-Object { $_.Uri -like '*/article*' -or $_.Uri -like '*/api/beta/*' }).Count -eq 0) (Show-Calls)
     $Mock.Calls.Clear()
-    $r = Add-CrArchiveReport -CompanyId 7 -ArchiveName 'Weekly Fleet Audit' -Subject 'Fleet audit - Contoso' -Html '<p>Two warnings.</p>' -IsError
+    $r = Add-CrArchiveReport -CompanyId 7 -ArchiveName 'weekly fleet audit' -Subject 'Fleet audit - Contoso' -Html '<p>Two warnings.</p>' -IsError
     $put = Get-LastCall
-    Check 'Add-CrArchiveReport: same subject replaces the item' ($r.action -eq 'updated' -and $put.Method -eq 'PUT' -and $put.Uri -eq "$CrBase/v2/archiveitem/31/401" -and (Read-Body $put).isError -eq $true -and @(Get-Calls 'POST' '*').Count -eq 0) (Show-Calls)
+    Check 'Add-CrArchiveReport: the folder name matches in any case, and the same subject replaces the item' ($r.action -eq 'updated' -and $put.Method -eq 'PUT' -and $put.Uri -eq "$CrBase/v2/archiveitem/31/401" -and (Read-Body $put).isError -eq $true -and @(Get-Calls 'POST' '*').Count -eq 0) (Show-Calls)
+    $a = Get-CrArchive -CompanyId 7 -Name 'Weekly Fleet Audit'
+    Check 'Get-CrArchive: returns the id and the folder''s inbound address' ($a.id -eq 31 -and $a.inboundAddress -eq 'x@reports.example') ($a | ConvertTo-Json -Compress)
+    $ArchState.unwrapped = $true
+    $a = Get-CrArchive -CompanyId 6 -Name 'Monthly Review' -Create
+    Check 'Get-CrArchive: a create reply without the data wrapper still gives the id and inbound address' ($a.id -eq 33 -and $a.inboundAddress -eq 'z@reports.example') ($a | ConvertTo-Json -Compress)
+    $ArchState.unwrapped = $false
+    $ArchState.dupOnCreate = $true
+    $a = Get-CrArchive -CompanyId 8 -Name 'Onboarding' -Create
+    Check 'Get-CrArchive: a 400 on create (made by another run meanwhile) finds the folder instead of failing' ($a.id -eq 32) ($a | ConvertTo-Json -Compress)
+}
+
+# --- Report Archives on a portal without the v2 folder routes: the legacy route, for the rest of the run ---
+$archives = New-Object System.Collections.ArrayList
+$null = $archives.Add([pscustomobject]@{ id = 5; companyId = 99; name = 'Weekly Fleet Audit' })
+$items.Clear()
+Reset-Mock $Sec.Clone() {
+    param($c, $n)
+    if ($c.Uri -like '*/v2/odata/archivefolder*' -or $c.Uri -like '*/v2/archivefolder*') { New-HttpError 404 '' }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/api/beta/archive?*') { return @($archives) }
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/api/beta/archive") { $b = $c.Body | ConvertFrom-Json; $null = $archives.Add([pscustomobject]@{ id = 41; companyId = $b.companyId; name = $b.name; inboundAddress = 'y@reports.example' }); return [pscustomobject]@{ success = $true } }
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @($items) } }
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/v2/archiveitem") { $null = $items.Add([pscustomobject]@{ companyReportItemId = 402; subject = ($c.Body | ConvertFrom-Json).subject }); return [pscustomobject]@{ companyReportItemId = 402 } }
+    return $null
+}
+Invoke-WithLib @('cloudradial.ps1') {
+    $null = Connect-Cr
+    $r = Add-CrArchiveReport -CompanyId 7 -ArchiveName 'Weekly Fleet Audit' -Subject 'Fleet audit - Contoso' -Html '<p>All good.</p>'
+    Check 'legacy portal: a 404 on the v2 folder list falls back to /api/beta/archive' ($r.action -eq 'created' -and $r.archiveId -eq 41 -and @(Get-Calls 'POST' "$CrBase/api/beta/archive").Count -eq 1 -and @(Get-Calls 'GET' '*/v2/odata/archivefolder*').Count -eq 1) (Show-Calls)
+    $null = Get-CrArchive -CompanyId 7 -Name 'Weekly Fleet Audit'
+    Check 'legacy portal: the v2 route is not tried again in the same run' (@(Get-Calls 'GET' '*/v2/odata/archivefolder*').Count -eq 1) (Show-Calls)
+}
+
+# --- per-company CloudRadial keys ($global:NcoCrSecretSuffix) ---
+Reset-Mock (@{ 'CloudRadial-BaseUrl' = $CrBase; 'CloudRadial-PublicKey' = 'pub'; 'CloudRadial-PrivateKey' = 'priv'; 'CloudRadial-PublicKey-fabrikam' = 'pubF' }) $null
+Invoke-WithLib @('cloudradial.ps1') {
+    Check 'Get-CrSecret: no suffix set reads the shared keys (strict mode)' ((Get-CrSecret 'CloudRadial-PublicKey') -eq 'pub') ''
+    $global:NcoCrSecretSuffix = 'fabrikam'
+    try {
+        Check 'Get-CrSecret: a suffix reads <Name>-<suffix>' ((Get-CrSecret 'CloudRadial-PublicKey') -eq 'pubF') ''
+        $m = Get-ThrowMessage { Get-CrSecret 'CloudRadial-PrivateKey' }
+        Check 'Get-CrSecret: a missing suffixed secret is named, never the shared one used instead' ($m -like '*CloudRadial-PrivateKey-fabrikam*') $m
+    }
+    finally { Remove-Variable -Name NcoCrSecretSuffix -Scope Global -ErrorAction SilentlyContinue }
 }
 
 Complete-Test

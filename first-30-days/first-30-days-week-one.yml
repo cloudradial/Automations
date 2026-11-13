@@ -297,7 +297,10 @@ definition:
           }
 
           # ---- small helpers (all Cr-prefixed so they don't clash with other shared files) ----
-          function Get-CrSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+          # A step that sets $global:NcoCrSecretSuffix (New Client Onboarding Form's cloudradial_company) reads <Name>-<suffix>
+          # instead, so one runner can hold several partners' CloudRadial keys. Unset or empty: the shared keys. Read through
+          # Get-Variable, because reading an unset variable throws in strict mode.
+          function Get-CrSecret { param([string]$Name) $v = $null; $sfx = ''; $gv = Get-Variable -Name NcoCrSecretSuffix -Scope Global -ErrorAction SilentlyContinue; if ($gv) { $sfx = [string]$gv.Value }; if ($sfx) { try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name "$Name-$sfx" -AsPlainText -ErrorAction SilentlyContinue } catch { }; if (-not $v) { throw "The runner Key Vault has no $Name-$sfx secret for cloudradial_company. Add it, or leave cloudradial_company empty to use the shared CloudRadial keys." }; return $v }; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
           function Get-CrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
           function Get-CrHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
           function Get-CrRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
@@ -433,33 +436,52 @@ definition:
               return @{ action = 'created'; productId = $(if ($newId) { [string]$newId } else { '' }); optionalFieldsDropped = $dropped }
           }
 
-          # Finds a company's report archive by name through the legacy /api/beta/archive list (which ignores
-          # companyId, so it is filtered here), and creates it with -Create. Returns @{ id; companyId; name; inboundAddress } or $null.
-          # The create reply doesn't always carry the new id, so the archive is looked up again by name.
+          # Finds a company's report archive folder by name, and creates it with -Create.
+          # Returns @{ id; companyId; name; inboundAddress } or $null.
+          # Uses the v2 archive folder API: GET /v2/odata/archivefolder filtered to the company, and POST /v2/archivefolder,
+          # which validates the name like the portal and gives the folder its inbound email address. Portals that answer the v2
+          # routes with 404 or 405 fall back to the legacy /api/beta/archive list (which ignores companyId, so it is filtered
+          # here) for the rest of the run. Names match case-insensitively, as the portal does.
+          function Test-CrMissingRoute { param([string]$Message) return ($Message -match '\(HTTP (404|405)\)') }
           function Get-CrArchive {
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'AutomationAI')
-              $find = {
-                  $list = @(Get-CrBetaAll '/api/beta/archive')
-                  @($list | Where-Object {
+              if (-not $CrState.ContainsKey('ArchiveApi')) { $CrState['ArchiveApi'] = 'v2' }
+              $match = { param($rows) @($rows | Where-Object {
                           $n = [string](Get-CrProp $_ 'name'); if (-not $n) { $n = [string](Get-CrProp $_ 'archiveName') }
                           $c = Get-CrProp $_ 'companyId'
                           $n.Trim() -ieq $Name.Trim() -and ($null -eq $c -or [int]$c -eq $CompanyId)
-                      }) | Select-Object -First 1
+                      }) | Select-Object -First 1 }
+              $find = {
+                  if ($CrState['ArchiveApi'] -eq 'v2') {
+                      try { return (& $match @(Get-CrAll "/v2/odata/archivefolder?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId"))")) }
+                      catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $CrState['ArchiveApi'] = 'beta' }
+                  }
+                  return (& $match @(Get-CrBetaAll '/api/beta/archive'))
               }
               $hit = & $find
               if ($null -eq $hit -and $Create) {
                   $resp = $null
-                  # A 400 here has meant "already exists" when the list missed it, so look again before giving up.
-                  try { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                  $body = [ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }
+                  try {
+                      if ($CrState['ArchiveApi'] -eq 'v2') {
+                          try { $resp = Invoke-CrApi -Path '/v2/archivefolder' -Method POST -Body $body }
+                          catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $CrState['ArchiveApi'] = 'beta' }
+                      }
+                      if ($CrState['ArchiveApi'] -eq 'beta') { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body $body }
+                  }
+                  # A 400 can mean the folder already exists (another run made it just now), so look again before giving up.
                   catch { $again = & $find; if ($null -eq $again) { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" }; $resp = $again }
-                  $id = Get-CrId $resp @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')
+                  # v2 replies { success, data = { archiveFolderId, inboundEmailAddress, ... } }; the legacy create may reply with a bare id.
+                  $id = Get-CrId $resp @('data.archiveFolderId', 'archiveFolderId', 'companyReportFolderId', 'id', 'archiveId', 'data.id', 'data.archiveId')
                   if (-not $id -and ([string]$resp -match '^\d+$')) { $id = [int][string]$resp }
-                  $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { & $find }
+                  $inb = [string](Get-CrProp (Get-CrProp $resp 'data') 'inboundEmailAddress'); if (-not $inb) { $inb = [string](Get-CrProp $resp 'inboundEmailAddress') }
+                  $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundEmailAddress = $inb } } else { & $find }
               }
               if ($null -eq $hit) { return $null }
-              $aid = Get-CrId $hit @('id', 'archiveId', 'companyReportFolderId')
+              $aid = Get-CrId $hit @('archiveFolderId', 'companyReportFolderId', 'id', 'archiveId')
               if (-not $aid) { throw "Found the '$Name' archive but couldn't read its id." }
-              return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = [string](Get-CrProp $hit 'inboundAddress') }
+              $inbound = [string](Get-CrProp $hit 'inboundEmailAddress'); if (-not $inbound) { $inbound = [string](Get-CrProp $hit 'inboundAddress') }
+              return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = $inbound }
           }
 
           # Writes an HTML report into a company's Report Archive (Compliance > Reports, admins only), creating the archive
@@ -1709,7 +1731,10 @@ definition:
           }
 
           # ---- small helpers (all Cr-prefixed so they don't clash with other shared files) ----
-          function Get-CrSecret { param([string]$Name) $v = $null; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+          # A step that sets $global:NcoCrSecretSuffix (New Client Onboarding Form's cloudradial_company) reads <Name>-<suffix>
+          # instead, so one runner can hold several partners' CloudRadial keys. Unset or empty: the shared keys. Read through
+          # Get-Variable, because reading an unset variable throws in strict mode.
+          function Get-CrSecret { param([string]$Name) $v = $null; $sfx = ''; $gv = Get-Variable -Name NcoCrSecretSuffix -Scope Global -ErrorAction SilentlyContinue; if ($gv) { $sfx = [string]$gv.Value }; if ($sfx) { try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name "$Name-$sfx" -AsPlainText -ErrorAction SilentlyContinue } catch { }; if (-not $v) { throw "The runner Key Vault has no $Name-$sfx secret for cloudradial_company. Add it, or leave cloudradial_company empty to use the shared CloudRadial keys." }; return $v }; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
           function Get-CrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
           function Get-CrHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
           function Get-CrRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
@@ -1845,33 +1870,52 @@ definition:
               return @{ action = 'created'; productId = $(if ($newId) { [string]$newId } else { '' }); optionalFieldsDropped = $dropped }
           }
 
-          # Finds a company's report archive by name through the legacy /api/beta/archive list (which ignores
-          # companyId, so it is filtered here), and creates it with -Create. Returns @{ id; companyId; name; inboundAddress } or $null.
-          # The create reply doesn't always carry the new id, so the archive is looked up again by name.
+          # Finds a company's report archive folder by name, and creates it with -Create.
+          # Returns @{ id; companyId; name; inboundAddress } or $null.
+          # Uses the v2 archive folder API: GET /v2/odata/archivefolder filtered to the company, and POST /v2/archivefolder,
+          # which validates the name like the portal and gives the folder its inbound email address. Portals that answer the v2
+          # routes with 404 or 405 fall back to the legacy /api/beta/archive list (which ignores companyId, so it is filtered
+          # here) for the rest of the run. Names match case-insensitively, as the portal does.
+          function Test-CrMissingRoute { param([string]$Message) return ($Message -match '\(HTTP (404|405)\)') }
           function Get-CrArchive {
               param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'AutomationAI')
-              $find = {
-                  $list = @(Get-CrBetaAll '/api/beta/archive')
-                  @($list | Where-Object {
+              if (-not $CrState.ContainsKey('ArchiveApi')) { $CrState['ArchiveApi'] = 'v2' }
+              $match = { param($rows) @($rows | Where-Object {
                           $n = [string](Get-CrProp $_ 'name'); if (-not $n) { $n = [string](Get-CrProp $_ 'archiveName') }
                           $c = Get-CrProp $_ 'companyId'
                           $n.Trim() -ieq $Name.Trim() -and ($null -eq $c -or [int]$c -eq $CompanyId)
-                      }) | Select-Object -First 1
+                      }) | Select-Object -First 1 }
+              $find = {
+                  if ($CrState['ArchiveApi'] -eq 'v2') {
+                      try { return (& $match @(Get-CrAll "/v2/odata/archivefolder?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId"))")) }
+                      catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $CrState['ArchiveApi'] = 'beta' }
+                  }
+                  return (& $match @(Get-CrBetaAll '/api/beta/archive'))
               }
               $hit = & $find
               if ($null -eq $hit -and $Create) {
                   $resp = $null
-                  # A 400 here has meant "already exists" when the list missed it, so look again before giving up.
-                  try { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
+                  $body = [ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }
+                  try {
+                      if ($CrState['ArchiveApi'] -eq 'v2') {
+                          try { $resp = Invoke-CrApi -Path '/v2/archivefolder' -Method POST -Body $body }
+                          catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $CrState['ArchiveApi'] = 'beta' }
+                      }
+                      if ($CrState['ArchiveApi'] -eq 'beta') { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body $body }
+                  }
+                  # A 400 can mean the folder already exists (another run made it just now), so look again before giving up.
                   catch { $again = & $find; if ($null -eq $again) { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" }; $resp = $again }
-                  $id = Get-CrId $resp @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')
+                  # v2 replies { success, data = { archiveFolderId, inboundEmailAddress, ... } }; the legacy create may reply with a bare id.
+                  $id = Get-CrId $resp @('data.archiveFolderId', 'archiveFolderId', 'companyReportFolderId', 'id', 'archiveId', 'data.id', 'data.archiveId')
                   if (-not $id -and ([string]$resp -match '^\d+$')) { $id = [int][string]$resp }
-                  $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { & $find }
+                  $inb = [string](Get-CrProp (Get-CrProp $resp 'data') 'inboundEmailAddress'); if (-not $inb) { $inb = [string](Get-CrProp $resp 'inboundEmailAddress') }
+                  $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundEmailAddress = $inb } } else { & $find }
               }
               if ($null -eq $hit) { return $null }
-              $aid = Get-CrId $hit @('id', 'archiveId', 'companyReportFolderId')
+              $aid = Get-CrId $hit @('archiveFolderId', 'companyReportFolderId', 'id', 'archiveId')
               if (-not $aid) { throw "Found the '$Name' archive but couldn't read its id." }
-              return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = [string](Get-CrProp $hit 'inboundAddress') }
+              $inbound = [string](Get-CrProp $hit 'inboundEmailAddress'); if (-not $inbound) { $inbound = [string](Get-CrProp $hit 'inboundAddress') }
+              return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = $inbound }
           }
 
           # Writes an HTML report into a company's Report Archive (Compliance > Reports, admins only), creating the archive

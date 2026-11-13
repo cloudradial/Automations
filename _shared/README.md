@@ -13,6 +13,7 @@ These links point at the `main` branch, so they always open the current version.
 | View `psa.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/psa.ps1) |
 | View `psa-tickets.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/psa-tickets.ps1) |
 | View `postmark.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/postmark.ps1) |
+| View `teams.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/teams.ps1) |
 | View `graph.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/graph.ps1) |
 | View `exchange.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/exchange.ps1) |
 | View `plan.ps1` | [GitHub](https://github.com/cloudradial/Automations/blob/main/_shared/plan.ps1) |
@@ -32,6 +33,7 @@ AutomationAI runs each PowerShell step as one self-contained script, so a step c
 | `psa.ps1` | One adapter for six PSAs: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk. Same secret names as each PSA's catalog extension. |
 | `psa-tickets.ps1` | Ticket lists, names, SLA targets, time entries, agreements, invoices, contacts and ticket relations for the same six PSAs. Paste it after `psa.ps1`. |
 | `postmark.ps1` | Staff email through Postmark that never throws, so the caller can fall back to an internal note. Needs no other file. |
+| `teams.ps1` | Adaptive Cards to a Microsoft Teams channel through a Teams Workflows webhook, one secret per channel. Never throws. Needs no other file. |
 | `graph.ps1` | Microsoft Graph: client-credentials sign-in, retries, paging, and the user, group, licence, sign-in and security helpers. A 403 says which permission is missing. |
 | `exchange.ps1` | Exchange Online for what Graph can't do (shared mailboxes, distribution lists, forwarding, hiding from the address list): the Exchange admin REST endpoint first, the ExchangeOnlineManagement module as the fallback, and a plain reason when neither works. |
 | `plan.ps1` | The preview/confirm pattern. AutomationAI has no approval step, so a write automation previews its changes and only makes them when the run says `confirm: true`. Used with or without Graph. |
@@ -199,6 +201,31 @@ A PSA can accept a write and then answer with a redirect. ConnectWise did this o
 
 **Secrets:** `Postmark-ServerToken`, `Postmark-FromEmail` (a verified sender), and optional `Postmark-ApiUrl` (default `https://api.postmarkapp.com`), the same names as the Postmark extension and `deliver-result`. Email is for staff; a message to a ticket's requester goes as a public PSA note so the PSA emails them.
 
+## teams.ps1
+
+Posts a card to a Teams channel. It uses a **Teams Workflows webhook**, the replacement for the retired Office 365 Incoming Webhook connector, so there's no Azure app, bot or Graph permission to set up.
+
+| Function | What it does |
+|---|---|
+| `Send-TeamsCard [-Channel <name>] -Title <string> [-Subtitle] [-Text] [-Facts <hashtable>] [-LinkText] [-LinkUrl] [-Style default\|good\|attention\|warning\|accent]` | Builds and posts one Adaptive Card and never throws. Returns `@{ configured; sent; reason; channel }`. `-Text` takes Teams markdown. `-Facts` is a label-to-value table; empty values are left out. `-LinkUrl` must be https and becomes one Open button. Pass `-Card` instead to post a card built elsewhere. Retries 429 and 5xx twice. A 401, 403 or 404 says the workflow may be off or deleted. A card over 27 KB is refused before sending (Teams allows about 28 KB), so post a summary with a link. |
+| `New-TmCard ...` | Builds the card (Adaptive Card 1.4) without posting it. |
+| `Test-TmConfigured [-Channel <name>]` | `$true` when that channel's secret is set. |
+
+**Secrets** (runner Key Vault), one per channel:
+- `Teams-WebhookUrl`: the default channel.
+- `Teams-WebhookUrl-<Channel>`: a named channel, for example `Teams-WebhookUrl-ServiceDesk` for `-Channel ServiceDesk`. A named channel never falls back to the default one.
+
+The URL carries a signature, so treat it like a password: it never goes in a workflow, input or output, and the helper never repeats it in a reason.
+
+### Teams channel cards: setup (once per channel)
+
+1. In Teams, open the channel, choose **...** > **Workflows**, and pick **Post to a channel when a webhook request is received**.
+2. Name it (for example "AutomationAI alerts"), confirm the team and channel, and choose **Add workflow**.
+3. Copy the URL Teams shows.
+4. In AutomationAI, add it to the runner's Key Vault as `Teams-WebhookUrl` (or `Teams-WebhookUrl-<Channel>`).
+
+Cards post as the person who created the workflow ("<name> via Workflows"). If that person leaves, recreate the workflow and update the secret.
+
 ## Moving the service-desk builds over
 
 The service-desk builds (open PRs #65 to #77) each carry a `src/psa-extra.ps1` (and some a Postmark sender). To move one over: swap the `# >>> src/psa-extra.ps1` markers for `_shared/psa-tickets.ps1` markers placed after `_shared/psa.ps1` (and `_shared/postmark.ps1` where it emails), delete the local file, apply the renames below, run `inject.js`, and run the build's own test.
@@ -315,7 +342,7 @@ Reports always go to Report Archives, never to a knowledge base article (client 
 pwsh -NoProfile -File _shared/tests/run.ps1
 ```
 
-Each library runs the way the runner runs it: pasted into one script with the test body, run through `& ([scriptblock]::Create(...))` under `Set-StrictMode -Version Latest`, with `Get-AzKeyVaultSecret`, `Invoke-RestMethod` and `Start-Sleep` mocked (and, for Exchange, `Get-Module`, `Import-Module`, `Connect-ExchangeOnline` and the cmdlets). The tests cover each PSA's sign-in, internal and public notes, create-ticket request, close and company lookup; Graph's 429 and 503 retries, paging, 401 refresh and the 403 permission message for every helper; plan preview, confirm and mid-plan failure; Exchange REST sign-in and calls, REST failure falling back to the module, neither available, cmdlet error messages and `-Confirm:$false` in module mode; CloudRadial paging, card update-or-create and archive writes; and `inject.js` itself. The mocked `Invoke-RestMethod` hands a JSON array back as one object, as the real cmdlet does. `test-psa-redirects.ps1` covers ConnectWise notes in the API's real shape (more than one page, `_info` links, line breaks) with the rerun-writes-nothing-twice case, list replies, API URL clean-up, a write answered with a redirect (saved and not saved, with and without a marker, the "insecure redirection" error) and GET redirects (sibling https, http upgraded, another domain refused, loops). `test-psa.ps1` also covers ConnectWise board moves (same-name status kept, the default or first open status used, a team kept, defaulted or cleared, one patch, a missing or inactive board, the statuses 403 fallback with its warning, a read-back still on the old board) and `Test-PsaQueue` on every PSA.
+Each library runs the way the runner runs it: pasted into one script with the test body, run through `& ([scriptblock]::Create(...))` under `Set-StrictMode -Version Latest`, with `Get-AzKeyVaultSecret`, `Invoke-RestMethod` and `Start-Sleep` mocked (and, for Exchange, `Get-Module`, `Import-Module`, `Connect-ExchangeOnline` and the cmdlets). The tests cover each PSA's sign-in, internal and public notes, create-ticket request, close and company lookup; Graph's 429 and 503 retries, paging, 401 refresh and the 403 permission message for every helper; plan preview, confirm and mid-plan failure; Exchange REST sign-in and calls, REST failure falling back to the module, neither available, cmdlet error messages and `-Confirm:$false` in module mode; CloudRadial paging, card update-or-create and archive writes; Teams cards (named channels without fallback, card shape, link and size rules, retries, and that the webhook URL never appears in a reason); and `inject.js` itself. The mocked `Invoke-RestMethod` hands a JSON array back as one object, as the real cmdlet does. `test-psa-redirects.ps1` covers ConnectWise notes in the API's real shape (more than one page, `_info` links, line breaks) with the rerun-writes-nothing-twice case, list replies, API URL clean-up, a write answered with a redirect (saved and not saved, with and without a marker, the "insecure redirection" error) and GET redirects (sibling https, http upgraded, another domain refused, loops). `test-psa.ps1` also covers ConnectWise board moves (same-name status kept, the default or first open status used, a team kept, defaulted or cleared, one patch, a missing or inactive board, the statuses 403 fallback with its warning, a read-back still on the old board) and `Test-PsaQueue` on every PSA.
 
 ## Not migrated yet
 

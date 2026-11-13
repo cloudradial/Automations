@@ -1,12 +1,14 @@
 # Ask Every Requester How It Went, and Hear About Bad Scores the Same Day
 
-When a ticket closes, the requester gets a one-click satisfaction survey right on the ticket. Low scores reach your service manager by email the same day, with the comment and a link to the ticket.
+When a ticket closes, the requester gets a one-click satisfaction survey right on the ticket. Low scores reach your service manager by email the same day, with the comment and a link to the ticket. Top scores can be shared with the team as a kudos card in Microsoft Teams.
 
 ## What happens
 
 **A ticket closes.** The requester gets an email from your PSA asking "How did we do?", with one link per score from Excellent to Very poor. One click is all it takes.
 
 **The requester answers.** Every score is added to the ticket as an internal note, so your team sees it where they work. When the score is low (2 out of 5 or below, by default), your service manager also gets an email with the score, the requester's comment and a link to the ticket.
+
+**Great scores get celebrated.** When a requester gives a top score (5 out of 5, by default), a kudos card goes to the Teams channel you choose, with the ticket, the score, their comment and a button to open the ticket.
 
 If you use CloudRadial feedback, scores can be saved there too, and the companion [Feedback CSAT Report](https://github.com/cloudradial/Automations/tree/main/feedback-csat-report) turns them into a monthly summary per client.
 
@@ -16,7 +18,8 @@ If you use CloudRadial feedback, scores can be saved there too, and the companio
 - **No surveys for junk.** Tickets closed as duplicate, spam, merged or cancelled are skipped.
 - **Only real answers count.** A score is accepted only for a ticket that was actually surveyed, and only the first answer is kept.
 - **Clients stay in their own lane.** When the answer comes from your portal, a client can't score another company's ticket.
-- **Nothing else changes.** It only adds notes and sends the low-score email. Ticket status and owner stay as they were.
+- **Nothing else changes.** It only adds notes, sends the low-score email and posts kudos. Ticket status and owner stay as they were.
+- **Kudos once per score.** A score is celebrated once, even if the answer is sent twice.
 
 ## Works with
 
@@ -32,21 +35,24 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
 - A page or form where the survey links land and send the answer back, such as a "Rate your support" form in your UCP portal, or a Microsoft Form with a Power Automate flow
 - Postmark, connected in AutomationAI, for the low-score email (without it, the ticket note asks your team to follow up instead)
 - Optional: your CloudRadial API connected, to save scores as CloudRadial feedback
+- Optional: a Teams channel for kudos, set up with Teams **Workflows** (about a minute, no Azure app needed)
 
 ## Set it up
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0).
 2. Go to **Workflows > Import** and upload it.
 3. Add your survey page link, your service manager's email address and your PSA connection to the runner.
 4. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
 
 **In your PSA:** set up a webhook that calls the workflow when a ticket closes (in Zendesk, when it's set to **Solved**).
 
+**For kudos (optional):** in Teams, open the channel, choose **...** > **Workflows** > **Post to a channel when a webhook request is received**, and copy the address it gives you. Add it to the runner as the `Teams-WebhookUrl` secret. Without it, everything else works and no kudos are posted.
+
 **For the answers:** build your "Rate your support" form with questions for the ticket number, the score and a comment, and have it send the answer back to the same workflow.
 
-You can change the low-score cutoff, the size of the scale (up to 10 points) and which closing reasons get no survey.
+You can change the low-score cutoff, the score that earns kudos and which Teams channel it goes to, the size of the scale (up to 10 points) and which closing reasons get no survey.
 
 **Test it.** Close a test ticket where you are the contact, click a low score in the email, and check that the note and the manager email arrive.
 
@@ -58,15 +64,15 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Technical details
 
-**Marketplace ID:** AAI-00056 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00056 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `post-close-feedback.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0).
+Each version is published as a release, with `post-close-feedback.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `post-close-feedback.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0) |
+| Download `post-close-feedback.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0) |
 | View the current source | [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/blob/main/post-close-feedback/post-close-feedback.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/post-close-feedback/src) |
 | All files in this automation | [post-close-feedback](https://github.com/cloudradial/Automations/tree/main/post-close-feedback) |
@@ -100,7 +106,7 @@ One workflow with **two entry points**, chosen by the `mode` input. Three steps,
 
 1. **Read the request.** Checks the score is a whole number from 1 to `score_max`, that a survey was actually posted on this ticket (so nobody can score a ticket that was never surveyed), and that no score was recorded before (only the first answer counts).
 2. **Send the survey.** Nothing to do in score mode.
-3. **Route low scores.** When the score is at or below `threshold` (default 2 out of 5), it emails the service manager through Postmark (`Send-PmMail` from the shared `_shared/postmark.ps1`) with the score, the comment and a link to the ticket. Every score, high or low, is then added as an **internal** note ("Satisfaction score received: 2 out of 5 ...") ending with the `[csat-score]` marker. The note is written with `Add-PsaNote -Marker`, so a note that is already there is never added again. If Postmark isn't set up, the note says the email wasn't sent and asks the team to follow up. When a CloudRadial company id is sent, it also records the score as CloudRadial **feedback** (see below).
+3. **Route low scores.** When the score is at or below `threshold` (default 2 out of 5), it emails the service manager through Postmark (`Send-PmMail` from the shared `_shared/postmark.ps1`) with the score, the comment and a link to the ticket. Every score, high or low, is then added as an **internal** note ("Satisfaction score received: 2 out of 5 ...") ending with the `[csat-score]` marker. The note is written with `Add-PsaNote -Marker`, so a note that is already there is never added again. If Postmark isn't set up, the note says the email wasn't sent and asks the team to follow up. When a CloudRadial company id is sent, it also records the score as CloudRadial **feedback** (see below). When the score is at or above `kudos_threshold` (default: the top of the scale) and the note was written by this run, it posts a kudos card to Teams with `Send-TeamsCard` from `_shared/teams.ps1`: the ticket and its summary, the score, who rated it, their comment and an Open ticket button. A rerun finds the `[csat-score]` note and posts nothing. A Teams failure is a warning; the run still succeeds. With no Teams secret and no `kudos_channel`, kudos is simply off and there's no warning.
 
 A normal call posts and sends. `"preview": true` returns what it would post or send (`status: pending_confirmation`) and writes nothing. It only writes notes and sends emails, which the service-desk rules exempt from the confirm pattern, so a normal call acts straight away; a live webhook that previewed because its body left out a flag would be the worse failure. The survey's first line and the `[csat-score]` marker stop a retry from acting twice.
 
@@ -121,7 +127,7 @@ What this workflow does with it: in score mode, when `cr_company_id` (the CloudR
 
 ## Download & import
 
-**Download the workflow:** [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.0.0)
+**Download the workflow:** [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 
@@ -135,7 +141,8 @@ By name only. The PSA, Postmark and CloudRadial names are the same as the catalo
 | `CSAT-ServiceManagerEmail` | Who hears about low scores (comma-separated for several). The `service_manager_email` input overrides it. |
 | `Postmark-ServerToken`, `Postmark-FromEmail` | The low-score email. Optional `Postmark-ApiUrl` (default `https://api.postmarkapp.com`). Without them, the internal note asks the team to follow up. |
 | `CloudRadial-BaseUrl`, `CloudRadial-PublicKey`, `CloudRadial-PrivateKey` | Optional. Records scores as CloudRadial feedback for the CSAT report. |
-| `PSA-TicketUrlTemplate` | Optional. A ticket link with `{id}` for the low-score email. Needed for Kaseya BMS. |
+| `Teams-WebhookUrl` | Optional. The Teams Workflows webhook URL for kudos (setup in [`_shared/README.md`](https://github.com/cloudradial/Automations/tree/main/_shared#teams-channel-cards-setup-once-per-channel)). For another channel, `Teams-WebhookUrl-<Channel>` with `kudos_channel`. Treat it like a password. |
+| `PSA-TicketUrlTemplate` | Optional. A ticket link with `{id}` for the low-score email and the kudos card. Needed for Kaseya BMS. |
 | `PSA-Type` | `connectwise`, `autotask`, `halopsa`, `kaseyabms`, `syncro` or `zendesk` (a `psa` input overrides it) |
 | ConnectWise: `CW-ApiUrl`, `CW-CompanyID`, `CW-PublicKey`, `CW-PrivateKey`, `CW-ClientId` | |
 | Autotask: `Autotask-ApiUrl`, `Autotask-ApiIntegrationCode`, `Autotask-Username`, `Autotask-Secret` | Optional: `Autotask-NotePublishId`, `Autotask-NotePublicPublishId`, `Autotask-NoteTypeId` |
@@ -165,6 +172,9 @@ The PSA API user needs to read tickets and notes and add public and internal not
 | `comment` | score | No | The requester's comment, quoted in the note and the email. |
 | `threshold` | score | No (default `2`) | Scores at or below this email the service manager. |
 | `service_manager_email` | score | No | Overrides the `CSAT-ServiceManagerEmail` secret. |
+| `kudos` | score | No (default `true`) | `false` never posts kudos. |
+| `kudos_threshold` | score | No (default `score_max`) | Scores at or above this post a kudos card to Teams, 1 to `score_max`. A low score never does. |
+| `kudos_channel` | score | No | A named Teams channel: the card goes to the `Teams-WebhookUrl-<kudos_channel>` secret instead of `Teams-WebhookUrl`. It never falls back to the default channel. |
 | `require_survey` | score | No (default `true`) | `false` accepts a score for a ticket with no survey note (for scores collected some other way). |
 | `company_psa_id` | both | No | The PSA company id (`@CompanyPsaId` on a portal form, or `Company.CompanyPsaId`). When sent, the run stops (`rejected`) unless the ticket belongs to that company. |
 | `cr_company_id` | score | No | The CloudRadial company id. When sent, the score is also recorded as CloudRadial feedback. |
@@ -185,7 +195,7 @@ The PSA API user needs to read tickets and notes and add public and internal not
 
 ## Output
 
-`status` (`success`, `pending_confirmation`, `incomplete`, `rejected` or `error`), `message`, `public_note` (the survey, in survey mode), `internal_note`, `ticket_id`, `mode`, `survey_sent`, `score`, `low_score`, `manager_emailed`, `postmark_message_id`, `cloudradial_recorded`, `actions` and `warnings`. A score preview also returns `email_text`.
+`status` (`success`, `pending_confirmation`, `incomplete`, `rejected` or `error`), `message`, `public_note` (the survey, in survey mode), `internal_note`, `ticket_id`, `mode`, `survey_sent`, `score`, `low_score`, `manager_emailed`, `postmark_message_id`, `cloudradial_recorded`, `kudos_posted`, `kudos_reason`, `actions` and `warnings`. A score preview also returns `email_text`, and its `internal_note` says whether it would post kudos.
 
 ## Wiring the trigger
 
@@ -211,3 +221,4 @@ The caller POSTs to the workflow's webhook URL with the secret in the **`X-Craut
 - `POST /v2/feedback`: the request shape is from the public v2 spec, but the meaning of `sentiment` and how the portal shows an API-created record aren't confirmed.
 - **Whether the PSA emails the requester** for an API-added public note, and whether a note on a closed ticket reopens it, depend on each PSA's settings (ConnectWise board email settings, Autotask notification templates, HaloPSA outcomes).
 - The ticket notes read (`Get-PsaTicketNotes`) for Autotask and HaloPSA, the HaloPSA status-name lookup (`Get-PsaStatusName`), the built-in ticket links (`Get-PsaTicketUrl`) for ConnectWise, Autotask, HaloPSA and Syncro, and ConnectWise public notes on the Discussion tab, all in `_shared/psa.ps1`. Each is marked `Unverified` in the shared source. Set the `PSA-TicketUrlTemplate` secret if a link is wrong.
+- **Kudos to Teams:** the card is checked against the mocked Teams Workflows webhook only. Post one real kudos to a test channel before relying on it (Teams renders Adaptive Card 1.4; the card uses a heading, text, a fact set and one Open button).

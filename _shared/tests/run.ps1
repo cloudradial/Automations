@@ -8,9 +8,9 @@ foreach ($t in @('test-psa.ps1', 'test-graph.ps1', 'test-plan.ps1', 'test-cloudr
     & pwsh -NoProfile -File (Join-Path $PSScriptRoot $t)
     if ($LASTEXITCODE -ne 0) { $failed += $t }
 }
-# Ticket lists, notes, ConnectWise reply shape and redirects, and Postmark (psa-tickets.ps1, the ticket and
-# redirect functions in psa.ps1, postmark.ps1).
-foreach ($t in @('test-psa-tickets.ps1', 'test-psa-redirects.ps1', 'test-postmark.ps1')) {
+# Ticket lists, notes, ConnectWise reply shape and redirects, Postmark and Teams (psa-tickets.ps1, the ticket and
+# redirect functions in psa.ps1, postmark.ps1, teams.ps1).
+foreach ($t in @('test-psa-tickets.ps1', 'test-psa-redirects.ps1', 'test-postmark.ps1', 'test-teams.ps1')) {
     Write-Host "--- $t"
     & pwsh -NoProfile -File (Join-Path $PSScriptRoot $t)
     if ($LASTEXITCODE -ne 0) { $failed += $t }

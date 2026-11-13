@@ -50,13 +50,16 @@ $TCommon = @{ 'Postmark-ServerToken' = 'pm-token'; 'Postmark-FromEmail' = 'servi
 function Get-Secrets { param([string]$P, [hashtable]$Extra = @{}, [string[]]$Drop = @()) $s = @{}; foreach ($k in $Psa[$P].Keys) { $s[$k] = $Psa[$P][$k] }; foreach ($k in $TCommon.Keys) { if ($Drop -notcontains $k) { $s[$k] = $TCommon[$k] } }; foreach ($k in $Extra.Keys) { $s[$k] = $Extra[$k] }; return $s }
 $TCW = 'https://cw.example.com/v4_6_release/apis/3.0'; $TAT = 'https://webservices5.autotask.example/atservicesrest/v1.0'; $TZD = 'https://example.zendesk.com/api/v2'
 $TPM = 'https://api.postmarkapp.com/email'; $TCR = 'https://api.cloudradial.example'
+$TTeams = 'https://prod-01.logic.example/workflows/kudos/invoke?sig=KUDOSSIG'; $TTeamsWins = 'https://prod-01.logic.example/workflows/wins/invoke?sig=WINSSIG'
 $TSurveyNote = "How did we do on ticket 1001 (Printer on floor 2 not printing)?`n`nYour ticket is now closed."
-$TScenario = @{ cwNotes = @(); atNotes = @(); zdComments = @(); noteFail = 0; cwStatus = 'Closed' }
+$TScenario = @{ cwNotes = @(); atNotes = @(); zdComments = @(); noteFail = 0; cwStatus = 'Closed'; teamsFail = 0 }
 $Handler = {
     param($c, $n)
     $k = "$($c.Method) $($c.Uri)"
     switch -Wildcard -CaseSensitive ($k) {
         "POST $TPM" { return [pscustomobject]@{ MessageID = 'pm-0002'; ErrorCode = 0 } }
+        "POST $TTeams" { if ($TScenario.teamsFail) { New-HttpError $TScenario.teamsFail '' }; return $null }
+        "POST $TTeamsWins" { return $null }
         "POST $TCR/v2/feedback" { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ id = 555 } } }
         "GET $TCW/service/tickets/1001/notes*" { return , @($TScenario.cwNotes) }
         "GET $TCW/service/tickets/1001" { return [pscustomobject]@{ id = 1001; summary = 'Printer on floor 2 not printing'; company = [pscustomobject]@{ id = 42 }; status = [pscustomobject]@{ name = $TScenario.cwStatus }; owner = $null } }
@@ -75,7 +78,7 @@ $Handler = {
     throw "Unexpected call in test: $k"
 }
 function Get-WriteCalls { return @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }) }
-function Reset-Scenario { $TScenario.cwNotes = @(); $TScenario.atNotes = @(); $TScenario.zdComments = @(); $TScenario.noteFail = 0; $TScenario.cwStatus = 'Closed' }
+function Reset-Scenario { $TScenario.cwNotes = @(); $TScenario.atNotes = @(); $TScenario.zdComments = @(); $TScenario.noteFail = 0; $TScenario.cwStatus = 'Closed'; $TScenario.teamsFail = 0 }
 function New-CwNote { param([string]$Text, [bool]$Public, [int]$Id = 5) return [pscustomobject]@{ id = $Id; text = $Text; internalAnalysisFlag = (-not $Public); detailDescriptionFlag = $Public; resolutionFlag = $false; dateCreated = "2026-10-08T1$($Id):00:00Z" } }
 
 # ---- 1. ConnectWise survey preview ----
@@ -147,6 +150,44 @@ Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNo
 $f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = 5 }
 Check 'high score: note, no email' ($f.r.out.status -eq 'success' -and $f.r.out.low_score -eq $false -and -not @(Get-Calls 'POST' $TPM).Count -and @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes").Count -eq 1) "$($f.r.error)"
 Check 'mode inferred from score' ((Invoke-Flow @{ ticketId = '1001'; score = '4' }).r.out.mode -eq 'score')
+Check 'no Teams secret: a top score posts nothing, with no warning' ($f.r.out.kudos_posted -eq $false -and $f.r.out.kudos_reason -like "*Teams isn't set up*" -and -not @($f.r.out.warnings | Where-Object { $_ -like '*kudos*' }).Count -and -not @($Mock.Calls | Where-Object { $_.Uri -like '*logic.example*' }).Count) "$($f.r.out.kudos_reason)"
+
+# ---- 7b. Kudos to Teams ----
+$TKudos = @{ 'Teams-WebhookUrl' = $TTeams; 'Teams-WebhookUrl-Wins' = $TTeamsWins }
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; comment = 'Fixed in ten minutes, thank you!'; contactEmail = 'megan.bowen@contoso.com' }
+$tc = @(Get-Calls 'POST' $TTeams); $card = if ($tc.Count) { (Read-Body $tc[0]).attachments[0].content } else { $null }
+$nt = @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes")
+Check 'kudos: a 5 out of 5 posts one card to the default channel' ($f.r.out.status -eq 'success' -and $f.r.out.kudos_posted -eq $true -and $tc.Count -eq 1 -and @($f.r.out.actions | Where-Object { $_ -eq 'Posted kudos to the default Teams channel.' }).Count -eq 1) "$($f.r.error) $(Show-Calls)"
+Check 'kudos card: title, comment, ticket facts and an Open ticket link' ($null -ne $card -and $card.body[0].text -eq 'Kudos! A client rated ticket #1001 5 out of 5' -and $card.body[0].color -eq 'Good' -and $card.body[1].text -like '*Fixed in ten minutes*' -and (@($card.body[2].facts | ForEach-Object { "$($_.title)=$($_.value)" }) -join '|') -eq 'Ticket=#1001 Printer on floor 2 not printing|Rated=5 out of 5|From=megan.bowen@contoso.com' -and $card.actions[0].url -like '*service_recid=1001*') ($tc | ForEach-Object { $_.Body })
+Check 'kudos: posted after the score note, never before it' ($nt.Count -eq 1 -and [array]::IndexOf(@($Mock.Calls), $nt[0]) -lt [array]::IndexOf(@($Mock.Calls), $tc[0])) (Show-Calls)
+$TWritten5 = (Read-Body $nt[0]).text
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @((New-CwNote $TWritten5 $false 6), (New-CwNote $TSurveyNote $true))
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5' }
+Check 'kudos rerun: the score is already recorded, so no second card' (@(Get-Calls 'POST' $TTeams).Count -eq 0 -and @(Get-WriteCalls).Count -eq 0) (Show-Calls)
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '4' }
+Check 'kudos: 4 out of 5 is below the default threshold (the top score)' ($f.r.out.kudos_posted -eq $false -and @(Get-Calls 'POST' $TTeams).Count -eq 0 -and $f.r.out.kudos_reason -like '*below the kudos threshold*') $f.r.out.kudos_reason
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '4'; kudos_threshold = '4'; kudos_channel = 'Wins' }
+Check 'kudos: kudos_threshold 4 and kudos_channel Wins post a 4 to that channel only' ($f.r.out.kudos_posted -eq $true -and @(Get-Calls 'POST' $TTeamsWins).Count -eq 1 -and @(Get-Calls 'POST' $TTeams).Count -eq 0 -and @($f.r.out.actions | Where-Object { $_ -eq 'Posted kudos to Teams channel Wins.' }).Count -eq 1) "$($f.r.error) $(Show-Calls)"
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; kudos = 'false' }
+Check 'kudos false: nothing posted' ($f.r.out.kudos_posted -eq $false -and @(Get-Calls 'POST' $TTeams).Count -eq 0) (Show-Calls)
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; kudos_channel = 'Nowhere' }
+Check 'kudos to a channel with no secret: a warning names the secret, the run still succeeds' ($f.r.out.status -eq 'success' -and $f.r.out.kudos_posted -eq $false -and @($f.r.out.warnings | Where-Object { $_ -like '*Teams-WebhookUrl-Nowhere*' }).Count -eq 1 -and @(Get-Calls 'POST' "$TCW/service/tickets/1001/notes").Count -eq 1) (@($f.r.out.warnings) -join ' | ')
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true); $TScenario.teamsFail = 404
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5' }
+Check 'kudos: a deleted Teams workflow is a warning, the run still succeeds and the URL never shows' ($f.r.out.status -eq 'success' -and $f.r.out.kudos_posted -eq $false -and @($f.r.out.warnings | Where-Object { $_ -like '*may be off or deleted*' }).Count -eq 1 -and ($f.r.out | ConvertTo-Json -Depth 8) -notmatch 'KUDOSSIG') (@($f.r.out.warnings) -join ' | ')
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; preview = 'true' }
+Check 'kudos preview: says it would post, posts nothing' ($f.r.out.status -eq 'pending_confirmation' -and $f.r.out.internal_note -like '*would post kudos to the default Teams channel*' -and @(Get-WriteCalls).Count -eq 0) "$($f.r.out.internal_note)"
+Reset-Mock (Get-Secrets 'connectwise' $TKudos) $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '1' }
+Check 'kudos: a low score never posts kudos' (@(Get-Calls 'POST' $TTeams).Count -eq 0 -and $f.r.out.low_score -eq $true) (Show-Calls)
+$f = Invoke-Flow @{ mode = 'score'; ticketId = '1001'; score = '5'; kudos_threshold = '9' }
+Check 'kudos_threshold above score_max: rejected' ($f.r.out.status -eq 'rejected' -and $f.r.error -like '*kudos_threshold must be between 1 and 5*') $f.r.error
 
 # ---- 8. Score preview ----
 Reset-Mock (Get-Secrets 'connectwise') $Handler; Reset-Scenario; $TScenario.cwNotes = @(New-CwNote $TSurveyNote $true)

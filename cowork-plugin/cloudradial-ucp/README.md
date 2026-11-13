@@ -60,6 +60,28 @@ You install the plugin once in each Claude app you use, but you enter your keys 
 
 The [technical details](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp#technical-details) list every example prompt, the skills and tools, how keys are stored, and troubleshooting.
 
+## What's new
+
+**2.8.0** ([release notes](https://github.com/cloudradial/Automations/releases/tag/v2.8.0))
+- Covers the rest of the CloudRadial API: security roles and role assignments, feature sets, support PINs, policy review and exceptions, licenses and who holds them, webhooks, the audit log and sync logs, Signal devices, and Microsoft 365 groups and admins.
+- Create assessments and templates directly, edit single questions, and record answers without re-importing a spreadsheet.
+- Dashboard widgets, media and quickstart file uploads, and attachments on portal messages.
+- Every change to access, policies, licenses or webhooks is previewed and waits for your yes. Webhook secrets and header values never go into chat.
+- New skills: Access Control, Policies & Licenses, and Webhooks & Audit (31 tools, 20 skills).
+
+**2.7.0** ([release notes](https://github.com/cloudradial/Automations/releases/tag/v2.7.0))
+- Signal desktop notices: preview who a message reaches, send, check who read or acknowledged it, and retract it. Portal banners and portal messages.
+- Upload report files (PDF, XLSX and more) into clients' archive folders, set up folders for every client, and find overdue or alerting reports.
+- Microsoft Secure Score for one client or all of them, with the top improvement actions; it also feeds the QBR deliverable.
+- Run, archive and delete assessments, and remove course enrollments.
+- Fixes: menu edits no longer fail with HTTP 415, large lists can be read in full, and deleting a partner-level token needs confirmation.
+- New skills: Client Communications and Report Archive.
+
+**2.6.4** ([release notes](https://github.com/cloudradial/Automations/releases/tag/v2.6.4))
+- Fixed "Forbidden" when saving API keys in the local setup form.
+
+Earlier versions are on the [releases page](https://github.com/cloudradial/Automations/releases?q=v2.&expanded=true).
+
 ---
 
 ## Technical details

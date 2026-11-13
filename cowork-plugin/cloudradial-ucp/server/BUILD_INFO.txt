@@ -1,5 +1,5 @@
 Version: 2.8.0
-Built: 2026-11-13T15:29:13.739Z
+Built: 2026-11-13T16:57:46.477Z
 variant: portable JavaScript; no bundled native binaries
 setup: pinned @napi-rs/keyring installed per OS/CPU/libc at first setup
 credentials: verified OS keychain; no credential-file fallback; local form only

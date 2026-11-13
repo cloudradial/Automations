@@ -127,7 +127,12 @@ All optional. With none, every name-matched company is migrated in apply mode.
 - **Connection errors are retried.** A request that fails before it reaches the server (TLS handshake, DNS, reset, timeout) is retried up to 3 more times. If a whole step still fails that way, it is run again for that company, up to 3 attempts, and the run output notes it. Steps match what already exists, so a re-run never duplicates.
 - **ScalePad software paging.** The installed-software list accepts `page_size` 100 at most (the other lists take 200); the step asks for 100. Any list that rejects 200 is retried at 100 automatically.
 
-- **Archive upload route.** `POST /api/beta/archive/{id}/item` takes the PDF as multipart/form-data. The create call doesn't always return the new archive's id, so the step looks the archive up again by name before uploading (a first live run uploaded to archive 0 and failed with "Sequence contains no elements").
+- **Archive routes.**
+  - Folders are found with `GET /v2/odata/archivefolder` filtered to the company (names compared case-insensitively) and created with `POST /v2/archivefolder`.
+  - Each PDF goes to `POST /v2/archiveitem/upload` (multipart: `archiveId`, `subject`, `files`), with the subject set so a re-run recognises it.
+  - A portal that answers the v2 routes with 404 or 405 gets the legacy `/api/beta/archive` routes for the rest of the step.
+  - If a create reply carries no id, the folder is looked up again by name before uploading. A first live run uploaded to archive 0 and failed with "Sequence contains no elements".
+  - The v2 upload hasn't had a live run yet; `test-upload.ps1` checks the request it sends.
 - **Assessment import `type`.** The upload's `data` part sends `type: 0`. If the import lands as a template instead of an assessment, change it in the assessments step.
 - **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).
@@ -153,7 +158,8 @@ All optional. With none, every name-matched company is migrated in apply mode.
 | `7-summary.ps1` | **Migration report.** |
 | `make-saas.js` | Generates `2d-saas.ps1` from `2b-assets.ps1`. Run it after changing `2b-assets.ps1`. |
 | `build-wf.js` | Assembles the `.yml`: the per-company loop, the per-phase re-run on connection errors, and checks on the result. |
-| `harness.ps1`, `test-flow.ps1` | Run the built steps against mocked ScalePad and CloudRadial APIs, in strict mode as on the runner. |
+| `harness.ps1`, `test-flow.ps1` | Run the built steps against mocked ScalePad and CloudRadial APIs, in strict mode as on the runner. Set `ARCH_LEGACY=1` to act as a portal without the v2 archive folder routes. |
+| `test-upload.ps1` | Sends the PDF upload from `6-archive.ps1` to a local listener and checks the real multipart request: the v2 route and its fields, the fallback to the legacy route on 404, and errors. |
 
 From `src/`:
 
@@ -161,5 +167,6 @@ From `src/`:
 2. `node make-saas.js` if you changed `2b-assets.ps1`.
 3. `node build-wf.js` rewrites `../scalepad-cloudradial-sync.yml`.
 4. `pwsh -File test-flow.ps1 -InputJson '{"mode":"plan"}'`, then with `"apply"`.
+5. `pwsh -File test-upload.ps1` if you changed the archive upload.
 
 The runner runs PowerShell steps under `Set-StrictMode -Version Latest`, so reading a property or key that doesn't exist throws. The harness does the same, so test there before importing.

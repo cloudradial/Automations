@@ -37,7 +37,7 @@ The plugin confirms the company and shows you any change before it writes to you
 
 ## Set it up
 
-1. **Download** [`cloudradial-ucp.plugin`](https://github.com/cloudradial/Automations/raw/main/codex-plugin/cloudradial-ucp.plugin), or get it from the [releases page](https://github.com/cloudradial/Automations/releases). It is one file for Windows, macOS and Linux.
+1. [**Download cloudradial-ucp.plugin**](https://github.com/cloudradial/Automations/releases/latest/download/cloudradial-ucp.plugin). It is one file for Windows, macOS and Linux. See what is new in the [release notes](https://github.com/cloudradial/Automations/releases/latest).
 2. **Install it in Codex** as a Codex plugin.
 3. **Connect your portal.** Start a new conversation and type **Setup the CloudRadial Plugin**. A form opens in your browser. Enter your public and private keys, pick your region, and save.
 4. **Try it.** Ask "Prepare me for my meeting with Contoso", using one of your own clients.
@@ -56,7 +56,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cod
 
 ### Step 1: Get the plugin file
 
-Download [`cloudradial-ucp.plugin`](https://github.com/cloudradial/Automations/raw/main/codex-plugin/cloudradial-ucp.plugin) from this folder, or from the [releases page](https://github.com/cloudradial/Automations/releases). It's **one file for macOS, Windows and Linux**; the older per-computer downloads are no longer needed.
+[**Download cloudradial-ucp.plugin**](https://github.com/cloudradial/Automations/releases/latest/download/cloudradial-ucp.plugin). It's **one file for macOS, Windows and Linux**; the older per-computer downloads are no longer needed. See what is new in the [release notes](https://github.com/cloudradial/Automations/releases/latest).
 
 ### Step 2: Install it
 

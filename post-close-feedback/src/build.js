@@ -60,7 +60,7 @@ ${block(body, '        ')}
 const steps = [
   { id: 'parse', name: 'Read the request', body: script(['psa.ps1'], ['step.ps1'], 'parse.ps1'), params: [['trigger', '{{ nodes.trigger.output }}']], test: testInput },
   { id: 'survey', name: 'Send the survey', body: script(['psa.ps1'], ['step.ps1'], 'survey.ps1') },
-  { id: 'route', name: 'Route low scores to the service manager', body: script(['psa.ps1', 'cloudradial.ps1', 'postmark.ps1'], ['step.ps1'], 'route.ps1') },
+  { id: 'route', name: 'Route low scores and kudos', body: script(['psa.ps1', 'cloudradial.ps1', 'postmark.ps1', 'teams.ps1'], ['step.ps1'], 'route.ps1') },
 ];
 
 let x = 280;

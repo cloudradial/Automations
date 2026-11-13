@@ -1,6 +1,8 @@
-# Step 3: Route low scores (mode "score" only).
+# Step 3: Route the score (mode "score" only).
 # Records the score as an internal note on the ticket. When the score is at or below the threshold, it first
 # emails the service manager through Postmark (or, if Postmark isn't set up, says so in the note).
+# When the score is at or above kudos_threshold (default: the top score) and a Teams channel is set up, it posts a
+# kudos card to Teams after the note is written, so a rerun (which finds the note) never posts twice.
 # When a CloudRadial company id is sent and the CloudRadial secrets are set, it also records the score as
 # CloudRadial feedback, so the Feedback & CSAT Report (feedback-csat-report) counts it.
 # With preview=true it returns what it would do (status pending_confirmation) and writes nothing.
@@ -36,10 +38,14 @@ $mailText = @(
     'Please follow up with them. A note on the ticket records the score.'
 ) -join "`n"
 $subject = "Low satisfaction score on ticket $($id): $score out of $max"
+$kudos = ($null -ne $ctx.PSObject.Properties['kudos']) -and [bool]$ctx.kudos
+$kudosChannel = if ($null -ne $ctx.PSObject.Properties['kudos_channel']) { [string]$ctx.kudos_channel } else { '' }
+$kudosWhere = if ($kudosChannel) { "Teams channel $kudosChannel" } else { 'the default Teams channel' }
 
 if ($ctx.preview) {
     $stopState.done = $true
     $preview = ($noteLines -join "`n") + $(if ($low) { "`nIt would email the service manager ($mgrText)." } else { '' })
+    if ($kudos) { $preview += $(if (Test-TmConfigured $kudosChannel) { "`nIt would post kudos to $kudosWhere." } else { "`nIt would post kudos to Teams, but $kudosWhere isn't set up ($(Get-TmSecretName $kudosChannel) secret)." }) }
     Set-NodeOutput ([ordered]@{
             status = 'pending_confirmation'; message = "Preview: ticket $id was rated $score out of $max. Run again without preview to record it$(if ($low) { ' and alert the service manager' })."
             public_note = ''; internal_note = $preview; ticket_id = $id; mode = 'score'; survey_sent = $true; score = $score; low_score = $low; manager_emailed = $false
@@ -70,6 +76,20 @@ catch {
 if ($noted -eq 'already-present') { $null = $warnings.Add("Ticket $id already had a score note (another run added it), so no second note was added.") }
 else { $null = $actions.Add("Added an internal note with the score to ticket $id.") }
 
+# ---- kudos to Teams, only after this run wrote the score note (a rerun finds the note and posts nothing) ----
+$kudosPosted = $false; $kudosReason = ''
+if ($kudos -and $noted -ne 'already-present') {
+    $facts = [ordered]@{ Ticket = "#$id$(if ($ctx.summary) { " $($ctx.summary)" })"; Rated = "$score out of $max"; From = [string]$ctx.contact }
+    $text = if ($comment) { "They wrote: *""$comment""*" } else { '' }
+    $tm = Send-TeamsCard -Channel $kudosChannel -Title "Kudos! A client rated ticket #$id $score out of $max" -Text $text -Facts $facts -LinkText 'Open ticket' -LinkUrl ([string]$ctx.ticket_url) -Style 'good'
+    $kudosPosted = [bool]$tm.sent; $kudosReason = [string]$tm.reason
+    if ($tm.sent) { $null = $actions.Add("Posted kudos to $kudosWhere.") }
+    # Teams not set up and no channel asked for: kudos is simply off for this partner, so no warning.
+    elseif ($tm.configured -or $kudosChannel) { $null = $warnings.Add("The kudos card wasn't posted to Teams: $($tm.reason)") }
+}
+elseif (-not $kudos) { $kudosReason = 'The score is below the kudos threshold, or kudos is off.' }
+else { $kudosReason = 'The score was already recorded by another run, so kudos was not posted again.' }
+
 # ---- optional: record it as CloudRadial feedback for the CSAT report ----
 $crId = [string]$ctx.cr_company_id
 $crRecorded = $false
@@ -96,5 +116,6 @@ else { "Ticket $id was rated $score out of $max. The score was noted on the tick
 Set-NodeOutput ([ordered]@{
         status = 'success'; message = $msg; public_note = ''; internal_note = $note; ticket_id = $id; mode = 'score'; survey_sent = $true
         score = $score; low_score = $low; manager_emailed = [bool]$mail.sent; postmark_message_id = [string]$mail.messageId; cloudradial_recorded = $crRecorded
+        kudos_posted = $kudosPosted; kudos_reason = $kudosReason
         actions = @($actions); warnings = @(Get-StepWarnings $warnings)
     })

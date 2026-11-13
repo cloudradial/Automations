@@ -102,5 +102,13 @@ $ctx.low = ($score -le $threshold)
 $ctx.comment = $comment
 $ctx.managers = @($managers | Where-Object { Test-StepEmail $_ })
 $ctx.cr_company_id = Get-StepField $a @('cr_company_id', 'crCompanyId', 'Company.CompanyId')
+# Kudos: a score at or above kudos_threshold (default: the top of the scale) is posted to a Teams channel.
+# kudos=false turns it off; kudos_channel picks a named channel (secret Teams-WebhookUrl-<channel>).
+$kudosOn = $true; $kRaw = Get-StepField $a @('kudos'); if ($kRaw) { $kudosOn = Test-StepTrue $kRaw }
+$kudosAt = Get-Int (Get-StepField $a @('kudos_threshold', 'kudosThreshold')) $scoreMax
+if ($kudosAt -lt 1 -or $kudosAt -gt $scoreMax) { Stop-Parse 'rejected' "kudos_threshold must be between 1 and $scoreMax (it was $kudosAt)." $ticketId $mode }
+$ctx.kudos = ($kudosOn -and -not $ctx.low -and $score -ge $kudosAt)
+$ctx.kudos_threshold = $kudosAt
+$ctx.kudos_channel = Get-StepField $a @('kudos_channel', 'kudosChannel')
 $ctx.warnings = @(Get-StepWarnings $warnings)
 Set-NodeOutput ([ordered]@{ status = 'success'; message = "Ticket $ticketId was rated $score out of $scoreMax."; ticket_id = $ticketId; mode = $mode; ctx_json = (ConvertTo-Json -InputObject $ctx -Depth 8 -Compress) })

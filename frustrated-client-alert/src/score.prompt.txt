@@ -1,0 +1,5 @@
+Score how frustrated the client is in each reply below. Reply with one JSON object in this shape:
+{"results": [{"key": "r1", "level": "none", "reason": "<one plain sentence>", "quote": ""}]}
+
+Replies (JSON):
+{{ nodes.node-find.output.facts_json }}

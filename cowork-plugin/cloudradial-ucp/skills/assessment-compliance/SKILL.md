@@ -33,7 +33,7 @@ to the `setup` skill before doing CloudRadial work.
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments; security types need `confirmed: true`) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -44,7 +44,15 @@ to the `setup` skill before doing CloudRadial work.
 | `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
 | `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
 | `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
-| `assessment_lifecycle` | Read a full assessment, run it, archive/unarchive it, or delete one run | `action`, `assessment_id` |
+| `assessment_lifecycle` | Create assessments and templates, list templates, read one with its questions, add/update/delete questions, record answers, run, archive/unarchive, delete a run | `action` |
+| `access_control` | Role assignments, feature-set companies, license users, support PINs (every write previews first; needs `confirmed: true`) | `action` |
+| `policy_review` | Policy review by category, a policy's exceptions, ignore/unignore an exception | `action`, `company_id` |
+| `webhook_action` | Webhook actions: list, create, update, enable/disable, test, rotate secret (saved to a local file), runs | `action` |
+| `audit_log` | Audit events, sessions and sync-job logs (read-only) | `action` |
+| `signal_device` | Signal installs: list, fleet stats, reset, revoke, unrevoke | `action` |
+| `m365_directory` | A company's Microsoft 365 groups and admin roles (read-only) | `action`, `company_id` |
+| `dashboard_widgets` | Widget types, add/update/delete widgets, replace a dashboard's layout | `action` |
+| `upload_file` | Upload media, create a quickstart from a file, replace a quickstart's file, attach files to a portal message | `target` |
 
 ### OData parameter conventions
 
@@ -164,9 +172,21 @@ For a cross-company compliance roll-up, use the export workflow below.
 
 ## Creating an assessment
 
-`create_resource` can't create an assessment: the API has no create endpoint, only the Excel upload.
-Use `assessment_import`, which uploads the questions (as an assessment, `type` 20), then finds the new
-`assessmentId` by title.
+Two ways to create one (`create_resource` doesn't do assessments):
+
+- **`assessment_lifecycle` with `action: "create"`** (new in 2.8.0, not yet tested live): `company_id`,
+  `title`, `type` 20 (assessment, default) or 10 (template), optional `category`, `description` and
+  `questions`. Each question is `{ updateKey, category, label, type 0 (free text) or 80 (multiple
+  choice), answerOptions [{label, value}], explanation, evaluationInfo, remediationInfo, order }`. Add or
+  change questions later with `set_questions` (matched by `updateKey`), `update_question` and
+  `delete_question`, and record answers with `set_answers` (value 2, 1, 0, -1 or -2 by `questionId` or
+  `updateKey`, plus `textValue`, `publicNotes`, `privateNotes`, `isFlagged`, `owner`).
+  `templates` lists the templates a company can use.
+- **`assessment_import`** (tested), which uploads the questions as a spreadsheet in the portal's
+  template layout, then finds the new `assessmentId` by title. Use it for spreadsheets and when the
+  user already works in the template columns.
+
+The steps below describe `assessment_import`.
 
 1. Resolve the company with `search_companies`. Confirm the company and the title with the user,
    because this writes to their portal.

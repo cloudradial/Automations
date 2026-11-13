@@ -38,8 +38,9 @@ Call `setup_status` first. If it returns `configured: false`, defer to the `setu
 - **Change** with `update_resource` (PATCH; no `company_id` needed).
 - **Delete** with `delete_resource` after the user confirms. It hasn't been tested whether the
   folder's items go with it, so warn the user and suggest checking the items first.
-- Partner default folders (`/v2/archivefolder/default`) aren't covered by a tool yet. Read them with
-  `raw_api_call` (GET) if asked, and don't write to them without showing the user the exact call.
+- **Partner default folders** (the folders new companies start with) are `resource_type:
+  "archive_folder_default"`: list, get, create, edit (PUT with the full body) and delete. They're
+  partner-wide, so writes need `confirmed: true` after the user approves.
 
 ## Upload report files
 

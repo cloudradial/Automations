@@ -66,6 +66,17 @@ nothing is duplicated.
 
 **What you get:** The existing assessment updated in place.
 
+### Record answers
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+In Contoso's "2026 Security Review", mark MFA as compliant and backups as
+partially compliant, with the note "Offsite copy pending". Show me the
+questions and the new answers first, and only save when I confirm.
+```
+
+**What you get:** Those answers updated in place, without re-importing the whole assessment.
+
 ### Run an assessment
 `Per-company` · `Writes to the portal` · **Not yet tested**
 

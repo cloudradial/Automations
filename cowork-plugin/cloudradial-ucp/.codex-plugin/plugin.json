@@ -1,6 +1,6 @@
 {
   "name": "cloudradial-ucp",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "Connect Codex to a CloudRadial UCP Portal through a local MCP server and CloudRadial-specific skills.",
   "author": {
     "name": "Nick Westgate"
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "CloudRadial UCP",
     "shortDescription": "Use CloudRadial portal data and actions in Codex.",
-    "longDescription": "CloudRadial UCP adds a local MCP server and task-specific skills for setup, portal setup and lookup, companies, users, content, service catalog, courses, assessments and compliance exports, Microsoft Secure Score, Signal notices, portal banners and messages, report archive uploads, endpoints and refresh cards, services and domains, client deliverables, feedback, and reporting.",
+    "longDescription": "CloudRadial UCP adds a local MCP server and task-specific skills for setup, portal setup and lookup, companies, users, content, service catalog, courses, assessments and compliance exports, Microsoft Secure Score, Signal notices, portal banners and messages, report archive uploads, roles and feature sets, policies and licenses, webhooks and the audit log, endpoints and refresh cards, services and domains, client deliverables, feedback, and reporting.",
     "developerName": "Nick Westgate",
     "category": "Productivity",
     "capabilities": [

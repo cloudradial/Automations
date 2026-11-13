@@ -29,7 +29,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments; security types need `confirmed: true`) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -39,7 +39,15 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
 | `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
 | `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
-| `assessment_lifecycle` | Read a full assessment, run it, archive/unarchive it, or delete one run | `action`, `assessment_id` |
+| `assessment_lifecycle` | Create assessments and templates, list templates, read one with its questions, add/update/delete questions, record answers, run, archive/unarchive, delete a run | `action` |
+| `access_control` | Role assignments, feature-set companies, license users, support PINs (every write previews first; needs `confirmed: true`) | `action` |
+| `policy_review` | Policy review by category, a policy's exceptions, ignore/unignore an exception | `action`, `company_id` |
+| `webhook_action` | Webhook actions: list, create, update, enable/disable, test, rotate secret (saved to a local file), runs | `action` |
+| `audit_log` | Audit events, sessions and sync-job logs (read-only) | `action` |
+| `signal_device` | Signal installs: list, fleet stats, reset, revoke, unrevoke | `action` |
+| `m365_directory` | A company's Microsoft 365 groups and admin roles (read-only) | `action`, `company_id` |
+| `dashboard_widgets` | Widget types, add/update/delete widgets, replace a dashboard's layout | `action` |
+| `upload_file` | Upload media, create a quickstart from a file, replace a quickstart's file, attach files to a portal message | `target` |
 
 ### OData parameter conventions
 
@@ -77,10 +85,10 @@ Certificates tracked in the portal. Key fields: `id` (the certificate's ID), `co
 Logical groupings of companies. Key fields: `companyGroupId`, `group` (the group's name; there is no `name` or `description`), `partnerId`. Create with `data: { group: "Managed Plus" }`. Membership lives in `company_group_company` (`companyGroupId`, `companyId`).
 
 ### quickstart
-Quickstart guides on a company's portal home page. Key fields: `quickstartId`, `companyId`, `subject` (NOT `name`), `description`, `category`, `body` (HTML), `icon`, `iconColor`, `datePublished`, `isText`. Creating one requires `companyId`, `subject`, `description`, `category`, `icon`, `iconColor`, `datePublished` and `isText`. PATCH of quickstart fields works.
+Quickstart guides on a company's portal home page. Key fields: `quickstartId`, `companyId`, `subject` (NOT `name`), `description`, `category`, `body` (HTML), `icon`, `iconColor`, `datePublished`, `isText`. Creating one requires `companyId`, `subject`, `description`, `category`, `icon`, `iconColor`, `datePublished` and `isText`. PATCH of quickstart fields works. To make a quickstart from a file (a PDF guide), use `upload_file` with `target: "quickstart"` and `company_id`, `subject`, `description`, `category`, `icon`, `icon_color`; replace its file later with `target: "quickstart_file"`.
 
 ### media
-Media files (images, documents) stored in the portal. Key fields: `partnerMediaId` (the media file's ID), `originalName`, `contentType`, `description`, `length`, `width`, `height`, `viewToken`. Create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }`; `width` and `height` are required, so use 0 for non-images. Media is partner-level (no `companyId`). Create, PATCH of `description`, and delete all work.
+Media files (images, documents) stored in the portal. Key fields: `partnerMediaId` (the media file's ID), `originalName`, `contentType`, `description`, `length`, `width`, `height`, `viewToken`. Upload a file from the user's computer with `upload_file` (`target: "media"`, optional `description`); or create with `create_resource` and `data: { originalName, data (base64), length, width, height, contentType, description }` (`width` and `height` are required, so use 0 for non-images). Media is partner-level (no `companyId`). Create, PATCH of `description`, and delete all work.
 
 ### token
 **Replacement tokens**, not API keys: the named values (like `@SupportPhone`) that portal forms, articles and automations fill in. A token lives at partner level (`companyId` 0) or on one company, and a company token overrides the partner token of the same name. Manage them with `manage_tokens`. Token names are case-sensitive.
@@ -122,6 +130,15 @@ For advanced operations not covered by the standard tools, use `raw_api_call` to
 **GET example with query params:** Call `raw_api_call` with `method: "GET"`, `path: "/v2/odata/company"`, `query: { "$top": 5, "$select": "companyId,name" }`.
 
 **POST example with a body:** Call `raw_api_call` with `method: "POST"`, `path: "/v2/companygroup"`, `body: { "group": "Managed Plus" }`. Confirm any write with the user first.
+
+**IT Glue compatibility routes:** `/v2/compatibility/flexible_asset_types`, `/v2/compatibility/flexible_assets`
+and `/v2/compatibility/organizations/{orgId}/relationships/flexible_assets` answer in IT Glue's shape, for
+tools built against IT Glue's API. Prefer the `flexible_asset` resource types; use these only when the
+user is wiring up such a tool, with `raw_api_call`.
+
+**Endpoints by manufacturer and machine name:** `/v2/endpoint/{manufacturer}/{machineName}` (and its
+`custom-property` and `update-warranty` routes) address a device without its serial number. Use
+`raw_api_call` when a device has no serial.
 
 A raw `PATCH` body must be a JSON Patch array (`[{ "op": "replace", "path": "/name", "value": "Contoso Ltd" }]`); `update_resource` builds that for you, so prefer it.
 

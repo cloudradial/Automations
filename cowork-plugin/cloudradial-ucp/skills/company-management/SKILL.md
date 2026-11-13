@@ -56,7 +56,7 @@ The core resource. These are the only fields the API accepts on create and updat
 | `territory` | string | Sales territory or region |
 | `accountManager` | string | Assigned account manager name |
 
-**Portal-only settings:** branding (logo, theme color), messaging (digest and direct messages), feature sets and delegated admin can't be set through the API. `get_resource` may return some of them, but they aren't in the API spec, so treat them as hints and have the user check or change them in the portal.
+**Portal-only settings:** branding (logo, theme color), messaging (digest and direct messages) and delegated admin can't be set through the API. Feature sets (which portal sections a company sees) can now be set; use the `access-control` skill. `get_resource` may return some of them, but they aren't in the API spec, so treat them as hints and have the user check or change them in the portal.
 
 Fields available via `list_resources` (OData, more limited):
 

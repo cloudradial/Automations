@@ -17,7 +17,9 @@ export interface ResourceConfig {
   odataPath: string;
   itemPath: string;
   idParam: string;
-    createPath?: string;
+  createPath?: string;
+  /** Plain (non-OData) list route, e.g. "role". Used by list_resources when there is no odataPath. */
+  listPath?: string;
 }
 
 export const RESOURCE_MAP: Record<string, ResourceConfig> = {
@@ -57,8 +59,18 @@ export const RESOURCE_MAP: Record<string, ResourceConfig> = {
   dashboard:                { odataPath: "dashboard",              itemPath: "dashboard",              idParam: "id" },              // Widgets via raw_api_call
   portal_message:           { odataPath: "message",                itemPath: "message",                idParam: "id" },
   signal_message:           { odataPath: "signalmessage",          itemPath: "signalmessage",          idParam: "id" },              // Writes only through the signal_message tool
-  article_feedback:         { odataPath: "articlefeedback",        itemPath: "",                       idParam: "" },                // List/count only
+  article_feedback:         { odataPath: "articlefeedback",        itemPath: "articlefeedback",        idParam: "id" },              // PUT takes only {rating}
   assessment_question:      { odataPath: "assessmentquestion",     itemPath: "",                       idParam: "" },                // List/count only
+  // Added in 2.8.0 (v2 API, 2026-11). Writes to these go through a confirmation step.
+  role:                     { odataPath: "",                       itemPath: "role",                   idParam: "id", listPath: "role" },
+  role_assignment:          { odataPath: "",                       itemPath: "roleassignment",         idParam: "id", listPath: "roleassignment" },
+  feature_set:              { odataPath: "",                       itemPath: "featureset",             idParam: "id", listPath: "featureset" },
+  license:                  { odataPath: "license",                itemPath: "license",                idParam: "id" },
+  user_license:             { odataPath: "userlicense",            itemPath: "",                       idParam: "" },                // List/count only
+  policy:                   { odataPath: "policy",                 itemPath: "policy",                 idParam: "id" },
+  webhook:                  { odataPath: "",                       itemPath: "action",                 idParam: "id", listPath: "action" }, // Create/rotate via webhook_action
+  archive_folder_default:   { odataPath: "",                       itemPath: "archivefolder/default",  idParam: "id", listPath: "archivefolder/default" },
+  signal_device:            { odataPath: "",                       itemPath: "",                       idParam: "", listPath: "signaldevice" }, // Writes via signal_device
 };
 
 export interface ApiResult {
@@ -95,21 +107,25 @@ export interface FormFile {
 export async function callApiForm(
   path: string,
   fields: Record<string, string | undefined>,
-  files: FormFile[]
+  files: FormFile[],
+  opts: { method?: "POST" | "PUT"; query?: Record<string, string | undefined> } = {}
 ): Promise<ApiResult> {
   const { authHeader, baseUrl } = getAuthContext();
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
   for (const f of files) form.append(f.field, new Blob([new Uint8Array(f.bytes)], { type: f.contentType }), f.name);
-  const resp = await fetch(new URL(path, baseUrl).toString(), {
-    method: "POST",
+  const url = new URL(path, baseUrl);
+  for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined && v !== "") url.searchParams.set(k, v);
+  const method = opts.method ?? "POST";
+  const resp = await fetch(url.toString(), {
+    method,
     headers: { Authorization: authHeader, Accept: "application/json" },
     body: form,
   });
   const text = await resp.text();
   let data: unknown = text;
   try { data = text ? JSON.parse(text) : null; } catch { /* keep text */ }
-  if (!resp.ok) throw new CloudRadialApiError("POST", path, resp.status, data);
+  if (!resp.ok) throw new CloudRadialApiError(method, path, resp.status, data);
   // Same { data, success, message } envelope as callApi: hand back the payload.
   if (data && typeof data === "object" && !Array.isArray(data) && "data" in data && "success" in data) {
     data = (data as { data: unknown }).data;

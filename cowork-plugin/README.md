@@ -5,7 +5,7 @@ This folder holds the CloudRadial UCP plugin for Claude (Cowork, Claude Desktop,
 | Folder | What it is |
 |---|---|
 | [`cloudradial-ucp/`](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp) | The plugin: skills, the bundled MCP server, manifests for Claude and Codex, and the build scripts. **Start here to install it**, and for the full list of prompts. |
-| [`cloudradial-ucp-mcp/`](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp-mcp) | TypeScript source of the MCP server (23 tools over the CloudRadial API V2) |
+| [`cloudradial-ucp-mcp/`](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp-mcp) | TypeScript source of the MCP server (31 tools over the CloudRadial API V2) |
 
 The plugin runs its MCP server locally with Node.js and talks straight to the CloudRadial API. There's no Azure Function, Chrome extension or hosted server; earlier versions needed them, and they're no longer used.
 

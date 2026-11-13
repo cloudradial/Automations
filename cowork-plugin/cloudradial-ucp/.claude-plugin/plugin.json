@@ -1,8 +1,8 @@
 {
   "name": "cloudradial-ucp",
   "displayName": "CloudRadial UCP",
-  "version": "2.7.0",
-  "description": "☁️📡 CloudRadial UCP: the AI-powered service delivery & client success platform, right inside Claude. Look up companies, manage articles/assessments/courses, send Signal notices, upload reports to client archives, check Microsoft Secure Score, refresh endpoint warranty, and work with 30+ CloudRadial resource types in plain English. After installing, say \"Setup the CloudRadial Plugin\" for a quick tour and one-step credential setup.",
+  "version": "2.8.0",
+  "description": "☁️📡 CloudRadial UCP: the AI-powered service delivery & client success platform, right inside Claude. Look up companies, manage articles/assessments/courses, send Signal notices, upload reports to client archives, check Microsoft Secure Score, review policies and access, manage webhooks, refresh endpoint warranty, and work with 30+ CloudRadial resource types in plain English. After installing, say \"Setup the CloudRadial Plugin\" for a quick tour and one-step credential setup.",
   "author": {
     "name": "Nick Westgate"
   },

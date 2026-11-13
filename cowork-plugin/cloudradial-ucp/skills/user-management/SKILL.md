@@ -29,7 +29,7 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments; security types need `confirmed: true`) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
 | `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
@@ -39,7 +39,15 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
 | `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
 | `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
-| `assessment_lifecycle` | Read a full assessment, run it, archive/unarchive it, or delete one run | `action`, `assessment_id` |
+| `assessment_lifecycle` | Create assessments and templates, list templates, read one with its questions, add/update/delete questions, record answers, run, archive/unarchive, delete a run | `action` |
+| `access_control` | Role assignments, feature-set companies, license users, support PINs (every write previews first; needs `confirmed: true`) | `action` |
+| `policy_review` | Policy review by category, a policy's exceptions, ignore/unignore an exception | `action`, `company_id` |
+| `webhook_action` | Webhook actions: list, create, update, enable/disable, test, rotate secret (saved to a local file), runs | `action` |
+| `audit_log` | Audit events, sessions and sync-job logs (read-only) | `action` |
+| `signal_device` | Signal installs: list, fleet stats, reset, revoke, unrevoke | `action` |
+| `m365_directory` | A company's Microsoft 365 groups and admin roles (read-only) | `action`, `company_id` |
+| `dashboard_widgets` | Widget types, add/update/delete widgets, replace a dashboard's layout | `action` |
+| `upload_file` | Upload media, create a quickstart from a file, replace a quickstart's file, attach files to a portal message | `target` |
 
 ### OData parameter conventions
 
@@ -92,7 +100,7 @@ List users with full OData filtering support. Better than user_lookup for bulk q
 
 The `user` entity has `userId` (a string), `email`, `firstName`, `lastName`, `displayName`, `userName`, `companyId`, `title` (job title), `department`, `phoneNumber`, `mobilePhone`, address fields, `psaKey`, `supportPin`, `dateCreated` and `dateModified`. Lists leave out `supportPin`: selecting it on `/v2/odata/user` returns HTTP 500, so `list_resources` and `user_lookup` select every other field by default. To read one user's `supportPin`, call `get_resource` with `resource_type: "user"`.
 
-**There is no `role` field, and no last-login date.** Portal security roles are managed in the portal and the API doesn't return them. On create and update the API also accepts flags it doesn't read back, including `isPartnerAdminUser` (partner admin), `isLoginDisabled`, `isShowInDirectory`, `priorityStatus` (0 or 10) and the digest and direct-message opt-ins. When the user asks about roles or admin access, say the API can't list them and point them to the portal.
+**There is no `role` field on users, and no last-login date.** Read a user's portal roles with `access_control` (`action: "list_assignments"`, `user_id`); assign or remove roles with the `access-control` skill. Sign-in history is in `audit_log` (`action: "sessions"`, `identity` = the user's email). On create and update the API also accepts flags it doesn't read back, including `isPartnerAdminUser` (partner admin), `isLoginDisabled`, `isShowInDirectory`, `priorityStatus` (0 or 10) and the digest and direct-message opt-ins. When the user asks about roles or admin access, use the `access-control` skill's access review.
 
 ### Create, update and delete
 

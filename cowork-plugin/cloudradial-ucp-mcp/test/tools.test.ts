@@ -253,7 +253,9 @@ check("portal_message delete scoped", r.ok && last().url.toString().endsWith("/v
 r = await run("create_resource", { resource_type: "signal_message", data: { title: "x" } });
 check("signal_message generic create blocked", !r.ok && /signal_message tool/.test(r.error!) && calls.length === 0, r.error);
 r = await run("delete_resource", { resource_type: "article_feedback", id: "3" });
-check("article_feedback read-only", !r.ok && calls.length === 0);
+check("article_feedback delete (2.8.0)", r.ok && last().method === "DELETE" && last().url.pathname === "/v2/articlefeedback/3");
+r = await run("update_resource", { resource_type: "article_feedback", id: "3", data: { rating: "1" } });
+check("article_feedback PATCH points to PUT", !r.ok && /PUT/.test(r.error!) && calls.length === 0);
 
 // --- archive_upload --------------------------------------------------------------
 {
@@ -350,6 +352,128 @@ r = await run("assessment_lifecycle", { action: "archive", assessment_id: 60, co
 check("archive scoped", r.ok && calls.length === 1 && last().url.toString().endsWith("/v2/assessment/60/archive?companyId=1"));
 r = await run("assessment_lifecycle", { action: "delete_run", assessment_id: 60, run_id: 61, company_id: 1 });
 check("delete_run", r.ok && last().method === "DELETE" && last().url.toString().endsWith("/v2/assessment/60/run/61?companyId=1"));
+
+// === 2.8.0 =========================================================================
+// --- sensitive generic writes need confirmed ---------------------------------------
+route = () => ({ status: 200, json: { success: true, data: { roleId: "r1" } } });
+r = await run("create_resource", { resource_type: "role", data: { name: "Helpdesk" } });
+check("role create without confirmed refused", !r.ok && /confirmed=true/.test(r.error!) && calls.length === 0, r.error);
+r = await run("create_resource", { resource_type: "role", data: { name: "Helpdesk" }, confirmed: true });
+check("role create with confirmed", r.ok && last().method === "POST" && last().url.pathname === "/v2/role");
+r = await run("delete_resource", { resource_type: "feature_set", id: "4" });
+check("feature_set delete needs confirmed", !r.ok && calls.length === 0);
+r = await run("update_resource", { resource_type: "role_assignment", id: "4", data: {}, confirmed: true });
+check("role_assignment can't be edited", !r.ok && /Delete the assignment/.test(r.error!) && calls.length === 0, r.error);
+r = await run("create_resource", { resource_type: "webhook", data: { name: "x" }, confirmed: true });
+check("webhook create routed to webhook_action", !r.ok && /webhook_action/.test(r.error!) && calls.length === 0, r.error);
+r = await run("update_resource", { resource_type: "article", id: "1", data: { subject: "x" } });
+check("non-sensitive update needs no confirm", r.ok);
+
+// --- non-OData lists ----------------------------------------------------------------
+route = () => ({ status: 200, json: { success: true, data: [{ roleId: "r1" }] } });
+r = await run("list_resources", { resource_type: "role_assignment", params: { userId: "u1", pageSize: 50 } });
+check("role_assignment list uses plain GET with params", r.ok && last().url.pathname === "/v2/roleassignment" && last().url.searchParams.get("userId") === "u1" && last().url.searchParams.get("pageSize") === "50", last().url.toString());
+r = await run("list_resources", { resource_type: "role", filter: "name eq 'x'" });
+check("OData filter refused on plain list", !r.ok && /params/.test(r.error!) && calls.length === 0, r.error);
+
+// --- policy and license company scoping --------------------------------------------
+route = (c) => c.url.pathname.startsWith("/v2/odata/") ? { status: 200, json: { value: [{ companyId: 7 }] } } : { status: 204, text: "" };
+r = await run("update_resource", { resource_type: "policy", id: "3", method: "PUT", data: { name: "Age" }, confirmed: true });
+check("policy PUT sends no companyId", r.ok && calls.length === 1 && last().url.search === "", last().url.toString());
+r = await run("delete_resource", { resource_type: "license", id: "3", confirmed: true });
+check("license delete looks up companyId", r.ok && last().url.searchParams.get("companyId") === "7", last().url.toString());
+
+// --- access_control -----------------------------------------------------------------
+route = (c) => {
+  if (c.url.pathname === "/v2/role/r9") return { status: 200, json: { success: true, data: { roleId: "r9", name: "Approver", isPartnerRole: false } } };
+  if (c.url.pathname === "/v2/featureset/2/companies" && c.method === "GET") return { status: 200, json: { success: true, data: [{ companyId: 1 }, { companyId: 2 }] } };
+  if (c.url.pathname === "/v2/odata/userlicense") return { status: 200, json: { value: [{ userId: "a" }, { userId: "b" }] } };
+  return { status: 200, json: { success: true, data: { ok: true } } };
+};
+r = await run("access_control", { action: "assign_role", role_id: "r9", user_id: "u1", scope: "company", scope_id: 1021 });
+check("assign_role previews without confirmed", r.ok && (r.value as any).changed === false && !calls.some((c) => c.method === "POST"), JSON.stringify(r.value).slice(0, 120));
+r = await run("access_control", { action: "assign_role", role_id: "r9", user_id: "u1", scope: "company", scope_id: 1021, confirmed: true });
+check("assign_role posts scopeType 3 memberType 1", r.ok && last().url.pathname === "/v2/roleassignment" && (last().body as any).scopeType === 3 && (last().body as any).memberType === 1 && (last().body as any).scopeId === 1021);
+r = await run("access_control", { action: "set_feature_set_companies", feature_set_id: 2, company_ids: [2, 3] });
+check("feature set preview shows added/removed", r.ok && JSON.stringify((r.value as any).preview.added) === "[3]" && JSON.stringify((r.value as any).preview.removed) === "[1]" && !calls.some((c) => c.method === "PUT"), JSON.stringify(r.value));
+r = await run("access_control", { action: "set_license_users", license_id: 5, company_id: 1, user_ids: ["b", "c"] });
+check("license users preview", r.ok && JSON.stringify((r.value as any).preview.added) === '["c"]' && JSON.stringify((r.value as any).preview.removed) === '["a"]');
+r = await run("access_control", { action: "set_support_pin", user_id: "u1", company_id: 1, support_pin: "4821", confirmed: true });
+check("support PIN set, never echoed", r.ok && last().url.pathname === "/v2/user/u1/supportpin" && (last().body as any).supportPin === "4821" && !JSON.stringify(r.value).includes("4821"));
+
+// --- webhook_action -----------------------------------------------------------------
+{
+  const { mkdtempSync, writeFileSync: wf, readFileSync: rf, statSync: st } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const home = mkdtempSync(join(tmpdir(), "cr-home-"));
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  const hv = join(home, "headers.json"); wf(hv, JSON.stringify({ Authorization: "Bearer s3cret" }));
+  route = (c) => c.method === "POST" && c.url.pathname === "/v2/action"
+    ? { status: 201, json: { success: true, data: { action: { actionId: 12, name: "PSA hook" }, signingSecret: "whsec_TOPSECRET" } } }
+    : { status: 200, json: { success: true, data: { actionId: 12, name: "PSA hook", url: "https://x.test/hook", isEnabled: true, headers: [{ name: "Authorization" }] } } };
+  r = await run("webhook_action", { action: "create", name: "PSA hook", url: "https://x.test/hook", header_names: ["Authorization"], header_values_file: hv });
+  check("webhook create previews, hides header value", r.ok && (r.value as any).changed === false && !JSON.stringify(r.value).includes("s3cret") && calls.length === 0, JSON.stringify(r.value).slice(0, 160));
+  r = await run("webhook_action", { action: "create", name: "PSA hook", url: "https://x.test/hook", header_names: ["Authorization"], header_values_file: hv, confirmed: true });
+  const savedTo = (r.value as any)?.signingSecretSavedTo as string;
+  check("signing secret saved to file, not returned", r.ok && !JSON.stringify(r.value).includes("TOPSECRET") && !!savedTo && rf(savedTo, "utf8").trim() === "whsec_TOPSECRET", JSON.stringify(r.value).slice(0, 200));
+  if (process.platform !== "win32") check("secret file is private", (st(savedTo).mode & 0o077) === 0, (st(savedTo).mode & 0o777).toString(8));
+  check("header value sent from file", (calls.find((c) => c.method === "POST")?.body as any)?.headers?.[0]?.value === "Bearer s3cret");
+  r = await run("webhook_action", { action: "create", name: "x", url: "http://x.test" , confirmed: true });
+  check("webhook http url refused", !r.ok && /https/.test(r.error!), r.error);
+  r = await run("webhook_action", { action: "update", id: 12, name: "Renamed", confirmed: true });
+  check("webhook update keeps stored header value", r.ok && last().method === "PUT" && (last().body as any).headers[0].value === "" && (last().body as any).name === "Renamed", JSON.stringify(last().body));
+  r = await run("webhook_action", { action: "disable", id: 12 });
+  check("disable previews without confirmed", r.ok && (r.value as any).changed === false && !calls.some((c) => c.method === "POST"));
+}
+
+// --- signal_device / audit / m365 / widgets / upload ------------------------------
+route = (c) => c.url.pathname === "/v2/signaldevice" ? { status: 200, json: { success: true, data: [{ installationId: "inst-1", state: "Active" }] } } : { status: 200, json: { success: true, data: { ok: 1 } } };
+r = await run("signal_device", { action: "revoke", installation_id: "inst-1" });
+check("revoke previews the device", r.ok && (r.value as any).device.installationId === "inst-1" && !calls.some((c) => c.method === "POST"));
+r = await run("signal_device", { action: "revoke", installation_id: "inst-1", confirmed: true });
+check("revoke posts", r.ok && last().url.pathname === "/v2/signaldevice/inst-1/revoke");
+r = await run("signal_device", { action: "revoke", installation_id: "nope" });
+check("unknown install refused", !r.ok && /No Signal install/.test(r.error!));
+r = await run("audit_log", { action: "events", company_id: 9, entity: "Company", source: "PublicAPI" });
+check("audit events filters", r.ok && last().url.pathname === "/v2/audit/event" && last().url.searchParams.get("entity") === "Company" && last().url.searchParams.get("source") === "PublicAPI");
+r = await run("audit_log", { action: "sync_log", job_name: "SyncTicketsForCompanyJob", company_id: 9 });
+check("sync log path", r.ok && last().url.pathname === "/v2/audit/synclog/SyncTicketsForCompanyJob" && last().url.searchParams.get("companyId") === "9");
+r = await run("m365_directory", { action: "roles", company_id: 9 });
+check("m365 roles path", r.ok && last().url.pathname === "/v2/m365/company/9/role");
+route = (c) => c.url.pathname === "/v2/odata/dashboard" ? { status: 200, json: { value: [{ companyId: 4 }] } } : { status: 200, json: { success: true, data: { id: "w1" } } };
+r = await run("dashboard_widgets", { action: "add", dashboard_id: 12, widget: { type: "Html", title: "Hi", html: "<p>x</p>" } });
+check("widget add scoped by dashboard company", r.ok && last().url.toString().endsWith("/v2/dashboard/12/widget?companyId=4"), last().url.toString());
+r = await run("dashboard_widgets", { action: "replace_all", dashboard_id: 12, widgets: [] });
+check("replace_all needs confirmed", r.ok && (r.value as any).changed === false && !calls.some((c) => c.method === "PUT"));
+{
+  const { mkdtempSync, writeFileSync: wf } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const d = mkdtempSync(join(tmpdir(), "cr-up-")); const img = join(d, "logo.png"); wf(img, "PNGDATA");
+  route = () => ({ status: 201, json: { success: true, data: { id: 3 } } });
+  r = await run("upload_file", { target: "media", file_paths: [img], description: "Contoso logo" });
+  check("media upload multipart + description query", r.ok && last().url.pathname === "/v2/media/upload" && last().url.searchParams.get("description") === "Contoso logo" && JSON.stringify(last().form) === JSON.stringify([["file", "file:logo.png:7"]]), JSON.stringify(last().form));
+  r = await run("upload_file", { target: "quickstart_file", quickstart_id: 8, file_paths: [img] });
+  check("quickstart file is a PUT", r.ok && last().method === "PUT" && last().url.pathname === "/v2/quickstart/8/file");
+  r = await run("upload_file", { target: "message_attachment", message_id: 4, company_id: 1, file_paths: [img, img] });
+  check("message attachments repeat Files", r.ok && last().url.searchParams.get("companyId") === "1" && last().form!.filter(([k]) => k === "Files").length === 2);
+}
+
+// --- assessment create / questions / answers ----------------------------------------
+route = (c) => c.url.pathname === "/v2/odata/assessment" ? { status: 200, json: { value: [{ assessmentId: 60, companyId: 1, title: "R", type: 20 }] } } : { status: 200, json: { success: true, data: { assessmentId: 70 } } };
+r = await run("assessment_lifecycle", { action: "create", company_id: 1, title: "Baseline", questions: [{ label: "MFA?", type: 80, order: 1, answerOptions: [{ label: "Yes", value: 2 }] }] });
+check("assessment create posts type 20 and stringified fields", r.ok && last().url.pathname === "/v2/assessment" && (last().body as any).type === "20" && (last().body as any).questions[0].type === "80" && (last().body as any).questions[0].answerOptions[0].value === "2", JSON.stringify(last().body));
+r = await run("assessment_lifecycle", { action: "create", company_id: 1, title: "x", questions: [{ label: "y", type: 30 }] });
+check("question type other than 0/80 refused", !r.ok && /0 \(free text\) or 80/.test(r.error!) && calls.length === 0, r.error);
+r = await run("assessment_lifecycle", { action: "set_questions", assessment_id: 60, questions: [{ label: "a" }], remove_missing: true });
+check("remove_missing needs confirmed", !r.ok && /confirmed=true/.test(r.error!) && !calls.some((c) => c.method === "PUT"));
+r = await run("assessment_lifecycle", { action: "set_answers", assessment_id: 60, answers: [{ updateKey: "mfa", value: -2 }] });
+check("answers PATCH is plain JSON object", r.ok && last().method === "PATCH" && last().contentType === "application/json" && (last().body as any).answers[0].value === "-2" && last().url.searchParams.get("companyId") === "1", last().contentType);
+r = await run("assessment_lifecycle", { action: "set_answers", assessment_id: 60, answers: [{ updateKey: "mfa", value: 5 }] });
+check("bad answer value refused", !r.ok && /2, 1, 0, -1 or -2/.test(r.error!));
+r = await run("assessment_lifecycle", { action: "update_question", assessment_id: 60, question_id: 9, company_id: 1, data: { label: "New" } });
+check("update_question is JSON Patch", r.ok && last().contentType === "application/json-patch+json" && last().url.pathname === "/v2/assessment/60/question/9");
 
 console.log(failed ? `${failed} FAILED` : "ALL PASSED");
 process.exit(failed ? 1 : 0);

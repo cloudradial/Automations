@@ -112,8 +112,8 @@ One company's message list in the portal.
 - `showAsAlert`, `includeInDigest`, `datePublished`, `tags`, `roleIds` are optional.
 - `sendAsBroadcast` hasn't been tested through the plugin; leave it unset unless the user asks, and
   say it's untested.
-- Attachments (`POST /v2/message/{id}/attachment`) need a file upload the plugin doesn't do yet.
-  Attach files in the portal.
+- Attach files with `upload_file` (`target: "message_attachment"`, `message_id`, `company_id`,
+  `file_paths`); remove one with `target: "remove_message_attachment"` and `attachment_id`.
 
 Workflow: resolve the company, draft the message, show it with its priority and alert setting, and
 create it after the user confirms. Delete with `delete_resource` (`company_id` is looked up).

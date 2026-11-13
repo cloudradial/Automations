@@ -101,7 +101,7 @@ and only post it when I confirm.
 
 **What you get:** A highlighted message in Contoso's portal message list.
 
-**Good to know:** Attachments on portal messages still have to be added in the portal.
+**Good to know:** Ask to attach a file from your computer and the skill adds it to the message.
 
 ## Good to know
 

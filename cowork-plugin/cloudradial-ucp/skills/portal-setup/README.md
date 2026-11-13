@@ -41,7 +41,7 @@ the portal-only steps as a short to-do list at the end.
 
 **What you get:** The service desk session: checks, a preview, then the items created.
 
-**Good to know:** Branding, integrations, security roles and agent deployment stay in the portal. The skill lists them instead of guessing.
+**Good to know:** Branding, connecting integrations, SSO and agent deployment stay in the portal. The skill lists them instead of guessing.
 
 ### Onboard a new client
 `Per-company` · `Writes to the portal` · **Tested**

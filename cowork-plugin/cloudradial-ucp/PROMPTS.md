@@ -93,12 +93,48 @@ Put a notice on client users' desktops with Signal, or a banner or message in th
 | `What's Contoso's Secure Score and its five biggest quick wins?` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#find-secure-score-quick-wins) |
 | `Rank all my clients by Secure Score, lowest first` | assessment-export | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-export/README.md#compare-secure-score-across-clients) |
 | `Add Contoso's Secure Score to their QBR` | client-deliverable | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-deliverable/README.md#add-secure-score-to-the-qbr) |
+| `Mark MFA compliant in Contoso's "2026 Security Review"` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#record-answers) |
 | `Run Contoso's "2026 Security Review" assessment` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#run-an-assessment) |
 | `Delete the empty "Test Review" assessment in Contoso's portal` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#delete-a-test-assessment) |
 | `What feedback has Contoso submitted in the last 30 days?` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#review-recent-feedback) |
 | `Fix a feedback entry for ticket 123456` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#fix-a-feedback-entry) |
 | `Move feedback to another company` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#move-feedback-to-another-company) |
 | `Which of my clients have the lowest CSAT this quarter?` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#compare-satisfaction) |
+
+### Access and security
+
+Roles, role assignments, feature sets and support PINs. Every change is previewed and waits for your yes.
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Who has admin access in Contoso's portal?` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#review-who-has-access) |
+| `Give Pat Jones the Approver role at Contoso` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#give-someone-a-role) |
+| `Create a "Ticket Viewer" role` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#create-a-role) |
+| `Move Contoso and Fabrikam onto the Essentials feature set` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#change-which-companies-use-a-feature-set) |
+| `Set Pat Jones's support PIN` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#set-a-support-pin) |
+| `Revoke the Signal install on Pat's stolen laptop` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#reset-or-revoke-a-signal-device) |
+
+### Policies, licenses and Microsoft 365
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Which of Contoso's policies are failing?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#review-policy-compliance) |
+| `Ignore the encryption exception on Contoso's build server` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#accept-a-policy-exception) |
+| `Add a policy that flags computers over 5 years old` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#add-a-policy) |
+| `Which licenses have the most unused seats?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#find-unused-licenses) |
+| `Who at Contoso holds a Microsoft 365 E3 license?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#check-who-holds-a-license) |
+| `Who are Contoso's Microsoft 365 admins?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#list-microsoft-365-admins) |
+
+### Webhooks and audit
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Create a "PSA intake" webhook` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#create-a-webhook) |
+| `Send a test to the "PSA intake" webhook` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#test-a-webhook) |
+| `Why did the "PSA intake" webhook stop working?` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#find-out-why-a-webhook-failed) |
+| `Rotate the signing secret on the "PSA intake" webhook` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#rotate-a-signing-secret) |
+| `Who changed Contoso's portal this week?` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#see-who-changed-what) |
+| `Did Contoso's PSA ticket sync run today?` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#check-a-sync) |
 
 ### Domains, certificates and reports
 
@@ -109,6 +145,6 @@ Put a notice on client users' desktops with Signal, or a banner or message in th
 
 ### What stays in the portal
 
-The CloudRadial API doesn't cover these, so the plugin lists them for you instead of doing them: portal branding (logo, colors, theme), security roles and SSO, connecting integrations (PSA, Microsoft 365, RMM), deploying the endpoint agent, approval workflows and automations on a request form, the feedback widget and CSAT surveys, scheduled report delivery, a course's exam passing score, copying an assessment template, and attachments on portal messages. Signal messages need Signal enabled for your partner account.
+The CloudRadial API doesn't cover these, so the plugin lists them for you instead of doing them: portal branding (logo, colors, theme), SSO, connecting integrations (PSA, Microsoft 365, RMM), deploying the endpoint agent, approval workflows and automations on a request form, the feedback widget and CSAT surveys, scheduled report delivery, a course's exam passing score, and copying an assessment template. Signal messages need Signal enabled for your partner account.
 
 For work that should run on its own (on a schedule, from a form, or from ServiceAI), use the matching [AutomationAI automations](https://github.com/cloudradial/Automations/tree/main).

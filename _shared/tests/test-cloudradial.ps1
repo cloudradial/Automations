@@ -99,7 +99,7 @@ Invoke-WithLib @('cloudradial.ps1') {
 $folders = New-Object System.Collections.ArrayList
 $null = $folders.Add([pscustomobject]@{ companyReportFolderId = 5; companyId = 99; name = 'Weekly Fleet Audit' })   # another company, same name
 $items = New-Object System.Collections.ArrayList
-$ArchState = @{ dupOnCreate = $false }
+$ArchState = @{ dupOnCreate = $false; unwrapped = $false }
 Reset-Mock $Sec.Clone() {
     param($c, $n)
     $u = [uri]::UnescapeDataString($c.Uri)
@@ -109,6 +109,7 @@ Reset-Mock $Sec.Clone() {
     }
     if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/v2/archivefolder") {
         $b = $c.Body | ConvertFrom-Json
+        if ($ArchState.unwrapped) { return [pscustomobject]@{ archiveFolderId = 33; companyId = $b.companyId; name = $b.name; inboundEmailAddress = 'z@reports.example' } }
         if ($ArchState.dupOnCreate) { $null = $folders.Add([pscustomobject]@{ companyReportFolderId = 32; companyId = $b.companyId; name = $b.name }); New-HttpError 400 '{"success":false,"message":"A folder with this name already exists."}' }
         $null = $folders.Add([pscustomobject]@{ companyReportFolderId = 31; companyId = $b.companyId; name = $b.name; inboundEmailAddress = 'x@reports.example' })
         return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ archiveFolderId = 31; companyId = $b.companyId; name = $b.name; inboundEmailAddress = 'x@reports.example' } }
@@ -137,6 +138,10 @@ Invoke-WithLib @('cloudradial.ps1') {
     Check 'Add-CrArchiveReport: the folder name matches in any case, and the same subject replaces the item' ($r.action -eq 'updated' -and $put.Method -eq 'PUT' -and $put.Uri -eq "$CrBase/v2/archiveitem/31/401" -and (Read-Body $put).isError -eq $true -and @(Get-Calls 'POST' '*').Count -eq 0) (Show-Calls)
     $a = Get-CrArchive -CompanyId 7 -Name 'Weekly Fleet Audit'
     Check 'Get-CrArchive: returns the id and the folder''s inbound address' ($a.id -eq 31 -and $a.inboundAddress -eq 'x@reports.example') ($a | ConvertTo-Json -Compress)
+    $ArchState.unwrapped = $true
+    $a = Get-CrArchive -CompanyId 6 -Name 'Monthly Review' -Create
+    Check 'Get-CrArchive: a create reply without the data wrapper still gives the id and inbound address' ($a.id -eq 33 -and $a.inboundAddress -eq 'z@reports.example') ($a | ConvertTo-Json -Compress)
+    $ArchState.unwrapped = $false
     $ArchState.dupOnCreate = $true
     $a = Get-CrArchive -CompanyId 8 -Name 'Onboarding' -Create
     Check 'Get-CrArchive: a 400 on create (made by another run meanwhile) finds the folder instead of failing' ($a.id -eq 32) ($a | ConvertTo-Json -Compress)

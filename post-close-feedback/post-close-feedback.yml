@@ -5093,8 +5093,8 @@ definition:
                 # v2 replies { success, data = { archiveFolderId, inboundEmailAddress, ... } }; the legacy create may reply with a bare id.
                 $id = Get-CrId $resp @('data.archiveFolderId', 'archiveFolderId', 'companyReportFolderId', 'id', 'archiveId', 'data.id', 'data.archiveId')
                 if (-not $id -and ([string]$resp -match '^\d+$')) { $id = [int][string]$resp }
-                $data = Get-CrProp $resp 'data'
-                $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundEmailAddress = [string](Get-CrProp $data 'inboundEmailAddress') } } else { & $find }
+                $inb = [string](Get-CrProp (Get-CrProp $resp 'data') 'inboundEmailAddress'); if (-not $inb) { $inb = [string](Get-CrProp $resp 'inboundEmailAddress') }
+                $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundEmailAddress = $inb } } else { & $find }
             }
             if ($null -eq $hit) { return $null }
             $aid = Get-CrId $hit @('archiveFolderId', 'companyReportFolderId', 'id', 'archiveId')

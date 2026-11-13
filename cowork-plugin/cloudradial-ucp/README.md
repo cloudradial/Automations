@@ -45,7 +45,7 @@ You install the plugin once in each Claude app you use, but you enter your keys 
    /plugin marketplace add anthropics/claude-plugins-community
    /plugin install cloudradial-ucp@claude-community
    ```
-   Or download `cloudradial-ucp.plugin` from the [releases page](https://github.com/cloudradial/Automations/releases). It is one file for Windows, macOS and Linux.
+   Or [**download cloudradial-ucp.plugin**](https://github.com/cloudradial/Automations/releases/latest/download/cloudradial-ucp.plugin). It is one file for Windows, macOS and Linux. See what is new in the [release notes](https://github.com/cloudradial/Automations/releases/latest).
 2. **Add the file to your app.**
    - **Cowork:** drag the file into the Cowork window and approve it.
    - **Claude Desktop:** drag the file into the app, then quit and reopen Claude Desktop.
@@ -78,7 +78,7 @@ You install this once **for each Claude app you use** (Cowork, Claude Code, or C
 /plugin install cloudradial-ucp@claude-community
 ```
 
-**Or install the single plugin file directly.** Download `cloudradial-ucp.plugin` from the [**releases page**](https://github.com/cloudradial/Automations/releases). It's one file that works on macOS, Windows, and Linux; then add it to your Claude app:
+**Or install the single plugin file directly.** [**Download cloudradial-ucp.plugin**](https://github.com/cloudradial/Automations/releases/latest/download/cloudradial-ucp.plugin). It's one file that works on macOS, Windows, and Linux ([release notes](https://github.com/cloudradial/Automations/releases/latest)); then add it to your Claude app:
 
 - **Cowork:** drag the file into the Cowork window, and approve it when asked.
 - **Claude Desktop:** drag the file into the app (or add it from the plugin gallery), then **quit and reopen** Claude Desktop.

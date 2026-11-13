@@ -132,7 +132,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
   - Each PDF goes to `POST /v2/archiveitem/upload` (multipart: `archiveId`, `subject`, `files`), with the subject set so a re-run recognises it.
   - A portal that answers the v2 routes with 404 or 405 gets the legacy `/api/beta/archive` routes for the rest of the step.
   - If a create reply carries no id, the folder is looked up again by name before uploading. A first live run uploaded to archive 0 and failed with "Sequence contains no elements".
-  - The v2 upload hasn't had a live run yet; `test-upload.ps1` checks the request it sends.
+  - The v2 upload was checked live on 2026-11-13: one PDF uploaded to a test folder on a demo portal became one item with the run's subject and the PDF attached. `test-upload.ps1` checks the request it sends.
 - **Assessment import `type`.** The upload's `data` part sends `type: 0`. If the import lands as a template instead of an assessment, change it in the assessments step.
 - **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).

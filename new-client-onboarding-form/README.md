@@ -59,7 +59,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/new
 
 ## Technical details
 
-**Formerly:** New Client: Portal + PSA (Form) | **Marketplace ID:** Not yet listed | **Type:** Workflow (PowerShell plus one agent step) | **Version:** 1.0.0
+**Formerly:** New Client: Portal + PSA (Form) | **Marketplace ID:** CRA-00004 | **Type:** Workflow (PowerShell plus one agent step) | **Version:** 1.0.0
 
 This is the portal-form version of [New Client Onboarding](../new-client-onboarding/). Its first five steps are that workflow's steps as they were in the test tenant on 2026-11-12. It adds the portal setup agent, Datto RMM and the company group.
 

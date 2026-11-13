@@ -51,7 +51,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/tic
 
 ## Technical details
 
-**Formerly:** Ticket Triage: Save Settings | **Marketplace ID:** Not yet listed | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
+**Formerly:** Ticket Triage: Save Settings | **Marketplace ID:** CRA-00008 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
 
 ## Files
 

@@ -53,7 +53,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/tic
 
 ## Technical details
 
-**Formerly:** Ticket Triage (Form) | **Marketplace ID:** Not yet listed | **Type:** Workflow (PowerShell plus one AI prompt) | **Version:** 1.0.0
+**Formerly:** Ticket Triage (Form) | **Marketplace ID:** CRA-00007 | **Type:** Workflow (PowerShell plus one AI prompt) | **Version:** 1.0.0
 
 ## Files
 

@@ -2,7 +2,9 @@
 # =====================================================================
 # Step 6 - Deliverable PDFs -> CloudRadial Report Archive
 #   1. Download the PDF from ScalePad to the run's temp folder.
-#   2. Upload it to the archive (POST /api/beta/archive/{id}/item).
+#   2. Upload it to the archive folder (POST /v2/archiveitem/upload, with the
+#      item subject set so a re-run recognises it; the legacy
+#      POST /api/beta/archive/{id}/item when the portal has no v2 route).
 #   3. If that route rejects the file, list it in the migration report
 #      (written to the portal by the summary step) as a manual upload.
 #   Nothing is kept after the run.
@@ -16,20 +18,39 @@ $counts = [ordered]@{ deliverables = 0; alreadyArchived = 0; toArchive = 0; uplo
 $items = New-Object System.Collections.ArrayList
 
 if (-not (Get-Command Send-ArchiveUpload -ErrorAction SilentlyContinue)) {
-    function script:Send-ArchiveUpload {
-        param([int]$ArchiveId, [string]$FilePath, [string]$FileName)
+    # Sends one multipart POST: a PDF part plus text fields. Returns @{ code; text }. Separate from the upload
+    # logic so the test can point it at a local listener.
+    function script:Send-CrMultipartPdf {
+        param([string]$Url, [string]$FileField, [string]$FilePath, [string]$FileName, [hashtable]$Fields = @{})
         Add-Type -AssemblyName System.Net.Http
         $client = New-Object System.Net.Http.HttpClient
-        $client.DefaultRequestHeaders.Add('Authorization', $crAuth)
-        $form = New-Object System.Net.Http.MultipartFormDataContent
-        $fc = New-Object System.Net.Http.ByteArrayContent(, [System.IO.File]::ReadAllBytes($FilePath))
-        $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/pdf')
-        $form.Add($fc, 'file', $FileName)
-        $resp = $client.PostAsync("$crBase/api/beta/archive/$ArchiveId/item", $form).GetAwaiter().GetResult()
-        $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-        $client.Dispose()
-        if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode): $text" }
-        return $text
+        try {
+            $client.DefaultRequestHeaders.Add('Authorization', $crAuth)
+            $form = New-Object System.Net.Http.MultipartFormDataContent
+            foreach ($k in $Fields.Keys) { $form.Add((New-Object System.Net.Http.StringContent([string]$Fields[$k])), $k) }
+            $fc = New-Object System.Net.Http.ByteArrayContent(, [System.IO.File]::ReadAllBytes($FilePath))
+            $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/pdf')
+            $form.Add($fc, $FileField, $FileName)
+            $resp = $client.PostAsync($Url, $form).GetAwaiter().GetResult()
+            return @{ code = [int]$resp.StatusCode; text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult() }
+        }
+        finally { $client.Dispose() }
+    }
+    # Uploads one PDF as one archive item. The v2 route takes the subject, so the item is named exactly as the run
+    # names it and a re-run recognises it. A 404 or 405 there means an older portal: the legacy item route is used
+    # for the rest of the step. Returns the reply text.
+    function script:Send-ArchiveUpload {
+        param([int]$ArchiveId, [string]$FilePath, [string]$FileName, [string]$Subject = '')
+        if ($crArchive.api -eq 'v2') {
+            $f = @{ archiveId = $ArchiveId }; if ($Subject) { $f.subject = $Subject }
+            $r = Send-CrMultipartPdf -Url "$crBase/v2/archiveitem/upload" -FileField 'files' -FilePath $FilePath -FileName $FileName -Fields $f
+            if ($r.code -ge 200 -and $r.code -lt 300) { return $r.text }
+            if ($r.code -notin @(404, 405)) { throw "HTTP $($r.code): $($r.text)" }
+            $crArchive.api = 'beta'
+        }
+        $r = Send-CrMultipartPdf -Url "$crBase/api/beta/archive/$ArchiveId/item" -FileField 'file' -FilePath $FilePath -FileName $FileName
+        if ($r.code -lt 200 -or $r.code -ge 300) { throw "HTTP $($r.code): $($r.text)" }
+        return $r.text
     }
 }
 
@@ -45,11 +66,11 @@ else {
     $archivedSubjects = New-Object System.Collections.Generic.HashSet[string]
     if ($archiveId -gt 0) {
         try {
-            # Documented archive-item list first (paged), then the legacy one; compare names without .pdf.
-            # (The legacy list alone did not return usable names, so a re-run uploaded the same PDF again.)
+            # The v2 archive-item list (paged); the legacy one only when that fails. Names are compared without .pdf,
+            # because items uploaded by earlier versions took the file name as their subject.
             $existingItems = @()
-            try { $existingItems = @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archiveId&`$select=companyReportItemId,subject") } catch { }
-            try { $existingItems += @(Get-CrBetaAll "/api/beta/archive/$archiveId/item") } catch { }
+            try { $existingItems = @(Get-CrAll "/v2/odata/archiveitem?`$filter=companyId eq $companyId and companyReportFolderId eq $archiveId&`$select=companyReportItemId,subject") }
+            catch { $existingItems = @(Get-CrBetaAll "/api/beta/archive/$archiveId/item") }
             foreach ($it in $existingItems) { foreach ($k in @('subject', 'name', 'fileName', 'filename', 'title', 'originalName')) { $nm = [string](Get-P $it $k ''); if ($nm) { $null = $archivedSubjects.Add(($nm -replace '(?i)\.pdf$', '').Trim().ToLowerInvariant()) } } }
         } catch { Warn "Could not list existing archive items; duplicates are possible. $($_.Exception.Message)" }
     }
@@ -81,7 +102,7 @@ else {
                 $null = Invoke-WithRetry -What "ScalePad PDF $dname" -Call { Invoke-WebRequest -Method Get -Uri "$spBase/lifecycle-manager/v1/deliverables/$(Get-P $d 'id')/pdf" -Headers @{ 'x-api-key' = $spKey; Accept = 'application/pdf' } -OutFile $file }
                 $fileName = (($subject -replace '[\\/:*?"<>|]', '-') + '.pdf')
                 if ($archiveId -le 0) { throw "the '$archiveName' archive has no id, so nothing was uploaded" }
-                $null = Send-ArchiveUpload -ArchiveId $archiveId -FilePath $file -FileName $fileName
+                $null = Send-ArchiveUpload -ArchiveId $archiveId -FilePath $file -FileName $fileName -Subject $subject
                 $counts.uploaded++; $item.method = 'api'
             }
             catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Couldn't upload '$subject' to the '$archiveName' archive: $($_.Exception.Message). Re-run to retry - uploaded PDFs are skipped." }

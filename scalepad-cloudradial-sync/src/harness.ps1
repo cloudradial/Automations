@@ -8,7 +8,7 @@ function Get-AzKeyVaultSecret { param($VaultName, $Name, [switch]$AsPlainText, $
 function Get-NodeInput { Get-Content $InFile -Raw | ConvertFrom-Json }
 function Set-NodeOutput { param($o) $o | ConvertTo-Json -Depth 30 | Set-Content $OutFile }
 function Send-CrMultipart { param($Path, $DataJson, $FileBytes, $FileName) $null = $global:MockWrites.Add("MULTIPART $Path data=$DataJson bytes=$($FileBytes.Length) file=$FileName"); [IO.File]::WriteAllBytes("$PSScriptRoot\last.xlsx", $FileBytes); '{"ok":true}' }
-function Send-ArchiveUpload { param($ArchiveId, $FilePath, $FileName) if ($ArchiveId -le 0) { throw 'HTTP 400: Sequence contains no elements.' }; $null = $global:MockWrites.Add("UPLOAD archive=$ArchiveId file=$FileName") }
+function Send-ArchiveUpload { param($ArchiveId, $FilePath, $FileName, $Subject) if ($ArchiveId -le 0) { throw 'HTTP 400: Sequence contains no elements.' }; $null = $global:MockWrites.Add("UPLOAD archive=$ArchiveId file=$FileName subject=$Subject") }
 function Invoke-WebRequest { param($Method, $Uri, $Headers, $OutFile) [IO.File]::WriteAllBytes($OutFile, [byte[]](37, 80, 68, 70)); $null = $global:MockWrites.Add("DOWNLOAD $Uri") }
 
 $sp = @{
@@ -81,7 +81,10 @@ function Invoke-RestMethod {
         if ($u.AbsolutePath -eq '/v2/flexible-asset-type') { $global:FaTypeN = 1 + [int](Get-Variable -Name FaTypeN -Scope Global -ValueOnly -ErrorAction SilentlyContinue); return [pscustomobject]@{ id = 60 + $global:FaTypeN } }
         if ($env:FAIL_FAPATCH -and $u.AbsolutePath -like '/v2/flexible-asset/*') { throw 'HTTP 400: bad patch' }
         if ($u.AbsolutePath -eq '/v2/assessment') { return [pscustomobject]@{ assessmentId = 555 } }
-        if ($env:ARCH_EMPTY -and $u.AbsolutePath -eq '/api/beta/archive') { $global:ArchMade = $true; return $null }
+        # v2 folder create (ARCH_LEGACY: the portal has no v2 folder route, so the legacy create is used).
+        if ($env:ARCH_LEGACY -and $u.AbsolutePath -eq '/v2/archivefolder') { throw 'HTTP 404: Not Found' }
+        if ($env:ARCH_EMPTY -and $u.AbsolutePath -in @('/v2/archivefolder', '/api/beta/archive')) { $global:ArchMade = $true; return $null }
+        if ($u.AbsolutePath -eq '/v2/archivefolder') { $b = $Body | ConvertFrom-Json; return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ archiveFolderId = 78; companyId = 9; name = $b.name; inboundEmailAddress = 'contoso-qbr@archive.cloudradial.test' } } }
         if ($u.AbsolutePath -eq '/api/beta/archive') { return [pscustomobject]@{ id = 77; companyId = 9; name = 'ScalePad QBR History'; inboundAddress = 'contoso-qbr@archive.cloudradial.test' } }
         return [pscustomobject]@{ ok = $true }
     }
@@ -107,6 +110,7 @@ function Invoke-RestMethod {
         '^/v2/odata/article' { if ($env:ART_EXISTS) { return [pscustomobject]@{ value = @([pscustomobject]@{ articleId = 555; subject = 'ScalePad sync report' }) } }; return [pscustomobject]@{ value = @() } }
         '^/v2/odata/assessment' { return [pscustomobject]@{ value = @() } }
         '^/v2/odata/product' { if ($env:PRODUCT_SELECT_FAIL -and $p -match 'summary') { throw 'HTTP 400: Could not find a property named summary' }; if ($env:PRODUCT_STORE) { return [pscustomobject]@{ value = @(Get-ProductStore) } }; return [pscustomobject]@{ value = @([pscustomobject]@{ productId = 301; subject = 'ScalePad Initiative - Workstation Replacement Q1'; status = 'InProgress' }, [pscustomobject]@{ productId = 302; subject = 'ScalePad Insight - Backups healthy'; status = 'Proposed' }) } }
+        '^/v2/odata/archivefolder\?' { if ($env:ARCH_LEGACY) { throw 'HTTP 404: Not Found' }; $fc = [int]([regex]::Match($p, 'companyId eq (\d+)').Groups[1].Value); if ($env:ARCH_EMPTY -and (Get-Variable -Name ArchMade -Scope Global -ErrorAction SilentlyContinue)) { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportFolderId = 86; companyId = $fc; name = 'scalepad qbr history' }, [pscustomobject]@{ companyReportFolderId = 87; companyId = $fc; name = 'ScalePad Migration' }, [pscustomobject]@{ companyReportFolderId = 88; companyId = $fc; name = 'ScalePad Meeting Notes' }) } }; return [pscustomobject]@{ value = @() } }
         '^/api/beta/archive\?' { if ($env:ARCH_EMPTY -and (Get-Variable -Name ArchMade -Scope Global -ErrorAction SilentlyContinue)) { return @([pscustomobject]@{ id = 86; companyId = 9; name = 'ScalePad QBR History' }, [pscustomobject]@{ id = 87; companyId = 9; name = 'ScalePad Migration' }) }; return @() }
         default { throw "unmocked CR GET $p" }
     }

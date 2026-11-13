@@ -63,6 +63,10 @@ $crBase = $crBase.TrimEnd('/')
 $spHeaders = @{ 'x-api-key' = $spKey; Accept = 'application/json' }
 $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPub):$($crPriv)"))
 $crHeaders = @{ Authorization = $crAuth; Accept = 'application/json' }
+# Which archive API this portal answers: 'v2' (/v2/archivefolder, /v2/archiveitem/upload) until a v2 route answers
+# 404 or 405, then 'beta' (/api/beta/archive) for the rest of the step. Changed in place, never reassigned.
+$crArchive = @{ api = 'v2' }
+function Test-CrMissingRoute { param([string]$Message) return ($Message -match '\bHTTP (404|405)\b') }
 
 # Connection-level failures (TLS handshake, DNS, reset, timeout) that are worth trying again.
 $TransientPattern = 'SSL connection could not be established|could not be established|No such host|Name or service not known|actively refused|forcibly closed|connection was closed|error occurred while sending the request|timed out|TaskCanceled|operation was canceled'
@@ -180,39 +184,57 @@ function Get-CrBetaAll {
     return $all.ToArray()
 }
 function Get-CrArchive {
-    # Finds a company report archive by name (legacy /api/beta/archive, which also returns
-    # its inboundAddress); creates it when -Create is set. Returns $null when absent.
-    # The create response doesn't reliably carry the id (a live run uploaded to archive 0), so the
-    # id is read from any known shape and, failing that, the archive is looked up again by name.
+    # Finds a company report archive folder by name, case-insensitively; creates it when -Create is set.
+    # Returns $null when absent. Uses the v2 folder API: GET /v2/odata/archivefolder filtered to the company, and
+    # POST /v2/archivefolder (validated like the portal, returns the folder's inbound address). A portal that answers
+    # those with 404 or 405 falls back to the legacy /api/beta/archive for the rest of the step ($crArchive.api).
+    # The id is read from any known reply shape and, failing that, the folder is looked up again by name.
     param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'ScalePad')
-    function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('id', 'archiveId', 'companyReportFolderId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
-    $script:ArchiveSeen = @()
+    function Get-ArchiveId { param($a) if ($null -eq $a) { return 0 }; if ($a -is [int] -or $a -is [long] -or ([string]$a -match '^\d+$')) { return [int]$a }; foreach ($k in @('data.archiveFolderId', 'archiveFolderId', 'companyReportFolderId', 'id', 'archiveId', 'data.id', 'data.archiveId')) { $v = Get-P $a $k; if ($v -and [string]$v -match '^\d+$' -and [int]$v -gt 0) { return [int]$v } }; return 0 }
+    $seen = New-Object System.Collections.ArrayList
     function Find-Archive {
-        foreach ($path in @('/api/beta/archive')) {
-            $list = @(); try { $list = @(Get-CrBetaAll $path) } catch { $script:ArchiveSeen += "GET $path failed: $($_.Exception.Message)"; continue }
-            $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
-            $script:ArchiveSeen += "GET $path returned $($list.Count) archive(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })"
-            $hit = @($list | Where-Object {
-                $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
-                $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
-                $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
-            }) | Select-Object -First 1
-            if ($null -ne $hit) { return $hit }
+        $list = @()
+        if ($crArchive.api -eq 'v2') {
+            $path = "/v2/odata/archivefolder?`$filter=companyId eq $CompanyId"
+            try { $list = @(Get-CrAll $path) }
+            catch {
+                if (-not (Test-CrMissingRoute $_.Exception.Message)) { $null = $seen.Add("GET $path failed: $($_.Exception.Message)"); return $null }
+                $crArchive.api = 'beta'
+            }
         }
-        return $null
+        if ($crArchive.api -eq 'beta') {
+            $path = '/api/beta/archive'
+            try { $list = @(Get-CrBetaAll $path) } catch { $null = $seen.Add("GET $path failed: $($_.Exception.Message)"); return $null }
+        }
+        $first = if ($list.Count) { ($list[0] | ConvertTo-Json -Depth 2 -Compress) } else { '' }
+        $null = $seen.Add("GET $path returned $($list.Count) folder(s)$(if ($first) { '; first: ' + $first.Substring(0, [Math]::Min(300, $first.Length)) })")
+        return (@($list | Where-Object {
+                    $n = [string](Get-P $_ 'name' (Get-P $_ 'archiveName' (Get-P $_ 'title' '')))
+                    $c = Get-P $_ 'companyId' (Get-P $_ 'company.companyId' $CompanyId)
+                    $_ -and $n.Trim().ToLowerInvariant() -eq $Name.Trim().ToLowerInvariant() -and ($c -as [int]) -eq $CompanyId
+                }) | Select-Object -First 1)
     }
     $hit = Find-Archive
     if ($null -eq $hit -and $Create) {
-        # A 400 here has meant "already exists" (the list missed it) - look again before giving up.
-        try { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body ([ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }) }
-        catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($script:ArchiveSeen -join ' | ')" } }
+        $body = [ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }
+        $resp = $null
+        try {
+            if ($crArchive.api -eq 'v2') {
+                try { $resp = Invoke-Cr -Method POST -Path '/v2/archivefolder' -Body $body }
+                catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $crArchive.api = 'beta' }
+            }
+            if ($crArchive.api -eq 'beta') { $resp = Invoke-Cr -Method POST -Path '/api/beta/archive' -Body $body }
+        }
+        # A 400 can mean "already exists" (another run made it, or the list missed it): look again before giving up.
+        catch { $again = Find-Archive; if ($null -ne $again) { $resp = $again } else { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message). Lookup: $($seen -join ' | ')" } }
         $id = Get-ArchiveId $resp
-        $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name } } else { Find-Archive }
+        $inb = [string](Get-P $resp 'data.inboundEmailAddress' (Get-P $resp 'inboundEmailAddress' ''))
+        $hit = if ($id -gt 0) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundEmailAddress = $inb } } else { Find-Archive }
     }
     if ($null -eq $hit) { return $null }
     $id = Get-ArchiveId $hit
     if ($id -le 0) { throw "Found the '$Name' archive but couldn't read its id." }
-    return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundAddress') }
+    return [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundAddress = (Get-P $hit 'inboundEmailAddress' (Get-P $hit 'inboundAddress')) }
 }
 function New-PatchOps { param([hashtable]$Fields) return @($Fields.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = '/' + $_.Key; value = $_.Value } }) }
 # Planner cards, keyed by lower-case subject, with the fields the Sync writes so an unchanged card isn't PATCHed.

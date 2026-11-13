@@ -36,19 +36,19 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`bulk-create-kb-articles/`](bulk-create-kb-articles/) | Add Many KB Articles at Once | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00025](https://automations.cloudradial.com/marketplace/AAI-00025) |
 | [`bulk-create-training-courses/`](bulk-create-training-courses/) | Add Many Training Courses at Once | Workflow (runs the CloudRadial UCP Reporting agent) | [AAI-00026](https://automations.cloudradial.com/marketplace/AAI-00026) |
 | [`certificate-expiration-report/`](certificate-expiration-report/) | Renew SSL Certificates Before Browsers Warn | Workflow | [AAI-00024](https://automations.cloudradial.com/marketplace/AAI-00024) |
-| [`client-value-review/`](client-value-review/) | Client Value Review | Workflow (PowerShell, no AI) | Not listed |
+| [`client-value-review/`](client-value-review/) | Client Value Review | Workflow (PowerShell, no AI) | [CRA-00006](https://automations.cloudradial.com/marketplace/CRA-00006) |
 | [`cloudradial-ucp/`](cloudradial-ucp/) | Run Portal Admin Tasks by Asking | Agent + goal workflow | [AAI-00031](https://automations.cloudradial.com/marketplace/AAI-00031) |
 | [`cloudradial-ucp-reporting/`](cloudradial-ucp-reporting/) | Report on Devices, Compliance and Training by Asking | Agent | Not listed |
-| [`connectwise-board-types-setup/`](connectwise-board-types-setup/) | ConnectWise Board Types Setup | Workflow (one PowerShell step, no AI) | Not listed |
+| [`connectwise-board-types-setup/`](connectwise-board-types-setup/) | ConnectWise Board Types Setup | Workflow (one PowerShell step, no AI) | [CRA-00009](https://automations.cloudradial.com/marketplace/CRA-00009) |
 | [`create-halo-ticket-from-template/`](create-halo-ticket-from-template/) | Create a Halo Ticket from a Template | Workflow (one PowerShell step, no AI) | Not listed |
 | [`deliver-result/`](deliver-result/) | Send Automation Results Wherever Your Team Works | Agent | [AAI-00039](https://automations.cloudradial.com/marketplace/AAI-00039) |
 | [`domain-expiration-report/`](domain-expiration-report/) | Never Let a Client Domain Expire | Workflow | [AAI-00023](https://automations.cloudradial.com/marketplace/AAI-00023) |
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Keep Every Client's Hardware Refresh Plan Current | Workflow (an optional AI agent version is included) | [AAI-00021](https://automations.cloudradial.com/marketplace/AAI-00021) |
 | [`endpoint-names-token/`](endpoint-names-token/) | Let Users Pick Their Computer on Portal Forms | Workflow | [AAI-00005](https://automations.cloudradial.com/marketplace/AAI-00005) |
-| [`escalation-handoff-summary/`](escalation-handoff-summary/) | Hand Off Escalated Tickets Without Rereading the Whole History | Workflow (PowerShell steps plus one AI Prompt step) | Not listed |
+| [`escalation-handoff-summary/`](escalation-handoff-summary/) | Hand Off Escalated Tickets Without Rereading the Whole History | Workflow (PowerShell steps plus one AI Prompt step) | [CRA-00010](https://automations.cloudradial.com/marketplace/CRA-00010) |
 | [`feedback-csat-report/`](feedback-csat-report/) | See Each Client's Satisfaction Score in Their Planner | Workflow | [AAI-00022](https://automations.cloudradial.com/marketplace/AAI-00022) |
-| [`first-30-days/`](first-30-days/) | Give a New Client a Strong First Week in One Run | Workflow (PowerShell) | Not listed |
-| [`frustrated-client-alert/`](frustrated-client-alert/) | Catch Frustrated Clients Before They Escalate | Workflow (PowerShell steps plus one AI Prompt step) | Not listed |
+| [`first-30-days/`](first-30-days/) | Give a New Client a Strong First Week in One Run | Workflow (PowerShell) | [CRA-00011](https://automations.cloudradial.com/marketplace/CRA-00011) |
+| [`frustrated-client-alert/`](frustrated-client-alert/) | Catch Frustrated Clients Before They Escalate | Workflow (PowerShell steps plus one AI Prompt step) | [CRA-00012](https://automations.cloudradial.com/marketplace/CRA-00012) |
 | [`halo-template-migration/`](halo-template-migration/) | Move HaloPSA Ticket Templates into CloudRadial Request Forms | Workflow (PowerShell steps plus one AI Prompt step) | Not listed |
 | [`import-service-catalog/`](import-service-catalog/) | Load Your Request Forms into Any Portal | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00003](https://automations.cloudradial.com/marketplace/AAI-00003) |
 | [`invoice-context/`](invoice-context/) | Answer Invoice Questions with the Billing Context Already on the Ticket | Workflow (PowerShell steps plus one AI Prompt step) | [AAI-00055](https://automations.cloudradial.com/marketplace/AAI-00055) |
@@ -59,9 +59,9 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`mailbox-group-access/`](mailbox-group-access/) | Give People Mailbox and Group Access Once It's Approved | Workflow (PowerShell, no AI) | [CRA-00002](https://automations.cloudradial.com/marketplace/CRA-00002) |
 | [`mfa-reset/`](mfa-reset/) | Let Users Reset Their Own MFA Safely | Workflow (PowerShell steps, no AI) | [AAI-00045](https://automations.cloudradial.com/marketplace/AAI-00045) |
 | [`microsoft-security-assessment/`](microsoft-security-assessment/) | Turn a Microsoft 365 Security Review into a Client Assessment | Workflow (PowerShell, no AI) | Not listed |
-| [`microsoft-tenant-review/`](microsoft-tenant-review/) | Microsoft Tenant Review | Workflow (PowerShell, no AI) | Not listed |
+| [`microsoft-tenant-review/`](microsoft-tenant-review/) | Microsoft Tenant Review | Workflow (PowerShell, no AI) | [CRA-00005](https://automations.cloudradial.com/marketplace/CRA-00005) |
 | [`new-client-onboarding/`](new-client-onboarding/) | Onboard a New Client in CloudRadial, the PSA and Microsoft 365 | Workflow (run by hand, MSP-wide) | Not listed |
-| [`new-client-onboarding-form/`](new-client-onboarding-form/) | Onboard a New Client from One Form | Workflow (PowerShell plus one agent step) | Not listed |
+| [`new-client-onboarding-form/`](new-client-onboarding-form/) | Onboard a New Client from One Form | Workflow (PowerShell plus one agent step) | [CRA-00004](https://automations.cloudradial.com/marketplace/CRA-00004) |
 | [`new-user-onboarding/`](new-user-onboarding/) | Get New Hires Ready for Day One | Agent + Workflow | [AAI-00040](https://automations.cloudradial.com/marketplace/AAI-00040) |
 | [`offline-device-sweep/`](offline-device-sweep/) | Ticket Devices That Have Dropped Off the RMM | Workflow (PowerShell, no AI, runs on a schedule) | [CRA-00001](https://automations.cloudradial.com/marketplace/CRA-00001) |
 | [`onboard-users-to-portal/`](onboard-users-to-portal/) | Onboard Many Portal Users at Once | Workflow (runs the CloudRadial UCP Assistant agent) | [AAI-00006](https://automations.cloudradial.com/marketplace/AAI-00006) |
@@ -92,10 +92,10 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Turn One Request into a Service Ticket and a Quote | Workflow + Agent | [AAI-00034](https://automations.cloudradial.com/marketplace/AAI-00034) |
 | [`stale-guest-cleanup/`](stale-guest-cleanup/) | Find and Clean Up Unused Microsoft 365 Accounts and Guests | Workflow (run monthly by a Routine, or by hand) | [AAI-00064](https://automations.cloudradial.com/marketplace/AAI-00064) |
 | [`status-change-updates/`](status-change-updates/) | Tell Requesters in Plain Language When Their Ticket Changes Status | Workflow (PowerShell steps plus one AI Prompt step) | [AAI-00054](https://automations.cloudradial.com/marketplace/AAI-00054) |
-| [`thank-you-close/`](thank-you-close/) | Close Tickets When the Client Says Thanks | Workflow (one PowerShell step) | Not listed |
+| [`thank-you-close/`](thank-you-close/) | Close Tickets When the Client Says Thanks | Workflow (one PowerShell step) | [CRA-00013](https://automations.cloudradial.com/marketplace/CRA-00013) |
 | [`ticket-routing/`](ticket-routing/) | Send Every Ticket to the Right Engineer | Agent + Workflow (ServiceAI Triage Action) | Not listed |
-| [`ticket-triage-form/`](ticket-triage-form/) | Ticket Triage from Portal Forms | Workflow (PowerShell plus one AI prompt) | Not listed |
-| [`ticket-triage-settings/`](ticket-triage-settings/) | Ticket Triage Settings | Workflow (one PowerShell step, no AI) | Not listed |
+| [`ticket-triage-form/`](ticket-triage-form/) | Ticket Triage from Portal Forms | Workflow (PowerShell plus one AI prompt) | [CRA-00007](https://automations.cloudradial.com/marketplace/CRA-00007) |
+| [`ticket-triage-settings/`](ticket-triage-settings/) | Ticket Triage Settings | Workflow (one PowerShell step, no AI) | [CRA-00008](https://automations.cloudradial.com/marketplace/CRA-00008) |
 | [`time-entry-review/`](time-entry-review/) | Catch Missing and Low-Detail Time Before It Costs You a Bill | Workflow (run daily by a Routine, or by hand) | [AAI-00051](https://automations.cloudradial.com/marketplace/AAI-00051) |
 | [`troubleshooting-article-delivery/`](troubleshooting-article-delivery/) | Send the Right Fix-It Article the Moment a Ticket Arrives | Workflow (PowerShell steps, no AI) | [AAI-00053](https://automations.cloudradial.com/marketplace/AAI-00053) |
 | [`ucp-webhook-echo/`](ucp-webhook-echo/) | See Exactly What a Portal Form Sends to AutomationAI | Workflow (PowerShell, no AI) | Not listed |

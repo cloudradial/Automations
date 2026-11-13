@@ -57,7 +57,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cli
 
 ## Technical details
 
-**Formerly:** Value Review | **Marketplace ID:** Not yet listed | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
+**Formerly:** Value Review | **Marketplace ID:** CRA-00006 | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
 
 ## Files
 

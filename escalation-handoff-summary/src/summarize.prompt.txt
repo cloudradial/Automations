@@ -1,0 +1,8 @@
+Write the handoff summary for this ticket.
+
+The facts were read without AI from the PSA for this one ticket: the ticket itself, why it is being escalated and to whom (when given), its notes oldest first, and the time entries with their notes where the PSA has them. "notesLeftOut" counts notes in the middle of a long ticket that were not included. "gaps" lists anything that could not be read.
+
+If the facts are exactly {"skip":true}, the summary is already on the ticket: reply {"skip":true} and nothing else.
+
+Facts (JSON):
+{{ nodes.node-gather.output.facts_json }}

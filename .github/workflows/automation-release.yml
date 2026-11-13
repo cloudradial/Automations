@@ -59,3 +59,6 @@ jobs:
           # not get the "Latest" badge. Folder names may contain '-', so this
           # checks the version part only, never the whole tag.
           prerelease: ${{ contains(steps.tag.outputs.version, '-') }}
+          # Never take the repo's "Latest" badge: the plugin READMEs link to
+          # releases/latest/download/cloudradial-ucp.plugin, which follows it.
+          make_latest: false

@@ -1,0 +1,24 @@
+{
+  "_source": "Tool names and read/write flags of the catalog extensions installed in the test tenant on 2026-11-13 (connectwise-manage 1.1.0, autotask-psa 2.5.7, halo-psa 1.3.0). Only the tools this agent relies on.",
+  "connectwise-manage": {
+    "cw_query_boards": "read",
+    "cw_query_tickets": "read",
+    "cw_query_companies": "read",
+    "cw_get_ticket": "read",
+    "cw_create_ticket": "write"
+  },
+  "autotask-psa": {
+    "at_get_ticket_field_values": "read",
+    "at_query_tickets": "read",
+    "at_get_company": "read",
+    "at_get_ticket": "read",
+    "at_create_ticket": "write"
+  },
+  "halo-psa": {
+    "halo_query_ticket_types": "read",
+    "halo_query_tickets": "read",
+    "halo_get_ticket": "read",
+    "halo_create_ticket": "write",
+    "halo_create_kb_article": "write"
+  }
+}

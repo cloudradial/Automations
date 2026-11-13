@@ -116,8 +116,8 @@ $Handler = {
     }
     # ---- CloudRadial ----
     if ($u -like 'https://cr.example/*') {
-        if ($m -eq 'GET' -and $u -like '*/api/beta/archive?*') { return @($Sc.archives) }
-        if ($m -eq 'POST' -and $u -eq 'https://cr.example/api/beta/archive') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.archives.Add((J @{ id = 31; companyId = $b.companyId; name = $b.name })); return J @{ success = $true } }
+        if ($m -eq 'GET' -and $u -like '*/v2/odata/archivefolder?*') { return [pscustomobject]@{ value = @($Sc.archives) } }
+        if ($m -eq 'POST' -and $u -eq 'https://cr.example/v2/archivefolder') { $b = $c.Body | ConvertFrom-Json; $null = $Sc.archives.Add((J @{ companyReportFolderId = 31; companyId = $b.companyId; name = $b.name })); return J @{ success = $true; data = @{ archiveFolderId = 31 } } }
         if ($m -eq 'GET' -and $u -like '*/v2/odata/archiveitem*') { return J @{ value = @() } }
         if ($m -eq 'POST' -and $u -eq 'https://cr.example/v2/archiveitem') { return J @{ companyReportItemId = 401 } }
         throw "unmocked CloudRadial $m $u"
@@ -248,7 +248,7 @@ $everything = ($o | ConvertTo-Json -Depth 20) + (@($Mock.Calls | Where-Object { 
 Check 'confirm: password is random and never output, noted or reported' ($pw.Length -eq 24 -and -not $everything.Contains($pw)) "len $($pw.Length)"
 $ar = @(Get-ArchiveWrites)
 $arBody = Read-Body $ar[0]
-Check 'confirm: completion report in archive Offboarding' ($ar.Count -eq 1 -and (Read-Body @(Get-Calls 'POST' 'https://cr.example/api/beta/archive')[0]).name -eq 'Offboarding' -and $arBody.text -match 'Convert the mailbox' -and $arBody.text -match 'allstaff@contoso.com' -and $arBody.isError -eq $false) (Show-Calls)
+Check 'confirm: completion report in archive Offboarding' ($ar.Count -eq 1 -and (Read-Body @(Get-Calls 'POST' 'https://cr.example/v2/archivefolder')[0]).name -eq 'Offboarding' -and $arBody.text -match 'Convert the mailbox' -and $arBody.text -match 'allstaff@contoso.com' -and $arBody.isError -eq $false) (Show-Calls)
 $notes = @(Get-PsaNotes)
 Check 'confirm: internal report note plus a generic public note' ($notes.Count -eq 2 -and (Read-Body $notes[0]).internalAnalysisFlag -eq $true -and (Read-Body $notes[1]).detailDescriptionFlag -eq $true -and (Read-Body $notes[1]).text -cmatch "^The offboarding request has been processed\.`nRef: [0-9a-f]{8}$") (($notes | ForEach-Object { $_.Body }) -join ' || ')
 Check 'confirm: message says what is left' ($o.message -match 'Offboarded sam.doe@contoso.com with 10 changes' -and $o.message -match 'left for a technician' -and $o.licences_removed -eq $true) $o.message

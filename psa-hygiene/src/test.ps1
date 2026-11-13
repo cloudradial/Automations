@@ -77,7 +77,7 @@ function Invoke-RestMethod {
     # Postmark
     if ($u -eq 'https://api.postmark.test/email' -and $m -eq 'POST') { return [pscustomobject]@{ ErrorCode = 0; Message = 'OK'; MessageID = 'msg-1' } }
     # CloudRadial
-    if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return , @([pscustomobject]@{ id = 55; companyId = 1; name = 'PSA Hygiene' }) }
+    if ($u -like 'https://portal.example-msp.test/v2/odata/archivefolder*' -and $m -eq 'GET') { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportFolderId = 55; companyId = 1; name = 'PSA Hygiene' }) } }
     if ($u -like 'https://portal.example-msp.test/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @() } }
     if ($u -eq 'https://portal.example-msp.test/v2/archiveitem' -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
     # ConnectWise

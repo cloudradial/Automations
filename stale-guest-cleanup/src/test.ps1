@@ -88,7 +88,7 @@ function Invoke-RestMethod {
         return $null
     }
     if ($m -eq 'POST' -and $u -like 'https://graph.microsoft.com/v1.0/users/*/revokeSignInSessions') { return [pscustomobject]@{ value = $true } }
-    if ($u -like 'https://portal.example-msp.test/api/beta/archive*' -and $m -eq 'GET') { return , @([pscustomobject]@{ id = 55; companyId = 9; name = 'Account Reviews' }) }
+    if ($u -like 'https://portal.example-msp.test/v2/odata/archivefolder*' -and $m -eq 'GET') { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportFolderId = 55; companyId = 9; name = 'Account Reviews' }) } }
     if ($u -like 'https://portal.example-msp.test/v2/odata/archiveitem*') { return [pscustomobject]@{ value = @() } }
     if ($u -eq 'https://portal.example-msp.test/v2/archiveitem' -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
     # Ticket notes are kept in $Mock.Notes, so a rerun (KeepNotes) sees what the first run wrote.

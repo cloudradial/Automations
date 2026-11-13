@@ -81,8 +81,8 @@ function Invoke-RestMethod {
         return [pscustomobject]@{ data = [pscustomobject]@{ companyDomainId = 44 } }
     }
     if ($u -eq "$CR/v2/companygroupcompany" -and $m -eq 'POST') { return [pscustomobject]@{ companyGroupId = 5; companyId = 9001 } }
-    if ($u -like "$CR/api/beta/archive*" -and $m -eq 'GET') { return , @() }
-    if ($u -eq "$CR/api/beta/archive" -and $m -eq 'POST') { return [pscustomobject]@{ id = 66 } }
+    if ($u -like "$CR/v2/odata/archivefolder*" -and $m -eq 'GET') { return [pscustomobject]@{ value = @() } }
+    if ($u -eq "$CR/v2/archivefolder" -and $m -eq 'POST') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ archiveFolderId = 66 } } }
     if ($u -like "$CR/v2/odata/archiveitem*") { return [pscustomobject]@{ value = @() } }
     if ($u -eq "$CR/v2/archiveitem" -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
     # ---- ConnectWise ----
@@ -205,7 +205,7 @@ Check 'confirm: one CW ticket for company 250' ($tk.Count -eq 1 -and $tb.company
 Check 'confirm: ticket carries the 10-item checklist' ($tb.initialDescription -match '\[ \] 1\. Confirm the signed agreement' -and $tb.initialDescription -match '\[ \] 10\. ') $tb.initialDescription
 $ab = @(Get-Calls POST "$CR/v2/archiveitem")
 Check 'confirm: baseline report in the Onboarding archive' ($ab.Count -eq 1 -and ($ab[0].Body | ConvertFrom-Json).archiveId -eq 66 -and ($ab[0].Body | ConvertFrom-Json).companyId -eq 9001) ''
-Check 'confirm: archive created as Onboarding' (((Get-Calls POST "$CR/api/beta/archive")[0].Body | ConvertFrom-Json).name -eq 'Onboarding') ''
+Check 'confirm: archive created as Onboarding' (((Get-Calls POST "$CR/v2/archivefolder")[0].Body | ConvertFrom-Json).name -eq 'Onboarding') ''
 $nb = (Get-Calls POST "$CW/service/tickets/5150/notes")[0].Body | ConvertFrom-Json
 Check 'confirm: CW internal note with the baseline' ($nb.internalAnalysisFlag -eq $true -and $nb.text -match 'CA001 - Require MFA for admins' -and $nb.text -match 'no sync call') ''
 Check 'ConnectWise calls are sent with -MaximumRedirection 0' ((@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' }).Count -gt 0) -and -not @($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' -and $_.MaxRedirect -ne 0 }).Count) (@($Mock.Calls | Where-Object { $_.Uri -like 'https://cw.example-msp.test/*' } | ForEach-Object { "$($_.Method) $($_.MaxRedirect)" }) -join ', ')

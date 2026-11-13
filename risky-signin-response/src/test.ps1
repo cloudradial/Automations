@@ -166,11 +166,11 @@ function Invoke-RestMethod {
     # CloudRadial
     $cr = 'https://portal.example-msp.test'
     if ($m -eq 'GET' -and $u -like "$cr/v2/odata/company*") { return [pscustomobject]@{ value = @([pscustomobject]@{ companyId = 9; name = 'Contoso' }) } }
-    if ($m -eq 'GET' -and $u -like "$cr/api/beta/archive*") {
-        if ($Mock.Opt.Contains('HasArchive')) { return , @([pscustomobject]@{ id = 66; companyId = 9; name = 'Risky Sign-ins' }) }
-        return , @()
+    if ($m -eq 'GET' -and $u -like "$cr/v2/odata/archivefolder*") {
+        if ($Mock.Opt.Contains('HasArchive')) { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportFolderId = 66; companyId = 9; name = 'Risky Sign-ins' }) } }
+        return [pscustomobject]@{ value = @() }
     }
-    if ($m -eq 'POST' -and $u -eq "$cr/api/beta/archive") { $Mock.Opt['HasArchive'] = $true; return [pscustomobject]@{ id = 66 } }
+    if ($m -eq 'POST' -and $u -eq "$cr/v2/archivefolder") { $Mock.Opt['HasArchive'] = $true; return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ archiveFolderId = 66 } } }
     if ($m -eq 'GET' -and $u -like "$cr/v2/odata/archiveitem*") {
         if ($Mock.Opt.Contains('Logged') -and $u -match [regex]::Escape($Mock.Opt['Logged'])) { return [pscustomobject]@{ value = @([pscustomobject]@{ companyReportItemId = 1; subject = ([regex]::Match($u, "subject eq '([^']+)'").Groups[1].Value) }) } }
         return [pscustomobject]@{ value = @() }

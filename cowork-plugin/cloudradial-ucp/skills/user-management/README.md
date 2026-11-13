@@ -37,7 +37,7 @@ last name.
 
 **What you get:** The full user list.
 
-**Good to know:** Security roles are set in the portal and aren't shown here.
+**Good to know:** For roles and admin access, ask for an access review (Access Control skill).
 
 ### Add a user
 `Per-company` · `Writes to the portal` · **Tested**
@@ -61,7 +61,7 @@ email and when they enrolled.
 
 **What you get:** Users matched against course enrollments.
 
-**Good to know:** Deleting a user leaves their enrollments behind, so the skill only counts current users.
+**Good to know:** Deleting a user leaves their enrollments behind, so the skill only counts current users and can offer to remove the leftovers.
 
 ## Good to know
 

@@ -66,6 +66,52 @@ nothing is duplicated.
 
 **What you get:** The existing assessment updated in place.
 
+### Record answers
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+In Contoso's "2026 Security Review", mark MFA as compliant and backups as
+partially compliant, with the note "Offsite copy pending". Show me the
+questions and the new answers first, and only save when I confirm.
+```
+
+**What you get:** Those answers updated in place, without re-importing the whole assessment.
+
+### Run an assessment
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+Run Contoso's "2026 Security Review" assessment as of today. Show me the
+assessment and the run name first, and only create the run when I confirm.
+```
+
+**What you get:** A point-in-time run of the assessment, answers included, like the portal's Run button.
+
+### Delete a test assessment
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+Delete the empty "Test Review" assessment in Contoso's portal, but keep any
+runs. Show me the assessment, its score and question count first, and only
+delete it when I confirm.
+```
+
+**What you get:** The assessment removed from the portal.
+
+**Good to know:** Deleted assessments can't be restored through the API.
+
+### Find Secure Score quick wins
+`Per-company` · `Read-only` · **Not yet tested**
+
+```
+What's Contoso's Microsoft Secure Score, and which five improvement actions
+would raise it most? Mark the low-cost, low-impact ones as quick wins.
+```
+
+**What you get:** The current score and the top improvement actions, with links to each setting.
+
+**Good to know:** The company has to be linked to its Microsoft tenant in the portal.
+
 ### Copy a template per server
 `Per-company` · `Writes to the portal` · **Portal only**
 
@@ -80,10 +126,10 @@ questions per server.
 
 ## Good to know
 
-- **The API can't delete or edit assessments.** Imports create or refresh them; delete test assessments in the portal.
+- **Assessments can be run, archived and deleted through the plugin now.** Imports still create or refresh them; there's no single-question edit.
 - **Copying a template doesn't work through the API yet.** Apply templates in the portal.
 - **Pair with [Endpoint Reporting](../endpoint-reporting)** for a full GAP picture (warranty + assessments).
-- **Microsoft Secure Score:** the plugin only talks to CloudRadial, so it can't read Secure Score. Use the AutomationAI workflow [Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment), or paste the controls in and ask for an assessment from them.
+- **Microsoft Secure Score** comes from CloudRadial's daily Microsoft 365 sync, so it's as of the last sync. For a scheduled version, use the AutomationAI workflow [Turn Microsoft Secure Score into a Client Assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment).
 
 ## Related skills
 

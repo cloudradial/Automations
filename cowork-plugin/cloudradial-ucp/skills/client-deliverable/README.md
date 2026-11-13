@@ -61,6 +61,31 @@ Planner items when I confirm.
 
 **What you get:** Planner items for the roadmap and budget, plus the Report Layout steps.
 
+### Add Secure Score to the QBR
+`Per-company` · `Read-only` · **Not yet tested**
+
+```
+Add Contoso's Microsoft Secure Score to their QBR: the current score and the
+five improvement actions worth the most points, as suggested roadmap items.
+Don't create anything yet; show me the list first.
+```
+
+**What you get:** The score for the security section and a short list of candidate roadmap items.
+
+**Good to know:** The score is as of CloudRadial's last daily Microsoft 365 sync.
+
+### Publish the QBR to the client's portal
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+Upload the attached Q4 business review PDF to Contoso's "Business Reviews"
+archive folder (create it if it's missing), then send Contoso's contacts a
+Signal notice that it's ready. Show me the upload and the message first, and
+only do each step when I confirm.
+```
+
+**What you get:** The PDF in Contoso's report archive and a desktop notice pointing them to it.
+
 ### Answer the scoring question
 `Per-company` · `Read-only` · **Not yet tested**
 

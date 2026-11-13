@@ -9,10 +9,13 @@ Manage your clients' CloudRadial portals by asking Claude in plain English. Look
 - **Set up a client portal.** Add companies and users, build request forms, seed knowledge base articles, and create courses and assessments. "Seed Contoso with 10 starter KB articles"
 - **Run the service day to day.** Check training progress, audit portal content, and keep your company list tidy. "Who has completed the security training at Acme Corp?"
 - **Devices and lifecycle.** See warranty status and plan hardware refreshes. "Which of Contoso's devices are out of warranty?"
-- **Compliance and satisfaction.** Check assessment results and client feedback, for one client or all of them. "Roll up assessment scores across all my clients"
+- **Compliance and satisfaction.** Check assessment results, Microsoft Secure Score and client feedback, for one client or all of them. "Roll up assessment scores across all my clients"
+- **Communicate with clients.** Put a notice on users' desktops with Signal, or a banner or message in their portal, after you approve the audience and wording. "Remind Pat Jones that their password expires Friday"
+- **Reports and archives.** Upload report PDFs into clients' archives and find the reports that are late or alerting. "Upload this backup report to Contoso's Nightly Backups folder"
+- **Access, policies and audit.** Review who has admin, change roles and feature sets, check policy compliance and licenses, set up webhooks, and see who changed what, with every change previewed first. "Who has admin access in Contoso's portal?"
 - **Domains, certificates and reports.** Spot what is about to expire. "Which of my managed domains expire in the next 90 days?"
 
-Claude confirms the company and shows you any change before it writes to your portal. A few things, such as portal branding, security roles and connecting integrations, still happen in the portal itself, and Claude lists those for you instead.
+Claude confirms the company and shows you any change before it writes to your portal. A few things, such as portal branding, SSO and connecting integrations, still happen in the portal itself, and Claude lists those for you instead.
 
 [See every example prompt](https://github.com/cloudradial/Automations/tree/main/cowork-plugin/cloudradial-ucp#technical-details)
 
@@ -32,7 +35,7 @@ Claude confirms the company and shows you any change before it writes to your po
 
 ## What you need
 
-- A CloudRadial public key and private key, from **Settings → API** in your CloudRadial admin portal
+- A CloudRadial public key and private key, from **Partner → Settings → Configuration → Integrations → API** (Add API Key) in your CloudRadial admin portal
 - Node.js 18 or newer on your computer
 - An internet connection the first time you set it up, so the plugin can install its keychain helper
 
@@ -61,7 +64,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cow
 
 ## Technical details
 
-**Marketplace ID:** AAI-00007 | **Type:** Plugin (Claude) | **Version:** 2.6.4
+**Marketplace ID:** AAI-00007 | **Type:** Plugin (Claude) | **Version:** 2.8.0
 
 ## Install: start here
 
@@ -92,7 +95,7 @@ Start a new conversation and type:
 
 > **Setup the CloudRadial Plugin**
 
-Setup first detects your OS/CPU, installs the matching native keyring dependency, and verifies OS-keychain storage. It then opens a local browser form where you enter your CloudRadial public/private keys from **Settings → API** and select US or EU. Keys are validated directly with CloudRadial and saved in your OS keychain. **Do not paste API keys into chat.**
+Setup first detects your OS/CPU, installs the matching native keyring dependency, and verifies OS-keychain storage. It then opens a local browser form where you enter your CloudRadial public/private keys from **Partner → Settings → Configuration → Integrations → API** (Add API Key) and select US or EU. Keys are validated directly with CloudRadial and saved in your OS keychain. **Do not paste API keys into chat.**
 
 ### Step 3: Try something
 
@@ -135,6 +138,7 @@ Walk a new client through implementation, or set up one area at a time. The plug
 | `Build a New User request form for Acme Corp` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#build-a-request-form) |
 | `Seed Contoso with 10 starter KB articles` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#seed-a-knowledge-base) |
 | `Add a "Get Help" menu tile to Contoso's portal` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#add-a-menu-tile) |
+| `Build a Service Overview dashboard on Contoso's portal` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#build-a-portal-dashboard) |
 | `Add a quickstart to Contoso's home page` | reporting-admin | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/reporting-admin/README.md#add-a-quickstart) |
 | `Set Contoso's SupportPhone token to 555-0100` | reporting-admin | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/reporting-admin/README.md#set-a-replacement-token) |
 | `Build a phishing-awareness course for Contoso` | course-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/course-management/README.md#build-a-training-course) |
@@ -149,6 +153,32 @@ Walk a new client through implementation, or set up one area at a time. The plug
 | `Audit Contoso's portal content` | content-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/content-management/README.md#audit-portal-content) |
 | `List all my companies` | company-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/company-management/README.md#list-and-audit-companies) |
 | `Rename the "Office 365 Only" company group` | company-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/company-management/README.md#rename-a-company-group) |
+| `Remove Sam from the phishing course at Contoso` | course-management | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/course-management/README.md#remove-someone-from-a-course) |
+
+### Communicate with clients
+
+Put a notice on client users' desktops with Signal, or a banner or message in their portal. The plugin shows you who it reaches and the exact message, and sends nothing until you say yes.
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Remind Pat Jones at Contoso that their password expires Friday` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#send-a-personal-reminder) |
+| `Announce Saturday's maintenance window to everyone at Contoso` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#announce-planned-maintenance) |
+| `Send an urgent outage notice to the Microsoft 365 company group` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#send-an-outage-notice) |
+| `Who has acknowledged the password reminder?` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#check-who-read-it) |
+| `Retract this morning's outage notice` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#retract-a-notice) |
+| `Add a banner for the Managed Plus group about our after-hours line` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#add-a-portal-banner) |
+| `Post an important message to Contoso's portal about the new password policy` | client-communications | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-communications/README.md#post-a-portal-message) |
+
+### Reports and archives
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Upload this backup report to Contoso's Nightly Backups folder` | report-archive | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/report-archive/README.md#upload-a-report) |
+| `Upload this month's patch reports, one per client` | report-archive | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/report-archive/README.md#upload-a-batch-for-every-client) |
+| `Give every client a Security Audits archive folder` | report-archive | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/report-archive/README.md#set-up-a-folder-for-every-client) |
+| `Which clients haven't received their reports on time?` | report-archive | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/report-archive/README.md#find-overdue-reports) |
+| `Which of Contoso's archived reports raised an alert this month?` | report-archive | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/report-archive/README.md#find-failed-reports) |
+| `Publish Contoso's Q4 review PDF to their portal and let them know` | client-deliverable | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-deliverable/README.md#publish-the-qbr-to-the-clients-portal) |
 
 ### Devices and lifecycle
 
@@ -166,10 +196,51 @@ Walk a new client through implementation, or set up one area at a time. The plug
 | `How is Contoso doing on compliance?` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#check-compliance) |
 | `Turn this spreadsheet into an assessment` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#import-a-spreadsheet) |
 | `Roll up assessment scores across all my clients` | assessment-export | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-export/README.md#roll-up-every-client) |
+| `What's Contoso's Secure Score and its five biggest quick wins?` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#find-secure-score-quick-wins) |
+| `Rank all my clients by Secure Score, lowest first` | assessment-export | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-export/README.md#compare-secure-score-across-clients) |
+| `Add Contoso's Secure Score to their QBR` | client-deliverable | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/client-deliverable/README.md#add-secure-score-to-the-qbr) |
+| `Mark MFA compliant in Contoso's "2026 Security Review"` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#record-answers) |
+| `Run Contoso's "2026 Security Review" assessment` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#run-an-assessment) |
+| `Delete the empty "Test Review" assessment in Contoso's portal` | assessment-compliance | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/assessment-compliance/README.md#delete-a-test-assessment) |
 | `What feedback has Contoso submitted in the last 30 days?` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#review-recent-feedback) |
 | `Fix a feedback entry for ticket 123456` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#fix-a-feedback-entry) |
 | `Move feedback to another company` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#move-feedback-to-another-company) |
 | `Which of my clients have the lowest CSAT this quarter?` | feedback-analysis | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/feedback-analysis/README.md#compare-satisfaction) |
+
+### Access and security
+
+Roles, role assignments, feature sets and support PINs. Every change is previewed and waits for your yes.
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Who has admin access in Contoso's portal?` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#review-who-has-access) |
+| `Give Pat Jones the Approver role at Contoso` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#give-someone-a-role) |
+| `Create a "Ticket Viewer" role` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#create-a-role) |
+| `Move Contoso and Fabrikam onto the Essentials feature set` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#change-which-companies-use-a-feature-set) |
+| `Set Pat Jones's support PIN` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#set-a-support-pin) |
+| `Revoke the Signal install on Pat's stolen laptop` | access-control | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/access-control/README.md#reset-or-revoke-a-signal-device) |
+
+### Policies, licenses and Microsoft 365
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Which of Contoso's policies are failing?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#review-policy-compliance) |
+| `Ignore the encryption exception on Contoso's build server` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#accept-a-policy-exception) |
+| `Add a policy that flags computers over 5 years old` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#add-a-policy) |
+| `Which licenses have the most unused seats?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#find-unused-licenses) |
+| `Who at Contoso holds a Microsoft 365 E3 license?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#check-who-holds-a-license) |
+| `Who are Contoso's Microsoft 365 admins?` | policies-licenses | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/policies-licenses/README.md#list-microsoft-365-admins) |
+
+### Webhooks and audit
+
+| Say this | Skill | Full prompt |
+|---|---|---|
+| `Create a "PSA intake" webhook` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#create-a-webhook) |
+| `Send a test to the "PSA intake" webhook` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#test-a-webhook) |
+| `Why did the "PSA intake" webhook stop working?` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#find-out-why-a-webhook-failed) |
+| `Rotate the signing secret on the "PSA intake" webhook` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#rotate-a-signing-secret) |
+| `Who changed Contoso's portal this week?` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#see-who-changed-what) |
+| `Did Contoso's PSA ticket sync run today?` | webhooks-audit | [Open](https://github.com/cloudradial/Automations/blob/main/cowork-plugin/cloudradial-ucp/skills/webhooks-audit/README.md#check-a-sync) |
 
 ### Domains, certificates and reports
 
@@ -180,7 +251,7 @@ Walk a new client through implementation, or set up one area at a time. The plug
 
 ### What stays in the portal
 
-The CloudRadial API doesn't cover these, so the plugin lists them for you instead of doing them: portal branding (logo, colors, theme), security roles and SSO, connecting integrations (PSA, Microsoft 365, RMM), deploying the endpoint agent, approval workflows and automations on a request form, the feedback widget and CSAT surveys, scheduled report delivery, a course's exam passing score, copying an assessment template, deleting assessments, and attaching files to archived reports.
+The CloudRadial API doesn't cover these, so the plugin lists them for you instead of doing them: portal branding (logo, colors, theme), SSO, connecting integrations (PSA, Microsoft 365, RMM), deploying the endpoint agent, approval workflows and automations on a request form, the feedback widget and CSAT surveys, scheduled report delivery, a course's exam passing score, and copying an assessment template. Signal messages need Signal enabled for your partner account.
 
 For work that should run on its own (on a schedule, from a form, or from ServiceAI), use the matching [AutomationAI automations](https://github.com/cloudradial/Automations/tree/main).
 
@@ -202,7 +273,7 @@ CloudRadial API V2
 
 The MCP server ships as portable JavaScript in one plugin file. First-time setup installs the pinned `@napi-rs/keyring@2.1.0` native dependency matching the current OS/CPU/libc into a per-user runtime cache. Native binaries are not bundled in the plugin. Credentials are stored in the OS keychain; there is no encrypted-file fallback. Existing environment-variable configurations remain supported.
 
-## Skills (15)
+## Skills (20)
 
 Each skill below has a partner-facing **README** with full example prompts, what you get, and what to watch for. Click the skill name for its guide.
 
@@ -223,10 +294,15 @@ Each skill below has a partner-facing **README** with full example prompts, what
 | **[feedback-analysis](skills/feedback-analysis/README.md)** | Analyze user feedback, CSAT trends, satisfaction reporting |
 | **[service-management](skills/service-management/README.md)** | Services, service installs, domains, products, coverage analysis |
 | **[reporting-admin](skills/reporting-admin/README.md)** | Archives, certificates, company groups, quickstarts, media, replacement tokens, raw API access |
+| **[client-communications](skills/client-communications/README.md)** | Signal desktop notices, portal banners and portal messages, previewed before anything is sent |
+| **[report-archive](skills/report-archive/README.md)** | Upload report files into clients' archives, set up archive folders, find overdue or alerting reports |
+| **[access-control](skills/access-control/README.md)** | Security roles, role assignments, feature sets, support PINs and Signal installs, every change previewed |
+| **[policies-licenses](skills/policies-licenses/README.md)** | Policy review and exceptions, policies, licenses and their users, Microsoft 365 groups and admins |
+| **[webhooks-audit](skills/webhooks-audit/README.md)** | Webhook actions (secrets kept out of chat), audit events, sessions and sync logs |
 
-## MCP tools (19)
+## MCP tools (31)
 
-The MCP server exposes 19 tools:
+The MCP server exposes 31 tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -236,23 +312,35 @@ The MCP server exposes 19 tools:
 | `clear_credentials` | Wipe stored credentials |
 | `search_companies` | Search companies by partial name |
 | `company_overview` | Full snapshot: details, counts, recent articles + feedback |
-| `list_resources` | List any of 30 resource types with OData filtering |
+| `list_resources` | List any listable resource type with OData filtering; `all_pages` reads every page |
 | `count_resources` | Count any resource type with optional filter |
 | `get_resource` | Retrieve a single resource by ID (incl. composite keys) |
 | `create_resource` | Create a new resource |
 | `update_resource` | Update a resource (PUT full / PATCH partial) |
-| `delete_resource` | Delete a resource by ID |
+| `delete_resource` | Delete a resource by ID, including assessments and course enrollments |
 | `user_lookup` | Find users by email, name, or company |
-| `manage_tokens` | List, get, set or delete replacement tokens (`@SupportPhone` and the like), partner-level or per company. Not API keys. |
+| `manage_tokens` | List, get, set or delete replacement tokens (`@SupportPhone` and the like), partner-level or per company. Not API keys. Deleting needs an explicit company, and a partner-level delete needs confirmation. |
 | `endpoint_update_warranty` | Trigger an async warranty refresh by endpoint serial number |
 | `courseenrollment_complete` | Mark a course enrollment as completed (with optional score/comment) |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course |
 | `assessment_import` | Create an assessment and load its questions from a list, a template-layout .xlsx, or a template assessment |
-| `raw_api_call` | Direct API call for advanced use cases |
+| `assessment_lifecycle` | Create assessments and templates, list templates, read one with its questions, add/update/delete questions, record answers, run, archive or unarchive, delete a run |
+| `archive_upload` | Upload report files into a client's archive folder, creating the folder if asked |
+| `signal_message` | Signal desktop notices: preview the audience, send, follow up, edit, resolve, retract |
+| `m365_secure_score` | Microsoft Secure Score and top improvement actions for one company, or a roll-up of every tenant |
+| `access_control` | Role assignments, feature-set companies, license users, support PINs (every write previewed, needs confirmation) |
+| `policy_review` | Policy review, a policy's exceptions, ignore or unignore an exception |
+| `webhook_action` | Webhook actions: create, update, enable/disable, test, rotate secret (saved to a local file), runs |
+| `audit_log` | Audit events, sessions and sync-job logs (read-only) |
+| `signal_device` | Signal installs: list, fleet stats, reset, revoke, unrevoke |
+| `m365_directory` | A company's Microsoft 365 groups and admin roles (read-only) |
+| `dashboard_widgets` | Dashboard widget types and widgets |
+| `upload_file` | Upload media, quickstart files and portal message attachments |
+| `raw_api_call` | Direct API call for advanced use cases (PATCH bodies are JSON Patch) |
 
-## 30 supported resource types
+## 46 supported resource types
 
-`company`, `user`, `application_user`, `article`, `endpoint`, `catalog`, `catalog_question`, `assessment`, `feedback`, `service`, `service_install`, `domain`, `course`, `course_enrollment`, `course_lesson`, `course_lesson_history`, `menu`, `product`, `archive_item`, `certificate`, `company_group`, `company_group_company`, `quickstart`, `flexible_asset`, `flexible_asset_type`, `flexible_asset_field`, `endpoint_application`, `endpoint_custom_property`, `media`, `token`.
+`company`, `user`, `application_user`, `article`, `endpoint`, `catalog`, `catalog_question`, `assessment`, `feedback`, `service`, `service_install`, `domain`, `course`, `course_enrollment`, `course_lesson`, `course_lesson_history`, `menu`, `product`, `archive_item`, `certificate`, `company_group`, `company_group_company`, `quickstart`, `flexible_asset`, `flexible_asset_type`, `flexible_asset_field`, `endpoint_application`, `endpoint_custom_property`, `media`, `token`, `archive_folder`, `banner`, `dashboard`, `portal_message`, `signal_message` (read; writes go through `signal_message`), `article_feedback`, `assessment_question` (list and count only), `role`, `role_assignment`, `feature_set`, `license`, `user_license` (read), `policy`, `webhook`, `archive_folder_default` and `signal_device` (read). Writes to roles, assignments, feature sets, policies, licenses, webhooks and default archive folders need `confirmed: true`.
 
 Composite-key resources (need extra args on get/update/delete): `archive_item`, `service_install`, `company_group_company`, `course_lesson_history`. `application_user` has no OData listing; get by id only.
 
@@ -268,7 +356,7 @@ Composite-key resources (need extra args on get/update/delete): `archive_item`, 
 
 ## Things to know
 
-- **OData pagination caps at 200.** The CloudRadial API returns at most 200 results per page. The `list_resources` tool accepts `top` and `skip` for pagination.
+- **OData pagination caps at 200.** The CloudRadial API returns at most 200 results per page. `list_resources` takes `top` and `skip`, or `all_pages: true` to read every row (up to `max_records`, default 5000).
 - **Article uses `subject`, not `title`.** Course uses `name`, not `title`. Skills know this, but keep it in mind if you use `raw_api_call`.
 - **EU partners:** during setup, choose `https://api.eu.cloudradial.com` as the base URL instead of the US default.
 

@@ -47,10 +47,23 @@ scores, the most common gaps and the trend against Q2.
 
 **What you get:** Overview, gaps, remediation opportunities and trends for the period.
 
+### Compare Secure Score across clients
+`All clients` · `Read-only` · **Not yet tested**
+
+```
+Rank all my clients by Microsoft Secure Score, lowest first, next to their
+latest assessment score, and list any Microsoft tenant that isn't linked to a
+company.
+```
+
+**What you get:** One row per client with Secure Score percentage and latest assessment score, worst first.
+
+**Good to know:** Secure Score comes from CloudRadial's daily Microsoft 365 sync, so it's as of the last sync.
+
 ## Good to know
 
 - **One place instead of one client at a time.** The portal's Excel and Word exports work per assessment run; this pulls every client through the API.
-- **Summary-level scores.** The API returns one score per assessment run. Per-question answers come from the portal's per-run Excel export, and the skill says so instead of estimating them.
+- **Summary-level scores by default.** The roll-up uses one score per assessment run. Per-question answers can now be read through the API too (not yet tested at scale); ask for them when you need question-level gaps.
 - **Read-only.** Nothing is written to the portal.
 
 ## Related skills

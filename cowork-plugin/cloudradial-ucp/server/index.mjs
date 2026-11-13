@@ -15452,7 +15452,10 @@ var StdioServerTransport = class {
 };
 
 // src/tools.ts
-import { readFileSync } from "node:fs";
+import { mkdirSync as mkdirSync2, readFileSync, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, join as join2 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { createHash as createHash2 } from "node:crypto";
 
 // src/secure-storage.ts
 import { createRequire } from "node:module";
@@ -15667,16 +15670,49 @@ var RESOURCE_MAP = {
   // No OData listing
   company_group_company: { odataPath: "companygroupcompany", itemPath: "companygroupcompany", idParam: "" },
   // Composite key
-  course_lesson_history: { odataPath: "courselessonhistory", itemPath: "courselessonhistory", idParam: "" }
+  course_lesson_history: { odataPath: "courselessonhistory", itemPath: "courselessonhistory", idParam: "" },
   // Composite key
+  // Added in 2.7.0 (v2 API, 2026-11)
+  archive_folder: { odataPath: "archivefolder", itemPath: "archivefolder", idParam: "id" },
+  // OData key companyReportFolderId
+  banner: { odataPath: "banner", itemPath: "banner", idParam: "id" },
+  // Partner-level; targeted by companyGroups
+  dashboard: { odataPath: "dashboard", itemPath: "dashboard", idParam: "id" },
+  // Widgets via raw_api_call
+  portal_message: { odataPath: "message", itemPath: "message", idParam: "id" },
+  signal_message: { odataPath: "signalmessage", itemPath: "signalmessage", idParam: "id" },
+  // Writes only through the signal_message tool
+  article_feedback: { odataPath: "articlefeedback", itemPath: "articlefeedback", idParam: "id" },
+  // PUT takes only {rating}
+  assessment_question: { odataPath: "assessmentquestion", itemPath: "", idParam: "" },
+  // List/count only
+  // Added in 2.8.0 (v2 API, 2026-11). Writes to these go through a confirmation step.
+  role: { odataPath: "", itemPath: "role", idParam: "id", listPath: "role" },
+  role_assignment: { odataPath: "", itemPath: "roleassignment", idParam: "id", listPath: "roleassignment" },
+  feature_set: { odataPath: "", itemPath: "featureset", idParam: "id", listPath: "featureset" },
+  license: { odataPath: "license", itemPath: "license", idParam: "id" },
+  user_license: { odataPath: "userlicense", itemPath: "", idParam: "" },
+  // List/count only
+  policy: { odataPath: "policy", itemPath: "policy", idParam: "id" },
+  webhook: { odataPath: "", itemPath: "action", idParam: "id", listPath: "action" },
+  // Create/rotate via webhook_action
+  archive_folder_default: { odataPath: "", itemPath: "archivefolder/default", idParam: "id", listPath: "archivefolder/default" },
+  signal_device: { odataPath: "", itemPath: "", idParam: "", listPath: "signaldevice" }
+  // Writes via signal_device
 };
 async function callApiMultipart(path, dataJson, file) {
+  return callApiForm(path, { data: dataJson }, [{ field: "file", ...file }]);
+}
+async function callApiForm(path, fields, files, opts = {}) {
   const { authHeader, baseUrl } = getAuthContext();
   const form = new FormData();
-  form.append("data", dataJson);
-  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
-  const resp = await fetch(new URL(path, baseUrl).toString(), {
-    method: "POST",
+  for (const [k, v] of Object.entries(fields)) if (v !== void 0) form.append(k, v);
+  for (const f of files) form.append(f.field, new Blob([new Uint8Array(f.bytes)], { type: f.contentType }), f.name);
+  const url = new URL(path, baseUrl);
+  for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== void 0 && v !== "") url.searchParams.set(k, v);
+  const method = opts.method ?? "POST";
+  const resp = await fetch(url.toString(), {
+    method,
     headers: { Authorization: authHeader, Accept: "application/json" },
     body: form
   });
@@ -15686,7 +15722,10 @@ async function callApiMultipart(path, dataJson, file) {
     data = text ? JSON.parse(text) : null;
   } catch {
   }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}: ${text.slice(0, 500)}`);
+  if (!resp.ok) throw new CloudRadialApiError(method, path, resp.status, data);
+  if (data && typeof data === "object" && !Array.isArray(data) && "data" in data && "success" in data) {
+    data = data.data;
+  }
   return { status: resp.status, data };
 }
 async function callApi(method, path, query, body) {
@@ -15703,7 +15742,7 @@ async function callApi(method, path, query, body) {
   };
   const init = { method, headers };
   if (body !== void 0 && ["POST", "PUT", "PATCH"].includes(method)) {
-    headers["Content-Type"] = "application/json";
+    headers["Content-Type"] = method === "PATCH" && Array.isArray(body) ? "application/json-patch+json" : "application/json";
     init.body = JSON.stringify(body);
   }
   const resp = await fetch(url.toString(), init);
@@ -16017,7 +16056,12 @@ var COMPANY_SCOPED = /* @__PURE__ */ new Set([
   "domain",
   "user",
   "application_user",
-  "token"
+  "token",
+  "dashboard",
+  "portal_message",
+  "archive_folder",
+  "license",
+  "policy"
 ]);
 var ODATA_KEY = {
   catalog_question: { set: "catalogquestion", key: "companyCatalogQuestionId" },
@@ -16027,8 +16071,26 @@ var ODATA_KEY = {
   application_user: { set: "user", key: "userId", quoted: true },
   // No single-item GET in the API: get_resource reads these through OData.
   assessment: { set: "assessment", key: "assessmentId" },
-  course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" }
+  course_enrollment: { set: "courseenrollment", key: "courseEnrollmentId" },
+  dashboard: { set: "dashboard", key: "dashboardId" },
+  portal_message: { set: "message", key: "messageId" },
+  archive_folder: { set: "archivefolder", key: "companyReportFolderId" },
+  license: { set: "license", key: "licenseId" },
+  policy: { set: "policy", key: "companyPolicyId" }
 };
+var NO_COMPANY_QUERY = {
+  archive_folder: ["PATCH"],
+  policy: ["PUT"],
+  license: ["PUT"]
+};
+var SENSITIVE = /* @__PURE__ */ new Set(["role", "role_assignment", "feature_set", "policy", "webhook", "license", "archive_folder_default"]);
+function requireConfirmed(resourceType, action, args) {
+  if (SENSITIVE.has(resourceType) && args.confirmed !== true) {
+    throw new Error(
+      `${action} on ${resourceType} changes access, security or partner-wide settings. Show the user exactly what will change (read the current record first), then call again with confirmed=true. Nothing was changed.`
+    );
+  }
+}
 var USER_SELECT = "userId,email,firstName,lastName,userName,phoneNumber,companyId,displayName,department,title,country,streetAddress,city,state,postalCode,mobilePhone,isDeleted,dateCreated,dateModified,psaKey,psaSiteKey,psaChildAccountKey";
 async function odataByKey(resourceType, id, select) {
   const k = ODATA_KEY[resourceType];
@@ -16072,19 +16134,241 @@ var NOT_IN_API = {
     delete: "The API can't delete a flexible_asset_field."
   },
   course_enrollment: {
-    put: "course_enrollment has no PUT; use PATCH (the default).",
-    delete: "The API can't delete a course enrollment."
-  }
+    put: "course_enrollment has no PUT; use PATCH (the default)."
+  },
+  archive_folder: { put: "archive_folder has no PUT; use PATCH (the default)." },
+  role_assignment: {
+    put: "Role assignments can't be edited. Delete the assignment and create a new one.",
+    patch: "Role assignments can't be edited. Delete the assignment and create a new one."
+  },
+  webhook: { patch: "webhook has no PATCH; use method PUT with the full body (header values left empty are kept), or webhook_action action=update." },
+  archive_folder_default: { patch: "archive_folder_default has no PATCH; use method PUT with the full body." },
+  article_feedback: { patch: "article_feedback is changed with method PUT and data {rating} only." }
 };
-var ASSESSMENT_HINT = "Assessments have no single-item write API. Create or refresh one with assessment_import; read one with get_resource or list_resources.";
+var WRITE_TOOL = {
+  signal_message: "Signal messages are sent, edited, resolved and retracted with the signal_message tool, which previews the audience before anything is sent.",
+  assessment_question: "assessment_question is read-only here. Change questions with assessment_lifecycle (set_questions, update_question, delete_question, set_answers) or assessment_import.",
+  signal_device: "Signal devices are reset, revoked and unrevoked with the signal_device tool.",
+  user_license: "user_license is read-only. Assign license users with access_control action=set_license_users."
+};
+var CREATE_TOOL = {
+  webhook: "Create webhooks with webhook_action (action=create): the signing secret is shown only once, so the tool saves it to a local file instead of returning it into the chat."
+};
+var ASSESSMENT_HINT = "Assessments are written with assessment_lifecycle (create, set_questions, update_question, delete_question, set_answers) or assessment_import (questions from a list or .xlsx). Read one with get_resource, list_resources or assessment_lifecycle action=get.";
 var COMPANY_ID_PARAM = {
   type: "string",
-  description: "Company the item belongs to, sent as ?companyId=. Used by catalog_question, course_lesson, course_lesson_history, domain, user, application_user and token; looked up automatically if omitted (except course_lesson_history and token). For company_group_company it is the path key instead."
+  description: "Company the item belongs to, sent as ?companyId=. Used by catalog_question, course_lesson, course_lesson_history, domain, user, application_user, token, dashboard, portal_message and archive_folder; looked up automatically if omitted (except course_lesson_history and token). For company_group_company it is the path key instead."
+};
+var CONFIRMED_PARAM = {
+  type: "boolean",
+  description: "Required (true) to write role, role_assignment, feature_set, policy, webhook, license and archive_folder_default, after the user has seen and approved the exact change."
 };
 var CUSTOM_PROPERTY_PARAMS = {
   serial_number: { type: "string", description: "endpoint_custom_property: the endpoint's serial number" },
   property_name: { type: "string", description: "endpoint_custom_property: the property name" }
 };
+var CONTENT_TYPES = {
+  pdf: "application/pdf",
+  csv: "text/csv",
+  txt: "text/plain",
+  htm: "text/html",
+  html: "text/html",
+  json: "application/json",
+  xml: "application/xml",
+  zip: "application/zip",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  doc: "application/msword",
+  xls: "application/vnd.ms-excel",
+  ppt: "application/vnd.ms-powerpoint",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  eml: "message/rfc822",
+  msg: "application/vnd.ms-outlook"
+};
+function contentTypeFor(path) {
+  const ext = (path.split(".").pop() ?? "").toLowerCase();
+  return CONTENT_TYPES[ext] ?? "application/octet-stream";
+}
+async function resolveArchiveFolder(companyId, args) {
+  const given = str(args, "archive_id");
+  if (given) {
+    const f = (await callApi("GET", `/v2/archivefolder/${encodeURIComponent(given)}`, { companyId: String(companyId) })).data;
+    return { id: Number(given), name: String(f?.name ?? ""), created: false };
+  }
+  const name = str(args, "folder_name");
+  if (!name) throw new Error("Give archive_id or folder_name.");
+  const list = await callApi("GET", "/v2/odata/archivefolder", {
+    $filter: `companyId eq ${companyId}`,
+    $select: "companyReportFolderId,companyId,name",
+    $top: "200"
+  });
+  const rows = list.data?.value ?? [];
+  const hit = rows.find((f) => String(f.name ?? "").trim().toLowerCase() === name.trim().toLowerCase());
+  if (hit) return { id: Number(hit.companyReportFolderId), name: String(hit.name), created: false };
+  if (args.create_folder !== true) {
+    const names = rows.map((f) => f.name).join(", ") || "none";
+    throw new Error(`Company ${companyId} has no archive folder named "${name}". Its folders: ${names}. Set create_folder=true to create it.`);
+  }
+  const body = { companyId, name: name.trim() };
+  if (str(args, "category")) body.category = str(args, "category");
+  if (str(args, "alert_keywords")) body.alertKeywords = str(args, "alert_keywords");
+  if (str(args, "required_keywords")) body.requiredKeywords = str(args, "required_keywords");
+  if (args.warn_on_past_days !== void 0) body.warnOnPastDays = Number(args.warn_on_past_days);
+  if (args.retain_for_days !== void 0) body.retainForDays = Number(args.retain_for_days);
+  const created = (await callApi("POST", "/v2/archivefolder", void 0, body)).data;
+  const newId = created?.archiveFolderId ?? created?.companyReportFolderId ?? created?.id;
+  if (newId === void 0 || newId === null) throw new Error(`Created folder "${name}", but the response had no folder id: ${JSON.stringify(created).slice(0, 200)}`);
+  return { id: Number(newId), name: name.trim(), created: true };
+}
+function checkSignalContent(b) {
+  const title = b.title === void 0 || b.title === null ? "" : String(b.title);
+  if (!title.trim()) throw new Error("title is required.");
+  if (title.length > 200) throw new Error("title must be 200 characters or less.");
+  if (b.body && String(b.body).length > 2e3) throw new Error("body must be 2,000 characters or less.");
+  if (b.deepLinkUrl && !/^https:\/\/\S+$/i.test(String(b.deepLinkUrl))) throw new Error("deep_link_url must be an absolute https:// URL.");
+  if (b.deepLinkLabel && String(b.deepLinkLabel).length > 100) throw new Error("deep_link_label must be 100 characters or less.");
+  const p = b.priority === void 0 || b.priority === null ? 0 : Number(b.priority);
+  if (![0, 1, 2].includes(p)) throw new Error("priority must be 0 (info), 1 (important) or 2 (urgent).");
+  if (p > 0 && !b.expiresAt) throw new Error("Important and urgent messages need expires_at.");
+  if (b.expiresAt) {
+    const t = Date.parse(String(b.expiresAt));
+    if (isNaN(t)) throw new Error("expires_at must be an ISO 8601 date-time.");
+    if (t - Date.now() > 90 * 864e5) throw new Error("expires_at can be at most 90 days ahead.");
+  }
+}
+function signalPublishBody(args) {
+  const arr = (k) => Array.isArray(args[k]) ? args[k] : void 0;
+  const companyIds = arr("company_ids")?.map(Number);
+  const groupIds = arr("group_ids")?.map(Number);
+  const users = arr("user_ids")?.map(String);
+  const roles = arr("role_ids")?.map(String);
+  const all = args.all_companies === true;
+  if (!all && !companyIds?.length && !groupIds?.length) {
+    throw new Error("Choose who gets it: company_ids, group_ids or all_companies=true.");
+  }
+  if ((users?.length ?? 0) > 500 || (roles?.length ?? 0) > 500) throw new Error("user_ids and role_ids are limited to 500 each.");
+  if (args.deep_link_label && !args.deep_link_url) throw new Error("deep_link_label needs deep_link_url.");
+  const body = {
+    ...companyIds?.length ? { companyIds } : {},
+    ...groupIds?.length ? { groupIds } : {},
+    ...all ? { allCompanies: true } : {},
+    ...users?.length ? { users } : {},
+    ...roles?.length ? { roles } : {},
+    title: str(args, "title"),
+    ...str(args, "body") ? { body: str(args, "body") } : {},
+    priority: args.priority === void 0 || args.priority === null ? 0 : Number(args.priority),
+    ...str(args, "expires_at") ? { expiresAt: str(args, "expires_at") } : {},
+    ...str(args, "due_at") ? { dueAt: str(args, "due_at") } : {},
+    ...str(args, "scheduled_send_at") ? { scheduledSendAt: str(args, "scheduled_send_at") } : {},
+    ...str(args, "deep_link_url") ? { deepLinkUrl: str(args, "deep_link_url") } : {},
+    ...str(args, "deep_link_label") ? { deepLinkLabel: str(args, "deep_link_label") } : {},
+    ...args.ack_required === true ? { ackRequired: true } : {}
+  };
+  checkSignalContent(body);
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  body.dedupeKey = str(args, "dedupe_key") || "ucp-" + createHash2("sha256").update(JSON.stringify(body) + day).digest("hex").slice(0, 40);
+  if (String(body.dedupeKey).length > 200) throw new Error("dedupe_key must be 200 characters or less.");
+  return body;
+}
+async function licenseHolders(licenseId) {
+  if (!/^\d+$/.test(licenseId)) throw new Error("license_id must be a number.");
+  const r = await listAllPages("/v2/odata/userlicense", { $filter: `licenseId eq ${licenseId}` }, 2e4);
+  return Array.isArray(r) ? r : r.value ?? [];
+}
+function webhookHeaders(args, cur) {
+  let values = {};
+  const file = str(args, "header_values_file");
+  if (file) {
+    try {
+      values = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      throw new Error(`header_values_file must be a readable JSON file of {name: value}: ${file}`);
+    }
+    if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error("header_values_file must hold a JSON object of {name: value}.");
+  }
+  const curNames = Array.isArray(cur.headers) ? cur.headers.map((h) => String(h.name)) : [];
+  const names = Array.isArray(args.header_names) ? args.header_names.map(String) : [.../* @__PURE__ */ new Set([...curNames, ...Object.keys(values)])];
+  return names.map((name) => {
+    const v = values[name];
+    if (v === void 0 && !curNames.includes(name)) throw new Error(`Header "${name}" is new, so it needs a value in header_values_file.`);
+    return { name, value: v === void 0 ? "" : String(v) };
+  });
+}
+function saveSigningSecret(data) {
+  const d = data ?? {};
+  if (!d.signingSecret) return { action: d.action ?? data, signingSecret: "(none returned)" };
+  const dir = join2(homedir2(), ".cloudradial-ucp", "webhook-secrets");
+  mkdirSync2(dir, { recursive: true, mode: 448 });
+  const id = String(d.action?.actionId ?? "new");
+  const file = join2(dir, `webhook-${id}-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.txt`);
+  writeFileSync2(file, String(d.signingSecret) + "\n", { mode: 384 });
+  return {
+    action: d.action,
+    signingSecretSavedTo: file,
+    note: "The signing secret is shown only once. It was saved to this file on your computer (readable only by you). Copy it into the receiving system, then delete the file."
+  };
+}
+function checkQuestion(q) {
+  if (!q || typeof q !== "object") throw new Error("Each question must be an object.");
+  if (!q.label || !String(q.label).trim()) throw new Error("Each question needs a label.");
+  if (q.type !== void 0 && !["0", "80"].includes(String(q.type))) {
+    throw new Error(`Question type must be 0 (free text) or 80 (multiple choice); got ${String(q.type)}.`);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(q)) {
+    if (k === "answerOptions" && Array.isArray(v)) out[k] = v.map((o) => ({ label: String(o.label), value: String(o.value) }));
+    else out[k] = v === null || v === void 0 || typeof v === "string" ? v : String(v);
+  }
+  return out;
+}
+async function assessmentCompany(id, given) {
+  if (given) return given;
+  const row = await odataByKey("assessment", id);
+  if (!row) throw new Error(`Assessment ${id} not found.`);
+  return String(row.companyId);
+}
+async function deleteAssessment(args) {
+  const id = requireStr(args, "id");
+  if (!/^\d+$/.test(id)) throw new Error(`assessment id must be a number, got "${id}"`);
+  const companyId = await assessmentCompany(id, str(args, "company_id"));
+  const query = { companyId };
+  if (args.include_runs === true) query.includeRuns = "true";
+  const r = await callApi("DELETE", `/v2/assessment/${id}`, query);
+  return r.data ?? { deleted: true, assessmentId: Number(id), runsDeleted: args.include_runs === true };
+}
+var PAGE = 200;
+async function listAllPages(path, query, maxRecords) {
+  if (!Number.isFinite(maxRecords) || maxRecords < 1) throw new Error("max_records must be a positive number.");
+  const rows = [];
+  let next = path;
+  let q = { ...query, $top: String(PAGE), $skip: "0" };
+  let pages = 0;
+  while (next) {
+    const r = await callApi("GET", next, q);
+    const body = r.data;
+    const page = Array.isArray(body?.value) ? body.value : [];
+    rows.push(...page);
+    pages++;
+    if (rows.length >= maxRecords) {
+      const more = page.length === PAGE || !!body?.["@odata.nextLink"];
+      return more ? { value: rows.slice(0, maxRecords), truncated: true, note: `Stopped at max_records=${maxRecords}; more rows match. Narrow the filter or raise max_records.` } : rows.slice(0, maxRecords);
+    }
+    if (body?.["@odata.nextLink"]) {
+      next = body["@odata.nextLink"];
+      q = void 0;
+    } else if (page.length === PAGE && q) {
+      q = { ...q, $skip: String(Number(q.$skip ?? 0) + PAGE) };
+    } else {
+      next = void 0;
+    }
+    if (pages > 500) throw new Error("Paging stopped after 500 pages; narrow the filter.");
+  }
+  return rows;
+}
 function requireResource(args) {
   const resourceType = requireStr(args, "resource_type");
   const config2 = RESOURCE_MAP[resourceType];
@@ -16097,7 +16381,7 @@ function requireResource(args) {
 }
 var tools = [
   // -------------------------------------------------------------------------
-  // Setup / credential management tools — call these first
+  // Setup / credential management tools: call these first
   // -------------------------------------------------------------------------
   {
     name: "setup_status",
@@ -16196,7 +16480,7 @@ var tools = [
   },
   {
     name: "list_resources",
-    description: "List any of 30 resource types with OData filtering, sorting, and pagination. ALWAYS paginates: defaults to top=100 if not specified to avoid hammering the API. Resource API caps each page at 200. To get more, increment `skip` (page through) or pair with `count_resources` to know the total. Note: application_user has no OData listing and will error here \u2014 use get_resource instead.",
+    description: "List any listable resource type with OData filtering, sorting, and pagination. One page by default: top=100 if not specified, and the API caps a page at 200. To read every matching row, set all_pages=true: the tool follows @odata.nextLink (or walks $skip) in pages of 200 until done or max_records (default 5000) is reached, and says so if it stopped early. Otherwise page with `skip`, or pair with `count_resources` for the total. application_user has no OData listing; use get_resource.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16204,17 +16488,37 @@ var tools = [
         filter: { type: "string", description: "OData $filter expression" },
         select: { type: "string", description: "OData $select (comma-separated field list)" },
         orderby: { type: "string", description: "OData $orderby (e.g. 'dateCreated desc')" },
-        top: { type: "string", description: "OData $top \u2014 page size. Defaults to 100, max 200." },
-        skip: { type: "string", description: "OData $skip \u2014 offset for pagination (use with top to walk pages)." },
+        top: { type: "string", description: "OData $top: page size. Defaults to 100, max 200." },
+        skip: { type: "string", description: "OData $skip: offset for pagination (use with top to walk pages)." },
         expand: { type: "string", description: "OData $expand" },
-        search: { type: "string", description: "OData $search" }
+        search: { type: "string", description: "OData $search" },
+        all_pages: { type: "boolean", description: "Read every matching row (pages of 200) instead of one page. Ignores top and skip." },
+        params: { type: "object", description: "For types without OData (role, role_assignment, feature_set, webhook, archive_folder_default, signal_device): the route's own query parameters, e.g. {userId, companyId, page, pageSize} for role_assignment." },
+        max_records: { type: "integer", description: "With all_pages: stop after this many rows (default 5000)." }
       },
       required: ["resource_type"]
     },
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
+      if (!config2.odataPath && config2.listPath) {
+        if (str(args, "filter") || str(args, "orderby") || str(args, "select")) {
+          throw new Error(`${resourceType} has no OData list: pass its own query parameters in params instead of filter/orderby/select.`);
+        }
+        const p = args.params || {};
+        const q = Object.fromEntries(Object.entries(p).filter(([, v]) => v !== void 0 && v !== null).map(([k, v]) => [k, String(v)]));
+        return (await callApi("GET", `/v2/${config2.listPath}`, q)).data;
+      }
       if (!config2.odataPath) {
         throw new Error(`${resourceType} does not support listing (no OData endpoint). Use get_resource with a specific ID.`);
+      }
+      if (args.all_pages === true) {
+        return listAllPages(`/v2/odata/${config2.odataPath}`, {
+          $filter: str(args, "filter"),
+          $select: str(args, "select") ?? (resourceType === "user" ? USER_SELECT : void 0),
+          $orderby: str(args, "orderby"),
+          $expand: str(args, "expand"),
+          $search: str(args, "search")
+        }, args.max_records === void 0 || args.max_records === null ? 5e3 : Number(args.max_records));
       }
       const query = {
         $filter: str(args, "filter"),
@@ -16243,7 +16547,7 @@ var tools = [
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
       if (!config2.odataPath) {
-        throw new Error(`${resourceType} does not support count (no OData endpoint).`);
+        throw new Error(`${resourceType} does not support count (no OData endpoint). List it with list_resources and count the rows.`);
       }
       const filter = str(args, "filter");
       const result = await callApi(
@@ -16323,13 +16627,14 @@ var tools = [
   },
   {
     name: "create_resource",
-    description: "Create a new resource. `data` is the resource body sent to CloudRadial; include every field the API requires for that type (e.g. article: subject, body, companyId, datePublished). endpoint_custom_property needs serial_number, with data {name, value, dataType}. Assessments are created with assessment_import, not here.",
+    description: "Create a new resource. `data` is the resource body sent to CloudRadial; include every field the API requires for that type (e.g. article: subject, body, companyId, datePublished). endpoint_custom_property needs serial_number, with data {name, value, dataType}. banner: {title, style 1-4 (1 green, 2 amber, 3 red, 4 blue), placement 1 sidebar or 2 top, companyGroups (group NAMES; empty means no company sees it), showOnHome/Login/Report/Request, publishDate, expireDate}. portal_message: {companyId, subject, category, author, body, priority 0/10/20, showAsAlert}. dashboard: {companyId, title}. archive_folder: {companyId, name, alertKeywords, requiredKeywords, warnOnPastDays, retainForDays}. Assessments are created with assessment_import; Signal messages with signal_message; report files with archive_upload.",
     inputSchema: {
       type: "object",
       properties: {
         resource_type: { type: "string", enum: RESOURCE_TYPES },
         data: { type: "object", description: "Resource fields (e.g. {subject, body, companyId, datePublished} for an article)" },
-        serial_number: CUSTOM_PROPERTY_PARAMS.serial_number
+        serial_number: CUSTOM_PROPERTY_PARAMS.serial_number,
+        confirmed: CONFIRMED_PARAM
       },
       required: ["resource_type", "data"]
     },
@@ -16337,6 +16642,9 @@ var tools = [
       const { resourceType, config: config2 } = requireResource(args);
       const data = args.data || {};
       if (resourceType === "assessment") throw new Error(ASSESSMENT_HINT);
+      if (WRITE_TOOL[resourceType]) throw new Error(WRITE_TOOL[resourceType]);
+      if (CREATE_TOOL[resourceType]) throw new Error(CREATE_TOOL[resourceType]);
+      requireConfirmed(resourceType, "create", args);
       if (resourceType === "endpoint_custom_property") {
         const result2 = await callApi("POST", customPropertyPath(args, false), void 0, data);
         return result2.data;
@@ -16349,7 +16657,7 @@ var tools = [
   },
   {
     name: "update_resource",
-    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the traits to change as data.traits; only traits the asset already has can be changed, and traits left out are kept. company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import) and flexible_asset_field updates.",
+    description: "Update a resource by ID. method=PATCH (default) changes only the fields in `data`; PUT replaces the whole record, so fields left out of `data` are cleared. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). flexible_asset: pass the traits to change as data.traits; only traits the asset already has can be changed, and traits left out are kept. company_group_company is create/delete-only. Not possible in the API: assessment updates (use assessment_import or assessment_lifecycle) and flexible_asset_field updates. Signal messages are edited with signal_message.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16363,6 +16671,7 @@ var tools = [
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
         company_id: COMPANY_ID_PARAM,
+        confirmed: CONFIRMED_PARAM,
         ...CUSTOM_PROPERTY_PARAMS
       },
       required: ["resource_type", "data"]
@@ -16370,6 +16679,7 @@ var tools = [
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
       if (resourceType === "assessment") throw new Error(ASSESSMENT_HINT);
+      if (WRITE_TOOL[resourceType]) throw new Error(WRITE_TOOL[resourceType]);
       if (!config2.itemPath) throw new Error(`update is not supported for ${resourceType}`);
       const method = (str(args, "method") || "PATCH").toUpperCase();
       if (!["PUT", "PATCH"].includes(method)) {
@@ -16377,6 +16687,7 @@ var tools = [
       }
       const blocked = NOT_IN_API[resourceType]?.[method.toLowerCase()];
       if (blocked) throw new Error(blocked);
+      requireConfirmed(resourceType, "update", args);
       let data = args.data || {};
       const extraOps = [];
       if (resourceType === "flexible_asset" && data.traits !== void 0) {
@@ -16406,12 +16717,12 @@ var tools = [
       } else if (resourceType === "endpoint_custom_property") {
         path = customPropertyPath(args, true);
       } else if (resourceType === "company_group_company") {
-        throw new Error("company_group_company has no update endpoint \u2014 use create_resource or delete_resource");
+        throw new Error("company_group_company has no update endpoint; use create_resource or delete_resource");
       } else {
         itemId = requireStr(args, "id");
         path = `/v2/${config2.itemPath}/${itemId}`;
       }
-      const query = await itemCompanyQuery(resourceType, args, itemId);
+      const query = NO_COMPANY_QUERY[resourceType]?.includes(method) ? void 0 : await itemCompanyQuery(resourceType, args, itemId);
       const body = method === "PATCH" ? [
         ...Object.entries(data).map(([key, value]) => ({
           op: "replace",
@@ -16426,7 +16737,7 @@ var tools = [
   },
   {
     name: "delete_resource",
-    description: "Delete a resource by ID. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), company_group_company (company_group_id + company_id), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). Not possible in the API: assessment, course_enrollment and flexible_asset_field deletes.",
+    description: "Delete a resource by ID. Deletes can't be undone through the API: confirm the exact item with the user first. Composite-key types: archive_item (archive_id + id), service_install (endpoint_id + id=serviceId), company_group_company (company_group_id + company_id), course_lesson_history (course_id + application_user_id + course_lesson_id), endpoint_custom_property (serial_number + property_name). assessment: soft-deletes an assessment (20), template (10) or archived assessment (50); its runs are kept unless include_runs=true. A run (30) is deleted with assessment_lifecycle action=delete_run. course_enrollment: removes the user from the course; they can be enrolled again. Not possible in the API: flexible_asset_field deletes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16439,16 +16750,20 @@ var tools = [
         course_id: { type: "string", description: "Required for course_lesson_history" },
         application_user_id: { type: "string", description: "Required for course_lesson_history" },
         course_lesson_id: { type: "string", description: "Required for course_lesson_history (alternative to id)" },
+        include_runs: { type: "boolean", description: "assessment only: also delete the assessment's runs (default false)" },
+        confirmed: CONFIRMED_PARAM,
         ...CUSTOM_PROPERTY_PARAMS
       },
       required: ["resource_type"]
     },
     handler: async (args) => {
       const { resourceType, config: config2 } = requireResource(args);
-      if (resourceType === "assessment") throw new Error("The API can't delete an assessment; remove it in the portal.");
+      if (resourceType === "assessment") return deleteAssessment(args);
+      if (WRITE_TOOL[resourceType]) throw new Error(WRITE_TOOL[resourceType]);
       if (!config2.itemPath) throw new Error(`delete is not supported for ${resourceType}`);
       const blocked = NOT_IN_API[resourceType]?.delete;
       if (blocked) throw new Error(blocked);
+      requireConfirmed(resourceType, "delete", args);
       let path;
       let itemId;
       if (resourceType === "archive_item") {
@@ -16516,7 +16831,7 @@ var tools = [
   },
   {
     name: "manage_tokens",
-    description: "Manage CloudRadial replacement tokens: the named values (like @SupportPhone) that portal forms, articles and automations fill in. These are NOT API keys. Tokens live at partner level (company_id 0, the default) or on one company (company_id > 0), and a company token overrides the partner token of the same name. action = list | get | create (creates or updates; needs token_name and value) | revoke (deletes).",
+    description: "Manage CloudRadial replacement tokens: the named values (like @SupportPhone) that portal forms, articles and automations fill in. These are NOT API keys. Tokens live at partner level (company_id 0, the default) or on one company (company_id > 0), and a company token overrides the partner token of the same name. action = list | get | create (creates or updates; needs token_name and value) | revoke (deletes). revoke always needs an explicit company_id: a company's token, or 0 for the partner token, which also needs confirm_partner_level=true because it removes the default every client falls back to. Names are case-sensitive.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16526,7 +16841,8 @@ var tools = [
         value: { type: "string", description: "Token value for create (empty string allowed as a placeholder)" },
         type: { type: "string", description: "Optional token type for create: None, String or Automation" },
         token_id: { type: "string", description: "Deprecated alias for token_name" },
-        data: { type: "object", description: "Deprecated: raw body {companyId, token, value, type} for create" }
+        data: { type: "object", description: "Deprecated: raw body {companyId, token, value, type} for create" },
+        confirm_partner_level: { type: "boolean", description: "revoke with company_id 0 only: set true after the user confirms deleting the partner-level token" }
       },
       required: ["action"]
     },
@@ -16554,6 +16870,12 @@ var tools = [
           return result.data;
         }
         case "revoke": {
+          if (args.company_id === void 0 || args.company_id === null || str(args, "company_id") === "") {
+            throw new Error("revoke needs company_id: the company whose token to delete, or 0 for the partner-level token.");
+          }
+          if (companyId === "0" && args.confirm_partner_level !== true) {
+            throw new Error(`This deletes the PARTNER-level token "${decodeURIComponent(nameOf())}", the default every company without its own token falls back to. Confirm with the user, then call again with confirm_partner_level=true.`);
+          }
           const result = await callApi("DELETE", `/v2/token/${nameOf()}`, { companyId });
           return result.data ?? { deleted: true };
         }
@@ -16634,7 +16956,7 @@ var tools = [
   },
   {
     name: "assessment_import",
-    description: "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`; the API currently accepts this call but copies no questions, so prefer the portal). Without `assessment_id`, the upload creates a new assessment (the API has no other create) and the tool finds its id by title. With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
+    description: "Create or refresh a CloudRadial assessment for a company from questions, the way the portal's Import Assessment does. Give ONE question source: `questions` (an array of objects keyed by assessment template column, e.g. {Category, Question, Order, Explanation, Answer, Remediation, Update Key}), `file_path` (a local .xlsx already in the CloudRadial assessment template layout), or `template_id` (copy every question from a template assessment into an existing `assessment_id`, optionally duplicated per server/endpoint/user with `apply_to`; the API currently accepts this call but copies no questions, so prefer the portal). Without `assessment_id`, the upload creates a new assessment and the tool finds its id by title (assessment_lifecycle action=create is the direct alternative). With `assessment_id`, the upload updates that assessment in place: questions are matched by their Update Key, so give each question a stable Update Key to refresh answers without duplicates. Returns {assessmentId, created, questions, source}. This writes to the portal: confirm the company and title with the user first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16718,8 +17040,766 @@ var tools = [
     }
   },
   {
+    name: "archive_upload",
+    description: "Upload one or more local report files (PDF, XLSX, DOCX, CSV, ZIP and other types the portal accepts) into a client company's report archive, the way uploading in the portal does. Each file becomes its own archive item with the file attached, and is checked against the folder's alert and required keywords, so folder alerts keep working. Pick the folder by archive_id, or by folder_name (case-insensitive) within company_id; with create_folder=true a missing folder is created first (name, category, alert/required keywords, warn_on_past_days, retain_for_days). Each file and the whole request must be 128 MB or less; a rejected file means nothing from the request was saved. This writes to the client's portal: confirm the company, folder and files with the user first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        company_id: { type: "integer", description: "Client company that owns the folder" },
+        archive_id: { type: "integer", description: "Folder id (companyReportFolderId). Give this or folder_name." },
+        folder_name: { type: "string", description: "Folder name within the company, matched case-insensitively" },
+        create_folder: { type: "boolean", description: "Create folder_name if the company doesn't have it (default false)" },
+        category: { type: "string", description: "New folder only: category, e.g. Backups" },
+        alert_keywords: { type: "string", description: "New folder only: comma-separated; a report containing any of them raises an alert" },
+        required_keywords: { type: "string", description: "New folder only: comma-separated; a report containing none of them raises an alert" },
+        warn_on_past_days: { type: "integer", description: "New folder only: folder goes into error if nothing arrives in this many days (0 = off)" },
+        retain_for_days: { type: "integer", description: "New folder only: keep items this many days (0 = forever)" },
+        file_paths: { type: "array", items: { type: "string" }, description: "Local files to upload; each becomes one archive item" },
+        subject: { type: "string", description: "Optional, up to 255 characters, applied to every item. Defaults to each file's name." },
+        body: { type: "string", description: "Optional text stored on every item (checked against the folder's keywords)" },
+        is_html: { type: "boolean", description: "Set true if body is HTML" }
+      },
+      required: ["company_id", "file_paths"]
+    },
+    handler: async (args) => {
+      const companyId = Number(requireStr(args, "company_id"));
+      if (!Number.isInteger(companyId) || companyId <= 0) throw new Error("company_id must be a client company id.");
+      const paths = Array.isArray(args.file_paths) ? args.file_paths.map(String) : [];
+      if (paths.length === 0) throw new Error("file_paths needs at least one file.");
+      const subject = str(args, "subject");
+      if (subject && subject.length > 255) throw new Error("subject must be 255 characters or less.");
+      const MAX = 128 * 1024 * 1024;
+      let total = 0;
+      const files = paths.map((p) => {
+        let size;
+        try {
+          size = statSync(p).size;
+        } catch {
+          throw new Error(`File not found: ${p}`);
+        }
+        if (size === 0) throw new Error(`File is empty: ${p}`);
+        if (size > MAX) throw new Error(`File is over 128 MB: ${p}`);
+        total += size;
+        return { field: "files", bytes: new Uint8Array(readFileSync(p)), name: basename(p), contentType: contentTypeFor(p) };
+      });
+      if (total > MAX) throw new Error(`The files add up to over 128 MB (${Math.round(total / 1048576)} MB). Upload them in smaller batches.`);
+      const folder = await resolveArchiveFolder(companyId, args);
+      const r = await callApiForm("/v2/archiveitem/upload", {
+        archiveId: String(folder.id),
+        subject,
+        body: str(args, "body"),
+        isHtml: args.is_html === true ? "true" : void 0
+      }, files);
+      const d = r.data ?? {};
+      return {
+        companyId,
+        archiveId: folder.id,
+        folderName: folder.name,
+        folderCreated: folder.created,
+        uploaded: (d.items ?? []).map((i) => ({
+          archiveItemId: i.archiveItemId,
+          subject: i.subject,
+          isError: i.isError,
+          files: (i.attachments ?? []).map((a) => ({ fileName: a.fileName, bytes: a.length }))
+        })),
+        ...d.items ? {} : { result: r.data },
+        note: "An item flagged isError matched the folder's alert keywords (or none of its required keywords); that is the folder working as designed."
+      };
+    }
+  },
+  {
+    name: "signal_message",
+    description: `Signal desktop notices: messages that appear on client users' desktops through the Signal client and browser extension, optionally with a button (deep link) and an acknowledgement. action = estimate | send | list | get | recipients | edit | resolve | retract. send previews first: without confirmed=true it only returns the audience estimate and the message, and sends nothing. Show that preview to the user, then call again with confirmed=true. Target with company_ids, group_ids or all_companies, narrowed by user_ids and/or role_ids (each at most 500; every targeted user must belong to a targeted company). priority 0 info, 1 important, 2 urgent; important and urgent need expires_at. expires_at defaults to 14 days and can be at most 90. deep_link_url must be an absolute https:// URL. A dedupe key is added automatically (same message, audience and day), so a retried send returns the existing message instead of a second one. edit, resolve and retract need the message id and use the version you last read (read automatically if omitted); a stale version is refused with 409. If Signal isn't enabled for the partner, every call returns 404 "Signal is not enabled for this partner."`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["estimate", "send", "list", "get", "recipients", "edit", "resolve", "retract"] },
+        id: { type: "integer", description: "signalMessageId for get, recipients, edit, resolve, retract" },
+        version: { type: "integer", description: "edit/resolve/retract: the version last read" },
+        confirmed: { type: "boolean", description: "send only: true after the user approved the preview" },
+        company_ids: { type: "array", items: { type: "integer" } },
+        group_ids: { type: "array", items: { type: "integer" }, description: "Company group ids" },
+        all_companies: { type: "boolean" },
+        user_ids: { type: "array", items: { type: "string" }, description: "userId values (GUIDs) from user_lookup" },
+        role_ids: { type: "array", items: { type: "string" } },
+        title: { type: "string", description: "Up to 200 characters" },
+        body: { type: "string", description: "Up to 2,000 characters" },
+        priority: { type: "integer", enum: [0, 1, 2] },
+        expires_at: { type: "string", description: "UTC ISO 8601" },
+        due_at: { type: "string", description: "Informational due date (UTC ISO 8601)" },
+        scheduled_send_at: { type: "string", description: "Send later instead of now (UTC ISO 8601)" },
+        deep_link_url: { type: "string" },
+        deep_link_label: { type: "string", description: "Button text, up to 100 characters (default Open Link)" },
+        ack_required: { type: "boolean" },
+        dedupe_key: { type: "string", description: "Optional: your own key instead of the automatic one" },
+        filter: { type: "string", description: "list: OData $filter" },
+        top: { type: "integer", description: "list: rows (default 25, max 200); recipients: page size (default 100)" },
+        skip: { type: "integer", description: "recipients: offset" },
+        acked_only: { type: "boolean", description: "recipients: only people who acknowledged" },
+        search: { type: "string", description: "recipients: name or email search" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const id = () => {
+        const v = requireStr(args, "id");
+        if (!/^\d+$/.test(v)) throw new Error("id must be a signalMessageId number.");
+        return v;
+      };
+      switch (action) {
+        case "list": {
+          const top = Math.min(Number(args.top ?? 25), 200);
+          const r = await callApi("GET", "/v2/odata/signalmessage", {
+            $filter: str(args, "filter"),
+            $orderby: "signalMessageId desc",
+            $top: String(top)
+          });
+          return r.data?.value ?? r.data;
+        }
+        case "get":
+          return (await callApi("GET", `/v2/signalmessage/${id()}`)).data;
+        case "recipients": {
+          const r = await callApi("GET", `/v2/signalmessage/${id()}/recipient`, {
+            ackedOnly: args.acked_only === true ? "true" : void 0,
+            search: str(args, "search"),
+            skip: str(args, "skip"),
+            take: String(args.top ?? 100)
+          });
+          return r.data;
+        }
+        case "estimate":
+        case "send": {
+          const body = signalPublishBody(args);
+          const est = (await callApi("POST", "/v2/signalmessage/estimate", void 0, body)).data;
+          if (action === "estimate" || args.confirmed !== true) {
+            return {
+              sent: false,
+              estimate: est,
+              message: body,
+              ...est && est.users === 0 ? { warning: "This targeting reaches nobody. Check that each user belongs to one of the targeted companies." } : {},
+              next: action === "send" ? "Show this to the user. Nothing was sent. Call again with confirmed=true to send." : void 0
+            };
+          }
+          if (est && est.users === 0) throw new Error("Not sent: the targeting reaches 0 users.");
+          const r = await callApi("POST", "/v2/signalmessage", void 0, body);
+          return { sent: true, estimate: est, result: r.data };
+        }
+        case "edit": {
+          const msgId = id();
+          const cur = (await callApi("GET", `/v2/signalmessage/${msgId}`)).data;
+          const pick2 = (arg, field) => args[arg] !== void 0 ? args[arg] : cur?.[field];
+          const PRIORITY = { info: 0, important: 1, urgent: 2 };
+          const prio = pick2("priority", "priority");
+          const priority = typeof prio === "string" && isNaN(Number(prio)) ? PRIORITY[prio.toLowerCase()] ?? prio : prio;
+          const edit = {
+            version: args.version ?? cur?.version,
+            title: pick2("title", "title"),
+            body: pick2("body", "body"),
+            priority,
+            deepLinkUrl: pick2("deep_link_url", "deepLinkUrl"),
+            deepLinkLabel: pick2("deep_link_label", "deepLinkLabel"),
+            dueAt: pick2("due_at", "dueAt"),
+            ackRequired: pick2("ack_required", "ackRequired"),
+            expiresAt: pick2("expires_at", "expiresAt")
+          };
+          checkSignalContent(edit);
+          return (await callApi("PUT", `/v2/signalmessage/${msgId}`, void 0, edit)).data;
+        }
+        case "resolve":
+        case "retract": {
+          const msgId = id();
+          let version2 = args.version;
+          if (version2 === void 0 || version2 === null) {
+            version2 = (await callApi("GET", `/v2/signalmessage/${msgId}`)).data?.version;
+          }
+          return (await callApi("POST", `/v2/signalmessage/${msgId}/${action}`, void 0, { version: version2 })).data;
+        }
+        default:
+          throw new Error("action must be one of: estimate, send, list, get, recipients, edit, resolve, retract");
+      }
+    }
+  },
+  {
+    name: "m365_secure_score",
+    description: "Microsoft Secure Score from CloudRadial's daily Microsoft 365 sync (read-only; the API never calls Microsoft itself, so today's changes show after the next sync). With company_id: that company's tenant, its current score and percentage, and the improvement actions worth the most points (top, default 5), each with Microsoft's cost, user impact, license tier and a link to the setting. Without company_id: every linked tenant ranked from lowest to highest percentage, for a roll-up across clients. Tenants with companyId null aren't linked to a company yet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        company_id: { type: "integer", description: "Client company; omit for the roll-up across all tenants" },
+        top: { type: "integer", description: "How many improvement actions to return (default 5, 0 for all)" }
+      }
+    },
+    handler: async (args) => {
+      const tenantsRes = await callApi("GET", "/v2/m365/tenant");
+      const tenants = Array.isArray(tenantsRes.data) ? tenantsRes.data : [];
+      const pct = (t) => typeof t.secureScorePercentage === "number" ? Math.round(t.secureScorePercentage * 1e3) / 10 : null;
+      const companyArg = str(args, "company_id");
+      if (!companyArg) {
+        const rows = tenants.map((t) => ({ companyId: t.companyId ?? null, tenant: t.name, domain: t.domainName, licensedUsers: t.licensedUsers, score: t.secureScore, max: t.secureScoreMax, percent: pct(t) })).sort((a, b) => (a.percent ?? 101) - (b.percent ?? 101));
+        return { tenants: rows.length, unlinked: rows.filter((r) => r.companyId === null).length, ranking: rows };
+      }
+      const matches = tenants.filter((t) => String(t.companyId) === companyArg);
+      if (matches.length === 0) {
+        throw new Error(`No Microsoft tenant is linked to company ${companyArg}. Link it in the portal, then wait for the next daily sync.`);
+      }
+      const top = args.top === void 0 || args.top === null ? 5 : Number(args.top);
+      const out = [];
+      for (const t of matches) {
+        const detail = (await callApi("GET", `/v2/m365/tenant/${t.microsoftTenantId}/securescore`)).data;
+        const controls = (detail?.controls ?? []).filter((c) => !c.deprecated && Number(c.maxScore) > Number(c.score)).map((c) => ({
+          title: c.title,
+          service: c.service,
+          category: c.category,
+          pointsAvailable: Math.round((Number(c.maxScore) - Number(c.score)) * 100) / 100,
+          implementationCost: c.implementationCost,
+          userImpact: c.userImpact,
+          tier: c.tier,
+          actionUrl: c.actionUrl
+        })).sort((a, b) => b.pointsAvailable - a.pointsAvailable);
+        out.push({
+          tenant: t.name,
+          domain: t.domainName,
+          microsoftTenantId: t.microsoftTenantId,
+          licensedUsers: t.licensedUsers,
+          score: detail?.currentScore ?? t.secureScore,
+          max: detail?.maxScore ?? t.secureScoreMax,
+          percent: pct(t),
+          scoreDate: detail?.scoreDate,
+          cached: detail?.cached,
+          ...detail?.cached === false ? { note: "No score stored in the last 7 days; check the tenant's connection in the portal." } : {},
+          actionsWithPointsAvailable: controls.length,
+          topActions: top === 0 ? controls : controls.slice(0, top)
+        });
+      }
+      return { companyId: Number(companyArg), tenants: out };
+    }
+  },
+  {
+    name: "assessment_lifecycle",
+    description: "Create and work with assessments through the v2 assessment routes. action = create (new assessment or template: company_id, title, type 20 assessment or 10 template, optional category, description and questions) | templates (list the templates available to company_id) | get (an assessment with its scores and questions) | set_questions (add or update questions, matched by updateKey; remove_missing=true soft-deletes every question not in the list and needs confirmed=true) | update_question (change one question's fields by question_id) | delete_question | set_answers (answers by questionId or updateKey: value 2 compliant, 1 partial, 0 N/A, -1 missing, -2 not compliant, plus textValue, publicNotes, privateNotes, isFlagged, owner) | run (a point-in-time copy, like the portal's Run) | archive | unarchive | delete_run. A question is {updateKey, category, label (required), type 0 free text or 80 multiple choice, answerOptions [{label, value}], explanation, evaluationInfo, remediationInfo, remediation pricing fields, order}. To delete an assessment or template, use delete_resource with resource_type=assessment. Everything except get and templates writes to the portal: confirm with the user first. company_id is looked up when omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["create", "templates", "get", "set_questions", "update_question", "delete_question", "set_answers", "run", "archive", "unarchive", "delete_run"] },
+        assessment_id: { type: "integer", description: "Required except for create and templates" },
+        title: { type: "string", description: "create: the assessment title" },
+        type: { type: "integer", enum: [10, 20], description: "create: 20 assessment (default) or 10 template" },
+        category: { type: "string" },
+        description: { type: "string" },
+        questions: { type: "array", items: { type: "object" }, description: "create / set_questions: question objects" },
+        remove_missing: { type: "boolean", description: "set_questions: soft-delete questions not in the list (needs confirmed=true)" },
+        confirmed: { type: "boolean" },
+        question_id: { type: "integer", description: "update_question / delete_question" },
+        data: { type: "object", description: "update_question: fields to change, e.g. {label, explanation}" },
+        answers: { type: "array", items: { type: "object" }, description: "set_answers: [{questionId or updateKey, value, textValue, publicNotes, privateNotes, isFlagged, owner}]" },
+        company_id: { type: "integer", description: "Looked up from the assessment when omitted" },
+        name: { type: "string", description: "run: the run's title (default: assessment title plus today's date)" },
+        run_id: { type: "integer", description: "delete_run: the run's assessmentId" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      if (action === "create") {
+        const companyId2 = Number(requireStr(args, "company_id"));
+        const title = requireStr(args, "title");
+        const type = args.type === void 0 || args.type === null ? 20 : Number(args.type);
+        if (![10, 20].includes(type)) throw new Error("type must be 20 (assessment) or 10 (template).");
+        const body = { companyId: companyId2, title, type: String(type) };
+        if (str(args, "category")) body.category = str(args, "category");
+        if (str(args, "description")) body.description = str(args, "description");
+        if (Array.isArray(args.questions)) body.questions = args.questions.map(checkQuestion);
+        return (await callApi("POST", "/v2/assessment", void 0, body)).data;
+      }
+      if (action === "templates") {
+        return (await callApi("GET", "/v2/assessment/template", { companyId: requireStr(args, "company_id") })).data;
+      }
+      const id = requireStr(args, "assessment_id");
+      if (!/^\d+$/.test(id)) throw new Error("assessment_id must be a number.");
+      if (action === "get") return (await callApi("GET", `/v2/assessment/${id}`)).data;
+      const companyId = await assessmentCompany(id, str(args, "company_id"));
+      const qid = () => {
+        const q = requireStr(args, "question_id");
+        if (!/^\d+$/.test(q)) throw new Error("question_id must be a number.");
+        return q;
+      };
+      switch (action) {
+        case "set_questions": {
+          const qs = Array.isArray(args.questions) ? args.questions : [];
+          if (qs.length === 0) throw new Error("questions needs at least one question.");
+          if (args.remove_missing === true && args.confirmed !== true) {
+            throw new Error("remove_missing=true deletes every question not in the list. Show the user which questions would go, then call again with confirmed=true.");
+          }
+          const body = { questions: qs.map(checkQuestion), removeMissing: args.remove_missing === true };
+          return (await callApi("PUT", `/v2/assessment/${id}/questions`, { companyId }, body)).data ?? { updated: qs.length };
+        }
+        case "update_question": {
+          const data = args.data || {};
+          if (Object.keys(data).length === 0) throw new Error("data needs at least one field to change.");
+          const ops = Object.entries(data).map(([k, v]) => ({ op: "replace", path: `/${k}`, value: v }));
+          return (await callApi("PATCH", `/v2/assessment/${id}/question/${qid()}`, { companyId }, ops)).data ?? { updated: true };
+        }
+        case "delete_question":
+          return (await callApi("DELETE", `/v2/assessment/${id}/question/${qid()}`, { companyId })).data ?? { deleted: true };
+        case "set_answers": {
+          const answers = Array.isArray(args.answers) ? args.answers : [];
+          if (answers.length === 0) throw new Error("answers needs at least one entry.");
+          for (const a of answers) {
+            if (a.questionId === void 0 && a.updateKey === void 0) throw new Error("Each answer needs questionId or updateKey.");
+            if (a.value !== void 0 && !["0", "1", "2", "-1", "-2"].includes(String(a.value))) {
+              throw new Error(`Answer value must be 2, 1, 0, -1 or -2 (got ${String(a.value)}).`);
+            }
+          }
+          const body = { answers: answers.map((a) => Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v === null || v === void 0 ? v : String(v)]))) };
+          return (await callApi("PATCH", `/v2/assessment/${id}/answers`, { companyId }, body)).data ?? { updated: answers.length };
+        }
+        case "run": {
+          let name = str(args, "name");
+          if (!name) {
+            const row = await odataByKey("assessment", id);
+            name = `${String(row?.title ?? "Assessment")} - ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`;
+          }
+          const r = await callApi("POST", `/v2/assessment/${id}/run`, void 0, { companyId: Number(companyId), name });
+          return r.data ?? { run: true, name };
+        }
+        case "archive":
+        case "unarchive": {
+          const r = await callApi("POST", `/v2/assessment/${id}/${action}`, { companyId });
+          return r.data ?? { [action === "archive" ? "archived" : "unarchived"]: true };
+        }
+        case "delete_run": {
+          const runId = requireStr(args, "run_id");
+          if (!/^\d+$/.test(runId)) throw new Error("run_id must be a number.");
+          const r = await callApi("DELETE", `/v2/assessment/${id}/run/${runId}`, { companyId });
+          return r.data ?? { deleted: true, runId: Number(runId) };
+        }
+        default:
+          throw new Error("action must be one of: create, templates, get, set_questions, update_question, delete_question, set_answers, run, archive, unarchive, delete_run");
+      }
+    }
+  },
+  {
+    name: "access_control",
+    description: "Portal access: role assignments, feature-set membership, license users and user support PINs. Roles and feature sets themselves are read and edited with the generic resource tools (resource_type role / feature_set, writes need confirmed=true). action = list_assignments (filters role_id, user_id, company_id, company_group_id, page, page_size) | assign_role (role_id, user_id, scope company|company_group|partner, scope_id) | remove_assignment (assignment_id) | feature_set_companies (feature_set_id) | set_feature_set_companies (feature_set_id, company_ids: the COMPLETE new list) | license_users (license_id) | set_license_users (license_id, company_id, user_ids: the complete new list) | set_support_pin (user_id, company_id, support_pin). Every write first returns a preview of the change (current vs new) and does nothing until called again with confirmed=true. A support PIN is never echoed back. The API refuses partner-level modules or Full permission on client roles (400) and protected or system roles can't be changed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list_assignments", "assign_role", "remove_assignment", "feature_set_companies", "set_feature_set_companies", "license_users", "set_license_users", "set_support_pin"] },
+        confirmed: { type: "boolean", description: "true after the user approved the preview" },
+        role_id: { type: "string" },
+        user_id: { type: "string", description: "userId (GUID)" },
+        company_id: { type: "integer" },
+        company_group_id: { type: "integer" },
+        scope: { type: "string", enum: ["company", "company_group", "partner"], description: "assign_role: what the role applies to (default company)" },
+        scope_id: { type: "integer", description: "assign_role: the company or company group id (0 for partner)" },
+        assignment_id: { type: "integer" },
+        feature_set_id: { type: "integer" },
+        company_ids: { type: "array", items: { type: "integer" } },
+        license_id: { type: "integer" },
+        user_ids: { type: "array", items: { type: "string" } },
+        support_pin: { type: "string" },
+        page: { type: "integer" },
+        page_size: { type: "integer" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const confirmed = args.confirmed === true;
+      const preview = (what, change) => ({ changed: false, preview: change, next: `Show this to the user. Nothing was changed. Call again with confirmed=true to ${what}.` });
+      switch (action) {
+        case "list_assignments": {
+          return (await callApi("GET", "/v2/roleassignment", {
+            roleId: str(args, "role_id"),
+            userId: str(args, "user_id"),
+            companyId: str(args, "company_id"),
+            companyGroupId: str(args, "company_group_id"),
+            page: str(args, "page"),
+            pageSize: str(args, "page_size")
+          })).data;
+        }
+        case "assign_role": {
+          const scope = str(args, "scope") ?? "company";
+          const scopeType = { partner: 1, company_group: 2, company: 3 }[scope];
+          if (!scopeType) throw new Error("scope must be company, company_group or partner.");
+          const scopeId = scope === "partner" ? 0 : Number(requireStr(args, "scope_id"));
+          const body = { roleId: requireStr(args, "role_id"), scopeType, scopeId, memberType: 1, userId: requireStr(args, "user_id") };
+          if (!confirmed) {
+            const role = (await callApi("GET", `/v2/role/${encodeURIComponent(body.roleId)}`)).data;
+            return preview("assign the role", {
+              role: { roleId: body.roleId, name: role?.name, isPartnerRole: role?.isPartnerRole },
+              userId: body.userId,
+              scope,
+              scopeId,
+              ...scope === "partner" ? { warning: "Partner scope applies this role across every client company." } : {}
+            });
+          }
+          return (await callApi("POST", "/v2/roleassignment", void 0, body)).data;
+        }
+        case "remove_assignment": {
+          const id = requireStr(args, "assignment_id");
+          if (!confirmed) return preview("remove the assignment", (await callApi("GET", `/v2/roleassignment/${id}`)).data);
+          return (await callApi("DELETE", `/v2/roleassignment/${id}`)).data ?? { deleted: true };
+        }
+        case "feature_set_companies":
+          return (await callApi("GET", `/v2/featureset/${requireStr(args, "feature_set_id")}/companies`)).data;
+        case "set_feature_set_companies": {
+          const fs = requireStr(args, "feature_set_id");
+          const next = Array.isArray(args.company_ids) ? args.company_ids.map(Number) : void 0;
+          if (!next) throw new Error("company_ids is required: the complete list of companies that should use this feature set.");
+          if (!confirmed) {
+            const cur = (await callApi("GET", `/v2/featureset/${fs}/companies`)).data;
+            const curIds = new Set((Array.isArray(cur) ? cur : []).map((c) => Number(c?.companyId ?? c)));
+            return preview("replace the feature set's companies", {
+              featureSetId: Number(fs),
+              added: next.filter((i) => !curIds.has(i)),
+              removed: [...curIds].filter((i) => !next.includes(i)),
+              newCount: next.length,
+              note: "This list replaces the current one; companies removed here fall back to the default feature set."
+            });
+          }
+          return (await callApi("PUT", `/v2/featureset/${fs}/companies`, void 0, { companyIds: next })).data ?? { updated: next.length };
+        }
+        case "license_users":
+          return licenseHolders(requireStr(args, "license_id"));
+        case "set_license_users": {
+          const lic = requireStr(args, "license_id");
+          const companyId = requireStr(args, "company_id");
+          const next = Array.isArray(args.user_ids) ? args.user_ids.map(String) : void 0;
+          if (!next) throw new Error("user_ids is required: the complete list of users who should hold this license.");
+          if (!confirmed) {
+            const cur = new Set((await licenseHolders(lic)).map((u) => String(u.userId)));
+            return preview("replace the license's users", { licenseId: Number(lic), added: next.filter((u) => !cur.has(u)), removed: [...cur].filter((u) => !next.includes(u)), newCount: next.length });
+          }
+          return (await callApi("PUT", `/v2/license/${lic}/users`, { companyId }, { userIds: next })).data ?? { updated: next.length };
+        }
+        case "set_support_pin": {
+          const userId = requireStr(args, "user_id");
+          const companyId = requireStr(args, "company_id");
+          const pin = requireStr(args, "support_pin");
+          if (!confirmed) return preview("set the PIN", { userId, companyId: Number(companyId), supportPin: "(hidden)" });
+          await callApi("PUT", `/v2/user/${encodeURIComponent(userId)}/supportpin`, { companyId }, { supportPin: pin });
+          return { updated: true, userId, note: "PIN set. It isn't shown here; share it with the user through your normal secure channel." };
+        }
+        default:
+          throw new Error("Unknown action.");
+      }
+    }
+  },
+  {
+    name: "policy_review",
+    description: "Policy compliance (the portal's Policies): action = review (a company's policy review by category: each policy's total items, compliant count, allowance, risk score) | exceptions (one policy's exceptions: the items failing it) | ignore | unignore (accept or restore one exception; needs confirmed=true). Create, edit and delete policies with the generic tools (resource_type policy; writes need confirmed=true).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["review", "exceptions", "ignore", "unignore"] },
+        company_id: { type: "integer" },
+        policy_id: { type: "integer" },
+        exception_id: { type: "integer" },
+        confirmed: { type: "boolean" }
+      },
+      required: ["action", "company_id"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const companyId = requireStr(args, "company_id");
+      if (action === "review") return (await callApi("GET", "/v2/policy/review", { companyId })).data;
+      const pid = requireStr(args, "policy_id");
+      if (action === "exceptions") return (await callApi("GET", `/v2/policy/${pid}/exception`, { companyId })).data;
+      if (action === "ignore" || action === "unignore") {
+        const eid = requireStr(args, "exception_id");
+        if (args.confirmed !== true) {
+          return { changed: false, next: `Show the user the exception and that it will be ${action === "ignore" ? "accepted (no longer counted against the policy)" : "counted again"}, then call again with confirmed=true.` };
+        }
+        return (await callApi("POST", `/v2/policy/${pid}/exception/${eid}/${action}`, { companyId })).data;
+      }
+      throw new Error("action must be one of: review, exceptions, ignore, unignore");
+    }
+  },
+  {
+    name: "webhook_action",
+    description: "Partner webhook actions (the HTTP calls automations and catalog submissions can trigger). action = list | get | create | update | enable | disable | test | rotate_secret | delete | runs | run_summary | run. Every change (create, update, enable, disable, rotate_secret, delete) returns a preview and needs confirmed=true. test sends one signed canned payload to the endpoint (10-second limit, no retry). The signing secret is shown by the API only once (create and rotate_secret): this tool saves it to a private file on this computer and returns the file path, never the secret. Header values (e.g. an auth token) are write-only: give them in header_values_file (a local JSON file of {name: value}) rather than in chat; an empty value on update keeps the stored one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "get", "create", "update", "enable", "disable", "test", "rotate_secret", "delete", "runs", "run_summary", "run"] },
+        id: { type: "integer", description: "actionId" },
+        run_id: { type: "string" },
+        name: { type: "string" },
+        description: { type: "string" },
+        url: { type: "string", description: "https:// endpoint" },
+        method: { type: "string", enum: ["POST", "PUT", "PATCH", "GET", "DELETE"] },
+        is_enabled: { type: "boolean" },
+        header_names: { type: "array", items: { type: "string" }, description: "Header names; values come from header_values_file (or stay as stored on update)" },
+        header_values_file: { type: "string", description: "Local JSON file {headerName: value}" },
+        page: { type: "integer" },
+        page_size: { type: "integer" },
+        confirmed: { type: "boolean" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const confirmed = args.confirmed === true;
+      const id = () => requireStr(args, "id");
+      const gate = (what, preview) => ({ changed: false, preview, next: `Show this to the user. Nothing was changed. Call again with confirmed=true to ${what}.` });
+      switch (action) {
+        case "list":
+          return (await callApi("GET", "/v2/action")).data;
+        case "get":
+          return (await callApi("GET", `/v2/action/${id()}`)).data;
+        case "runs":
+          return (await callApi("GET", "/v2/action/run", { page: str(args, "page"), pageSize: str(args, "page_size") })).data;
+        case "run_summary":
+          return (await callApi("GET", "/v2/action/run/summary")).data;
+        case "run":
+          return (await callApi("GET", `/v2/action/run/${encodeURIComponent(requireStr(args, "run_id"))}`)).data;
+        case "create":
+        case "update": {
+          let cur = {};
+          if (action === "update") cur = (await callApi("GET", `/v2/action/${id()}`)).data ?? {};
+          const url = str(args, "url") ?? cur.url;
+          if (!url || !/^https:\/\/\S+$/i.test(url)) throw new Error("url must be an absolute https:// URL.");
+          const body = {
+            name: str(args, "name") ?? cur.name,
+            description: str(args, "description") ?? cur.description,
+            type: 1,
+            isEnabled: args.is_enabled !== void 0 ? args.is_enabled === true : cur.isEnabled ?? true,
+            url,
+            method: (str(args, "method") ?? cur.method ?? "POST").toUpperCase(),
+            headers: webhookHeaders(args, cur)
+          };
+          if (!body.name) throw new Error("name is required.");
+          if (!confirmed) return gate(`${action} the webhook`, { ...body, headers: body.headers.map((h) => ({ name: h.name, value: h.value ? "(from file)" : "(keep stored)" })) });
+          if (action === "update") return (await callApi("PUT", `/v2/action/${id()}`, void 0, body)).data ?? { updated: true };
+          return saveSigningSecret((await callApi("POST", "/v2/action", void 0, body)).data);
+        }
+        case "enable":
+        case "disable":
+        case "delete":
+        case "rotate_secret": {
+          if (!confirmed) {
+            const cur = (await callApi("GET", `/v2/action/${id()}`)).data;
+            return gate(`${action.replace("_", " ")} it`, {
+              actionId: cur?.actionId,
+              name: cur?.name,
+              url: cur?.url,
+              isEnabled: cur?.isEnabled,
+              ...action === "rotate_secret" ? { warning: "The old secret stops working right away; the receiving system must be updated with the new one." } : {}
+            });
+          }
+          if (action === "delete") return (await callApi("DELETE", `/v2/action/${id()}`)).data ?? { deleted: true };
+          const r = await callApi("POST", `/v2/action/${id()}/${action === "rotate_secret" ? "rotate-secret" : action}`);
+          return action === "rotate_secret" ? saveSigningSecret(r.data) : r.data ?? { [action + "d"]: true };
+        }
+        case "test":
+          return (await callApi("POST", `/v2/action/${id()}/test`)).data;
+        default:
+          throw new Error("Unknown action.");
+      }
+    }
+  },
+  {
+    name: "audit_log",
+    description: "Read-only audit trail. action = events (changes: filters company_id, entity e.g. Company / ApplicationUser / CompanyPolicy, entity_id, identity = a user id, sign-in email or API key user name, source e.g. PublicAPI, from, to, page, page_size) | event (one event by id) | sessions (sign-in and API sessions, same filters) | sync_log (one run of a named sync job, e.g. SyncTicketsForCompanyJob, with company_id and optional status).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["events", "event", "sessions", "sync_log"] },
+        id: { type: "string" },
+        company_id: { type: "integer" },
+        entity: { type: "string" },
+        entity_id: { type: "string" },
+        identity: { type: "string" },
+        source: { type: "string" },
+        from: { type: "string", description: "ISO 8601" },
+        to: { type: "string", description: "ISO 8601" },
+        page: { type: "integer" },
+        page_size: { type: "integer" },
+        job_name: { type: "string" },
+        status: { type: "string" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      const common = { companyId: str(args, "company_id"), identity: str(args, "identity"), source: str(args, "source"), from: str(args, "from"), to: str(args, "to"), page: str(args, "page"), pageSize: str(args, "page_size") };
+      switch (action) {
+        case "events":
+          return (await callApi("GET", "/v2/audit/event", { ...common, entity: str(args, "entity"), entityId: str(args, "entity_id") })).data;
+        case "event":
+          return (await callApi("GET", `/v2/audit/event/${encodeURIComponent(requireStr(args, "id"))}`)).data;
+        case "sessions":
+          return (await callApi("GET", "/v2/audit/session", common)).data;
+        case "sync_log":
+          return (await callApi("GET", `/v2/audit/synclog/${encodeURIComponent(requireStr(args, "job_name"))}`, { companyId: str(args, "company_id"), status: str(args, "status") })).data;
+        default:
+          throw new Error("action must be one of: events, event, sessions, sync_log");
+      }
+    }
+  },
+  {
+    name: "signal_device",
+    description: "Signal client installs enrolled under the partner. action = list (every install, most recently seen first, revoked ones included; filter on state yourself for the live fleet) | fleet_stats | rebootstrap (one-shot reset: the install signs out and purges cached credentials and notices; someone must sign in again on that device) | revoke (permanent sign-out until unrevoked) | unrevoke. rebootstrap, revoke and unrevoke need confirmed=true after the user approves; without it they return the device and what will happen.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "fleet_stats", "rebootstrap", "revoke", "unrevoke"] },
+        installation_id: { type: "string" },
+        confirmed: { type: "boolean" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      if (action === "list") return (await callApi("GET", "/v2/signaldevice")).data;
+      if (action === "fleet_stats") return (await callApi("GET", "/v2/signaldevice/fleetstats")).data;
+      if (!["rebootstrap", "revoke", "unrevoke"].includes(action)) throw new Error("action must be one of: list, fleet_stats, rebootstrap, revoke, unrevoke");
+      const inst = requireStr(args, "installation_id");
+      if (args.confirmed !== true) {
+        const all = (await callApi("GET", "/v2/signaldevice")).data;
+        const device = (Array.isArray(all) ? all : []).find((d) => String(d?.installationId) === inst);
+        if (!device) throw new Error(`No Signal install with installationId ${inst}.`);
+        const effect = {
+          rebootstrap: "On its next check-in it signs out and clears its cached credentials and notices. Someone has to sign in on that device again.",
+          revoke: "It signs out on its next poll and stays signed out, even if someone signs in, until it is unrevoked.",
+          unrevoke: "It can be signed in again."
+        }[action];
+        return { changed: false, device, effect, next: "Show this to the user. Nothing was changed. Call again with confirmed=true." };
+      }
+      return (await callApi("POST", `/v2/signaldevice/${encodeURIComponent(inst)}/${action}`)).data ?? { [action]: true };
+    }
+  },
+  {
+    name: "m365_directory",
+    description: "Read-only Microsoft 365 directory data from CloudRadial's daily sync for one company: action = groups (the company's Microsoft 365 groups) | roles (its Microsoft admin roles and who holds them). The company must be linked to its tenant in the portal.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["groups", "roles"] },
+        company_id: { type: "integer" }
+      },
+      required: ["action", "company_id"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      if (!["groups", "roles"].includes(action)) throw new Error("action must be groups or roles");
+      const companyId = requireStr(args, "company_id");
+      return (await callApi("GET", `/v2/m365/company/${encodeURIComponent(companyId)}/${action === "groups" ? "group" : "role"}`)).data;
+    }
+  },
+  {
+    name: "dashboard_widgets",
+    description: "Widgets on a portal dashboard (create the dashboard itself with create_resource resource_type=dashboard). action = types (the widget types and their settings; read this before adding, never guess a type) | add (dashboard_id, widget {type, title, info, url, html, width, height, x, y, refreshInterval, cacheInterval, isPartnerOnly, settings}) | update (dashboard_id, widget_id, data: fields to change) | replace_all (dashboard_id, widgets: the complete layout; needs confirmed=true) | delete (dashboard_id, widget_id). company_id is looked up from the dashboard when omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["types", "add", "update", "replace_all", "delete"] },
+        dashboard_id: { type: "integer" },
+        widget_id: { type: "string" },
+        company_id: { type: "integer" },
+        widget: { type: "object" },
+        widgets: { type: "array", items: { type: "object" } },
+        data: { type: "object" },
+        confirmed: { type: "boolean" }
+      },
+      required: ["action"]
+    },
+    handler: async (args) => {
+      const action = requireStr(args, "action");
+      if (action === "types") return (await callApi("GET", "/v2/dashboard/widget-types")).data;
+      const dash = requireStr(args, "dashboard_id");
+      const q = await itemCompanyQuery("dashboard", args, dash) ?? {};
+      switch (action) {
+        case "add": {
+          const w = args.widget;
+          if (!w || !w.type) throw new Error("widget.type is required (read action=types first).");
+          return (await callApi("POST", `/v2/dashboard/${dash}/widget`, q, w)).data;
+        }
+        case "update": {
+          const data = args.data || {};
+          if (Object.keys(data).length === 0) throw new Error("data needs at least one field to change.");
+          const ops = Object.entries(data).map(([k, v]) => ({ op: "replace", path: `/${k}`, value: v }));
+          return (await callApi("PATCH", `/v2/dashboard/${dash}/widget/${encodeURIComponent(requireStr(args, "widget_id"))}`, q, ops)).data ?? { updated: true };
+        }
+        case "replace_all": {
+          const ws = Array.isArray(args.widgets) ? args.widgets : void 0;
+          if (!ws) throw new Error("widgets (the complete layout) is required.");
+          if (args.confirmed !== true) return { changed: false, widgets: ws.length, next: "This replaces every widget on the dashboard. Show the user the layout, then call again with confirmed=true." };
+          return (await callApi("PUT", `/v2/dashboard/${dash}/widgets`, q, ws)).data ?? { replaced: ws.length };
+        }
+        case "delete":
+          return (await callApi("DELETE", `/v2/dashboard/${dash}/widget/${encodeURIComponent(requireStr(args, "widget_id"))}`, q)).data ?? { deleted: true };
+        default:
+          throw new Error("action must be one of: types, add, update, replace_all, delete");
+      }
+    }
+  },
+  {
+    name: "upload_file",
+    description: "Upload local files to the portal. target = media (partner media library; optional description) | quickstart (create a quickstart from a file: company_id, subject, description, category, icon, icon_color, is_favorite) | quickstart_file (replace an existing quickstart's file: quickstart_id) | message_attachment (attach files to a portal message: message_id, company_id) | remove_message_attachment (message_id, attachment_id, company_id). For report files use archive_upload. Each file must exist on this computer. Confirm the target with the user first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: { type: "string", enum: ["media", "quickstart", "quickstart_file", "message_attachment", "remove_message_attachment"] },
+        file_paths: { type: "array", items: { type: "string" }, description: "Local files (one for media, quickstart and quickstart_file)" },
+        description: { type: "string" },
+        company_id: { type: "integer" },
+        subject: { type: "string" },
+        category: { type: "string" },
+        icon: { type: "string" },
+        icon_color: { type: "string" },
+        is_favorite: { type: "boolean" },
+        quickstart_id: { type: "integer" },
+        message_id: { type: "integer" },
+        attachment_id: { type: "integer" }
+      },
+      required: ["target"]
+    },
+    handler: async (args) => {
+      const target = requireStr(args, "target");
+      if (target === "remove_message_attachment") {
+        return (await callApi("DELETE", `/v2/message/${requireStr(args, "message_id")}/attachment/${requireStr(args, "attachment_id")}`, { companyId: requireStr(args, "company_id") })).data ?? { deleted: true };
+      }
+      const paths = Array.isArray(args.file_paths) ? args.file_paths.map(String) : [];
+      if (paths.length === 0) throw new Error("file_paths needs at least one file.");
+      if (target !== "message_attachment" && paths.length !== 1) throw new Error(`${target} takes exactly one file.`);
+      const read = (field) => paths.map((p) => {
+        let size;
+        try {
+          size = statSync(p).size;
+        } catch {
+          throw new Error(`File not found: ${p}`);
+        }
+        if (size === 0) throw new Error(`File is empty: ${p}`);
+        return { field, bytes: new Uint8Array(readFileSync(p)), name: basename(p), contentType: contentTypeFor(p) };
+      });
+      switch (target) {
+        case "media":
+          return (await callApiForm("/v2/media/upload", {}, read("file"), { query: { description: str(args, "description") } })).data;
+        case "quickstart":
+          return (await callApiForm("/v2/quickstart/upload", {
+            CompanyId: requireStr(args, "company_id"),
+            Subject: requireStr(args, "subject"),
+            Description: str(args, "description"),
+            Category: str(args, "category"),
+            Icon: str(args, "icon"),
+            IconColor: str(args, "icon_color"),
+            IsFavorite: args.is_favorite === void 0 ? void 0 : String(args.is_favorite === true)
+          }, read("File"))).data;
+        case "quickstart_file":
+          return (await callApiForm(`/v2/quickstart/${requireStr(args, "quickstart_id")}/file`, {}, read("File"), { method: "PUT" })).data ?? { replaced: true };
+        case "message_attachment":
+          return (await callApiForm(`/v2/message/${requireStr(args, "message_id")}/attachment`, {}, read("Files"), { query: { companyId: requireStr(args, "company_id") } })).data;
+        default:
+          throw new Error("target must be one of: media, quickstart, quickstart_file, message_attachment, remove_message_attachment");
+      }
+    }
+  },
+  {
     name: "raw_api_call",
-    description: "Direct call to the CloudRadial API for advanced/custom use cases. Provide the path (e.g. '/v2/odata/company') and optional method, query, body.",
+    description: "Direct call to the CloudRadial API for advanced/custom use cases. Provide the path (e.g. '/v2/odata/company') and optional method, query, body. A PATCH body must be a JSON Patch array ([{op, path, value}]); it is sent as application/json-patch+json. Useful for routes without their own tool, e.g. dashboard widgets: GET /v2/dashboard/widget-types, POST /v2/dashboard/{id}/widget?companyId=, PUT /v2/dashboard/{id}/widgets.",
     inputSchema: {
       type: "object",
       properties: {
@@ -16752,7 +17832,7 @@ var tools = [
 
 // src/index.ts
 var server = new Server(
-  { name: "cloudradial-ucp", version: "2.6.4" },
+  { name: "cloudradial-ucp", version: "2.8.0" },
   { capabilities: { tools: {} } }
 );
 var toolByName = new Map(tools.map((t) => [t.name, t]));

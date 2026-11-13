@@ -10,8 +10,8 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 |---|---|
 | Each automation folder (listed below) | One AutomationAI automation |
 | [`_shared/`](_shared/) | PowerShell libraries pasted into the workflows at build time (for maintainers; nothing to import) |
-| [`cowork-plugin/`](cowork-plugin/) | CloudRadial UCP plugin for Cowork and Claude Desktop |
-| [`codex-plugin/`](codex-plugin/) | CloudRadial plugin for Claude Code and Codex |
+| [`cowork-plugin/`](cowork-plugin/) | CloudRadial UCP plugin for Claude (Cowork, Claude Desktop, Claude Code): source, skills and build |
+| [`codex-plugin/`](codex-plugin/) | The same CloudRadial UCP plugin packaged for ChatGPT Codex (the file also installs in Claude) |
 | [`legacy-scripts/`](legacy-scripts/) | The original standalone PowerShell scripts, kept for reference. Most are replaced by an automation below. |
 
 ## What's in an automation folder

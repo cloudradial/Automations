@@ -64,7 +64,7 @@ tile before you create it.
 
 **What you get:** A new menu tile visible to the right groups.
 
-**Good to know:** Editing a tile replaces the whole tile, so the skill reads it first and sends every field back.
+**Good to know:** Edits now change only the fields you name. If an edit fails, the skill reads the tile and sends the whole tile back instead.
 
 ### Audit portal content
 `Per-company` · `Read-only` · **Tested**
@@ -75,6 +75,19 @@ anything out of date or duplicated called out. Don't change anything.
 ```
 
 **What you get:** Content by status, with gaps.
+
+### Build a portal dashboard
+`Per-company` · `Writes to the portal` · **Not yet tested**
+
+```
+Build a "Service Overview" dashboard on Contoso's portal with widgets for open
+tickets, device health and recent KB articles. List the widget types you'd use
+and the layout first, and only build it when I confirm.
+```
+
+**What you get:** A new dashboard on Contoso's portal, laid out as agreed.
+
+**Good to know:** The skill reads the available widget types from the API first instead of guessing them.
 
 ## Good to know
 

@@ -24,22 +24,34 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
-| `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
+| `list_resources` | List any listable resource type with OData filtering; `all_pages: true` reads every page | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments; security types need `confirmed: true`) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
-| `raw_api_call` | Direct API call for advanced cases | `path` |
+| `raw_api_call` | Direct API call for advanced cases (a PATCH body is a JSON Patch array) | `path` |
+| `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
+| `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
+| `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
+| `assessment_lifecycle` | Create assessments and templates, list templates, read one with its questions, add/update/delete questions, record answers, run, archive/unarchive, delete a run | `action` |
+| `access_control` | Role assignments, feature-set companies, license users, support PINs (every write previews first; needs `confirmed: true`) | `action` |
+| `policy_review` | Policy review by category, a policy's exceptions, ignore/unignore an exception | `action`, `company_id` |
+| `webhook_action` | Webhook actions: list, create, update, enable/disable, test, rotate secret (saved to a local file), runs | `action` |
+| `audit_log` | Audit events, sessions and sync-job logs (read-only) | `action` |
+| `signal_device` | Signal installs: list, fleet stats, reset, revoke, unrevoke | `action` |
+| `m365_directory` | A company's Microsoft 365 groups and admin roles (read-only) | `action`, `company_id` |
+| `dashboard_widgets` | Widget types, add/update/delete widgets, replace a dashboard's layout | `action` |
+| `upload_file` | Upload media, create a quickstart from a file, replace a quickstart's file, attach files to a portal message | `target` |
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200. To read every matching row, pass `all_pages: true`: the server follows the API's next-page link (or walks `skip`), stops at `max_records` (default 5000) and says so if it stopped early. Without it, increment `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -88,10 +100,10 @@ List users with full OData filtering support. Better than user_lookup for bulk q
 
 The `user` entity has `userId` (a string), `email`, `firstName`, `lastName`, `displayName`, `userName`, `companyId`, `title` (job title), `department`, `phoneNumber`, `mobilePhone`, address fields, `psaKey`, `supportPin`, `dateCreated` and `dateModified`. Lists leave out `supportPin`: selecting it on `/v2/odata/user` returns HTTP 500, so `list_resources` and `user_lookup` select every other field by default. To read one user's `supportPin`, call `get_resource` with `resource_type: "user"`.
 
-**There is no `role` field, and no last-login date.** Portal security roles are managed in the portal and the API doesn't return them. On create and update the API also accepts flags it doesn't read back, including `isPartnerAdminUser` (partner admin), `isLoginDisabled`, `isShowInDirectory`, `priorityStatus` (0 or 10) and the digest and direct-message opt-ins. When the user asks about roles or admin access, say the API can't list them and point them to the portal.
+**There is no `role` field on users, and no last-login date.** Read a user's portal roles with `access_control` (`action: "list_assignments"`, `user_id`); assign or remove roles with the `access-control` skill. Sign-in history is in `audit_log` (`action: "sessions"`, `identity` = the user's email). On create and update the API also accepts flags it doesn't read back, including `isPartnerAdminUser` (partner admin), `isLoginDisabled`, `isShowInDirectory`, `priorityStatus` (0 or 10) and the digest and direct-message opt-ins. When the user asks about roles or admin access, use the `access-control` skill's access review.
 
 ### Create, update and delete
 
 - **Create:** `create_resource` with `resource_type: "user"` and `data: { companyId, email, firstName, lastName }` (all four required). Confirm with the user first. `title` (and other profile fields) sent on create aren't saved; set them with an update straight after, then read the user back.
 - **Update:** `update_resource` with `resource_type: "user"`, `id: "<userId>"`, `company_id: "<companyId>"` and only the fields to change (PATCH is the default). The API needs `company_id` for user updates and deletes; the tool looks it up if you leave it out.
-- **Delete:** `delete_resource` with `resource_type: "user"`, `id`, `company_id`. Always confirm first, and tell the user the person's course enrollments stay behind (the API can't delete enrollments), so training reports will still count them.
+- **Delete:** `delete_resource` with `resource_type: "user"`, `id`, `company_id`. Always confirm first, and tell the user the person's course enrollments stay behind and will still count in training reports. Offer to remove them as well (`delete_resource` with `resource_type: "course_enrollment"`, one per enrollment, after a second confirmation).

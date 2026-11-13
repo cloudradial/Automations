@@ -31,3 +31,6 @@ jobs:
           # pre-release so they don't get the "Latest" badge. Plain v*.*.*
           # tags publish as a normal release and become Latest.
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # Plain v*.*.* plugin releases always take "Latest" (the READMEs'
+          # download link follows it); pre-releases never do.
+          make_latest: ${{ !contains(github.ref_name, '-') }}

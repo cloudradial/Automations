@@ -24,22 +24,34 @@ Call `setup_status` first to confirm credentials are stored. If it returns `conf
 | `setup_status` | Check credential state (never returns the keys) | None |
 | `search_companies` | Search companies by partial name | `name` |
 | `company_overview` | Snapshot: details, user/endpoint counts, recent articles + feedback | `company_id` |
-| `list_resources` | List any of 30 resource types with OData filtering | `resource_type` |
+| `list_resources` | List any listable resource type with OData filtering; `all_pages: true` reads every page | `resource_type` |
 | `count_resources` | Count a resource type with optional `filter` | `resource_type` |
 | `get_resource` | Retrieve one resource by ID (optional `company_id` for company-scoped types) | `resource_type`, `id` |
 | `create_resource` | Create a new resource | `resource_type`, `data` |
 | `update_resource` | Partial update: PATCH by default, so fields you leave out are kept. `method: "PUT"` replaces the whole record | `resource_type`, `id`, `data` |
-| `delete_resource` | Delete by ID (always confirm with the user first) | `resource_type`, `id` |
+| `delete_resource` | Delete by ID (always confirm with the user first; includes assessments and course enrollments; security types need `confirmed: true`) | `resource_type`, `id` |
 | `user_lookup` | Find users by email, name, or company | one of `email`/`name`/`company_id` |
-| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. | `action` |
+| `manage_tokens` | List, get, set or delete replacement tokens (the @Token values forms and automations fill in), partner-level or per company. Not API keys. Delete needs an explicit `company_id`. | `action` |
 | `endpoint_update_warranty` | Trigger async warranty refresh by endpoint serial number | `serial_number` |
 | `courseenrollment_complete` | Mark a course enrollment completed (optional score/comment) | `enrollment_id` |
 | `courseenrollment_for_user` | Get a user's enrollment record for a specific course | `course_id`, `user_id` |
-| `raw_api_call` | Direct API call for advanced cases | `path` |
+| `raw_api_call` | Direct API call for advanced cases (a PATCH body is a JSON Patch array) | `path` |
+| `archive_upload` | Upload local report files (PDF, XLSX, ...) into a client's archive folder, creating the folder if asked | `company_id`, `file_paths`, `archive_id` or `folder_name` |
+| `signal_message` | Signal desktop notices: estimate, send (previews first; needs `confirmed: true`), list, get, recipients, edit, resolve, retract | `action` |
+| `m365_secure_score` | Microsoft Secure Score for one company with its top improvement actions, or a roll-up of every tenant | none (`company_id` for one company) |
+| `assessment_lifecycle` | Create assessments and templates, list templates, read one with its questions, add/update/delete questions, record answers, run, archive/unarchive, delete a run | `action` |
+| `access_control` | Role assignments, feature-set companies, license users, support PINs (every write previews first; needs `confirmed: true`) | `action` |
+| `policy_review` | Policy review by category, a policy's exceptions, ignore/unignore an exception | `action`, `company_id` |
+| `webhook_action` | Webhook actions: list, create, update, enable/disable, test, rotate secret (saved to a local file), runs | `action` |
+| `audit_log` | Audit events, sessions and sync-job logs (read-only) | `action` |
+| `signal_device` | Signal installs: list, fleet stats, reset, revoke, unrevoke | `action` |
+| `m365_directory` | A company's Microsoft 365 groups and admin roles (read-only) | `action`, `company_id` |
+| `dashboard_widgets` | Widget types, add/update/delete widgets, replace a dashboard's layout | `action` |
+| `upload_file` | Upload media, create a quickstart from a file, replace a quickstart's file, attach files to a portal message | `target` |
 
 ### OData parameter conventions
 
-For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200 and the API returns no next-page link, so keep incrementing `skip` until a page comes back shorter than `top`.
+For `list_resources` and `count_resources`, pass OData parameters **without** the leading `$`: `filter`, `select`, `orderby`, `top`, `skip`, `expand`, `search`. The server adds the `$` when forwarding. Defaults to `top=100` if unspecified (pagination by default to avoid hammering the API). Max page is 200. To read every matching row, pass `all_pages: true`: the server follows the API's next-page link (or walks `skip`), stops at `max_records` (default 5000) and says so if it stopped early. Without it, increment `skip` until a page comes back shorter than `top`.
 
 ### Field-name quirks
 
@@ -83,6 +95,9 @@ Key fields: `companyCatalogQuestionId`, `companyCatalogId`, `companyId`, `label`
 - **Add a question:** Call `create_resource` with `resource_type: "catalog_question"`, `data: { companyCatalogId, companyId, label, order, type, isRequired, jsonId }`.
 - **Edit a question:** Call `update_resource` with `resource_type: "catalog_question"`, `id`, `company_id` and only the changed fields (for example `label`, `isRequired`, `order`). PATCH works.
 - **`type` takes a name.** Send the type name on create, for example `type: "TextField"`. Names seen in the API: `TextField`, `MemoField`, `EmailField`, `NumberField`, `DateField`, `MultiChoiceField`, `MultiChoiceDropdown`, `MultiSelectField`, `Comment`, `PageBreak` and `Template`. The create response returns `type` as a number (`TextField` comes back as `0`), but `list_resources` returns the name, so read the question back to confirm its type. The spec defines more codes than these names (0 to 230, and 999); for a kind not in this list, copy `type` from an existing question of that kind on any catalog item, and say so. Never guess.
+- **The API docs also list numeric types:** 0 single-line text (with `isUserLookup: true`, a picker of the company's users), 10 multi-line text, 30 number, 40 date, 80 one choice as buttons, 130 one choice as a dropdown, 90 several choices. Choice types need `options` as a comma-separated string, or the question shows no choices.
+- **Add questions one at a time** with `create_resource` on `catalog_question`. Questions sent inside the catalog item's own create keep only their label, type and order, so `isRequired` and `options` are lost.
+- **`selectText`** (the tile's button) can only be set when the catalog item is created. **`tags`** are objects: `[{ "tag": "hardware" }]`. Set `isSubject: true` to use an answer as the ticket title, and `customFieldName` to write it to a PSA custom field.
 - **Set `jsonId`** on every question an automation needs to read. Don't use a predefined token name such as `UserEmail` or `CompanyName`; the predefined value wins and the answer is lost.
 - **Subscribed forms:** if the catalog item came from a content package, editing it may detach it from the package. Ask before changing a subscribed item.
 
@@ -92,7 +107,21 @@ Portal navigation tiles. Key fields: `companyMenuId` (the ID to pass to `get_res
 - **List menus:** Call `list_resources` with `resource_type: "menu"`, `filter: "companyId eq 42"`.
 - **Add a menu tile:** Call `create_resource` with `resource_type: "menu"`. Copy `editRights` and `category` from an existing menu on the same company, since their allowed values aren't published.
 - **Always send `groups`** as an array of group names, for example `groups: ["Everyone"]`. A tile created without it saves with no groups, which existing tiles never have, so it may not show for anyone. Copy the groups from a similar existing tile when the user doesn't say.
-- **Edit a menu tile with PUT, not PATCH.** PATCH on a menu returns HTTP 415. Read the tile with `get_resource`, change the fields, and call `update_resource` with `method: "PUT"` and the full body (`companyId`, `name`, `url`, `category`, `order`, `editRights`, `groups` and the rest), since PUT replaces the whole record.
+- **Edit a menu tile with PATCH (the default)** and only the fields that change. Before 2.7.0 menu PATCH returned HTTP 415 because the plugin sent the wrong content type; that's fixed but not yet retested live. If PATCH still fails, fall back to PUT: read the tile with `get_resource`, change the fields, and call `update_resource` with `method: "PUT"` and the full body (`companyId`, `name`, `url`, `category`, `order`, `editRights`, `groups` and the rest), since PUT replaces the whole record.
+
+### Dashboards
+Custom dashboards on a company's portal. Key fields: `dashboardId`, `companyId`, `title`, `description`, `order`, `icon`, `isPartnerManaged`, `roleIds`, `widgetCount`. Creating one requires `companyId` and `title`.
+
+- **List dashboards:** `list_resources` with `resource_type: "dashboard"`, `filter: "companyId eq 42"`.
+- **Create, edit, delete:** `create_resource` / `update_resource` / `delete_resource` with `resource_type: "dashboard"` (`company_id` is looked up for get, edit and delete).
+- **Widgets** use `dashboard_widgets`:
+  - `action: "types"` lists the widget types and their settings. Read it first; never guess a `type`.
+  - `action: "add"` with `dashboard_id` and `widget: { type, title, info, url, html, width, height, x, y, settings }`.
+  - `action: "update"` (`widget_id`, `data`), `"delete"`, and `"replace_all"` (the whole layout; needs `confirmed: true`).
+- Dashboards and widgets are new in the API and **not yet tested** through the plugin. Show the user the planned layout first, build it, then read it back with `get_resource`.
+
+### Banners and portal messages
+Announcements: portal banners (partner-wide, shown by company group) and portal messages (one company's message list). Use the `client-communications` skill for these and for Signal desktop notices.
 
 ### Courses & Lessons
 Training content for end users. Course uses `name` (NOT `title`); creating one requires `companyId`, `name`, `description`, `shortDescription`, `category` and `estimatedTime` (an integer number of minutes). CourseLesson uses `title`, `overview`, `category`, `text` (HTML body), and `order`; creating one requires `companyId`, `courseId`, `title`, `overview`, `category` and `text`.

@@ -17,7 +17,9 @@ export interface ResourceConfig {
   odataPath: string;
   itemPath: string;
   idParam: string;
-    createPath?: string;
+  createPath?: string;
+  /** Plain (non-OData) list route, e.g. "role". Used by list_resources when there is no odataPath. */
+  listPath?: string;
 }
 
 export const RESOURCE_MAP: Record<string, ResourceConfig> = {
@@ -51,6 +53,24 @@ export const RESOURCE_MAP: Record<string, ResourceConfig> = {
   application_user:         { odataPath: "",                       itemPath: "applicationuser",        idParam: "id" },              // No OData listing
   company_group_company:    { odataPath: "companygroupcompany",    itemPath: "companygroupcompany",    idParam: "" },                // Composite key
   course_lesson_history:    { odataPath: "courselessonhistory",    itemPath: "courselessonhistory",    idParam: "" },                // Composite key
+  // Added in 2.7.0 (v2 API, 2026-11)
+  archive_folder:           { odataPath: "archivefolder",          itemPath: "archivefolder",          idParam: "id" },              // OData key companyReportFolderId
+  banner:                   { odataPath: "banner",                 itemPath: "banner",                 idParam: "id" },              // Partner-level; targeted by companyGroups
+  dashboard:                { odataPath: "dashboard",              itemPath: "dashboard",              idParam: "id" },              // Widgets via raw_api_call
+  portal_message:           { odataPath: "message",                itemPath: "message",                idParam: "id" },
+  signal_message:           { odataPath: "signalmessage",          itemPath: "signalmessage",          idParam: "id" },              // Writes only through the signal_message tool
+  article_feedback:         { odataPath: "articlefeedback",        itemPath: "articlefeedback",        idParam: "id" },              // PUT takes only {rating}
+  assessment_question:      { odataPath: "assessmentquestion",     itemPath: "",                       idParam: "" },                // List/count only
+  // Added in 2.8.0 (v2 API, 2026-11). Writes to these go through a confirmation step.
+  role:                     { odataPath: "",                       itemPath: "role",                   idParam: "id", listPath: "role" },
+  role_assignment:          { odataPath: "",                       itemPath: "roleassignment",         idParam: "id", listPath: "roleassignment" },
+  feature_set:              { odataPath: "",                       itemPath: "featureset",             idParam: "id", listPath: "featureset" },
+  license:                  { odataPath: "license",                itemPath: "license",                idParam: "id" },
+  user_license:             { odataPath: "userlicense",            itemPath: "",                       idParam: "" },                // List/count only
+  policy:                   { odataPath: "policy",                 itemPath: "policy",                 idParam: "id" },
+  webhook:                  { odataPath: "",                       itemPath: "action",                 idParam: "id", listPath: "action" }, // Create/rotate via webhook_action
+  archive_folder_default:   { odataPath: "",                       itemPath: "archivefolder/default",  idParam: "id", listPath: "archivefolder/default" },
+  signal_device:            { odataPath: "",                       itemPath: "",                       idParam: "", listPath: "signaldevice" }, // Writes via signal_device
 };
 
 export interface ApiResult {
@@ -67,21 +87,49 @@ export async function callApiMultipart(
   dataJson: string,
   file: { bytes: Uint8Array; name: string; contentType: string }
 ): Promise<ApiResult> {
-  const { authHeader, baseUrl } = getAuthContext();
-  const form = new FormData();
   // A plain string field: appending a Blob makes it a file part named "blob",
   // and the upload answers 400 "Invalid form data." (live, 2026-10-07).
-  form.append("data", dataJson);
-  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: file.contentType }), file.name);
-  const resp = await fetch(new URL(path, baseUrl).toString(), {
-    method: "POST",
+  return callApiForm(path, { data: dataJson }, [{ field: "file", ...file }]);
+}
+
+export interface FormFile {
+  field: string;
+  bytes: Uint8Array;
+  name: string;
+  contentType: string;
+}
+
+/**
+ * POST multipart/form-data with plain string fields plus file parts. Fields are
+ * appended as strings (never Blobs); a repeated file field (e.g. `files`) is sent
+ * once per file. Throws on a non-2xx status, like callApi.
+ */
+export async function callApiForm(
+  path: string,
+  fields: Record<string, string | undefined>,
+  files: FormFile[],
+  opts: { method?: "POST" | "PUT"; query?: Record<string, string | undefined> } = {}
+): Promise<ApiResult> {
+  const { authHeader, baseUrl } = getAuthContext();
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
+  for (const f of files) form.append(f.field, new Blob([new Uint8Array(f.bytes)], { type: f.contentType }), f.name);
+  const url = new URL(path, baseUrl);
+  for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined && v !== "") url.searchParams.set(k, v);
+  const method = opts.method ?? "POST";
+  const resp = await fetch(url.toString(), {
+    method,
     headers: { Authorization: authHeader, Accept: "application/json" },
     body: form,
   });
   const text = await resp.text();
   let data: unknown = text;
   try { data = text ? JSON.parse(text) : null; } catch { /* keep text */ }
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${path}: ${text.slice(0, 500)}`);
+  if (!resp.ok) throw new CloudRadialApiError(method, path, resp.status, data);
+  // Same { data, success, message } envelope as callApi: hand back the payload.
+  if (data && typeof data === "object" && !Array.isArray(data) && "data" in data && "success" in data) {
+    data = (data as { data: unknown }).data;
+  }
   return { status: resp.status, data };
 }
 
@@ -107,7 +155,12 @@ export async function callApi(
   const init: RequestInit = { method, headers };
 
   if (body !== undefined && ["POST", "PUT", "PATCH"].includes(method)) {
-    headers["Content-Type"] = "application/json";
+    // Every v2 PATCH route takes an RFC 6902 JSON Patch array and declares
+    // application/json-patch+json. Sending it as application/json gets HTTP 415
+    // on some routes (Menu, live 2026-11). A PATCH with a non-array body is sent
+    // as plain JSON so the API reports the real problem.
+    headers["Content-Type"] =
+      method === "PATCH" && Array.isArray(body) ? "application/json-patch+json" : "application/json";
     init.body = JSON.stringify(body);
   }
 
@@ -121,7 +174,7 @@ export async function callApi(
     // success envelope: { data, success, message }. Unwrap it so callers
     // see the resource directly, matching the tool descriptions.
     // OData collection responses ({ "@odata.context", value: [...] }) are a
-    // different shape and pass through here — they're unwrapped per-handler
+    // different shape and pass through here; they're unwrapped per-handler
     // (search_companies / list_resources / user_lookup) to `.value`.
     if (
       parsed &&

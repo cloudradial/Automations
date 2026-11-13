@@ -48,8 +48,9 @@ arguments or ask for keys in chat, attachments, screenshots, or structured chat
 questions.** This tool opens a browser form bound only to 127.0.0.1, protected by
 a random session token, origin/host checks, and a ten-minute timeout.
 
-Tell the user to enter their public/private keys from CloudRadial **Settings →
-API**, select US or EU, and click **Connect**. The local helper sends the keys
+Tell the user to enter their public/private keys from CloudRadial **Partner → Settings →
+Configuration → Integrations → API** (Add API Key creates a new pair; the private key is shown
+only once), select US or EU, and click **Connect**. The local helper sends the keys
 directly over HTTPS to CloudRadial for validation and writes them to the OS
 keychain only after successful validation. The form URL and keys are not returned
 through MCP.

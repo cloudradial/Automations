@@ -1,0 +1,23 @@
+{
+  "_source": "GET /api/extensions/<slug>/tools in an AutomationAI tenant, 2026-11-13. Only the tools this agent relies on, with write = readOnly false.",
+  "connectwise-manage": {
+    "version": "1.1.0",
+    "read": ["cw_query_tickets", "cw_query_companies", "cw_query_members", "cw_query_activity_types"],
+    "write": ["cw_create_activity", "cw_create_company_note"]
+  },
+  "autotask-psa": {
+    "version": "2.5.7",
+    "read": ["at_query_tickets", "at_query_companies", "at_query_resources", "at_query_resource_roles", "at_get_ticket_field_values"],
+    "write": ["at_create_ticket"]
+  },
+  "halo-psa": {
+    "version": "1.3.0",
+    "read": ["halo_query_tickets", "halo_query_clients", "halo_query_agents", "halo_query_ticket_types"],
+    "write": ["halo_create_ticket"]
+  },
+  "cloudradial-v2-feedback": {
+    "version": "0.3.0",
+    "read": ["cr_list_feedback"],
+    "write": []
+  }
+}

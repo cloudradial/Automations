@@ -74,11 +74,13 @@ $tenantScore = Get-F3Text $score 'tenantScore'
 $assessmentId = Get-F3Text $score 'assessmentId'
 switch ($scoreStatus) {
     'created' {
-        $null = $lines.Add("Security: Microsoft Secure Score $tenantScore, added to the portal as assessment $assessmentId ($(Get-F3Text $score 'compliant') of $(Get-F3Text $score 'controls') controls compliant).")
-        $null = $manual.Add("In the portal, open $(Get-F3Of $company) Assessments and choose Run on the new Microsoft Secure Score assessment, so the client sees their score.")
+        $runId = Get-F3Text $score 'runId'
+        $null = $lines.Add("Security: Microsoft Secure Score $tenantScore, in the portal as assessment $assessmentId ($(Get-F3Text $score 'compliant') of $(Get-F3Text $score 'controls') controls compliant)$(if ($runId) { ", with today's run $runId" }).")
+        # Older Secure Score steps (before the JSON assessment API) created the assessment without a run.
+        if (-not $runId) { $null = $manual.Add("In the portal, open $(Get-F3Of $company) Assessments and choose Run on the new Microsoft Secure Score assessment, so the client sees their score.") }
     }
-    'skipped' { $null = $lines.Add("Security: Microsoft Secure Score $tenantScore. Today's assessment already exists, so it wasn't added again.") }
-    'plan' { $null = $lines.Add("Security (preview): Microsoft Secure Score $tenantScore. The assessment would be added with $(Get-F3Text $score 'controls') controls, $(Get-F3Text $score 'compliant') compliant.") }
+    'skipped' { $null = $lines.Add("Security: Microsoft Secure Score $tenantScore. Today's run already exists, so nothing was added again.") }
+    'plan' { $null = $lines.Add("Security (preview): Microsoft Secure Score $tenantScore. The assessment would be added or refreshed with $(Get-F3Text $score 'controls') controls, plus today's run, $(Get-F3Text $score 'compliant') compliant.") }
     default { $null = $lines.Add("Security: no result$(if ($scoreStatus) { " ($scoreStatus)" }). $(Get-F3Text $score 'message')".Trim()); $null = $warnings.Add('The Secure Score step did not finish with a result.') }
 }
 

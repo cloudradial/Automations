@@ -181,4 +181,49 @@ Invoke-WithLib @('cloudradial.ps1') {
     finally { Remove-Variable -Name NcoCrSecretSuffix -Scope Global -ErrorAction SilentlyContinue }
 }
 
+# --- assessments from JSON (Sync-CrAssessment) ---
+$AsRows = New-Object System.Collections.ArrayList
+Reset-Mock $Sec.Clone() {
+    param($c, $n)
+    if ($c.Method -eq 'GET' -and $c.Uri -like '*/v2/odata/assessment*') { return [pscustomobject]@{ value = @($AsRows) } }
+    if ($c.Method -eq 'POST' -and $c.Uri -eq "$CrBase/v2/assessment") { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ assessmentId = 301; type = 20 } } }
+    if ($c.Method -eq 'PUT' -and $c.Uri -like '*/v2/assessment/*/questions*') { $q = @((Read-Body $c).questions); return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ added = 0; updated = $q.Count; removed = $(if ((Read-Body $c).PSObject.Properties['removeMissing'] -and (Read-Body $c).removeMissing) { 3 } else { 0 }) } } }
+    if ($c.Method -eq 'PATCH' -and $c.Uri -like '*/answers*') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ updated = @((Read-Body $c).answers).Count; scores = [pscustomobject]@{ totalScore = 1; maxScore = 4 } } } }
+    if ($c.Method -eq 'POST' -and $c.Uri -like '*/run') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ assessmentId = 302; type = 30; totalScore = 1; compliantScore = 2; partialScore = 1; maxScore = 4; questionCount = 2 } } }
+    return $null
+}
+Invoke-WithLib @('cloudradial.ps1') {
+    $null = Connect-Cr
+    $qs = @(@{ updateKey = 'mfa'; label = 'MFA for all users'; category = 'Identity'; value = 2; publicNotes = '12 of 12' }, @{ updateKey = 'backup'; label = 'Backups tested'; category = 'Data'; value = 1; remediationInfo = 'Test a restore.' })
+    $r = Sync-CrAssessment -CompanyId 7 -Title 'Contoso Security Review' -Questions $qs -Category 'Security' -RunName 'Contoso Security Review - 11/13/26'
+    $create = Read-Body @(Get-Calls 'POST' "$CrBase/v2/assessment")[0]
+    Check 'assessment: created from JSON as type 20 with its questions, no upload' ($r.action -eq 'created' -and $r.assessmentId -eq 301 -and $create.type -eq 20 -and $create.companyId -eq 7 -and @($create.questions).Count -eq 2 -and @(Get-Calls 'POST' '*/upload*').Count -eq 0) (Show-Calls)
+    Check 'assessment: questions carry structure only, choice type and the five answer options' ($create.questions[0].type -eq 80 -and @($create.questions[0].answerOptions).Count -eq 5 -and $null -eq $create.questions[0].PSObject.Properties['value'] -and $create.questions[1].remediationInfo -eq 'Test a restore.') ($create.questions | ConvertTo-Json -Depth 5 -Compress)
+    $ans = Read-Body @(Get-Calls 'PATCH' '*/v2/assessment/301/answers?companyId=7')[0]
+    Check 'assessment: answers set in one call by updateKey, with notes' (@($ans.answers).Count -eq 2 -and $ans.answers[0].updateKey -eq 'mfa' -and $ans.answers[0].value -eq 2 -and $ans.answers[0].publicNotes -eq '12 of 12' -and $ans.answers[1].value -eq 1) ($ans | ConvertTo-Json -Depth 5 -Compress)
+    $run = Read-Body @(Get-Calls 'POST' '*/v2/assessment/301/run')[0]
+    Check 'assessment: a run is created after the answers, and its scores returned' ($r.runId -eq 302 -and $run.name -eq 'Contoso Security Review - 11/13/26' -and $run.companyId -eq 7 -and $r.scores.totalScore -eq 1 -and (@($Mock.Calls).IndexOf(@(Get-Calls 'PATCH' '*/answers*')[0]) -lt @($Mock.Calls).IndexOf(@(Get-Calls 'POST' '*/run')[0]))) (Show-Calls)
+}
+$null = $AsRows.Add([pscustomobject]@{ assessmentId = 290; companyId = 7; title = 'Contoso Security Review'; type = 'Assessment_Run'; isDeleted = $false })
+$null = $AsRows.Add([pscustomobject]@{ assessmentId = 280; companyId = 7; title = 'contoso security review '; type = 'Assessment'; isDeleted = $false })
+$Mock.Calls.Clear()
+Invoke-WithLib @('cloudradial.ps1') {
+    $null = Connect-Cr
+    $qs = @(@{ updateKey = 'mfa'; label = 'MFA for all users'; value = -2 })
+    $p = Sync-CrAssessment -CompanyId 7 -Title 'Contoso Security Review' -Questions $qs -Preview
+    Check 'assessment preview: finds the existing assessment, writes nothing' ($p.action -eq 'would-update' -and $p.assessmentId -eq 280 -and @($Mock.Calls | Where-Object { $_.Method -ne 'GET' }).Count -eq 0) (Show-Calls)
+    $r = Sync-CrAssessment -CompanyId 7 -Title 'Contoso Security Review' -Questions $qs -RemoveMissing
+    $put = Read-Body @(Get-Calls 'PUT' '*/v2/assessment/280/questions?companyId=7')[0]
+    Check 'assessment rerun: the same assessment refreshed in place (title matched case-insensitively, runs ignored), never created again' ($r.action -eq 'updated' -and $r.assessmentId -eq 280 -and @(Get-Calls 'POST' "$CrBase/v2/assessment").Count -eq 0 -and $put.removeMissing -eq $true -and $r.removed -eq 3 -and $r.runId -eq 0 -and @(Get-Calls 'POST' '*/run').Count -eq 0) (Show-Calls)
+    $m = Get-ThrowMessage { Sync-CrAssessment -CompanyId 7 -Title 'X' -Questions @(@{ updateKey = 'a'; label = 'A' }, @{ updateKey = 'A'; label = 'B' }) }
+    Check 'assessment: duplicate updateKeys refused before any write' ($m -match "share the updateKey") $m
+}
+$big = @(1..1500 | ForEach-Object { @{ updateKey = "c$_"; label = "Control $_"; value = 2 } })
+$AsRows.Clear(); $Mock.Calls.Clear()
+Invoke-WithLib @('cloudradial.ps1') {
+    $null = Connect-Cr
+    $r = Sync-CrAssessment -CompanyId 7 -Title 'Big' -Questions $big
+    Check 'assessment: over 1,000 questions are sent in chunks of 1,000' ($r.added -eq 1500 -and @((Read-Body @(Get-Calls 'POST' "$CrBase/v2/assessment")[0]).questions).Count -eq 1000 -and @((Read-Body @(Get-Calls 'PUT' '*/questions*')[0]).questions).Count -eq 500 -and @(Get-Calls 'PATCH' '*/answers*').Count -eq 2) (Show-Calls)
+}
+
 Complete-Test

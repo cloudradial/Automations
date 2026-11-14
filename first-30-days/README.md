@@ -30,7 +30,7 @@ CloudRadial, Microsoft 365 and AutomationAI. No PSA is needed.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/first-30-days/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/first-30-days/v1.1.0).
 2. In AutomationAI, go to **Workflows > Import** and upload this file. No agent is needed.
 3. Click **Publish**, then **Deploy** to your runner.
 4. Choose **Run**, and enter the client's name in AutomationAI, its CloudRadial company number, and what to add to the portal.
@@ -45,15 +45,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/fir
 
 ## Technical details
 
-**Marketplace ID:** Not listed yet | **Type:** Workflow (PowerShell) | **Version:** 1.0.0
+**Marketplace ID:** Not listed yet | **Type:** Workflow (PowerShell) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `first-30-days-week-one.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/first-30-days/v1.0.0).
+Each version is published as a release, with `first-30-days-week-one.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/first-30-days/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `first-30-days-week-one.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/first-30-days/v1.0.0) |
+| Download `first-30-days-week-one.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/first-30-days/v1.1.0) |
 | View the current source | [`first-30-days-week-one.yml`](https://github.com/cloudradial/Automations/blob/main/first-30-days/first-30-days-week-one.yml) |
 | Build source and tests | [src/](https://github.com/cloudradial/Automations/tree/main/first-30-days/src) |
 | All files in this automation | [first-30-days](https://github.com/cloudradial/Automations/tree/main/first-30-days) |

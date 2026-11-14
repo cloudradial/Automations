@@ -9,12 +9,10 @@
 #     assessmentTitle  - the assessment's name, default "Microsoft 365 Security Assessment". Each run
 #                        is titled "<name> - M/d/yy", the portal's own run naming.
 #     runTitle         - overrides the run's title (for example a second run on the same day)
-#     portalUrl        - the partner portal, e.g. https://contoso.us.cloudradial.com, used to create the
-#                        run (default: the CloudRadial-PortalUrl secret; without either, no run is made)
 #     mode             - apply (default) creates the assessment; plan only previews the questions
-#     assessmentType   - omit to upload the type 20 assessment (once) and then the type 30 run, like
-#                        the portal's own pairs. Send 20 or 30 to upload only that one. The type codes
-#                        are undocumented; from live data 10 = template, 20 = assessment, 30 = run.
+#     assessmentType   - omit to create or refresh the type 20 assessment and then add today's type 30
+#                        run, like the portal's own pairs. Send 20 to only refresh the assessment, or 30 to
+#                        only add a run of the existing one. (10 = template, 20 = assessment, 30 = run.)
 #   Secrets (runner Key Vault): M365-ClientID, M365-ClientSecret, M365-TenantID (optional when
 #   tenantId is sent), CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
 $ErrorActionPreference = 'Stop'

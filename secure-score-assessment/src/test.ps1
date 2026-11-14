@@ -7,14 +7,6 @@ $ErrorActionPreference = 'Stop'
 $env:RUNNER_KV_NAME = 'kv-test'
 $js = "const y=require('js-yaml'),fs=require('fs');const w=y.load(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(w.definition.activities.find(a=>a.properties&&a.properties.script).properties.script)"
 $script = node -e $js (Join-Path $Root 'secure-score-assessment/secure-score-assessment.yml') | Out-String
-# The upload uses HttpClient, so rename the script's own Send-CrMultipart and let the mock below stand in for it.
-$script = $script.Replace('function Send-CrMultipart {', 'function Send-CrMultipart-Real {')
-function Send-CrMultipart { param([string]$Path, [string]$DataJson, [byte[]]$FileBytes, [string]$FileName)
-    $global:Uploads += , ($DataJson | ConvertFrom-Json)
-    if ($global:UploadFail) { if ($global:UploadFail -match '504') { $d = $DataJson | ConvertFrom-Json; $global:Assessments += , [pscustomobject]@{ assessmentId = 502; title = $d.name; type = $d.type; companyId = $d.companyId } }; throw $global:UploadFail }
-    if (-not $global:UploadLost) { $d = $DataJson | ConvertFrom-Json; $global:Assessments += , [pscustomobject]@{ assessmentId = 501; title = $d.name; type = $d.type; companyId = $d.companyId } }
-    return ''
-}
 function Start-Sleep { param($Seconds) }
 $fail = 0
 function Check { param($Name, [bool]$Ok, $Detail) if ($Ok) { Write-Host "PASS $Name" } else { Write-Host "FAIL $Name :: $Detail"; $script:fail++ } }
@@ -44,12 +36,19 @@ function Invoke-RestMethod { param($Uri, $Method = 'GET', $Headers, $ContentType
     if ($Uri -like 'https://graph.microsoft.com/*secureScoreControlProfiles*') {
         return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'MFARegistrationV2'; title = 'Ensure all users can complete MFA'; controlCategory = 'Identity'; rank = 1; maxScore = 10; deprecated = $false; implementationCost = 'Low'; userImpact = 'Low'; threats = @('Account breach'); remediation = 'Turn on MFA.'; actionUrl = 'https://example.com'; service = 'AzureAD'; tier = 'Core' }) } }
     if ($Uri -like 'https://cr.example.com/v2/odata/assessment*') { return [pscustomobject]@{ value = @($global:Assessments) } }
-    if ($Method -eq 'POST') { $global:Writes++; throw [Microsoft.PowerShell.Commands.HttpResponseException]::new('Response status code does not indicate success: 404 (Not Found).', [System.Net.Http.HttpResponseMessage]::new(404)) }
+    if ($Uri -like 'https://cr.example.com/v2/assessment*') {
+        $global:Writes++; $global:CrWrites += , [pscustomobject]@{ Method = $Method; Uri = $Uri; Body = $(if ($Body) { $Body | ConvertFrom-Json } else { $null }) }
+        if ($global:CrFail) { throw [Microsoft.PowerShell.Commands.HttpResponseException]::new('Response status code does not indicate success: 400 (Bad Request).', [System.Net.Http.HttpResponseMessage]::new(400)) }
+        if ($Method -eq 'POST' -and $Uri -eq 'https://cr.example.com/v2/assessment') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ assessmentId = 501; type = 20 } } }
+        if ($Method -eq 'PUT') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ added = 0; updated = 1; removed = 0 } } }
+        if ($Method -eq 'PATCH') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ updated = 1; scores = [pscustomobject]@{ totalScore = -2; maxScore = 2 } } } }
+        if ($Method -eq 'POST' -and $Uri -like '*/run') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ assessmentId = 502; type = 30; totalScore = -2; compliantScore = 0; partialScore = 0; maxScore = 2; questionCount = 1 } } }
+    }
     throw "Unmocked $Method $Uri"
 }
-function Invoke-Step { param($In, [string[]]$Roles, [switch]$Deny, [switch]$UploadLost, [string]$UploadFail = '', [object[]]$Existing = @())
+function Invoke-Step { param($In, [string[]]$Roles, [switch]$Deny, [switch]$CrFail, [object[]]$Existing = @())
     $global:NodeIn = $In; $global:Roles = $Roles; $global:Deny = [bool]$Deny; $global:NodeOut = $null; $global:Calls = @(); $global:Writes = 0
-    $global:Uploads = @(); $global:Assessments = @($Existing); $global:UploadLost = [bool]$UploadLost; $global:UploadFail = $UploadFail
+    $global:CrWrites = @(); $global:Assessments = @($Existing); $global:CrFail = [bool]$CrFail
     $global:ActiveCompany = ''
     $err = $null; try { & ([scriptblock]::Create($script)) } catch { $err = $_.Exception.Message }
     return [pscustomobject]@{ err = $err; out = $(if ($null -ne $global:NodeOut) { $global:NodeOut | ConvertTo-Json -Depth 6 | ConvertFrom-Json } else { $null }) }
@@ -70,22 +69,27 @@ $r = Invoke-Step $in @('SecurityEvents.Read.All')
 Check 'plan: previews the controls' ($null -eq $r.err -and $r.out.status -eq 'plan' -and $r.out.controls -eq 1) ($r | ConvertTo-Json -Compress -Depth 5)
 Check 'plan: nothing written' ($global:Writes -eq 0) "writes=$($global:Writes)"
 
-# 3. Apply: the upload creates the assessment (assessmentId 0, type 20); POST /v2/assessment (404) is never called.
+# 3. Apply: one assessment created or refreshed from JSON, answered, then a dated run. No workbook upload.
 $apply = [pscustomobject]@{ companyId = 1; tenantId = '00000000-0000-0000-0000-000000000001'; mode = 'apply' }
 $r = Invoke-Step $apply @('SecurityEvents.Read.All')
-$u = @($global:Uploads)
-Check 'apply: created through one upload, no create call' ($null -eq $r.err -and $r.out.status -eq 'created' -and $global:Writes -eq 0 -and $u.Count -eq 1) ($r | ConvertTo-Json -Compress -Depth 5)
-Check 'apply: upload is a new type 20 assessment for the company' ($u.Count -eq 1 -and $u[0].assessmentId -eq 0 -and $u[0].type -eq 20 -and $u[0].companyId -eq 1 -and $u[0].name -match '^Microsoft Secure Score \(\d{4}-\d{2}-\d{2}\)$') ($u | ConvertTo-Json -Compress)
-Check 'apply: reports the new assessmentId' ($r.out.assessmentId -eq 501) ($r.out | ConvertTo-Json -Compress)
-$r = Invoke-Step $apply @('SecurityEvents.Read.All') -UploadLost
-Check 'apply: upload accepted but not found is an error' ($null -ne $r.err -and $r.out.status -eq 'error' -and $r.out.message -match 'no assessment titled') ($r | ConvertTo-Json -Compress -Depth 5)
-$r = Invoke-Step $apply @('SecurityEvents.Read.All') -UploadFail 'HTTP 504: gateway timeout'
-Check 'apply: upload 504 but created is still success' ($null -eq $r.err -and $r.out.status -eq 'created' -and $r.out.assessmentId -eq 502) ($r | ConvertTo-Json -Compress -Depth 5)
-$r = Invoke-Step $apply @('SecurityEvents.Read.All') -UploadFail 'HTTP 400: bad workbook'
-Check 'apply: upload 400 stops the run' ($null -ne $r.err -and $r.err -match 'HTTP 400') ($r | ConvertTo-Json -Compress -Depth 5)
-$today = "Microsoft Secure Score ($(Get-Date -Format 'yyyy-MM-dd'))"
-$r = Invoke-Step $apply @('SecurityEvents.Read.All') -Existing @([pscustomobject]@{ assessmentId = 9; title = $today; type = 20; companyId = 1 })
-Check 'apply: same title already there is skipped, no upload' ($r.out.status -eq 'skipped' -and @($global:Uploads).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+$w = @($global:CrWrites)
+$create = @($w | Where-Object { $_.Method -eq 'POST' -and $_.Uri -eq 'https://cr.example.com/v2/assessment' })
+Check 'apply: created as one type 20 assessment titled Microsoft Secure Score, no upload' ($null -eq $r.err -and $r.out.status -eq 'created' -and $create.Count -eq 1 -and $create[0].Body.type -eq 20 -and $create[0].Body.companyId -eq 1 -and $create[0].Body.title -eq 'Microsoft Secure Score' -and @($w | Where-Object { $_.Uri -like '*upload*' }).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+Check 'apply: one question per control, keyed on the control id' (@($create[0].Body.questions).Count -eq 1 -and $create[0].Body.questions[0].updateKey -eq 'MFARegistrationV2' -and $create[0].Body.questions[0].category -eq 'Identity' -and $create[0].Body.questions[0].remediationInfo -eq 'Turn on MFA.') ($create | ConvertTo-Json -Compress -Depth 6)
+$ans = @($w | Where-Object { $_.Method -eq 'PATCH' })
+Check 'apply: answered by control id in one call' ($ans.Count -eq 1 -and $ans[0].Uri -like '*/v2/assessment/501/answers?companyId=1' -and $ans[0].Body.answers[0].updateKey -eq 'MFARegistrationV2') ($ans | ConvertTo-Json -Compress -Depth 6)
+$run = @($w | Where-Object { $_.Method -eq 'POST' -and $_.Uri -like '*/run' })
+Check 'apply: then a dated run named the portal way' ($run.Count -eq 1 -and $run[0].Body.name -match '^Microsoft Secure Score - \d{1,2}/\d{1,2}/\d{2}$' -and $r.out.runId -eq 502 -and $r.out.assessmentId -eq 501) ($r.out | ConvertTo-Json -Compress)
+$r = Invoke-Step $apply @('SecurityEvents.Read.All') -Existing @([pscustomobject]@{ assessmentId = 77; title = 'Microsoft Secure Score'; type = 'Assessment'; companyId = 1; isDeleted = $false })
+$w = @($global:CrWrites)
+Check 'apply again: the same assessment refreshed in place (deprecated controls removed), never created twice' ($r.out.status -eq 'created' -and $r.out.assessmentAction -eq 'updated' -and @($w | Where-Object { $_.Uri -eq 'https://cr.example.com/v2/assessment' }).Count -eq 0 -and @($w | Where-Object { $_.Method -eq 'PUT' -and $_.Uri -like '*/v2/assessment/77/questions*' -and $_.Body.removeMissing }).Count -eq 1 -and @($w | Where-Object { $_.Uri -like '*/77/run' }).Count -eq 1) ($r | ConvertTo-Json -Compress -Depth 5)
+$todayRun = "Microsoft Secure Score - $((Get-Date).ToString('M/d/yy', [Globalization.CultureInfo]::InvariantCulture))"
+$r = Invoke-Step $apply @('SecurityEvents.Read.All') -Existing @([pscustomobject]@{ assessmentId = 78; title = $todayRun; type = 'Assessment_Run'; companyId = 1; isDeleted = $false })
+Check 'apply: today''s run already there is skipped, nothing written' ($r.out.status -eq 'skipped' -and @($global:CrWrites).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step $apply @('SecurityEvents.Read.All') -CrFail
+Check 'apply: a CloudRadial 400 fails the run with a plain message' ($null -ne $r.err -and $r.out.status -eq 'error' -and $r.out.message -match 'HTTP 400') ($r | ConvertTo-Json -Compress -Depth 5)
+$r = Invoke-Step ([pscustomobject]@{ companyId = 1; tenantId = '00000000-0000-0000-0000-000000000001'; mode = 'plan' }) @('SecurityEvents.Read.All') -Existing @([pscustomobject]@{ assessmentId = 77; title = 'Microsoft Secure Score'; type = 'Assessment'; companyId = 1; isDeleted = $false })
+Check 'plan: says it would refresh the existing assessment, writes nothing' ($r.out.status -eq 'plan' -and $r.out.message -match 'refresh the assessment' -and $r.out.assessmentId -eq 77 -and @($global:CrWrites).Count -eq 0) ($r | ConvertTo-Json -Compress -Depth 5)
 
 # 4. Which client: the company input picks the AutomationAI company, and the tenant comes from its secrets.
 $byName = [pscustomobject]@{ company = 'Contoso Ltd'; companyId = 1; mode = 'plan' }

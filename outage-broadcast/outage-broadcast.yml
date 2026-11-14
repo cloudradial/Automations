@@ -408,6 +408,100 @@ definition:
             $r = Invoke-CrApi -Path '/v2/archiveitem' -Method POST -Body $item
             return @{ action = 'created'; archiveId = $aid; itemId = (Get-CrId $r @('companyReportItemId', 'id', 'data.companyReportItemId', 'data.id')); location = $where }
         }
+
+        # The answer options a synced multiple-choice question offers in the portal, so every value an automation writes
+        # (2 compliant, 1 partial, 0 not applicable, -1 not determined, -2 not compliant) can also be picked by hand.
+        $CrState['AssessmentOptions'] = @(
+            [ordered]@{ label = 'Yes'; value = 2 }, [ordered]@{ label = 'Partial'; value = 1 }, [ordered]@{ label = 'No'; value = -2 },
+            [ordered]@{ label = 'Not Applicable'; value = 0 }, [ordered]@{ label = 'Not Determined'; value = -1 })
+
+        # Creates or refreshes one company assessment from JSON, answers it, and optionally runs it, so the portal shows a
+        # dated, scored run linked to the assessment. No workbook upload.
+        #   -Title      the assessment's title. The company's assessment (type 20) with this title is refreshed in place;
+        #               without one, it is created.
+        #   -Questions  each a hashtable: updateKey (a stable text such as a control name, so a re-run updates the same
+        #               question), label, category, value (2 compliant, 1 partial, 0 not applicable, -1 not determined,
+        #               -2 not compliant), and optionally textValue, publicNotes, privateNotes, isFlagged, explanation,
+        #               evaluationInfo, remediationInfo, remediationLineItem, controlType, likelihood, risk, riskCost,
+        #               riskImpact, order, type (80 choice, the default, or 0 text) and answerOptions.
+        #   -Category, -Description, -Recommendations   the assessment's own fields, set when it is created
+        #   -Visibility     0 partner only (the default) or 2 client visible, set when it is created
+        #   -RemoveMissing  soft-delete the assessment's questions that aren't in -Questions
+        #   -RunName        also create a run with this name, a dated snapshot that the portal's Assessments list shows
+        #   -Preview        work out what would happen without writing
+        # Returns @{ action = created | updated | would-create | would-update; assessmentId; runId; added; updated; removed; scores }.
+        function Sync-CrAssessment {
+            param([int]$CompanyId, [string]$Title, [object[]]$Questions, [string]$Category = '', [string]$Description = '', [string]$Recommendations = '',
+                [int]$Visibility = 0, [switch]$RemoveMissing, [string]$RunName = '', [switch]$Preview)
+            if ($CompanyId -le 0 -or [string]::IsNullOrWhiteSpace($Title)) { throw 'Sync-CrAssessment needs a company id and a title.' }
+            $qs = @($Questions | Where-Object { $null -ne $_ })
+            if (-not $qs.Count) { throw "Sync-CrAssessment has no questions for '$Title'." }
+            $keys = @{}
+            foreach ($q in $qs) {
+                $k = [string](Get-CrProp $q 'updateKey'); $l = [string](Get-CrProp $q 'label')
+                if (-not $k -or -not $l) { throw "Every question of '$Title' needs an updateKey and a label." }
+                if ($keys.ContainsKey($k.ToLowerInvariant())) { throw "Two questions of '$Title' share the updateKey '$k'." }
+                $keys[$k.ToLowerInvariant()] = $true
+            }
+            $structure = @('updateKey', 'category', 'label', 'type', 'answerOptions', 'explanation', 'evaluationInfo', 'remediationInfo', 'remediationLineItem',
+                'remediationMonthlyUnits', 'remediationMonthlyUnitPrice', 'remediationProjectUnits', 'remediationProjectUnitPrice', 'controlType', 'likelihood', 'risk', 'riskCost', 'riskImpact', 'order')
+            $answerFields = @('value', 'textValue', 'publicNotes', 'privateNotes', 'isFlagged', 'owner')
+            $qBodies = @(foreach ($q in $qs) {
+                    $b = [ordered]@{}
+                    foreach ($f in $structure) { $v = Get-CrProp $q $f; if ($null -ne $v -and [string]$v -ne '') { $b[$f] = $v } }
+                    if (-not $b.Contains('type')) { $b['type'] = 80 }
+                    if ([int]$b['type'] -eq 80 -and -not $b.Contains('answerOptions')) { $b['answerOptions'] = $CrState['AssessmentOptions'] }
+                    , $b
+                })
+            $aBodies = @(foreach ($q in $qs) {
+                    $b = [ordered]@{ updateKey = [string](Get-CrProp $q 'updateKey') }
+                    foreach ($f in $answerFields) { $v = Get-CrProp $q $f; if ($null -ne $v) { $b[$f] = $v } }
+                    if ($b.Count -gt 1) { , $b }
+                })
+            $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId"))") | Where-Object {
+                $t = [string](Get-CrProp $_ 'type')
+                ([string](Get-CrProp $_ 'title')).Trim() -ieq $Title.Trim() -and ($t -eq '20' -or $t -eq 'Assessment') -and -not (Get-CrProp $_ 'isDeleted')
+            } | Sort-Object { [int](Get-CrProp $_ 'assessmentId') } | Select-Object -First 1
+            $aid = Get-CrId $existing @('assessmentId')
+            $res = @{ action = ''; assessmentId = $aid; runId = 0; added = 0; updated = 0; removed = 0; scores = $null }
+            if ($Preview) { $res.action = $(if ($aid) { 'would-update' } else { 'would-create' }); return $res }
+            $chunk = 1000
+            $slice = { param($list, [int]$from) @($list[$from..([Math]::Min($from + $chunk, $list.Count) - 1)]) }
+            if ($aid) {
+                $res.action = 'updated'
+                for ($i = 0; $i -lt $qBodies.Count; $i += $chunk) {
+                    # removeMissing only when every question fits in one call, or a later chunk would delete an earlier one's questions.
+                    $r = Invoke-CrApi -Path "/v2/assessment/$aid/questions?companyId=$CompanyId" -Method PUT -Body ([ordered]@{ questions = (& $slice $qBodies $i); removeMissing = [bool]($RemoveMissing -and $qBodies.Count -le $chunk) })
+                    $d = Get-CrProp $r 'data'; if ($null -eq $d) { $d = $r }
+                    $res.added += [int](Get-CrProp $d 'added'); $res.updated += [int](Get-CrProp $d 'updated'); $res.removed += [int](Get-CrProp $d 'removed')
+                }
+            }
+            else {
+                $res.action = 'created'
+                $first = & $slice $qBodies 0
+                $r = Invoke-CrApi -Path '/v2/assessment' -Method POST -Body ([ordered]@{ companyId = $CompanyId; title = $Title; type = 20; category = $Category; description = $Description; recommendations = $Recommendations; visibility = $Visibility; questions = $first })
+                $aid = Get-CrId $r @('data.assessmentId', 'assessmentId')
+                if (-not $aid) { throw "CloudRadial created the assessment '$Title' but its reply had no assessmentId." }
+                $res.assessmentId = $aid; $res.added = $first.Count
+                for ($i = $chunk; $i -lt $qBodies.Count; $i += $chunk) {
+                    $part = & $slice $qBodies $i
+                    $null = Invoke-CrApi -Path "/v2/assessment/$aid/questions?companyId=$CompanyId" -Method PUT -Body ([ordered]@{ questions = $part })
+                    $res.added += $part.Count
+                }
+            }
+            for ($i = 0; $i -lt $aBodies.Count; $i += $chunk) {
+                $r = Invoke-CrApi -Path "/v2/assessment/$aid/answers?companyId=$CompanyId" -Method PATCH -Body ([ordered]@{ answers = (& $slice $aBodies $i) })
+                $d = Get-CrProp $r 'data'; if ($null -eq $d) { $d = $r }
+                $s = Get-CrProp $d 'scores'; if ($null -ne $s) { $res.scores = $s }
+            }
+            if ($RunName) {
+                $run = Invoke-CrApi -Path "/v2/assessment/$aid/run" -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $RunName })
+                $res.runId = Get-CrId $run @('data.assessmentId', 'assessmentId')
+                $rd = Get-CrProp $run 'data'; if ($null -eq $rd) { $rd = $run }
+                if ($null -ne (Get-CrProp $rd 'totalScore')) { $res.scores = [ordered]@{ totalScore = Get-CrProp $rd 'totalScore'; compliantScore = Get-CrProp $rd 'compliantScore'; partialScore = Get-CrProp $rd 'partialScore'; maxScore = Get-CrProp $rd 'maxScore'; questionCount = Get-CrProp $rd 'questionCount' } }
+            }
+            return $res
+        }
         # ---------- end _shared/cloudradial.ps1 ----------
         # <<< _shared/cloudradial.ps1
         $ErrorActionPreference = 'Stop'
@@ -865,6 +959,100 @@ definition:
             }
             $r = Invoke-CrApi -Path '/v2/archiveitem' -Method POST -Body $item
             return @{ action = 'created'; archiveId = $aid; itemId = (Get-CrId $r @('companyReportItemId', 'id', 'data.companyReportItemId', 'data.id')); location = $where }
+        }
+
+        # The answer options a synced multiple-choice question offers in the portal, so every value an automation writes
+        # (2 compliant, 1 partial, 0 not applicable, -1 not determined, -2 not compliant) can also be picked by hand.
+        $CrState['AssessmentOptions'] = @(
+            [ordered]@{ label = 'Yes'; value = 2 }, [ordered]@{ label = 'Partial'; value = 1 }, [ordered]@{ label = 'No'; value = -2 },
+            [ordered]@{ label = 'Not Applicable'; value = 0 }, [ordered]@{ label = 'Not Determined'; value = -1 })
+
+        # Creates or refreshes one company assessment from JSON, answers it, and optionally runs it, so the portal shows a
+        # dated, scored run linked to the assessment. No workbook upload.
+        #   -Title      the assessment's title. The company's assessment (type 20) with this title is refreshed in place;
+        #               without one, it is created.
+        #   -Questions  each a hashtable: updateKey (a stable text such as a control name, so a re-run updates the same
+        #               question), label, category, value (2 compliant, 1 partial, 0 not applicable, -1 not determined,
+        #               -2 not compliant), and optionally textValue, publicNotes, privateNotes, isFlagged, explanation,
+        #               evaluationInfo, remediationInfo, remediationLineItem, controlType, likelihood, risk, riskCost,
+        #               riskImpact, order, type (80 choice, the default, or 0 text) and answerOptions.
+        #   -Category, -Description, -Recommendations   the assessment's own fields, set when it is created
+        #   -Visibility     0 partner only (the default) or 2 client visible, set when it is created
+        #   -RemoveMissing  soft-delete the assessment's questions that aren't in -Questions
+        #   -RunName        also create a run with this name, a dated snapshot that the portal's Assessments list shows
+        #   -Preview        work out what would happen without writing
+        # Returns @{ action = created | updated | would-create | would-update; assessmentId; runId; added; updated; removed; scores }.
+        function Sync-CrAssessment {
+            param([int]$CompanyId, [string]$Title, [object[]]$Questions, [string]$Category = '', [string]$Description = '', [string]$Recommendations = '',
+                [int]$Visibility = 0, [switch]$RemoveMissing, [string]$RunName = '', [switch]$Preview)
+            if ($CompanyId -le 0 -or [string]::IsNullOrWhiteSpace($Title)) { throw 'Sync-CrAssessment needs a company id and a title.' }
+            $qs = @($Questions | Where-Object { $null -ne $_ })
+            if (-not $qs.Count) { throw "Sync-CrAssessment has no questions for '$Title'." }
+            $keys = @{}
+            foreach ($q in $qs) {
+                $k = [string](Get-CrProp $q 'updateKey'); $l = [string](Get-CrProp $q 'label')
+                if (-not $k -or -not $l) { throw "Every question of '$Title' needs an updateKey and a label." }
+                if ($keys.ContainsKey($k.ToLowerInvariant())) { throw "Two questions of '$Title' share the updateKey '$k'." }
+                $keys[$k.ToLowerInvariant()] = $true
+            }
+            $structure = @('updateKey', 'category', 'label', 'type', 'answerOptions', 'explanation', 'evaluationInfo', 'remediationInfo', 'remediationLineItem',
+                'remediationMonthlyUnits', 'remediationMonthlyUnitPrice', 'remediationProjectUnits', 'remediationProjectUnitPrice', 'controlType', 'likelihood', 'risk', 'riskCost', 'riskImpact', 'order')
+            $answerFields = @('value', 'textValue', 'publicNotes', 'privateNotes', 'isFlagged', 'owner')
+            $qBodies = @(foreach ($q in $qs) {
+                    $b = [ordered]@{}
+                    foreach ($f in $structure) { $v = Get-CrProp $q $f; if ($null -ne $v -and [string]$v -ne '') { $b[$f] = $v } }
+                    if (-not $b.Contains('type')) { $b['type'] = 80 }
+                    if ([int]$b['type'] -eq 80 -and -not $b.Contains('answerOptions')) { $b['answerOptions'] = $CrState['AssessmentOptions'] }
+                    , $b
+                })
+            $aBodies = @(foreach ($q in $qs) {
+                    $b = [ordered]@{ updateKey = [string](Get-CrProp $q 'updateKey') }
+                    foreach ($f in $answerFields) { $v = Get-CrProp $q $f; if ($null -ne $v) { $b[$f] = $v } }
+                    if ($b.Count -gt 1) { , $b }
+                })
+            $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId"))") | Where-Object {
+                $t = [string](Get-CrProp $_ 'type')
+                ([string](Get-CrProp $_ 'title')).Trim() -ieq $Title.Trim() -and ($t -eq '20' -or $t -eq 'Assessment') -and -not (Get-CrProp $_ 'isDeleted')
+            } | Sort-Object { [int](Get-CrProp $_ 'assessmentId') } | Select-Object -First 1
+            $aid = Get-CrId $existing @('assessmentId')
+            $res = @{ action = ''; assessmentId = $aid; runId = 0; added = 0; updated = 0; removed = 0; scores = $null }
+            if ($Preview) { $res.action = $(if ($aid) { 'would-update' } else { 'would-create' }); return $res }
+            $chunk = 1000
+            $slice = { param($list, [int]$from) @($list[$from..([Math]::Min($from + $chunk, $list.Count) - 1)]) }
+            if ($aid) {
+                $res.action = 'updated'
+                for ($i = 0; $i -lt $qBodies.Count; $i += $chunk) {
+                    # removeMissing only when every question fits in one call, or a later chunk would delete an earlier one's questions.
+                    $r = Invoke-CrApi -Path "/v2/assessment/$aid/questions?companyId=$CompanyId" -Method PUT -Body ([ordered]@{ questions = (& $slice $qBodies $i); removeMissing = [bool]($RemoveMissing -and $qBodies.Count -le $chunk) })
+                    $d = Get-CrProp $r 'data'; if ($null -eq $d) { $d = $r }
+                    $res.added += [int](Get-CrProp $d 'added'); $res.updated += [int](Get-CrProp $d 'updated'); $res.removed += [int](Get-CrProp $d 'removed')
+                }
+            }
+            else {
+                $res.action = 'created'
+                $first = & $slice $qBodies 0
+                $r = Invoke-CrApi -Path '/v2/assessment' -Method POST -Body ([ordered]@{ companyId = $CompanyId; title = $Title; type = 20; category = $Category; description = $Description; recommendations = $Recommendations; visibility = $Visibility; questions = $first })
+                $aid = Get-CrId $r @('data.assessmentId', 'assessmentId')
+                if (-not $aid) { throw "CloudRadial created the assessment '$Title' but its reply had no assessmentId." }
+                $res.assessmentId = $aid; $res.added = $first.Count
+                for ($i = $chunk; $i -lt $qBodies.Count; $i += $chunk) {
+                    $part = & $slice $qBodies $i
+                    $null = Invoke-CrApi -Path "/v2/assessment/$aid/questions?companyId=$CompanyId" -Method PUT -Body ([ordered]@{ questions = $part })
+                    $res.added += $part.Count
+                }
+            }
+            for ($i = 0; $i -lt $aBodies.Count; $i += $chunk) {
+                $r = Invoke-CrApi -Path "/v2/assessment/$aid/answers?companyId=$CompanyId" -Method PATCH -Body ([ordered]@{ answers = (& $slice $aBodies $i) })
+                $d = Get-CrProp $r 'data'; if ($null -eq $d) { $d = $r }
+                $s = Get-CrProp $d 'scores'; if ($null -ne $s) { $res.scores = $s }
+            }
+            if ($RunName) {
+                $run = Invoke-CrApi -Path "/v2/assessment/$aid/run" -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $RunName })
+                $res.runId = Get-CrId $run @('data.assessmentId', 'assessmentId')
+                $rd = Get-CrProp $run 'data'; if ($null -eq $rd) { $rd = $run }
+                if ($null -ne (Get-CrProp $rd 'totalScore')) { $res.scores = [ordered]@{ totalScore = Get-CrProp $rd 'totalScore'; compliantScore = Get-CrProp $rd 'compliantScore'; partialScore = Get-CrProp $rd 'partialScore'; maxScore = Get-CrProp $rd 'maxScore'; questionCount = Get-CrProp $rd 'questionCount' } }
+            }
+            return $res
         }
         # ---------- end _shared/cloudradial.ps1 ----------
         # <<< _shared/cloudradial.ps1

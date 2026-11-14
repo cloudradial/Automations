@@ -2883,9 +2883,9 @@ definition:
                   # ---- end shared helpers ----
                   try {
                   # =====================================================================
-                  # Step 4 - Assessments -> CloudRadial assessment (Excel import format)
-                  #   Columns follow support KB 360052746791 "Importing Assessments".
-                  #   The .xlsx is built in memory - nothing is written to storage.
+                  # Step 4 - Assessments -> CloudRadial assessment (JSON assessment API)
+                  #   Each ScalePad assessment becomes one CloudRadial assessment (type 20) created with its questions and
+                  #   ScalePad's own answer options, answered, then run once so the portal lists it with its score.
                   # =====================================================================
                   $phase = 'assessments'
                   $results = ConvertTo-Dict (Get-P $ctx 'results')
@@ -2895,20 +2895,6 @@ definition:
                   $counts = [ordered]@{ scalePadAssessments = 0; alreadyInCloudRadial = 0; toImport = 0; imported = 0; questions = 0; errors = 0 }
                   $items = New-Object System.Collections.ArrayList
 
-                  $Columns = @('Category', 'Question', 'Order', 'Explanation', 'Type', 'Answer', 'Text Answer', 'Responses', 'Is Flagged', 'Notes', 'Evaluation', 'Remediation Summary', 'Remediation', 'Reference', 'Partner Notes')
-                  # The official blank template (radials.io/blankassessment): sheet "Assessment", these 51
-                  # headers in this order. The workbook is written in exactly this shape so it imports whether
-                  # CloudRadial reads columns by name or by position; columns we don't fill stay empty.
-                  $TemplateColumns = @('Partner Notes', 'Monthly Unit Cost', 'Project Unit Cost', 'Psa Board', 'Psa Item', 'Psa Status', 'Psa Category', 'Psa Sub Type', 'Psa Type', 'Psa Priority', 'Psa Source', 'Psa Estimated Time', 'Email List', 'Teams Webhook', 'Slack Webhook', 'Flow Webhook', 'Json Webhook', 'Script', 'Checklist', 'Category', 'Question', 'Order', 'Explanation', 'Type', 'Answer', 'Text Answer', 'Responses', 'Is Flagged', 'Notes', 'Evaluation', 'Remediation Summary', 'Remediation', 'Reference', 'Monthly Units', 'Monthly Unit Price', 'Project Units', 'Project Unit Price', 'Control Type', 'Likelihood', 'Risk', 'Risk Cost', 'Risk Impact', 'Owner', 'Updated by', 'Update Key', 'Content Update Key', 'Note Compliant', 'Note Partially Compliant', 'Note NA', 'Note Missing', 'Note Not Compliant')
-                  function ConvertTo-TemplateRows { param([object[]]$Rows)
-                      $idx = @{}; for ($i = 0; $i -lt $Columns.Count; $i++) { $idx[$Columns[$i]] = $i }
-                      $out = New-Object System.Collections.ArrayList
-                      foreach ($r in $Rows) {
-                          $row = @($r)
-                          $null = $out.Add(@($TemplateColumns | ForEach-Object { if ($idx.ContainsKey($_)) { $row[$idx[$_]] } else { $null } }))
-                      }
-                      return $out.ToArray()
-                  }
                   $ScoreText = @{ 2 = 'Compliant'; 1 = 'Partially Compliant'; 0 = 'N/A'; -1 = 'Missing answer'; -2 = 'Not compliant' }
                   $Suffix = @{ 2 = ''; 1 = '+'; 0 = '='; -1 = '*'; -2 = '-' }
 
@@ -2923,61 +2909,10 @@ definition:
                       return -1
                   }
                   function Get-Text { param($v) if ($null -eq $v) { return '' }; if ($v -is [string]) { return $v }; $t = Get-P $v 'text' (Get-P $v 'comment' (Get-P $v 'value' '')); return [string]$t }
-                  function New-XlsxBytes {
-                      # Minimal Office Open XML workbook: one sheet, inline strings, header row + data rows.
-                      param([string[]]$Header, [object[]]$Rows)
-                      Add-Type -AssemblyName System.IO.Compression
-                      $esc = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
-                      $colName = { param([int]$n) $s = ''; $n++; while ($n -gt 0) { $m = ($n - 1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n - 1) / 26) }; $s }
-                      $sb = New-Object System.Text.StringBuilder
-                      $null = $sb.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
-                      $all = @(, $Header) + $Rows
-                      for ($r = 0; $r -lt $all.Count; $r++) {
-                          $null = $sb.Append("<row r=""$($r + 1)"">")
-                          $row = @($all[$r])
-                          for ($c = 0; $c -lt $row.Count; $c++) {
-                              $ref = (& $colName $c) + ($r + 1)
-                              $val = $row[$c]
-                              if ($val -is [int] -or $val -is [long] -or $val -is [double]) { $null = $sb.Append("<c r=""$ref""><v>$val</v></c>") }
-                              elseif (-not [string]::IsNullOrEmpty([string]$val)) { $null = $sb.Append("<c r=""$ref"" t=""inlineStr""><is><t xml:space=""preserve"">$(& $esc $val)</t></is></c>") }
-                          }
-                          $null = $sb.Append('</row>')
-                      }
-                      $null = $sb.Append('</sheetData></worksheet>')
-                      $files = [ordered]@{
-                          '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
-                          '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
-                          'xl/workbook.xml'            = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>'
-                          'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
-                          'xl/worksheets/sheet1.xml'   = $sb.ToString()
-                      }
-                      $ms = New-Object System.IO.MemoryStream
-                      $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
-                      foreach ($k in $files.Keys) {
-                          $entry = $zip.CreateEntry($k)
-                          $w = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding($false)))
-                          $w.Write($files[$k]); $w.Dispose()
-                      }
-                      $zip.Dispose()
-                      return , $ms.ToArray()
-                  }
-                  if (-not (Get-Command Send-CrMultipart -ErrorAction SilentlyContinue)) {
-                      function script:Send-CrMultipart {
-                          param([string]$Path, [string]$DataJson, [byte[]]$FileBytes, [string]$FileName)
-                          Add-Type -AssemblyName System.Net.Http
-                          $client = New-Object System.Net.Http.HttpClient
-                          $client.DefaultRequestHeaders.Add('Authorization', $crAuth)
-                          $form = New-Object System.Net.Http.MultipartFormDataContent
-                          $form.Add((New-Object System.Net.Http.StringContent($DataJson, [Text.Encoding]::UTF8, 'application/json')), 'data')
-                          $fc = New-Object System.Net.Http.ByteArrayContent(, $FileBytes)
-                          $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                          $form.Add($fc, 'file', $FileName)
-                          $resp = $client.PostAsync("$crBase$Path", $form).GetAwaiter().GetResult()
-                          $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                          $client.Dispose()
-                          if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode): $text" }
-                          return $text
-                      }
+                  # Answers many questions in one call. Invoke-Cr sends PATCH as a JSON Patch array, so this one calls the API directly.
+                  function Set-CrAnswers { param([int]$AssessmentId, [object[]]$Answers)
+                      $json = [ordered]@{ answers = $Answers } | ConvertTo-Json -Depth 8
+                      return Invoke-WithRetry -What "CloudRadial PATCH /v2/assessment/$AssessmentId/answers" -Call { Invoke-RestMethod -Method Patch -Uri "$crBase/v2/assessment/$AssessmentId/answers?companyId=$companyId" -Headers $crHeaders -ContentType 'application/json' -Body $json }
                   }
 
                   if ((Get-P $ctx 'phases' @()) -notcontains $phase) {
@@ -3033,24 +2968,29 @@ definition:
                               $order = 0
                               foreach ($qn in @(Get-P $cat 'question_list' @())) {
                                   $order += 10
-                                  $responses = @(); $answer = -1
+                                  $options = @(); $answer = -1
                                   foreach ($cr in @(Get-P $qn 'criteria_list' @())) {
                                       $key = [string](Get-P $cr 'label_key' '')
                                       $label = [string](Get-P $cr 'display_label' (Get-P $labels $key $key))
                                       $sc = Get-LabelScore $key $label $overrides
                                       $scoreUse["$label"] = $sc
-                                      $responses += ($label -replace ',', ' ') + $Suffix[$sc]
+                                      if (-not @($options | Where-Object { $_.label -eq $label }).Count) { $options += [ordered]@{ label = $label; value = $sc } }
                                       if ((Get-P $cr 'is_selected' $false) -eq $true) { $answer = $sc }
                                   }
-                                  if ($responses.Count -eq 0) { $responses = @('Yes', 'Partially+', 'Not Applicable=', 'Unanswered*', 'No-') }
+                                  # No criteria: the partner's default answer options. A choice question can't offer the same value twice, so keep the first.
+                                  $seenValues = @{}; $options = @($options | Where-Object { if ($seenValues.ContainsKey([int]$_.value)) { $false } else { $seenValues[[int]$_.value] = $true; $true } })
                                   $tips = [string](Get-P $qn 'remediation_tips' '')
                                   $summary = if ($tips) { ($tips -split '(?<=[.!?])\s')[0] } else { '' }
                                   $refs = @(@(Get-P $qn 'linked_initiatives' @()) | ForEach-Object { Get-P $_ 'initiative_name' } | Where-Object { $_ }) -join '; '
-                                  $null = $rows.Add(@(
-                                          $catTitle, [string](Get-P $qn 'title' ''), $order, [string](Get-P $qn 'description' ''), 'List',
-                                          $answer, $ScoreText[$answer], ($responses -join ','), $(if ($answer -eq -2) { 'Yes' } else { 'No' }),
-                                          (Get-Text (Get-P $qn 'public_comment')), [string](Get-P $qn 'scoring_instructions' ''), $summary, $tips,
-                                          $(if ($refs) { "Linked initiatives: $refs" } else { '' }), (Get-Text (Get-P $qn 'internal_comments'))))
+                                  $explain = [string](Get-P $qn 'description' ''); if ($refs) { $explain = ("$explain Linked initiatives: $refs").Trim() }
+                                  $qk = "scalepad-$spId-$([string](Get-P $qn 'id' "$catNo-$order"))"
+                                  $qb = [ordered]@{
+                                      updateKey = $qk; category = $catTitle; label = [string](Get-P $qn 'title' ''); order = $order; explanation = $explain
+                                      evaluationInfo = [string](Get-P $qn 'scoring_instructions' ''); remediationInfo = $tips; remediationLineItem = $summary
+                                      value = $answer; isFlagged = ($answer -eq -2); publicNotes = (Get-Text (Get-P $qn 'public_comment')); privateNotes = (Get-Text (Get-P $qn 'internal_comments'))
+                                  }
+                                  if ($options.Count) { $qb.answerOptions = $options }
+                                  $null = $rows.Add($qb)
                               }
                           }
                           $counts.questions += $rows.Count
@@ -3060,13 +3000,18 @@ definition:
                           if ($apply -and -not $assessReadFailed) {
                               try {
                                   $desc = "Imported from ScalePad Lifecycle Manager. $([string](Get-P $full 'description' ''))".Trim()
-                                  $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId = $companyId; title = $title; category = 'ScalePad'; description = $desc })
-                                  $aid = Get-P $created 'assessmentId' (Get-P $created 'id')
+                                  $structure = @($rows | ForEach-Object { $b = [ordered]@{}; foreach ($k in $_.Keys) { if ($k -notin @('value', 'isFlagged', 'publicNotes', 'privateNotes')) { $b[$k] = $_[$k] } }; $b['type'] = 80; , $b })
+                                  $created = Invoke-Cr -Method POST -Path '/v2/assessment' -Body ([ordered]@{ companyId = $companyId; title = $title; type = 20; category = 'ScalePad'; description = $desc; visibility = 2; questions = $structure })
+                                  $aid = Get-P (Get-P $created 'data' $created) 'assessmentId' (Get-P $created 'assessmentId')
                                   if (-not $aid) { throw 'CloudRadial did not return an assessmentId.' }
-                                  $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-                                  $data = (@{ name = $title; assessmentId = [int]$aid; type = 0; companyId = $companyId } | ConvertTo-Json -Compress)
-                                  $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName ('scalepad-' + $spId + '.xlsx')
                                   $item.assessmentId = [int]$aid
+                                  $answers = @($rows | ForEach-Object { [ordered]@{ updateKey = $_.updateKey; value = $_.value; isFlagged = $_.isFlagged; publicNotes = $_.publicNotes; privateNotes = $_.privateNotes } })
+                                  $scored = Set-CrAnswers -AssessmentId ([int]$aid) -Answers $answers
+                                  $item.score = Get-P (Get-P (Get-P $scored 'data' $scored) 'scores') 'totalScore'
+                                  # A run is what the portal's Assessments list shows (date run, score and status).
+                                  $runName = "$title - $((Get-Date).ToString('M/d/yy', [Globalization.CultureInfo]::InvariantCulture))"
+                                  $run = Invoke-Cr -Method POST -Path "/v2/assessment/$aid/run" -Body ([ordered]@{ companyId = $companyId; name = $runName })
+                                  $item.runId = [int](Get-P (Get-P $run 'data' $run) 'assessmentId' 0)
                                   $counts.imported++
                               }
                               catch { $counts.errors++; $item.error = $_.Exception.Message; Warn "Assessment '$title' failed: $($_.Exception.Message)" }

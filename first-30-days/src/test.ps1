@@ -106,8 +106,12 @@ $r = Invoke-Step 'node-summary' ([pscustomobject]@{ plan = $planLive; setup = $s
 Check 'summary live: success with a one-line headline' ($r.out.status -eq 'success' -and $r.out.message -eq 'Week one for Contoso Ltd is done: score 87.93 / 267, 2 unused licence(s) worth about $12.00 a month.') "$($r.error) $($r.out.message)"
 Check 'summary live: actions from every stage' (@($r.out.actions).Count -eq 5 -and @($r.out.actions) -contains 'Added Secure Score assessment 179' -and @($r.out.actions) -contains 'Planner card updated') (@($r.out.actions) -join ' | ')
 Check 'summary live: manual steps include the assessment Run click and the card review' (@($r.out.manualSteps) -match 'choose Run' -and @($r.out.manualSteps) -match 'Review the ' -and @($r.out.manualSteps) -contains 'Show the new menu tile to Everyone.') (@($r.out.manualSteps) -join ' | ')
-Check 'summary live: one line per stage' ($r.out.summary -match '- Portal setup: 3 change\(s\)\.' -and $r.out.summary -match '- Security: Microsoft Secure Score 87\.93 / 267, added to the portal as assessment 179' -and $r.out.summary -match '- Licences: 2 paid licences') $r.out.summary
+Check 'summary live: one line per stage' ($r.out.summary -match '- Portal setup: 3 change\(s\)\.' -and $r.out.summary -match '- Security: Microsoft Secure Score 87\.93 / 267, in the portal as assessment 179' -and $r.out.summary -match '- Licences: 2 paid licences') $r.out.summary
 Check 'summary live: one bullet per setup change, the long answer kept out' ($r.out.summary -match '\n    - Created token SupportPhone' -and $r.out.summary -notmatch 'Added 1 user, 1 token' -and $r.out.setupAnswer -match '^Added 1 user') $r.out.summary
+
+$scoreRun = [pscustomobject]@{ status = 'created'; message = 'Refreshed'; assessmentId = 179; runId = 181; assessmentAction = 'updated'; controls = 460; compliant = 25; tenantScore = '87.93 / 267' }
+$r = Invoke-Step 'node-summary' ([pscustomobject]@{ plan = $planLive; setup = $setupOk; score = $scoreRun; card = $cardOk })
+Check 'summary live with a run: names the run, no Run click asked for' ($r.out.status -eq 'success' -and $r.out.summary -like "*assessment 179 (25 of 460 controls compliant), with today's run 181.*" -and -not (@($r.out.manualSteps) -match 'choose Run')) "$($r.out.summary) / $(@($r.out.manualSteps) -join ' | ')"
 
 $r = Invoke-Step 'node-summary' ([pscustomobject]@{
         plan = ($planLive | ConvertTo-Json); setup = ($setupOk | ConvertTo-Json -Depth 5); score = ($scoreOk | ConvertTo-Json); card = ($cardOk | ConvertTo-Json) })
@@ -123,7 +127,7 @@ Check 'summary preview: no Run click asked for' (-not (@($r.out.manualSteps) -ma
 
 $r = Invoke-Step 'node-summary' ([pscustomobject]@{ plan = $planLive; setup = [pscustomobject]@{ companyId = '9'; answer = 'x'; actions = @(); skipped = @('domain: already there'); manualSteps = @() }; score = [pscustomobject]@{ status = 'skipped'; message = 'exists'; tenantScore = '87.93 / 267' }; card = $null })
 Check 'summary: missing card result and a company mismatch are flagged' ($r.out.status -eq 'incomplete' -and @($r.out.warnings) -match 'company 9' -and @($r.out.warnings) -match 'licence card' -and $r.out.message -match '2 thing\(s\) need a look') "$($r.error) $(@($r.out.warnings) -join ' | ')"
-Check 'summary: skipped assessment explained' ($r.out.summary -match "already exists, so it wasn't added again" -and $r.out.summary -match '1 already there') $r.out.summary
+Check 'summary: skipped assessment explained' ($r.out.summary -match "already exists, so nothing was added again" -and $r.out.summary -match '1 already there') $r.out.summary
 
 $r = Invoke-Step 'node-summary' ([pscustomobject]@{ plan = $null; setup = $null; score = $null; card = $null })
 Check 'summary: nothing at all still finishes' ($r.out.status -eq 'incomplete' -and -not $r.error -and $r.out.message -match 'the client') "$($r.error)"

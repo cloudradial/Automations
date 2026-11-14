@@ -19,14 +19,14 @@ These links point at the `main` branch, so they always open the current version.
 ## How it works
 
 ```
-Start -> Review Microsoft 365 security -> Create CloudRadial assessment -> Create assessment run (in development) -> End
+Start -> Review Microsoft 365 security -> Create CloudRadial assessment -> Create assessment run -> End
 ```
 
 1. **Review Microsoft 365 security** finds the CloudRadial company by ID or name and reads the tenant from Microsoft Graph. It scores **11 checks with fixed rules**, so it uses no AI: it runs the same on any AI provider and has no turn limit.
 2. **Create CloudRadial assessment** keeps one assessment per company, named **Microsoft 365 Security Assessment**, under **Compliance > Assessments**:
    - The first run creates it.
    - Every later run updates its answers in place.
-3. **Create assessment run (in development)** is meant to add the dated run (for example *Microsoft 365 Security Assessment - 10/6/26*). The public API can't create a run yet (see [Creating the run](#creating-the-run)), so for now **create the run from the assessment in the portal** after the workflow runs. The run copies the assessment's current answers.
+3. **Create assessment run** adds the dated run (for example *Microsoft 365 Security Assessment - 10/6/26*) with `POST /v2/assessment/{id}/run`. The run copies the answers and the assessment's `updateKey`, so the portal lists it under the assessment with its score. A run with the same title is never created twice.
 
 Every question carries the evidence (Notes), how it was evaluated, a remediation summary and steps, a Microsoft Learn reference and risk-matrix values. Questions that aren't compliant are flagged.
 
@@ -77,30 +77,29 @@ If Graph can't read an area (a missing permission or licence), its questions are
 |---|---|---|
 | `companyId` or `companyName` | required | The CloudRadial company. A name can be exact or a unique partial match. |
 | `tenantId` | `M365-TenantID` | The Entra tenant to review. |
-| `mode` | `apply` | `plan` scores the checks and builds the workbook but writes nothing. |
+| `mode` | `apply` | `plan` scores the checks but writes nothing. |
 | `assessmentTitle` | `Microsoft 365 Security Assessment` | The assessment's name. Runs are titled `<name> - M/d/yy`. |
 | `runTitle` | `<name> - M/d/yy` | The run's title (step 3). |
 | `assessmentType` | both | `20` updates only the assessment; step 3 is skipped. |
-| `portalUrl` | `CloudRadial-PortalUrl` secret | Step 3 only (in development): the partner portal, for example `https://contoso.us.cloudradial.com`. Leave it out today. |
 
 ## Outputs
 
 - **Review Microsoft 365 security:** every question with its answer and evidence, the counts, and any area Graph couldn't read.
 - **Create CloudRadial assessment:** whether the assessment was `created` or `refreshed`, and its scores.
-- **Create assessment run:** `skipped` with the reminder to create the run in the portal, or with `portalUrl`, `unsupported` (HTTP 401, nothing created).
+- **Create assessment run:** `success` with the run's id, score and whether it's linked to the assessment, or `skipped` when today's run already exists.
 
 ## How the assessment is written
 
-The v2 API has no create or update endpoint for assessments (`POST /v2/assessment` returns 404). Everything goes through **`POST /v2/assessment/upload`** with an Excel workbook in the import format: sheet `Assessment`, the 51 columns of the [blank template](https://radials.io/blankassessment). The workbook is built in memory. These behaviours were verified live:
+The workflow uses the JSON assessment API (added to the CloudRadial API on 2026-11-13) through [`Sync-CrAssessment`](https://github.com/cloudradial/Automations/blob/main/_shared/cloudradial.ps1):
 
-- **`type` codes** (not documented): `10` template, `20` assessment, `30` run. The workflow uploads type `20`, the kind the Assessments list shows. Type `0` creates a row the portal never shows.
-- **Create:** `assessmentId: 0` creates the assessment, named by `name`. The upload returns no body, so the workflow finds the new assessment by title and type.
-- **Update:** an upload with the existing `assessmentId` replaces the answers in place. It's the same row and `updateKey`, with no duplicate questions.
-- **Question matching** uses the workbook's **Update Key** column. Each check has a permanent id (`-Id` in `src/1-review.ps1`), and its Update Key is derived from it, so it's the same on every run. A reworded check still updates its question. An assessment first uploaded without keys also switches to keys cleanly.
+- **Create:** `POST /v2/assessment` with `type: 20` (the kind the Assessments list shows), client visible, with every question.
+- **Refresh:** a later run updates the same assessment with `PUT /v2/assessment/{id}/questions`. Questions match on **updateKey**: each check has a permanent id (`-Id` in `src/1-review.ps1`) and its key is derived from it, so a reworded check updates the same question. Assessments first made by the older workbook upload used the same keys, so they're refreshed in place too.
+- **Answers:** one `PATCH /v2/assessment/{id}/answers` sets every answer and the notes, and re-scores once.
+- **Run:** `POST /v2/assessment/{id}/run` creates the dated type `30` copy with the same `updateKey`, which links it to the assessment, as the portal's Run button does. Verified live on 2026-11-13.
 
 ## Creating the run
 
-A run is a copy of its assessment with type `30`, the date in the title and the **same `updateKey`**, which is what links it to the assessment. The portal creates one with `POST /api/assessments/run`, an internal portal API that accepts only a signed-in user (an API key gets HTTP 401). The v2 upload ignores `updateKey`, so an uploaded type 30 row isn't linked and never appears. Step 3 stays **in development** until CloudRadial offers a supported way to create a run. Until then it ends without creating anything, and you create the run in the portal.
+A run is a copy of its assessment with type `30`, the date in the title and the **same `updateKey`**, which is what links it to the assessment. Step 3 creates it with `POST /v2/assessment/{id}/run`, the same assessment service as the portal's Run button, after step 2 has refreshed the answers, so the run carries this review. It skips a run whose title already exists, so a rerun the same day changes nothing; send `runTitle` for a second run that day.
 
 ## Troubleshooting
 
@@ -109,8 +108,8 @@ A run is a copy of its assessment with type `30`, the date in the title and the 
 | "Please add these secrets..." | Add the named secrets to the runner Key Vault. |
 | "matches N companies" | Send `companyId` instead of a partial name. |
 | Questions show "couldn't be checked" | Read Partner Notes. Grant the named Graph permission, or the tenant lacks P1 or P2. |
-| The run shows old answers | A run copies the assessment's answers when it's created. Run the workflow first, then create the run. |
-| Step 3 `unsupported` | Expected today. Create the run in the portal. |
+| The run shows old answers | A run copies the assessment's answers when it's created. A run made by hand in the portal before the workflow ran keeps the older answers. |
+| Step 3 `skipped`, run already exists | Today's run was made earlier. Send `runTitle` to add another. |
 
 ## Changing the workflow
 
@@ -120,8 +119,8 @@ The steps in `microsoft-security-assessment.yml` are built from [`src/`](src/):
 |---|---|
 | `1-review.ps1` | Review Microsoft 365 security: the Graph reads and the 11 checks |
 | `2-assessment.ps1` | Create CloudRadial assessment |
-| `3-run.ps1` | Create assessment run (in development) |
-| `common.ps1` | The workbook builder and upload helpers. The build inlines it into steps 2 and 3. |
+| `3-run.ps1` | Create assessment run |
+| `common.ps1` | Question mapping and assessment lookups, plus [`_shared/cloudradial.ps1`](https://github.com/cloudradial/Automations/blob/main/_shared/cloudradial.ps1). The build inlines both into steps 2 and 3. |
 
 From `src/`:
 

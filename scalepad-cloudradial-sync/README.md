@@ -2,15 +2,15 @@
 
 Moves every matched client's devices, other hardware, software, assessments, roadmap, budget, SaaS, insights and QBR documents from ScalePad into CloudRadial, and is safe to re-run.
 
-**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** AAI-00030 | **Type:** Workflow | **Version:** 1.0.0
+**Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** AAI-00030 | **Type:** Workflow | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `scalepad-cloudradial-sync.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.0.0).
+Each version is published as a release, with `scalepad-cloudradial-sync.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `scalepad-cloudradial-sync.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.0.0) |
+| Download `scalepad-cloudradial-sync.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.1.0) |
 | View the current source | [`scalepad-cloudradial-sync.yml`](https://github.com/cloudradial/Automations/blob/main/scalepad-cloudradial-sync/scalepad-cloudradial-sync.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync/src) |
 | All files in this automation | [scalepad-cloudradial-sync](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync) |
@@ -36,7 +36,7 @@ A deterministic **workflow** that moves ScalePad Lifecycle Manager data into Clo
 | `assets` | Other hardware: types `NETWORK`, `MOBILE`, `IMAGING`, plus workstations, servers and VMs with no serial number | One flexible asset type per kind of device (Infrastructure): Network Devices, Mobile Devices, Printers & Imaging, Storage Devices, Power Devices, Workstations (No Serial), Servers (No Serial), Virtual Machines (No Serial) or Other Hardware. Each type is created with its fields if missing: name, type, manufacturer, model, serial, warranty and purchase dates, location, assigned user and the ScalePad id. Matched on the ScalePad id, so re-runs update the row. Rows an earlier version wrote to the single **ScalePad Assets** type are moved to their device type; the report says when the old type can be deleted. |
 | `saas` | SaaS subscriptions (Microsoft 365, Google Workspace, ...) | CloudRadial's software records always belong to a device and its API has no SaaS or licence route, so each subscription becomes a row of a flexible asset type named **SaaS**: product, vendor, SKU, category, status, licences and assigned seats, term start, renewal date, auto-renew, billing, provider, tenant domain and the ScalePad id (the match key, so re-runs update). |
 | `software` | Installed software per device | One endpoint application per product per device (name, publisher, version), tagged *Added by ScalePad to CloudRadial Sync* in its comments. Devices that already have software in CloudRadial (usually from the RMM, which keeps its own list current) are left alone; otherwise a product is skipped when the device already has one with the same name, ignoring publisher and version. |
-| `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, imported from an `.xlsx` built in memory in the layout from *Importing Assessments* (support KB 360052746791). Answers are scored +2 / +1 / 0 / −1 / −2. |
+| `assessments` | Completed assessments, full question tree | A CloudRadial assessment per ScalePad assessment, created from JSON with ScalePad's own answer options, answered, and run once so the portal lists it with its score. Answers are scored +2 / +1 / 0 / −1 / −2. |
 | `roadmap` | Initiatives (with budget and fiscal quarter) and contracts | Planner cards `ScalePad Initiative - <name>` / `ScalePad Contract - <name>`, updated if they exist. One-time budget → project price, recurring → monthly price, status and priority mapped, quarter placed on the roadmap. |
 | `insights` | Lifecycle Manager insights (High-risk, Warranty coverage, Hardware and Software modernization, Windows 11, Backup, Security, custom) | Each insight with affected assets becomes a **Proposed** Planner card `ScalePad Insight - <title>`: priority from the risk level, description, affected count, 30-day trend and, for hardware insights, the affected devices (up to 25). Re-runs refresh the text only, keeping any status or priority you set. Every insight, including clear ones, is listed in the report. |
 | `archive` | Deliverable PDFs | The company's **ScalePad QBR History** report archive (created if missing), uploaded through the archive API. The archive is found by name (or created), and each PDF is uploaded to it through the archive API; a PDF that fails is reported as an error and retried on the next run. |
@@ -133,7 +133,6 @@ All optional. With none, every name-matched company is migrated in apply mode.
   - A portal that answers the v2 routes with 404 or 405 gets the legacy `/api/beta/archive` routes for the rest of the step.
   - If a create reply carries no id, the folder is looked up again by name before uploading. A first live run uploaded to archive 0 and failed with "Sequence contains no elements".
   - The v2 upload was checked live on 2026-11-13: one PDF uploaded to a test folder on a demo portal became one item with the run's subject and the PDF attached. `test-upload.ps1` checks the request it sends.
-- **Assessment import `type`.** The upload's `data` part sends `type: 0`. If the import lands as a template instead of an assessment, change it in the assessments step.
 - **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).
 - **Devices created from ScalePad** have no RMM agent until one is deployed, they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.

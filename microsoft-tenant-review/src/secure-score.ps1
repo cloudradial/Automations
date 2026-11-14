@@ -1,9 +1,11 @@
 # =====================================================================
-#  Secure Score -> CloudRadial Assessment (deterministic, in-memory xlsx)
+#  Secure Score -> CloudRadial Assessment (deterministic, JSON assessment API)
 #  Run input: {"companyId":123,"tenantId":"<client Graph tenant GUID>","assessmentTitle":"Microsoft Secure Score","mode":"apply"}
 #    companyId  - CloudRadial company the assessment is created under (required)
 #    tenantId   - the CLIENT's Entra tenant id to pull Secure Score from (required)
 #    mode       - "apply" (default) writes; "plan" previews only
+#  Keeps one assessment per client ("<companyName> Secure Score Assessment"), one question per control keyed on
+#  the control id, refreshed in place on every run, and adds a dated run the portal lists.
 #  Secrets (runner Key Vault): CloudRadial-BaseUrl / -PublicKey / -PrivateKey,
 #    and M365-ClientID / M365-ClientSecret (an Entra app with
 #    SecurityEvents.Read.All application permission, consented in the client tenant).
@@ -39,86 +41,10 @@ if (@($missing).Count -gt 0) { $m = "Add these runner Key Vault secret(s) and re
 $crBase = ([string]$crBaseRaw).TrimEnd('/')
 $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$pub`:$prv"))
 
-# ---- CloudRadial helpers ----
-function Invoke-Cr {
-    param([string]$Method,[string]$Path,[object]$Body)
-    $u = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
-    $h = @{ Authorization = $crAuth; Accept = 'application/json' }
-    $a = @{ Uri = $u; Method = $Method; Headers = $h; ContentType = 'application/json' }
-    if ($null -ne $Body) { $a.Body = ($Body | ConvertTo-Json -Depth 10) }
-    Invoke-RestMethod @a
-}
-function Get-CrAll {
-    param([string]$Path)
-    $all = @(); $skip = 0
-    for ($p = 0; $p -lt 500; $p++) {
-        $sep = if ($Path -match '\?') { '&' } else { '?' }
-        $r = Invoke-Cr -Method GET -Path "${Path}${sep}`$top=100&`$skip=$skip"
-        $rows = if ($r.PSObject.Properties['value']) { @($r.value) } elseif ($r -is [System.Array]) { @($r) } else { @() }
-        $all += $rows
-        if (@($rows).Count -lt 100) { break }
-        $skip += 100
-    }
-    return $all
-}
-function Send-CrMultipart {
-    param([string]$Path,[string]$DataJson,[byte[]]$FileBytes,[string]$FileName)
-    Add-Type -AssemblyName System.Net.Http
-    $client = New-Object System.Net.Http.HttpClient
-    $client.DefaultRequestHeaders.Add('Authorization', $crAuth)
-    $form = New-Object System.Net.Http.MultipartFormDataContent
-    $form.Add((New-Object System.Net.Http.StringContent($DataJson, [Text.Encoding]::UTF8, 'application/json')), 'data')
-    $fc = New-Object System.Net.Http.ByteArrayContent(, $FileBytes)
-    $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    $form.Add($fc, 'file', $FileName)
-    $resp = $client.PostAsync("$crBase$Path", $form).GetAwaiter().GetResult()
-    $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-    $client.Dispose()
-    if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode): $text" }
-    return $text
-}
-
-# ---- assessment template (51-col) + a 15-col working subset ----
-$Columns = @('Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Partner Notes')
-$TemplateColumns = @('Partner Notes','Monthly Unit Cost','Project Unit Cost','Psa Board','Psa Item','Psa Status','Psa Category','Psa Sub Type','Psa Type','Psa Priority','Psa Source','Psa Estimated Time','Email List','Teams Webhook','Slack Webhook','Flow Webhook','Json Webhook','Script','Checklist','Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Monthly Units','Monthly Unit Price','Project Units','Project Unit Price','Control Type','Likelihood','Risk','Risk Cost','Risk Impact','Owner','Updated by','Update Key','Content Update Key','Note Compliant','Note Partially Compliant','Note NA','Note Missing','Note Not Compliant')
-function ConvertTo-TemplateRows { param([object[]]$Rows)
-    $idx = @{}; for ($i = 0; $i -lt $Columns.Count; $i++) { $idx[$Columns[$i]] = $i }
-    $out = New-Object System.Collections.ArrayList
-    foreach ($r in $Rows) { $row = @($r); $null = $out.Add(@($TemplateColumns | ForEach-Object { if ($idx.ContainsKey($_)) { $row[$idx[$_]] } else { $null } })) }
-    return $out.ToArray()
-}
-function New-XlsxBytes {
-    param([string[]]$Header,[object[]]$Rows)
-    Add-Type -AssemblyName System.IO.Compression
-    $esc = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
-    $colName = { param([int]$n) $s=''; $n++; while ($n -gt 0) { $m = ($n-1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n-1)/26) }; $s }
-    $sb = New-Object System.Text.StringBuilder
-    $null = $sb.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
-    $all = @(, $Header) + $Rows
-    for ($r = 0; $r -lt $all.Count; $r++) {
-        $null = $sb.Append("<row r=""$($r+1)"">")
-        $row = @($all[$r])
-        for ($c = 0; $c -lt $row.Count; $c++) {
-            $ref = (& $colName $c) + ($r+1); $val = $row[$c]
-            if ($val -is [int] -or $val -is [long] -or $val -is [double]) { $null = $sb.Append("<c r=""$ref""><v>$val</v></c>") }
-            elseif (-not [string]::IsNullOrEmpty([string]$val)) { $null = $sb.Append("<c r=""$ref"" t=""inlineStr""><is><t xml:space=""preserve"">$(& $esc $val)</t></is></c>") }
-        }
-        $null = $sb.Append('</row>')
-    }
-    $null = $sb.Append('</sheetData></worksheet>')
-    $files = [ordered]@{
-        '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
-        '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
-        'xl/workbook.xml'            = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>'
-        'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
-        'xl/worksheets/sheet1.xml'   = $sb.ToString()
-    }
-    $ms = New-Object System.IO.MemoryStream
-    $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
-    foreach ($k in $files.Keys) { $entry = $zip.CreateEntry($k); $w = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding($false))); $w.Write($files[$k]); $w.Dispose() }
-    $zip.Dispose()
-    return , $ms.ToArray()
-}
+# ---- CloudRadial API (assessments from JSON, no workbook upload) ----
+# @shared:cloudradial.ps1
+$null = Connect-Cr
+function Invoke-Cr { param([string]$Method, [string]$Path, [object]$Body) Invoke-CrApi -Path $Path -Method $Method -Body $Body }
 
 # ---- Microsoft Graph: token + Secure Score ----
 $tokUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
@@ -169,13 +95,14 @@ function Get-ShortText { param([string]$Text, [int]$Max = 240)
     $sp = $cut.LastIndexOf(' '); if ($sp -gt 0) { $cut = $cut.Substring(0, $sp) }
     return ($cut.TrimEnd(',', ';', ':', ' ') + '…')
 }
-# ---- build the 15-column assessment rows ----
+# ---- one question per control, keyed on the control id so a rerun updates the same question ----
 $catOrder = @{ 'Identity'=1; 'Device'=2; 'Apps'=3; 'Data'=4; 'Infrastructure'=5 }
 $sorted = $active | Sort-Object @(
     @{ Expression = { $k=[string]$_.controlCategory; if ($catOrder.ContainsKey($k)) { $catOrder[$k] } else { 99 } } },
     @{ Expression = { $_.rank } }
 )
-$rows = New-Object System.Collections.ArrayList
+$today = Get-Date -Format 'yyyy-MM-dd'
+$questions = New-Object System.Collections.ArrayList
 $order = 0; $compliantCount = 0
 foreach ($c in $sorted) {
     $order += 10
@@ -185,20 +112,18 @@ foreach ($c in $sorted) {
     $max = if ($c.maxScore) { [double]$c.maxScore } else { 0 }
     $isCompliant = ($cur -ge $max) -and ($max -gt 0)
     if ($isCompliant) { $compliantCount++ }
-    $answer = if ($isCompliant) { 2 } else { -2 }
-    $txt = if ($isCompliant) { 'Compliant' } else { 'Not compliant' }
-    $flag = if ($isCompliant) { 'No' } else { 'Yes' }
     $pct = if ($tenantMax -gt 0) { [math]::Round(($max / $tenantMax) * 100, 2) } else { 0 }
     $rem = ConvertTo-PlainText ([string]$c.remediation)
-    $remSum = Get-ShortText $rem 240
-    $null = $rows.Add(@(
-        $cat, ([System.Net.WebUtility]::HtmlDecode([string]$c.title)).Trim(), $order,
-        "Service: $($c.service) | Score impact: $pct% | Points: $cur / $max", 'List',
-        $answer, $txt, 'Compliant,Partially Compliant+,N/A=,Missing*,Not Compliant-', $flag, '',
-        'Review this control in the Microsoft 365 Defender portal under Secure Score.',
-        $remSum, $rem, "Microsoft Secure Score - $($c.service)", ''
-    ))
+    $null = $questions.Add([ordered]@{
+        updateKey = [string]$c.id; category = $cat; label = ([System.Net.WebUtility]::HtmlDecode([string]$c.title)).Trim(); order = $order
+        explanation = "Service: $($c.service) | Score impact: $pct% | Points: $cur / $max"
+        evaluationInfo = 'Review this control in the Microsoft 365 Defender portal under Secure Score.'
+        remediationInfo = $rem; remediationLineItem = (Get-ShortText $rem 240)
+        value = $(if ($isCompliant) { 2 } else { -2 }); isFlagged = (-not $isCompliant)
+        privateNotes = "Microsoft Secure Score - $($c.service): $cur of $max points on $today."
+    })
 }
+$textSample = @($questions | Where-Object { $_.remediationInfo } | Select-Object -First 3 | ForEach-Object { [ordered]@{ title = $_.label; short = $_.remediationLineItem; full = $_.remediationInfo.Substring(0, [math]::Min(600, $_.remediationInfo.Length)) } })
 
 $catCards = @()
 if ($mode -eq 'apply') {
@@ -229,47 +154,34 @@ if ($mode -eq 'apply') {
         } catch { $catCards += "Could not save $($subject): $($_.Exception.Message)" }
     }
 }
-$coNameT = [string](Get-Prop $in 'companyName'); if (-not $coNameT) { $coNameT = 'Client' }
-$titleFinal = "$coNameT Secure Score Assessment ($((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC)"
-$summary = "$($rows.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
+$coName = [string](Get-Prop $in 'companyName'); if (-not $coName) { $coName = 'Client' }
+$titleFinal = "$coName Secure Score Assessment"
+$summary = "$($questions.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
+$facts = [ordered]@{ controls = $questions.Count; compliant = $compliantCount; tenantScore = "$tenantCur / $tenantMax" }
+function Send-ReviewOut { param($o) $r = [ordered]@{ plannerCards = $catCards; textSample = $textSample }; foreach ($k in $o.Keys) { $r[$k] = $o[$k] }; foreach ($k in $facts.Keys) { $r[$k] = $facts[$k] }; Set-NodeOutput $r }
 
-# ---- duplicate check ----
-$existing = @(); $dupe = $false
-try { $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { }
-foreach ($a in $existing) { if (([string](Get-Prop $a 'title')) -eq $titleFinal) { $dupe = $true } }
-
-if ($dupe) {
-    Set-NodeOutput ([ordered]@{ plannerCards = $catCards; textSample = @($rows | Where-Object { [string]$_[12] } | Select-Object -First 3 | ForEach-Object { [ordered]@{ title = [string]$_[1]; short = [string]$_[11]; full = ([string]$_[12]).Substring(0, [math]::Min(600, ([string]$_[12]).Length)) } }); status='skipped'; message="An assessment titled '$titleFinal' already exists for companyId $companyId - not re-created."; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+if ($mode -eq 'plan') {
+    $p = Sync-CrAssessment -CompanyId ([int]$companyId) -Title $titleFinal -Questions $questions.ToArray() -Preview
+    $what = if ($p.action -eq 'would-update') { "refresh '$titleFinal' (assessmentId $($p.assessmentId)) in place" } else { "create '$titleFinal'" }
+    Send-ReviewOut ([ordered]@{ status = 'plan'; message = "DRY RUN - would $what with $($questions.Count) questions and add today's run. $summary"; assessmentId = [int]$p.assessmentId })
+    return
 }
-elseif ($mode -eq 'plan') {
-    Set-NodeOutput ([ordered]@{ plannerCards = $catCards; textSample = @($rows | Where-Object { [string]$_[12] } | Select-Object -First 3 | ForEach-Object { [ordered]@{ title = [string]$_[1]; short = [string]$_[11]; full = ([string]$_[12]).Substring(0, [math]::Min(600, ([string]$_[12]).Length)) } }); status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
-}
-else {
-    # The v2 API has no create endpoint (POST /v2/assessment returns 404). Like the portal's Import Assessment
-    # dialog, the upload creates the assessment when assessmentId is 0 (type 20 = an assessment the portal lists)
-    # and returns 204 with no body, so the new row is found afterwards by title and type.
-    $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-    $coName = [string](Get-Prop $in 'companyName'); if (-not $coName) { $coName = 'this client' }
 $pctScore = if ([double]$tenantMax -gt 0) { [math]::Round(100 * [double]$tenantCur / [double]$tenantMax, 0) } else { 0 }
-$assessDescription = "Microsoft Secure Score review for $coName, imported $(Get-Date -Format 'd MMMM yyyy') from Microsoft 365. Tenant score: $tenantCur of $tenantMax points ($pctScore%), with $compliantCount of $($rows.Count) security controls fully in place. Each question is one Microsoft Secure Score control, grouped by Identity, Device, Apps and Data. Compliant means Microsoft reports the control as fully implemented; Not compliant means points are still available. The score impact on each question shows how much fixing it raises the overall score."
+$assessDescription = "Microsoft Secure Score review for $coName from Microsoft 365, refreshed by the Microsoft Tenant Review. Tenant score on $(Get-Date -Format 'd MMMM yyyy'): $tenantCur of $tenantMax points ($pctScore%), with $compliantCount of $($questions.Count) security controls fully in place. Each question is one Microsoft Secure Score control, grouped by Identity, Device, Apps and Data. Compliant means Microsoft reports the control as fully implemented; Not compliant means points are still available. The score impact on each question shows how much fixing it raises the overall score."
 $assessRecommendations = "Start with the highest-impact gaps in Identity (multi-factor authentication, admin account protection and legacy sign-in blocking), then work through Device, Apps and Data. The Microsoft 365 security cards on the Planner list the top fixes for each category. Run the Microsoft Tenant Review again after changes to update the score."
-$data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 20; companyId = [int]$companyId; category = 'Microsoft 365 Security'; description = $assessDescription; recommendations = $assessRecommendations } | ConvertTo-Json -Compress)
-    # A large upload (hundreds of controls) can outlast CloudRadial's gateway, which answers 502/503/504 while
-    # the import still finishes. So a 5xx or timeout only means "look for it longer"; other errors stop the run.
-    $uploadErr = $null
-    try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
-    catch { $uploadErr = $_.Exception.Message; if ($uploadErr -notmatch 'HTTP 5\d\d|time(d)? ?out|canceled') { throw } }
-    $waits = if ($uploadErr) { @(0, 15, 30, 60, 90) } else { @(0, 3, 10) }
-    $aid = $null
-    foreach ($wait in $waits) {
-        if ($wait) { Start-Sleep -Seconds $wait }
-        $seen = @(); try { $seen = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { continue }
-        $hit = @($seen | Where-Object { ([string](Get-Prop $_ 'title')) -eq $titleFinal -and [int](Get-Prop $_ 'type') -eq 20 } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending) | Select-Object -First 1
-        if ($hit) { $aid = Get-Prop $hit 'assessmentId'; break }
-    }
-    if (-not $aid) {
-        $m = $(if ($uploadErr) { "The upload didn't answer in time ($uploadErr) and no assessment titled '$titleFinal' appeared for companyId $companyId within about 3 minutes. It may still appear; check the company's assessments before running again (a rerun skips it once it exists)." } else { "CloudRadial accepted the upload but no assessment titled '$titleFinal' appeared for companyId $companyId. Check the company's assessments before running again." })
-        Set-NodeOutput @{ plannerCards = $catCards; status = 'error'; message = $m }; throw $m
-    }
-    Set-NodeOutput ([ordered]@{ plannerCards = $catCards; status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=[int]$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+try {
+    # The portal names a run "<assessment> - M/d/yy". A second review on the same day gets " (2)", " (3)" and so on,
+    # so every review keeps its own snapshot.
+    $runBase = "$titleFinal - $((Get-Date).ToString('M/d/yy', [Globalization.CultureInfo]::InvariantCulture))"
+    $taken = @(@(Get-CrAll "/v2/odata/assessment?`$filter=$([uri]::EscapeDataString("companyId eq $companyId"))") | Where-Object { -not (Get-Prop $_ 'isDeleted') } | ForEach-Object { ([string](Get-Prop $_ 'title')).Trim().ToLowerInvariant() })
+    $runName = $runBase; $n = 1
+    while ($taken -contains $runName.ToLowerInvariant()) { $n++; $runName = "$runBase ($n)" }
+    $r = Sync-CrAssessment -CompanyId ([int]$companyId) -Title $titleFinal -Questions $questions.ToArray() -Category 'Microsoft 365 Security' -Description $assessDescription -Recommendations $assessRecommendations -Visibility 2 -RemoveMissing -RunName $runName
 }
+catch {
+    $m = "Couldn't write the Secure Score assessment for companyId ${companyId}: $($_.Exception.Message)"
+    Send-ReviewOut ([ordered]@{ status = 'error'; message = $m }); throw $m
+}
+$did = if ($r.action -eq 'created') { 'Created' } else { 'Refreshed' }
+$sc = if ($r.scores) { " Assessment score $(Get-Prop $r.scores 'totalScore') of $(Get-Prop $r.scores 'maxScore')." } else { '' }
+Send-ReviewOut ([ordered]@{ status = 'created'; message = "$did assessment '$titleFinal' (assessmentId $($r.assessmentId)) with $($questions.Count) questions and added the run '$runName' (assessmentId $($r.runId)). $summary$sc"; assessmentId = [int]$r.assessmentId; runId = [int]$r.runId; assessmentAction = $r.action; runName = $runName })

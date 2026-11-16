@@ -137,13 +137,17 @@ It accepts a flat JSON body, or one wrapped in `{trigger: ...}`.
 
 > The step logic lives in `src/`: edit `read.ps1`, `create.ps1` or the `judge.*.txt` prompts, then run `node src/build.js` (it pastes `_shared/psa.ps1` and `_shared/cloudradial.ps1`) and `pwsh -NoProfile -File src/test.ps1`. Never edit the `.yml` by hand.
 
+### Proven live
+
+- **A live migration (run 028dcce8, 2026-10-16).** It read three Halo templates and created three forms with 17, 3 and 3 questions. Every option list, hint and the description flag were saved, and the PSA values and `halo-template:<id>` tags were set.
+- **The CloudRadial create call:** `POST /v2/catalog` with inline questions and tags, followed by one update per question (the create alone keeps only each question's label, type and order).
+- **Tickets from the migrated forms.** Halo's own names on a form (`psaValues: "halo"`) created no Halo ticket (2026-10-19), so tokens are now the default (#141). With tokens, a client submitted the migrated "New Starter Request" form on 2026-11-03 and [Create a Halo Ticket from a Template](https://github.com/cloudradial/Automations/tree/main/create-halo-ticket-from-template) created Halo ticket 14956 from the matching template.
+
 ### Not yet proven live
 
-- **The Halo API calls** are the ones the HaloAPI PowerShell module uses (`/Template`, `/TicketType`, `/Field`, `/Priority`, `/Status`). **The property names are marked `Unverified` in `src/read.ps1`:**
+- **Halo property names beyond the templates tested.** The reads use the calls the HaloAPI PowerShell module uses (`/Template`, `/TicketType`, `/Field`, `/Priority`, `/Status`). They worked for the three templates in run 028dcce8, but `src/read.ps1` still marks these as `Unverified` for other Halo setups:
   - the template's ticket type, priority, category, team, status and group
-  - the ticket type's field list
+  - the ticket type's field list and field groups
   - the field type numbers
   - the inactive flag
-- **The CloudRadial create call** was proven on a test form: `POST /v2/catalog` with inline questions and tags.
-- **Halo's names on the form (`psaValues: "halo"`):** a test submission with them created no Halo ticket (2026-10-19), which is why tokens are the default. Check step 3 of Import & test before moving everything.
-- **The AutomationAI route end to end:** Create a Halo Ticket from a Template created a Halo ticket with every custom field filled from a manual run (ticket 14743). A real form submission through the Action isn't proven yet, nor is whether CloudRadial respects Send to PSA off set through the API.
+- **Send to PSA off, set through the API.** Whether CloudRadial always respects it, so a submission raises only the workflow's ticket, isn't confirmed yet.

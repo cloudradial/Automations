@@ -41,7 +41,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/con
 
 ## Technical details
 
-**Formerly:** Tool: ConnectWise Board Types Setup | **Marketplace ID:** Not yet listed | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
+**Formerly:** Tool: ConnectWise Board Types Setup | **Marketplace ID:** CRA-00009 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
 
 ## Files
 

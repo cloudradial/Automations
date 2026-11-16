@@ -8,7 +8,7 @@ Every week, finds the problems that keep coming back for each client and propose
 
 ## What happens behind the scenes
 
-- **Once a week, an AI agent reads each client's last 30 days of tickets** and groups the ones about the same problem, for example five "Outlook keeps asking for my password" tickets from one client.
+- **Once a week, an AI agent reads each client's last 14 days of tickets** and groups the ones about the same problem, for example five "Outlook keeps asking for my password" tickets from one client.
 - **It picks the three biggest groups** that have at least three tickets and aren't already being tracked.
 - **For each one, it proposes a problem ticket** for that client, listing the tickets, what they have in common, what to check first and a draft knowledge base article.
 - **Nothing is created until someone approves it.** Approve, deny or ask it a question from the Pulsar. It remembers what you denied and doesn't suggest it again for 30 days.
@@ -29,7 +29,7 @@ ConnectWise PSA, Autotask and HaloPSA.
 
 ## Set it up
 
-**1. Import the agent.** Download the [files](https://github.com/cloudradial/Automations/releases/tag/recurring-issue-finder/v1.0.0). On **Agents > Custom > Import**, upload the agent for your PSA, for example **Recurring Issue Finder (ConnectWise PSA)**.
+**1. Import the agent.** Download the [files](https://github.com/cloudradial/Automations/releases/tag/recurring-issue-finder/v1.0.1). On **Agents > Custom > Import**, upload the agent for your PSA, for example **Recurring Issue Finder (ConnectWise PSA)**.
 
 **2. Add your rules.** Edit the two documents in the [knowledge folder](https://github.com/cloudradial/Automations/tree/main/recurring-issue-finder/knowledge) to match how your team works: **Recurring Issue Rules** (how far back, what counts as a repeat, clients to skip) and **Problem Ticket Standards** (where problem tickets go and how they're written). Keep the headings. On **Knowledge**, create a folder named **Recurring Issue Finder** and upload both. Without them, it uses the built-in defaults: 30 days, three tickets, the top three, and a board or queue with "Problem" in its name.
 
@@ -41,7 +41,7 @@ ConnectWise PSA, Autotask and HaloPSA.
    - **Name:** Recurring Issue Finder
 2. **What's the goal?**
    ```
-   Each week, find the issues that keep coming back in each client's last 30 days of tickets and propose a problem ticket with a KB draft for the top three that aren't already being tracked.
+   Each week, find the issues that keep coming back in each client's last 14 days of tickets and propose a problem ticket with a KB draft for the top three that aren't already being tracked.
    ```
    Leave **How will we know it's done?** empty. It keeps watching.
 3. **When should it check in?** **On a schedule**, **Every week**.
@@ -49,7 +49,8 @@ ConnectWise PSA, Autotask and HaloPSA.
 5. **Where does it keep notes?** **An existing Knowledge folder**: **Recurring Issue Finder** from step 2. It reads its recent notes at every check-in, so it remembers what it already proposed.
 
 **Also set:**
-- **Limits:** keep the default monthly and per-check-in limits, and no finish rules. If it stops for going over the per-check-in limit, change the look-back in **Recurring Issue Rules** to 14 days.
+- **Limits:** no finish rules.
+- **Token use:** set the per-check-in limit to about 150,000 tokens; a weekly check-in fits inside the 2,000,000 monthly default. If it stops for going over the per-check-in limit, change the look-back in **Recurring Issue Rules** to 7 days.
 - **Who should hear from it?** You, plus every Admin and Owner (the default). Optionally, **Also post to Teams channels** and pick your service desk channel.
 
 **4. Test it.** Click **Save draft**, then **Try a check-in now**. You should see a note listing the repeat issues it found and up to three proposed problem tickets. Approve one to check it lands on the right board or queue, deny the others, then click **Start**.
@@ -64,11 +65,11 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/rec
 
 ## Technical details
 
-**Formerly:** none (new) | **Marketplace ID:** to be assigned | **Type:** Pulsar (setup guide) + Agent + Workflow | **Version:** 1.0.0
+**Formerly:** none (new) | **Marketplace ID:** to be assigned | **Type:** Pulsar (setup guide) + Agent + Workflow | **Version:** 1.0.1
 
 ## Files
 
-Each version is published as a release with all six `.yml` files attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/recurring-issue-finder/v1.0.0).
+Each version is published as a release with all six `.yml` files attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/recurring-issue-finder/v1.0.1).
 
 | What | Link |
 |---|---|
@@ -90,7 +91,7 @@ Each check-in, in about 10 to 12 tool calls (the runner stops an agent at 25 tur
 
 1. **Reads its notes:** themes already proposed (client, ticket ids), the problem board or queue it resolved, and what people answered or denied.
 2. **Resolves where problem tickets go,** unless its notes already hold it.
-3. **Reads the tickets in one bulk query** with only the fields it needs, and the open problem tickets in a second one. At most 300 tickets; over that, it drops to 14 days and says so.
+3. **Reads the tickets in one bulk query** with only the fields it needs, and the open problem tickets in a second one. At most 150 tickets, summary fields only; over that, it keeps the newest 150 and says so.
 4. **Groups each client's tickets into themes** (shared type, subtype, category or item, plus shared key words in the summary), keeps themes of at least 3 tickets, drops any already pending, approved, denied in the last 30 days or covered by an open problem ticket, and ranks by size, then by the newest ticket.
 5. **Confirms** a top theme by reading one member ticket only when the summaries aren't clear (at most 3 reads).
 6. **Proposes** one problem ticket per top theme (3 by default, never more than 5). Each holds one client's tickets only.
@@ -119,9 +120,13 @@ Each check-in, in about 10 to 12 tool calls (the runner stops an agent at 25 tur
 
 | Run input (optional) | Default | Range |
 |---|---|---|
-| `lookback_days` | 30 | 7 to 90 |
+| `lookback_days` | 14 | 7 to 90 |
 | `min_tickets` | 3 | 2 to 20 |
 | `max_proposals` | 3 | 1 to 5 |
+
+### Token use
+
+Every tool result stays in the agent's conversation and is sent again on each later turn. On 2026-11-16 a sibling Pulsar (Dispatch Queue 1.0.0) used about 2.4 million tokens in one ConnectWise check-in after an unfiltered ticket read, so 1.0.1 bounds every read here: a 14-day default look-back, at most 150 tickets with summary fields only (ConnectWise `fields`, Autotask `MaxRecords` and `IncludeFields`, Halo `page_size` 150 and never a second page), and no wider query after a capped read.
 
 ## Build and test
 

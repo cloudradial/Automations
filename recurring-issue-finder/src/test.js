@@ -108,5 +108,24 @@ try {
   else check('settings.ps1 strict-mode harness', false, (e.stdout || '') + (e.stderr || ''));
 }
 
+// Token safety (2026-11-16: one Pulsar check-in used 2.38M tokens after an unfiltered ticket read).
+check('version is 1.0.1', VERSION === '1.0.1');
+for (const key of Object.keys(PSAS)) {
+  const sp = yaml.load(fs.readFileSync(path.join(ROOT, `${SLUG}-${key}.agent.yml`), 'utf8')).agent.systemPrompt;
+  check(`${key} token rules present`, /## Token rules/.test(sp) && /data too large, narrowed to/.test(sp));
+  check(`${key} forbids a broad or unfiltered query`, /never run a broad or unfiltered query/i.test(sp));
+  check(`${key} default look-back 14 days, cap 150`, /last 14 days of service tickets/.test(sp) && /At most 150 tickets/.test(sp));
+  check(`${key} no 300-ticket read left`, !/\b300\b/.test(sp));
+  const lines = sp.split('\n').filter((l) => /\b(cw_query_tickets|at_query_tickets|halo_query_tickets)\b/.test(l) && /^- \*\*(Tickets in the look-back|Open problem tickets)/.test(l.trim()));
+  check(`${key} ticket read instructions found`, lines.length === 2, String(lines.length));
+  const body = (l) => sp.slice(sp.indexOf(l), sp.indexOf(l) + 900);
+  for (const l of lines) {
+    const t = body(l);
+    if (key === 'connectwise') check(`connectwise read names fields and conditions: ${l.slice(4, 40)}`, /fields: `[^`]+`|fields `[^`]+`/.test(t) && /conditions/.test(t));
+    if (key === 'autotask') check(`autotask read has MaxRecords, IncludeFields and a filter: ${l.slice(4, 40)}`, /"MaxRecords":\d+/.test(t) && /"IncludeFields":\[/.test(t) && /"filter":\[/.test(t));
+    if (key === 'halo') check(`halo read is paged small: ${l.slice(4, 40)}`, /pageinate true/.test(t) && /page_size (150|50)\b/.test(t));
+  }
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

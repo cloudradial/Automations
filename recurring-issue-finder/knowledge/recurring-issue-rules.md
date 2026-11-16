@@ -8,8 +8,8 @@ Owner: Service Desk Manager · Effective: 2026-11-13 · Used by: Recurring Issue
 
 | Setting | Value |
 |---|---|
-| Look-back | 30 days, by date entered |
-| Most tickets read per check-in | 300 (it drops to 14 days when there are more) |
+| Look-back | 14 days, by date entered |
+| Most tickets read per check-in | 150, summary fields only (it keeps the newest 150 when there are more) |
 
 ## What counts as a theme?
 

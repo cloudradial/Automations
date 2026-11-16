@@ -22,7 +22,7 @@ function Check {
 }
 
 $o = Invoke-Step $null
-Check 'no input uses defaults' ($o.lookback_days -eq 30 -and $o.min_tickets -eq 3 -and $o.max_proposals -eq 3 -and @($o.warnings).Count -eq 0)
+Check 'no input uses defaults' ($o.lookback_days -eq 14 -and $o.min_tickets -eq 3 -and $o.max_proposals -eq 3 -and @($o.warnings).Count -eq 0)
 Check 'request names the date' ($o.request -match 'Today is \d{4}-\d{2}-\d{2}')
 
 $o = Invoke-Step ([pscustomobject]@{ lookback_days = 14; min_tickets = '4'; max_proposals = 2 })
@@ -30,13 +30,13 @@ Check 'object input is read' ($o.lookback_days -eq 14 -and $o.min_tickets -eq 4 
 Check 'request carries the values' ($o.request -match 'last 14 days' -and $o.request -match 'at most 2')
 
 $o = Invoke-Step '{"lookback_days": 200, "max_proposals": "lots"}'
-Check 'bad values fall back with warnings' ($o.lookback_days -eq 30 -and $o.max_proposals -eq 3 -and @($o.warnings).Count -eq 2)
+Check 'bad values fall back with warnings' ($o.lookback_days -eq 14 -and $o.max_proposals -eq 3 -and @($o.warnings).Count -eq 2)
 
 $o = Invoke-Step @{ trigger = @{ min_tickets = 5 } }
 Check 'trigger envelope is unwrapped' ($o.min_tickets -eq 5)
 
 $o = Invoke-Step 'run it'
-Check 'plain text input uses defaults' ($o.status -eq 'success' -and $o.lookback_days -eq 30)
+Check 'plain text input uses defaults' ($o.status -eq 'success' -and $o.lookback_days -eq 14)
 
 Write-Host "$($state.pass) passed, $($state.fail) failed"
 if ($state.fail -gt 0) { exit 1 }

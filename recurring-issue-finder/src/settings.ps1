@@ -1,5 +1,5 @@
 # Recurring Issue Finder: check-in settings (first step of the goal workflow, left unbound).
-# Run input (all optional): {"lookback_days": 30, "min_tickets": 3, "max_proposals": 3}
+# Run input (all optional): {"lookback_days": 14, "min_tickets": 3, "max_proposals": 3}
 # Builds the request the agent node reads. No PSA calls here.
 $ErrorActionPreference = 'Stop'
 
@@ -33,7 +33,7 @@ if ($in -is [string]) {
 }
 
 $warnings = [System.Collections.Generic.List[string]]::new()
-$days = Get-RifInt $in 'lookback_days' 30 7 90 $warnings
+$days = Get-RifInt $in 'lookback_days' 14 7 90 $warnings
 $min  = Get-RifInt $in 'min_tickets' 3 2 20 $warnings
 $max  = Get-RifInt $in 'max_proposals' 3 1 5 $warnings
 

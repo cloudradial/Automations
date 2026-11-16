@@ -51,7 +51,8 @@ ConnectWise PSA, Autotask and HaloPSA, each with its own version of the agent.
 
 **3. Limits and who hears from it.**
 
-- **Limits:** start with a per-check-in limit of about 60,000 tokens and a monthly limit to match (roughly 22 working days of check-ins). Leave the finish rules off.
+- **Limits:** leave the finish rules off.
+- **Token use:** set the per-check-in limit to about 150,000 tokens. A check-in every 30 minutes on weekdays runs about 350 check-ins a month, so the monthly limit needs to be well above the 2,000,000 default; start with every hour, or a daily check-in, if you want to stay inside it.
 - **Who should hear from it?** You, plus every Admin and Owner, by default. Turn on **Also post to Teams channels** and pick your dispatch channel to post the next-best list there.
 
 **4. Test it.** Click **Save draft**, then **Try a check-in now**. Check that the next-best list names your technicians, and that each proposed assignment makes sense. Deny one to see it learn. Then click **Start**.
@@ -66,7 +67,7 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Technical details
 
-**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow) | **Version:** 1.0.0
+**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow) | **Version:** 1.0.1
 
 ## Files
 
@@ -102,11 +103,11 @@ A Pulsar check-in **looks** (read tools run for real), **proposes** (every write
 
 | | ConnectWise PSA (`connectwise-manage`) | Autotask (`autotask-psa`) | HaloPSA (`halo-psa`) |
 |---|---|---|---|
-| Unassigned tickets | `cw_query_tickets`: `closedFlag = false AND owner/id = null`, entered in the last 14 days; skips tickets with resources | `at_query_tickets`: status not Complete, `assignedResourceID` not set, created in the last 14 days | `halo_query_tickets`: `open_only`, `agentId` 0, last 14 days; keeps `agent_id` 0 or empty |
-| Technicians | `cw_query_members` (active) | `at_query_resources` (active), `at_query_resource_roles` | `halo_query_agents` |
-| Load | `cw_query_tickets` open, `owner/identifier in (...)` | `at_query_tickets` open, `assignedResourceID in (...)` | `halo_query_tickets` open, 200 rows, counted by `agent_id` |
+| Unassigned tickets | `cw_query_tickets`: `closedFlag = false AND owner/id = null`, entered in the last 2, then 7, then 14 days; fields `id,summary,board/name,status/name,priority/name,company/name,owner/identifier,resources,dateEntered,requiredDate`; first 30; skips tickets with resources | `at_query_tickets`: status not Complete, `assignedResourceID` not set, created in the last 2, 7, then 14 days; `MaxRecords` 30; `IncludeFields` id, ticketNumber, title, companyID, queueID, priority, status, createDate, dueDateTime, assignedResourceID | `halo_query_tickets`: `open_only`, `agentId` 0, last 2, 7, then 14 days, `pageinate` with `page_size` 30; keeps `agent_id` 0 or empty |
+| Technicians | `cw_query_members`: active, filtered to the Dispatch Team identifiers or emails | `at_query_resources`: active, filtered to the Dispatch Team emails; `IncludeFields` id, firstName, lastName, userName, email, isActive; `at_query_resource_roles` with `IncludeFields` | `halo_query_agents`: searched by each Dispatch Team name |
+| Load | `cw_query_tickets` open, `owner/identifier in (...)`, fields `id,owner/identifier` | `at_query_tickets` open, `assignedResourceID in (...)`, `IncludeFields` id, assignedResourceID | `halo_query_tickets` per agent, `page_size` 1, read `record_count` |
 | Labels | priority name on the ticket | `at_get_ticket_field_values` | `halo_query_priorities` |
-| Due time | `requiredDate`, else `slaStatus` | `dueDateTime` | `fixbydate`, else `deadlinedate` |
+| Due time | `requiredDate` | `dueDateTime` | `fixbydate`, else `deadlinedate` |
 | Assign (proposal) | `cw_update_ticket` `ownerId` | `at_update_ticket` `assignedResourceID` + `assignedResourceRoleID` | `halo_update_ticket` `agentId` + `forceReassign` |
 | Why-note (proposal, off by default) | `cw_create_ticket_note`, internal analysis | `at_create_ticket_note`, an "Internal" publish value | `halo_add_action`, `isPrivate`, private note outcome |
 
@@ -117,9 +118,22 @@ A Pulsar check-in **looks** (read tools run for real), **proposes** (every write
 - The goal workflow's agent node has `autoApprove: false` and `allowedExtensions` set to that one extension. Its webhook ships off.
 - Ticket text is treated as data: the prompt tells it never to follow instructions in a ticket.
 
+### Token use
+
+Every tool result stays in the agent's conversation and is sent again on each later turn, so one oversized read multiplies across the check-in. On 2026-11-16 a ConnectWise trial check-in with 1.0.0 used about 2.4 million tokens: its first unassigned-ticket read came back with every field on hundreds of tickets before it narrowed. 1.0.1 fixes that:
+
+- every ticket read names its fields (or `IncludeFields`) and a row cap,
+- it starts with the last 2 days and widens only while it has fewer than 30 tickets,
+- after a read that hits its cap it never queries wider; it says "data too large" and carries on,
+- people reads are filtered to the Dispatch Team, and Halo load is counted with `record_count`, not by paging every open ticket.
+
+### Proven live
+
+- **2026-11-16, ConnectWise staging (1.0.0):** the goal workflow without a Dispatch Team asked who dispatches; a Pulsar trial check-in read all three documents in its notes folder and proposed 4 assignments (the cap set in the test Dispatch Rules). The no-team run didn't list the top 5 tickets; 1.0.1 fixes that.
+
 ### Not yet proven live
 
-The Pulsar setup, the Halo `agentId` 0 filter for unassigned tickets, and whether documents uploaded to the notes folder are read at every check-in (the support article says recent notes are) haven't been tested in a tenant yet. If the documents aren't read, the agent asks who dispatches, and the answer is kept as something it has learned.
+1.0.1's reads, the Autotask and Halo agents, and the Halo `agentId` 0 filter for unassigned tickets.
 
 ## Build and test
 

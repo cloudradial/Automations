@@ -34,7 +34,7 @@ for (const key of ['connectwise', 'autotask', 'halo']) {
   ok(a.automationsAgent === 1 && a.agent, `${key} agent marker`);
   const g = a.agent;
   ok(g.slug === `dispatch-queue-${key}`, `${key} agent slug`);
-  ok(/^\d+\.\d+\.\d+$/.test(g.version) && g.version === '1.0.0', `${key} agent version 1.0.0`);
+  ok(/^\d+\.\d+\.\d+$/.test(g.version) && g.version === '1.0.1', `${key} agent version 1.0.1`);
   ok(g.model === '', `${key} model blank`);
   ok(g.dryRunDefault === true, `${key} dryRunDefault true`);
   ok(JSON.stringify(g.requiredExtensionSlugs) === JSON.stringify([s.slug]), `${key} requiredExtensionSlugs is only ${s.slug}`);
@@ -100,6 +100,29 @@ for (const q of ['Who\'s doing the work?', 'What\'s the goal?', 'When should it 
 }
 ok(top.includes('Try a check-in now'), 'README says Try a check-in now');
 ok(top.includes('Also post to Teams channels'), 'README covers Teams posting');
+
+
+// Token safety (2026-11-16: one check-in used 2.38M tokens after an unfiltered ticket read).
+for (const key of ['connectwise', 'autotask', 'halo']) {
+  const g = yaml.load(fs.readFileSync(path.join(ROOT, `dispatch-queue-${key}.agent.yml`), 'utf8')).agent;
+  const sp = g.systemPrompt;
+  ok(/Top 5 unassigned tickets:/.test(sp) && /listing the top 5 ranked tickets/.test(sp), `${key} no-team path lists the top 5`);
+  ok(/TOKEN RULES/.test(sp), `${key} prompt has the token rules`);
+  ok(/data too large, narrowed to/.test(sp), `${key} prompt says how to report an oversized read`);
+  ok(/never run a broad or unfiltered query/i.test(sp), `${key} prompt forbids a broad or unfiltered query`);
+  const lines = sp.split('\n').filter((l) => /^- (cw_query_tickets|at_query_tickets|halo_query_tickets)\b/.test(l.trim()));
+  ok(lines.length > 0, `${key} prompt has ticket read instructions`);
+  for (const l of lines) {
+    if (key === 'connectwise') ok(/fields `[^`]+`/.test(l) && /conditions `/.test(l), `connectwise ticket read names fields and conditions: ${l.slice(0, 60)}`);
+    if (key === 'autotask') ok(/"IncludeFields":\[/.test(l) && /"MaxRecords":\d+/.test(l) && /"filter":\[/.test(l), `autotask ticket read names IncludeFields, MaxRecords and a filter: ${l.slice(0, 60)}`);
+    if (key === 'halo') ok(/pageinate true/.test(l) && /page_size \d+/.test(l) && !/page_size ([2-9]\d{2}|\d{4,})/.test(l), `halo ticket read is paged small: ${l.slice(0, 60)}`);
+  }
+  const people = sp.split('\n').filter((l) => /^- (cw_query_members|at_query_resources|halo_query_agents)\b/.test(l.trim()));
+  for (const l of people) {
+    if (key === 'autotask') ok(/"IncludeFields":\[/.test(l), `autotask resources read names IncludeFields`);
+    if (key === 'connectwise') ok(/conditions `/.test(l), `connectwise members read is filtered`);
+  }
+}
 
 // Generated files are current.
 try {

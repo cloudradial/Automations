@@ -34,7 +34,7 @@ for (const key of ['connectwise', 'autotask', 'halo']) {
   ok(a.automationsAgent === 1 && a.agent, `${key} agent marker`);
   const g = a.agent;
   ok(g.slug === `dispatch-queue-${key}`, `${key} agent slug`);
-  ok(/^\d+\.\d+\.\d+$/.test(g.version) && g.version === '1.0.1', `${key} agent version 1.0.1`);
+  ok(/^\d+\.\d+\.\d+$/.test(g.version) && g.version === '1.0.2', `${key} agent version 1.0.2`);
   ok(g.model === '', `${key} model blank`);
   ok(g.dryRunDefault === true, `${key} dryRunDefault true`);
   ok(JSON.stringify(g.requiredExtensionSlugs) === JSON.stringify([s.slug]), `${key} requiredExtensionSlugs is only ${s.slug}`);

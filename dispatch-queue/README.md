@@ -67,7 +67,7 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Technical details
 
-**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow) | **Version:** 1.0.1
+**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow) | **Version:** 1.0.2
 
 ## Files
 
@@ -127,13 +127,18 @@ Every tool result stays in the agent's conversation and is sent again on each la
 - after a read that hits its cap it never queries wider; it says "data too large" and carries on,
 - people reads are filtered to the Dispatch Team, and Halo load is counted with `record_count`, not by paging every open ticket.
 
+The 1.0.1 retest on 2026-11-16 (the same check-in on gpt-5.5, gpt-5.4-mini and gpt-5.4-nano) found two more costs, fixed in 1.0.2:
+
+- with no Dispatch Team found, 1.0.1 read the whole ConnectWise member list (`cw_query_members` has no field list, so about 555,000 characters); 1.0.2 never reads the whole list,
+- gpt-5.5 ran 14 knowledge searches and 18 model turns (about 600,000 tokens in all, because each turn re-sends the conversation); 1.0.2 runs exactly three searches up front, at most one more, and caps the check-in at 8 turns. It also starts the ticket read at 1 day, and never retries a read that exceeded its pages with a wider window.
+
 ### Proven live
 
 - **2026-11-16, ConnectWise staging (1.0.0):** the goal workflow without a Dispatch Team asked who dispatches; a Pulsar trial check-in read all three documents in its notes folder and proposed 4 assignments (the cap set in the test Dispatch Rules). The no-team run didn't list the top 5 tickets; 1.0.1 fixes that.
 
 ### Not yet proven live
 
-1.0.1's reads, the Autotask and Halo agents, and the Halo `agentId` 0 filter for unassigned tickets.
+1.0.2's reads, the Autotask and Halo agents, and the Halo `agentId` 0 filter for unassigned tickets.
 
 ## Build and test
 

@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require(process.env.JS_YAML_PATH || 'C:/Users/NicholasWestgate/OneDrive - Azurative/Documents/Claude/handoffs/src/node_modules/js-yaml');
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const ROOT = path.resolve(__dirname, '..');
 const FEEDBACK = 'cloudradial-v2-feedback';
 
@@ -15,44 +15,32 @@ const PSAS = {
   connectwise: {
     name: 'ConnectWise PSA',
     ext: 'connectwise-manage',
-    gather: [
-      '- Tickets, last 60 days: cw_query_tickets with conditions "dateEntered >= [<today minus 60 days, yyyy-mm-dd>]", fields "id,company/id,company/name,dateEntered,closedFlag,isInSla" and orderBy "dateEntered desc".',
-      '- If that reports more than 300 records or exceeding maxPages, run it again as two windows: "dateEntered >= [<today minus 30 days>]" and "dateEntered >= [<today minus 60 days>] and dateEntered < [<today minus 30 days>]". If a window is still capped, don\'t score the volume trend or SLA this week and write a NOTE line.',
-      '- Aged open tickets: cw_query_tickets with conditions "closedFlag = false and dateEntered < [<today minus 14 days>]" and fields "id,company/id,company/name,dateEntered".',
-    ].join('\n'),
+    gather: "- Tickets, last 30 days (A): cw_query_tickets with conditions \"dateEntered >= [<today minus 30 days, yyyy-mm-dd>]\", fields \"id,company/id,company/name,closedFlag,isInSla\" and orderBy \"id asc\". Add \"and company/id in (<ids>)\" when Knowledge has a watch list. Always pass that exact fields list.\n- Tickets, the 30 days before (B), in the same turn: cw_query_tickets with conditions \"dateEntered >= [<today minus 60 days>] and dateEntered < [<today minus 30 days>]\" and fields \"id,company/id\". Same watch-list filter.\n- If either reports more than 300 records or exceeding maxPages, don't run it again wider or split it further: don't score the volume trend or SLA this week and write a NOTE line.\n- Aged open tickets: cw_query_tickets with conditions \"closedFlag = false and dateEntered < [<today minus 14 days>]\" and fields \"id,company/id\". Same watch-list filter.",
     sla: ' In ConnectWise, use isInSla on closed tickets (closedFlag true) only. ConnectWise counts business hours, so treat it as its own verdict and don\'t recalculate it.',
     propose: [
       '- ConnectWise: propose cw_create_activity with name "Client health follow-up: <client name>", companyId = the client, typeId = the activity type, assignToId = the account manager\'s member id, dateStart = today, and notes = the reason.',
-      '- Resolve once per check-in, in parallel: the activity type with cw_query_activity_types (conditions name="<type from Knowledge, default Follow Up>"), and every account manager you need with one cw_query_members call (conditions identifier in ("a","b") or the names Knowledge gives).',
+      '- Resolve once per check-in, in parallel: the activity type with cw_query_activity_types (conditions name="<type from Knowledge, default Follow Up>"), and every account manager you need with one cw_query_members call (conditions inactiveFlag = false and identifier in ("a","b"), or firstName and lastName from Knowledge). Use only id and identifier from the result.',
       '- If that activity type doesn\'t exist, propose cw_create_company_note instead, with companyId = the client, text = "Client health follow-up for <account manager>: <reason>" and flagged true.',
     ].join('\n'),
   },
   autotask: {
     name: 'Autotask',
     ext: 'autotask-psa',
-    gather: [
-      '- Tickets, last 60 days: at_query_tickets with search {"filter":[{"op":"gte","field":"createDate","value":"<today minus 60 days, ISO 8601 UTC>"}],"IncludeFields":["id","companyID","createDate","completedDate","serviceLevelAgreementHasBeenMet"]}. The search must be complete, valid JSON.',
-      '- Aged open tickets: at_query_tickets with search {"filter":[{"op":"notExist","field":"completedDate"},{"op":"lt","field":"createDate","value":"<today minus 14 days>"}],"IncludeFields":["id","companyID","createDate"]}.',
-      '- Client names: at_query_companies with search {"filter":[{"op":"eq","field":"isActive","value":true}],"IncludeFields":["id","companyName"]}.',
-    ].join('\n'),
+    gather: "- Tickets, last 30 days (A): at_query_tickets with search {\"MaxRecords\":500,\"filter\":[{\"op\":\"gte\",\"field\":\"createDate\",\"value\":\"<today minus 30 days, ISO 8601 UTC>\"}],\"IncludeFields\":[\"id\",\"companyID\",\"completedDate\",\"serviceLevelAgreementHasBeenMet\"]}. Add {\"op\":\"in\",\"field\":\"companyID\",\"value\":[<ids>]} when Knowledge has a watch list. The search must be complete, valid JSON, and always carries MaxRecords and IncludeFields.\n- Tickets, the 30 days before (B), in the same turn: at_query_tickets with search {\"MaxRecords\":500,\"filter\":[{\"op\":\"gte\",\"field\":\"createDate\",\"value\":\"<today minus 60 days>\"},{\"op\":\"lt\",\"field\":\"createDate\",\"value\":\"<today minus 30 days>\"}],\"IncludeFields\":[\"id\",\"companyID\"]}. Same watch-list filter.\n- If a read returns 500 rows, it was capped: don't score the part that depends on it and write a NOTE line. Don't query again wider.\n- Aged open tickets: at_query_tickets with search {\"MaxRecords\":500,\"filter\":[{\"op\":\"notExist\",\"field\":\"completedDate\"},{\"op\":\"lt\",\"field\":\"createDate\",\"value\":\"<today minus 14 days>\"}],\"IncludeFields\":[\"id\",\"companyID\"]}.\n- Client names, after the ticket reads: at_query_companies with search {\"MaxRecords\":100,\"filter\":[{\"op\":\"in\",\"field\":\"id\",\"value\":[<the companyIDs you will score, at most 40>]}],\"IncludeFields\":[\"id\",\"companyName\"]}.",
     sla: ' In Autotask, serviceLevelAgreementHasBeenMet true is met and false is missed. A ticket where it is empty has no SLA result.',
     propose: [
       '- Autotask: propose at_create_ticket with title "Client health follow-up: <client name>", companyID = the client, queueID = the queue Knowledge names (default "Account Management"), status = New, priority = Medium (or the one Knowledge names), dueDateTime = 3 working days from today, description = the reason, and assignedResourceID with assignedResourceRoleID for the account manager.',
-      '- Resolve once per check-in, in parallel: the status, priority and queue ids with at_get_ticket_field_values, and the account managers with at_query_resources. Then get each account manager\'s role with at_query_resource_roles (filter resourceID); Autotask rejects a resource without a role it holds.',
+      '- Resolve once per check-in, in parallel: the status, priority and queue ids with at_get_ticket_field_values, and the account managers with at_query_resources (search {"MaxRecords":20,"filter":[{"op":"eq","field":"isActive","value":true},{"op":"in","field":"email","value":[<emails from Knowledge>]}],"IncludeFields":["id","firstName","lastName","email"]}). Then get each account manager\'s role with at_query_resource_roles (filter resourceID); Autotask rejects a resource without a role it holds.',
     ].join('\n'),
   },
   halo: {
     name: 'HaloPSA',
     ext: 'halo-psa',
-    gather: [
-      '- Tickets, last 60 days: halo_query_tickets with startDate = today minus 60 days, endDate = today, dateSearch "dateoccurred", pageinate true and page_size 500. Each ticket carries client_id, client_name, dateoccurred, and when closed, dateclosed or datecleared and fixbydate.',
-      '- If record_count is more than the rows you got, the volume trend and SLA can\'t be scored this week: write a NOTE line.',
-      '- Aged open tickets: halo_query_tickets with open_only true, endDate = today minus 14 days, dateSearch "dateoccurred", pageinate true and page_size 500.',
-    ].join('\n'),
+    gather: "- Tickets, last 30 days (A): halo_query_tickets with startDate = today minus 30 days, endDate = today, dateSearch \"dateoccurred\", pageinate true and page_size 100. Each ticket carries client_id, client_name, dateoccurred, and when closed, dateclosed or datecleared and fixbydate. Use only those fields.\n- Tickets, the 30 days before (B), in the same turn: halo_query_tickets with startDate = today minus 60 days and endDate = today minus 30 days, pageinate true and page_size 100.\n- If record_count is more than the rows you got, don't fetch more pages: don't score the volume trend or SLA this week and write a NOTE line saying the data was too large. HaloPSA can't return fewer fields per ticket, so never raise page_size above 100.\n- Aged open tickets: halo_query_tickets with open_only true, endDate = today minus 14 days, dateSearch \"dateoccurred\", pageinate true and page_size 100. Count by client_id; if record_count is higher than the rows, use record_count only as a total and don't score the aged part per client.",
     sla: ' In HaloPSA, a closed ticket met its SLA when its fixbydate is set (1900-01-01 means not set) and it was closed on or before it. A ticket without a fixbydate has no SLA result. If no ticket has these fields, skip this part and say so in a NOTE line.',
     propose: [
       '- HaloPSA: propose halo_create_ticket with summary "Client health follow-up: <client name>", details = the reason, clientId = the internal client Knowledge names (your own MSP\'s client in HaloPSA), agentId = the account manager, and tickettypeId if Knowledge names a ticket type.',
-      '- Resolve once per check-in, in parallel: the account managers with halo_query_agents, the internal client with halo_query_clients if Knowledge gives a name rather than an id, and the ticket type with halo_query_ticket_types if Knowledge names one.',
+      '- Resolve once per check-in, in parallel: the account managers with halo_query_agents (search = each name, at most 6 calls; use only id, name and email), the internal client with halo_query_clients if Knowledge gives a name rather than an id, and the ticket type with halo_query_ticket_types if Knowledge names one.',
     ].join('\n'),
   },
 };

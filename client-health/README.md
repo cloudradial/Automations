@@ -54,7 +54,9 @@ ConnectWise PSA, Autotask and HaloPSA, with CloudRadial feedback for the satisfa
 4. **How much can it do on its own?** **Propose changes**. Every follow-up waits for your approval.
 5. **Where does it keep notes?** **An existing Knowledge folder**: choose **Client Health**, the folder from step 2. Its scores and your rules then live in one place.
 
-**Limits.** Start with the default token limits. After the first check-in, look at how much it used and set the per-check-in limit a little above that. Leave the finish rules off.
+**Limits.** Leave the finish rules off.
+
+**Token use.** Set the per-check-in limit to about 150,000 tokens; a weekly check-in fits easily inside the 2,000,000 monthly default. After the first check-in, look at how much it used and adjust.
 
 **Who should hear from it?** The defaults (you, plus every Admin and Owner). To share the weekly summary with account managers, turn on **Also post to Teams channels** and pick their channel.
 
@@ -68,7 +70,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cli
 
 ## Technical details
 
-**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow to run it by hand) | **Version:** 1.0.0
+**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow to run it by hand) | **Version:** 1.0.1
 
 ## Files
 
@@ -120,6 +122,16 @@ A follow-up is proposed for a drop of 15 or more points since the last `SCORE` l
 | HaloPSA (`halo-psa`) | `halo_query_tickets` (`pageinate`, `page_size` 500), `halo_query_agents`, `halo_query_clients`, `halo_query_ticket_types` | `halo_create_ticket` for the internal client Knowledge names | closed date vs `fixbydate` |
 
 ConnectWise ticket reads return at most 300 rows: the agent splits the 60 days into two windows, and if a window is still capped it skips the volume and SLA parts and writes a `NOTE` line. HaloPSA does the same when `record_count` is more than the rows returned. Reopen counts aren't used, because none of the three PSAs exposes them in a bulk ticket read.
+
+### Token use
+
+Every tool result stays in the agent's conversation and is sent again on each later turn. On 2026-11-16 a sibling Pulsar (Dispatch Queue 1.0.0) used about 2.4 million tokens in one ConnectWise check-in after an unfiltered ticket read, so 1.0.1 bounds every read here:
+
+- ConnectWise: two 30-day windows, fields `id,company/id,company/name,closedFlag,isInSla` (last 30 days) and `id,company/id` (the 30 before, and aged open), no second try after a capped read.
+- Autotask: `MaxRecords` 500 and `IncludeFields` `id,companyID,completedDate,serviceLevelAgreementHasBeenMet` (or `id,companyID`); client names only for the companies being scored.
+- HaloPSA: `page_size` 100 per 30-day window, never more pages. Halo can't trim fields, so a busy Halo tenant gets "data too large" for volume and SLA instead of a huge read.
+- CloudRadial feedback: `select` `companyPsaId,companyName,feedbackRating,sentiment`, never comments.
+- A watch list in Knowledge filters every ConnectWise and Autotask ticket read to those clients.
 
 ### Notes format
 

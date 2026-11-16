@@ -107,5 +107,23 @@ for (const [key] of Object.entries(PSAS)) {
   for (const f of [`client-health-${key}.agent.yml`, `client-health-${key}.yml`]) ok(readme.includes(f), `README: links ${f}`);
 }
 
+// Token safety (2026-11-16: one Pulsar check-in used 2.38M tokens after an unfiltered ticket read).
+ok(VERSION === '1.0.1', 'version is 1.0.1');
+for (const key of Object.keys(PSAS)) {
+  const sp = yaml.load(fs.readFileSync(path.join(ROOT, `client-health-${key}.agent.yml`), 'utf8')).agent.systemPrompt;
+  ok(/TOKEN RULES/.test(sp), `${key} token: prompt has the token rules`);
+  ok(/data too large, narrowed to/.test(sp), `${key} token: says how to report an oversized read`);
+  ok(/never run a broad or unfiltered query/i.test(sp), `${key} token: forbids a broad or unfiltered query`);
+  ok(/cr_list_feedback[^\n]*select "companyPsaId,companyName,feedbackRating,sentiment"/.test(sp), `${key} token: feedback read has a select list`);
+  ok(!/today minus 60 days[^\n]*\bendDate = today[,.]|dateEntered >= \[<today minus 60 days[^\]]*\]",? fields/.test(sp), `${key} token: no single 60-day ticket read`);
+  const lines = sp.split('\n').filter((l) => /\b(cw_query_tickets|at_query_tickets|halo_query_tickets)\b/.test(l) && /^- (Tickets|Aged)/.test(l.trim()));
+  ok(lines.length >= 3, `${key} token: ticket read instructions found (${lines.length})`);
+  for (const l of lines) {
+    if (key === 'connectwise') ok(/fields "[^"]+"/.test(l) && /conditions "/.test(l), `connectwise token: ticket read names fields and conditions: ${l.slice(0, 50)}`);
+    if (key === 'autotask') ok(/"MaxRecords":\d+/.test(l) && /"IncludeFields":\[/.test(l) && /"filter":\[/.test(l), `autotask token: ticket read has MaxRecords, IncludeFields and a filter: ${l.slice(0, 50)}`);
+    if (key === 'halo') ok(/pageinate true/.test(l) && /page_size 100\b/.test(l), `halo token: ticket read is paged at 100: ${l.slice(0, 50)}`);
+  }
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

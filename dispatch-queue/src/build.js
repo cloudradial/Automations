@@ -13,7 +13,7 @@ const yaml = (() => {
   throw new Error('js-yaml not found: set JS_YAML_PATH');
 })();
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const ROOT = path.resolve(__dirname, '..');
 const prompt = fs.readFileSync(path.join(__dirname, 'prompt.md'), 'utf8').replace(/\r\n/g, '\n');
 const snapshot = JSON.parse(fs.readFileSync(path.join(__dirname, 'tools-snapshot.json'), 'utf8'));

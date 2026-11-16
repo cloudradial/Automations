@@ -1,0 +1,16 @@
+{
+  "_source": "Tool names this agent relies on, from the autotask-psa catalog extension in a test tenant on 2026-11-13 (listed there as 2.5.7, 33 tools). at_get_time_entry, at_update_time_entry_notes and at_approve_time_entry are the time entry tools this agent needs.",
+  "extensions": {
+    "autotask-psa": { "toolCount": 33, "catalog": true }
+  },
+  "read": [
+    "at_query_time_entries",
+    "at_get_time_entry",
+    "at_query_companies",
+    "at_query_resources"
+  ],
+  "write": [
+    "at_update_time_entry_notes",
+    "at_approve_time_entry"
+  ]
+}

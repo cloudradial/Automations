@@ -37,7 +37,7 @@ ConnectWise PSA, Autotask and HaloPSA, with CloudRadial feedback for the satisfa
 
 ## Set it up
 
-**1. Add the agent.** Download the agent for your PSA from the [release](https://github.com/cloudradial/Automations/releases/tag/client-health/v1.0.0): **Client Health (ConnectWise PSA)**, **Client Health (Autotask)** or **Client Health (HaloPSA)**. Go to **Agents > Custom** and upload it.
+**1. Add the agent.** Download the agent for your PSA from the [release](https://github.com/cloudradial/Automations/releases/tag/client-health/v1.0.1): **Client Health (ConnectWise PSA)**, **Client Health (Autotask)** or **Client Health (HaloPSA)**. Go to **Agents > Custom** and upload it.
 
 **2. Add your rules.** Go to **Knowledge**, create a folder called **Client Health**, and add the two example documents from the [knowledge folder](https://github.com/cloudradial/Automations/tree/main/client-health/knowledge). Edit **Client Health Account Managers** with your own clients and account managers, and where follow-ups should go. **Client Health Scoring** is optional: leave it out to use the built-in scoring.
 
@@ -74,7 +74,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cli
 
 ## Files
 
-Each version is published as a release with every `.yml` attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/client-health/v1.0.0).
+Each version is published as a release with every `.yml` attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/client-health/v1.0.1).
 
 | What | ConnectWise PSA | Autotask | HaloPSA |
 |---|---|---|---|

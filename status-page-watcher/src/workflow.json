@@ -1,0 +1,62 @@
+{
+  "name": "Status Page Watcher",
+  "description": "Checks vendor status pages (Zoom, Google Workspace, Slack, Fathom, Dropbox, Atlassian and optionally Microsoft 365 service health) on a schedule. New incidents send your technicians a Signal to approve a client broadcast, or go straight to Outage / Incident Broadcast in auto mode. Preview only until confirm is true.",
+  "version": "0.1.0",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "Start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "watch",
+        "type": "powershell-script",
+        "name": "Check the status pages",
+        "position": {
+          "x": 300,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:watch.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": [],
+          "testInput": "{\n  \"mode\": \"approve\",\n  \"confirm\": false,\n  \"cloudradial_company\": \"azurative-technology\",\n  \"simulate\": \"Zoom\"\n}"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "End",
+        "position": {
+          "x": 500,
+          "y": 80
+        },
+        "properties": {}
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "watch",
+        "sourceHandle": null
+      },
+      {
+        "source": "watch",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

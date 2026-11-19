@@ -45,8 +45,10 @@ $waiting = [string](Get-NudgeInput @('waiting_status_name', 'waitingStatusName')
 $daysIn = Get-NudgeInput @('reminder_days', 'reminderDays') '2,4'
 $dayList = if ($daysIn -is [array]) { @($daysIn) } else { @(([string]$daysIn) -split '[,;\s]+' | Where-Object { $_ }) }
 $reminderDays = @($dayList | ForEach-Object { ConvertTo-NudgeInt $_ 'Each reminder day' 1 365 } | Sort-Object -Unique)
-$closeDay = ConvertTo-NudgeInt (Get-NudgeInput @('close_day', 'closeDay') 7) 'close_day' 1 365
-if ($reminderDays.Count -and $closeDay -le $reminderDays[-1]) { throw "close_day ($closeDay) must be later than the last reminder day ($($reminderDays[-1]))." }
+# close_day: never close unless an approved number of days is set. 'never', 0 or empty = reminders only.
+$closeIn = [string](Get-NudgeInput @('close_day', 'closeDay') 'never')
+$closeDay = if ($closeIn -match '^(?i)(never|none|off|false|0|)$') { 0 } else { ConvertTo-NudgeInt $closeIn 'close_day' 1 365 }
+if ($closeDay -and $reminderDays.Count -and $closeDay -le $reminderDays[-1]) { throw "close_day ($closeDay) must be later than the last reminder day ($($reminderDays[-1]))." }
 $preview = ConvertTo-NudgeBool (Get-NudgeInput @('preview', 'dryRun', 'dry_run') $false) 'preview'
 $maxTickets = ConvertTo-NudgeInt (Get-NudgeInput @('max_tickets', 'maxTickets') 200) 'max_tickets' 1 1000
 $closeStatus = [string](Get-NudgeInput @('close_status_name', 'closeStatusName') '')
@@ -68,7 +70,7 @@ if ($companyIn) {
 
 # ---- find ----
 $now = (Get-Date).ToUniversalTime()
-$firstDay = if ($reminderDays.Count) { $reminderDays[0] } else { $closeDay }
+$firstDay = if ($reminderDays.Count) { $reminderDays[0] } elseif ($closeDay) { $closeDay } else { 1 }
 # A ticket created less than $firstDay days ago can't be due yet, so the list is cut on the created date.
 $found = @(Find-PsaTickets -Status $waiting -CreatedBefore $now.AddDays(-$firstDay) -CompanyId $companyId -Max $maxTickets)
 $truncated = [bool]$PsaState.FindTruncated
@@ -125,11 +127,11 @@ foreach ($t in $found) {
 
     $item = [ordered]@{
         ticketId = $t.id; number = $t.number; summary = $t.summary; companyId = $t.companyId; companyName = $t.companyName
-        priority = $t.priority; daysWaiting = $days; since = (Format-NudgeStamp $since); closeBy = (Format-NudgeStamp $since.AddDays($closeDay))
+        priority = $t.priority; daysWaiting = $days; since = (Format-NudgeStamp $since); closeBy = $(if ($closeDay) { Format-NudgeStamp $since.AddDays($closeDay) } else { 'never (reminders only)' })
         action = ''; day = 0; reminderNo = 0; reminderTotal = $reminderDays.Count; notice = $false
         remindResult = ''; noticeResult = ''; closeResult = ''; closedStatus = ''; noteResult = ''; error = ''
     }
-    if ($days -ge $closeDay) {
+    if ($closeDay -and $days -ge $closeDay) {
         if ($high) {
             if ($held) { $null = $skipped.Add(@{ ticketId = $t.id; number = $t.number; reason = 'high priority, already flagged' }); continue }
             $item.action = 'hold'

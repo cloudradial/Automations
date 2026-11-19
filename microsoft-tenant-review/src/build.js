@@ -22,7 +22,10 @@ const src = JSON.parse(fs.readFileSync(path.join(here, 'workflow.json'), 'utf8')
 
 const paste = (v) => {
   if (typeof v === 'string' && v.startsWith('@file:')) {
-    return fs.readFileSync(path.join(here, v.slice(6)), 'utf8').replace(/\r\n/g, '\n').replace(/\s+$/, '');
+    const text = fs.readFileSync(path.join(here, v.slice(6)), 'utf8').replace(/\r\n/g, '\n').replace(/\s+$/, '');
+    // A "# @shared:<file>" line is replaced by that _shared library (a function replacement, so "$'" in the
+    // PowerShell is never read as a replacement pattern).
+    return text.replace(/^# @shared:([\w.-]+)$/gm, (_, f) => fs.readFileSync(path.join(here, '..', '..', '_shared', f), 'utf8').replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').replace(/\s+$/, ''));
   }
   if (Array.isArray(v)) return v.map(paste);
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, paste(x)]));

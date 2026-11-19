@@ -1,4 +1,4 @@
-// Builds ../microsoft-security-assessment.yml from the step scripts. common.ps1 is inlined into steps 2 and 3.
+// Builds ../microsoft-security-assessment.yml from the step scripts. common.ps1 (with _shared/cloudradial.ps1) is inlined into steps 2 and 3.
 //   npm install, then: node build.js [output.yml]
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +8,10 @@ const read = f => fs.readFileSync(path.join(__dirname, f), 'utf8').replace(/\r\n
 const withCommon = f => {
   const src = read(f);
   if (!src.includes('#{{COMMON}}\n')) throw new Error(`${f} has no #{{COMMON}} line`);
-  return src.replace('#{{COMMON}}\n', read('common.ps1'));
+  const shared = fs.readFileSync(path.join(__dirname, '..', '..', '_shared', 'cloudradial.ps1'), 'utf8').replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '');
+  // Function replacements, so a "$'" or "$&" in the PowerShell is never read as a replacement pattern.
+  const common = read('common.ps1').replace('#{{CLOUDRADIAL}}\n', () => shared);
+  return src.replace('#{{COMMON}}\n', () => common);
 };
 const step = (id, name, x, script, extra = {}) => ({
   id, name, type: 'powershell-script', position: { x, y: 100 },
@@ -28,7 +31,7 @@ const doc = {
       }),
       // No binding: each step receives the previous step's output.
       step('create-cloudradial-assessment', 'Create CloudRadial assessment', 560, withCommon('2-assessment.ps1')),
-      step('create-assessment-run', 'Create assessment run (in development)', 800, withCommon('3-run.ps1')),
+      step('create-assessment-run', 'Create assessment run', 800, withCommon('3-run.ps1')),
       { id: 'end', name: 'End', type: 'end', position: { x: 1040, y: 100 } },
     ],
     connections: [

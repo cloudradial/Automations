@@ -76,7 +76,7 @@ This is the portal-form version that builds the assessment from Secure Score. [m
 Start -> Secure Score assessment -> License and MFA review -> End
 ```
 
-1. **Secure Score assessment** reads the company and its tenant ID from the form's ticket, signs in to the client's tenant, and reads Secure Score and its control profiles. It creates a CloudRadial assessment named `<Company> Secure Score Assessment (yyyy-MM-dd HH:mm UTC)` with a description, recommendations and four categories.
+1. **Secure Score assessment** reads the company and its tenant ID from the form's ticket, signs in to the client's tenant, and reads Secure Score and its control profiles. It keeps one client-visible CloudRadial assessment named `<Company> Secure Score Assessment`, with one question per control, refreshed in place on every review through the JSON assessment API, and adds a dated run (`<Company> Secure Score Assessment - M/d/yy`; a second review that day gets ` (2)`). It also writes one Planner card per security category with the top fixes.
 2. **License and MFA review** reads subscribed SKUs, users, MFA registration and last sign-in (or the Office 365 active-user report), then keeps three Planner cards: **Unused Microsoft 365 licenses** (Efficiency), **Accounts without MFA** (Security) and **Stale Microsoft 365 accounts** (Efficiency, 90 days).
 
 ### CloudRadial API limits

@@ -1,6 +1,6 @@
 automationsWorkflow: 1
 name: "Turn Microsoft Secure Score into a Client Assessment"
-description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a CloudRadial assessment question, creates the assessment and uploads it - all in one deterministic PowerShell node. Send {"company":"<AutomationAI company>","companyId":123}; the tenant comes from that company''s M365-TenantID secret. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
+description: 'Pulls a client tenant''s Microsoft Secure Score from Graph, maps each control to a question of one CloudRadial assessment per client, refreshes it in place through the JSON assessment API and adds a dated run - all in one deterministic PowerShell node. Send {"company":"<AutomationAI company>","companyId":123}; the tenant comes from that company''s M365-TenantID secret. {"mode":"plan"} previews without writing. Replaces the AAI-00001 script. Requires an Entra app with SecurityEvents.Read.All consented in the client tenant.'
 definition:
   schemaVersion: 1
   activities:
@@ -21,7 +21,7 @@ definition:
       properties:
         script: |-
           # =====================================================================
-          #  Secure Score -> CloudRadial Assessment (deterministic, in-memory xlsx)
+          #  Secure Score -> CloudRadial Assessment (deterministic, JSON assessment API)
           #  Run input: {"company":"Contoso Ltd","companyId":123,"assessmentTitle":"Microsoft Secure Score","mode":"apply"}
           #    company    - the AutomationAI company (name, external id or alias) whose Microsoft 365 and
           #                 CloudRadial secrets to use. Blank uses the step's own Company setting.
@@ -29,6 +29,8 @@ definition:
           #    tenantId   - optional. The client's Entra tenant id. Defaults to the company's M365-TenantID
           #                 secret; when both are set they must match.
           #    mode       - "apply" (default) writes; "plan" previews only
+          #  Keeps one assessment per client (assessmentTitle, default "Microsoft Secure Score"), one question per
+          #  control keyed on the control id, refreshed in place on every run, and adds a dated run the portal lists.
           #  Secrets (the company's, or the runner Key Vault's): CloudRadial-BaseUrl / -PublicKey / -PrivateKey,
           #    M365-TenantID, and M365-ClientID / M365-ClientSecret (an Entra app with
           #    SecurityEvents.Read.All application permission, consented in the client tenant).
@@ -132,86 +134,334 @@ definition:
           $crBase = ([string]$crBaseRaw).TrimEnd('/')
           $crAuth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$pub`:$prv"))
 
-          # ---- CloudRadial helpers ----
-          function Invoke-Cr {
-              param([string]$Method,[string]$Path,[object]$Body)
-              $u = if ($Path -match '^https?://') { $Path } else { "$crBase$Path" }
-              $h = @{ Authorization = $crAuth; Accept = 'application/json' }
-              $a = @{ Uri = $u; Method = $Method; Headers = $h; ContentType = 'application/json' }
-              if ($null -ne $Body) { $a.Body = ($Body | ConvertTo-Json -Depth 10) }
-              Invoke-RestMethod @a
-          }
-          function Get-CrAll {
-              param([string]$Path)
-              $all = @(); $skip = 0
-              for ($p = 0; $p -lt 500; $p++) {
-                  $sep = if ($Path -match '\?') { '&' } else { '?' }
-                  $r = Invoke-Cr -Method GET -Path "${Path}${sep}`$top=100&`$skip=$skip"
-                  $rows = if ($r.PSObject.Properties['value']) { @($r.value) } elseif ($r -is [System.Array]) { @($r) } else { @() }
-                  $all += $rows
-                  if (@($rows).Count -lt 100) { break }
-                  $skip += 100
-              }
-              return $all
-          }
-          function Send-CrMultipart {
-              param([string]$Path,[string]$DataJson,[byte[]]$FileBytes,[string]$FileName)
-              Add-Type -AssemblyName System.Net.Http
-              $client = New-Object System.Net.Http.HttpClient
-              $client.DefaultRequestHeaders.Add('Authorization', $crAuth)
-              $form = New-Object System.Net.Http.MultipartFormDataContent
-              $form.Add((New-Object System.Net.Http.StringContent($DataJson, [Text.Encoding]::UTF8, 'application/json')), 'data')
-              $fc = New-Object System.Net.Http.ByteArrayContent(, $FileBytes)
-              $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-              $form.Add($fc, 'file', $FileName)
-              $resp = $client.PostAsync("$crBase$Path", $form).GetAwaiter().GetResult()
-              $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-              $client.Dispose()
-              if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode): $text" }
-              return $text
+          # ---- CloudRadial API (assessments from JSON, no workbook upload) ----
+          # >>> _shared/cloudradial.ps1 (generated by _shared/inject.js; edit the source, not this block)
+          # ---------- _shared/cloudradial.ps1: CloudRadial API for AutomationAI steps ----------
+          # Edit this file, then run: node _shared/inject.js <automation-folder>
+          # Lifted from endpoint-lifecycle-manager/src/elm.ps1 and the ScalePad sync's archive helpers.
+          # Secrets (runner Key Vault): CloudRadial-BaseUrl, CloudRadial-PublicKey, CloudRadial-PrivateKey.
+          # Reports for a client go to Report Archives (Compliance > Reports, admins only), never to the
+          # knowledge base, and never carry another client's data.
+          # All state lives in the $CrState hashtable and is changed in place, because the runner
+          # runs a step in a child scope where $script: variables don't behave.
+
+          $CrState = @{
+              Base        = $null
+              Headers     = $null
+              MaxAttempts = 6
+              # A new Planner card needs a category: POST /v2/product answers 400 "The Category field is required" without one.
+              # These are Endpoint LifeCycle Manager's defaults; a build's own category and productCategoryId always win.
+              CardCategory          = 'Efficiency'
+              CardProductCategoryId = 7
           }
 
-          # ---- assessment template (51-col) + a 15-col working subset ----
-          $Columns = @('Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Partner Notes')
-          $TemplateColumns = @('Partner Notes','Monthly Unit Cost','Project Unit Cost','Psa Board','Psa Item','Psa Status','Psa Category','Psa Sub Type','Psa Type','Psa Priority','Psa Source','Psa Estimated Time','Email List','Teams Webhook','Slack Webhook','Flow Webhook','Json Webhook','Script','Checklist','Category','Question','Order','Explanation','Type','Answer','Text Answer','Responses','Is Flagged','Notes','Evaluation','Remediation Summary','Remediation','Reference','Monthly Units','Monthly Unit Price','Project Units','Project Unit Price','Control Type','Likelihood','Risk','Risk Cost','Risk Impact','Owner','Updated by','Update Key','Content Update Key','Note Compliant','Note Partially Compliant','Note NA','Note Missing','Note Not Compliant')
-          function ConvertTo-TemplateRows { param([object[]]$Rows)
-              $idx = @{}; for ($i = 0; $i -lt $Columns.Count; $i++) { $idx[$Columns[$i]] = $i }
-              $out = New-Object System.Collections.ArrayList
-              foreach ($r in $Rows) { $row = @($r); $null = $out.Add(@($TemplateColumns | ForEach-Object { if ($idx.ContainsKey($_)) { $row[$idx[$_]] } else { $null } })) }
-              return $out.ToArray()
+          # ---- small helpers (all Cr-prefixed so they don't clash with other shared files) ----
+          # A step that sets $global:NcoCrSecretSuffix (New Client Onboarding Form's cloudradial_company) reads <Name>-<suffix>
+          # instead, so one runner can hold several partners' CloudRadial keys. Unset or empty: the shared keys. Read through
+          # Get-Variable, because reading an unset variable throws in strict mode.
+          function Get-CrSecret { param([string]$Name) $v = $null; $sfx = ''; $gv = Get-Variable -Name NcoCrSecretSuffix -Scope Global -ErrorAction SilentlyContinue; if ($gv) { $sfx = [string]$gv.Value }; if ($sfx) { try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name "$Name-$sfx" -AsPlainText -ErrorAction SilentlyContinue } catch { }; if (-not $v) { throw "The runner Key Vault has no $Name-$sfx secret for cloudradial_company. Add it, or leave cloudradial_company empty to use the shared CloudRadial keys." }; return $v }; try { $v = Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $Name -AsPlainText -ErrorAction SilentlyContinue } catch { }; return $v }
+          function Get-CrProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+          function Get-CrHttpStatus { param($Err) $c = 0; try { $c = [int]$Err.Exception.Response.StatusCode } catch { }; return $c }
+          function Get-CrRetryAfter { param($Err, [int]$Attempt) $s = 0; try { $ra = $Err.Exception.Response.Headers.RetryAfter; if ($null -ne $ra -and $null -ne $ra.Delta) { $s = [int][Math]::Ceiling($ra.Delta.TotalSeconds) } elseif ($null -ne $ra -and $null -ne $ra.Date) { $s = [int][Math]::Ceiling(($ra.Date.UtcDateTime - [datetime]::UtcNow).TotalSeconds) } } catch { }; if ($s -le 0) { $s = [int][Math]::Min(30, [Math]::Pow(2, $Attempt)) }; return [Math]::Min($s, 120) }
+          function Get-CrId { param($o, [string[]]$Names) foreach ($n in $Names) { $v = $o; foreach ($part in $n -split '\.') { $v = Get-CrProp $v $part }; if ($null -ne $v -and [string]$v -match '^\d+$' -and [long]$v -gt 0) { return [int]$v } }; return 0 }
+
+          # Reads the API keys from the runner Key Vault (or takes them as parameters). Returns @{ Base }.
+          function Connect-Cr {
+              param([string]$BaseUrl, [string]$PublicKey, [string]$PrivateKey)
+              if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-CrSecret 'CloudRadial-BaseUrl' }
+              if ([string]::IsNullOrWhiteSpace($PublicKey)) { $PublicKey = Get-CrSecret 'CloudRadial-PublicKey' }
+              if ([string]::IsNullOrWhiteSpace($PrivateKey)) { $PrivateKey = Get-CrSecret 'CloudRadial-PrivateKey' }
+              $missing = @()
+              if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $missing += 'CloudRadial-BaseUrl' }
+              if ([string]::IsNullOrWhiteSpace($PublicKey)) { $missing += 'CloudRadial-PublicKey' }
+              if ([string]::IsNullOrWhiteSpace($PrivateKey)) { $missing += 'CloudRadial-PrivateKey' }
+              if ($missing.Count) { throw "Add these secrets to the runner Key Vault: $($missing -join ', ')" }
+              $CrState.Base = $BaseUrl.Trim().TrimEnd('/')
+              $CrState.Headers = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($PublicKey.Trim()):$($PrivateKey.Trim())")); Accept = 'application/json' }
+              return @{ Base = $CrState.Base }
           }
-          function New-XlsxBytes {
-              param([string[]]$Header,[object[]]$Rows)
-              Add-Type -AssemblyName System.IO.Compression
-              $esc = { param($s) [System.Security.SecurityElement]::Escape([string]$s) }
-              $colName = { param([int]$n) $s=''; $n++; while ($n -gt 0) { $m = ($n-1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n-1)/26) }; $s }
-              $sb = New-Object System.Text.StringBuilder
-              $null = $sb.Append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
-              $all = @(, $Header) + $Rows
-              for ($r = 0; $r -lt $all.Count; $r++) {
-                  $null = $sb.Append("<row r=""$($r+1)"">")
-                  $row = @($all[$r])
-                  for ($c = 0; $c -lt $row.Count; $c++) {
-                      $ref = (& $colName $c) + ($r+1); $val = $row[$c]
-                      if ($val -is [int] -or $val -is [long] -or $val -is [double]) { $null = $sb.Append("<c r=""$ref""><v>$val</v></c>") }
-                      elseif (-not [string]::IsNullOrEmpty([string]$val)) { $null = $sb.Append("<c r=""$ref"" t=""inlineStr""><is><t xml:space=""preserve"">$(& $esc $val)</t></is></c>") }
+
+          # One CloudRadial call. Path is relative to the base URL (or a full URL).
+          # Retries 429, GET 5xx and dropped connections, honoring Retry-After; other errors throw a plain message.
+          function Invoke-CrApi {
+              param([string]$Path, [string]$Method = 'GET', $Body = $null, [string]$ContentType = 'application/json')
+              if ($null -eq $CrState.Headers) { throw 'Call Connect-Cr before any other CloudRadial function.' }
+              $url = if ($Path -match '^https?://') { $Path } else { "$($CrState.Base)$Path" }
+              for ($i = 1; $i -le $CrState.MaxAttempts; $i++) {
+                  try {
+                      $a = @{ Uri = $url; Method = $Method; Headers = $CrState.Headers; ContentType = $ContentType; ErrorAction = 'Stop' }
+                      if ($null -ne $Body) { $a.Body = $(if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 12 }) }
+                      return Invoke-RestMethod @a
                   }
-                  $null = $sb.Append('</row>')
+                  catch {
+                      $code = Get-CrHttpStatus $_
+                      $msg = [string]$_.Exception.Message
+                      $transient = (-not $code -and $msg -match 'SSL connection|could not be established|No such host|actively refused|forcibly closed|error occurred while sending|timed out|TaskCanceled')
+                      if (($code -eq 429 -or ($Method -eq 'GET' -and $code -ge 500) -or $transient) -and $i -lt $CrState.MaxAttempts) { Start-Sleep -Seconds (Get-CrRetryAfter $_ $i); continue }
+                      $detail = $msg; try { if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message } } catch { }
+                      throw "CloudRadial $Method $Path failed$(if ($code) { " (HTTP $code)" }): $detail"
+                  }
               }
-              $null = $sb.Append('</sheetData></worksheet>')
-              $files = [ordered]@{
-                  '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
-                  '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
-                  'xl/workbook.xml'            = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Assessment" sheetId="1" r:id="rId1"/></sheets></workbook>'
-                  'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
-                  'xl/worksheets/sheet1.xml'   = $sb.ToString()
-              }
-              $ms = New-Object System.IO.MemoryStream
-              $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)
-              foreach ($k in $files.Keys) { $entry = $zip.CreateEntry($k); $w = New-Object System.IO.StreamWriter($entry.Open(), (New-Object System.Text.UTF8Encoding($false))); $w.Write($files[$k]); $w.Dispose() }
-              $zip.Dispose()
-              return , $ms.ToArray()
           }
+
+          # Every row of a /v2/odata list. Those lists stop at 200 rows with no nextLink, so this pages with $top/$skip.
+          # Wrap the result in @(...).
+          function Get-CrAll {
+              param([string]$Path, [int]$PageSize = 200, [int]$MaxPages = 500)
+              $rows = New-Object System.Collections.ArrayList; $skip = 0
+              for ($n = 0; $n -lt $MaxPages; $n++) {
+                  $sep = if ($Path -match '\?') { '&' } else { '?' }
+                  $resp = Invoke-CrApi -Path "$Path$sep`$top=$PageSize&`$skip=$skip"
+                  $batch = @(); $v = Get-CrProp $resp 'value'
+                  if ($null -ne $v) { $batch = @($v) } elseif ($resp -is [array]) { $batch = @($resp) }
+                  $batch = @($batch | Where-Object { $null -ne $_ })
+                  foreach ($r in $batch) { $null = $rows.Add($r) }
+                  if ($batch.Count -lt $PageSize) { break }
+                  $skip += $PageSize
+              }
+              return @($rows)
+          }
+
+          # Every row of a legacy /api/beta list. Those page with Skip/Take and return 10 rows by default.
+          function Get-CrBetaAll {
+              param([string]$Path, [int]$Take = 100, [int]$MaxPages = 50)
+              $all = New-Object System.Collections.ArrayList
+              $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+              for ($p = 0; $p -lt $MaxPages; $p++) {
+                  $raw = Invoke-CrApi -Path "$Path$($sep)Skip=$($p * $Take)&Take=$Take"
+                  $rows = @($raw)
+                  foreach ($k in @('value', 'data', 'items', 'archives')) { if ($rows.Count -eq 1 -and $null -ne (Get-CrProp $rows[0] $k)) { $rows = @(Get-CrProp $rows[0] $k) } }
+                  $rows = @($rows | Where-Object { $null -ne $_ })
+                  foreach ($r in $rows) { $null = $all.Add($r) }
+                  if ($rows.Count -lt $Take) { break }
+              }
+              return @($all)
+          }
+
+          # Creates or updates one Planner card (a CloudRadial "product") for a company, so a run never duplicates a card.
+          # It finds the company's card whose subject matches -Subject, or whose body holds -Key, and updates it; otherwise it creates one.
+          #   -Fields    the card's other fields: body, summary, notes, category, productCategoryId, priority (1 high, 0 medium, -1 low),
+          #              status (0 open, 20 scheduled, 40 completed), productType, scheduledQuarter, quarterOffset, and so on
+          #   -Key       a stable marker. It is added to the end of the body when missing, so the card is found again after its subject changes
+          #   -Existing  the company's cards when already read (saves a call per card); otherwise they are read here
+          #   -Preview   work out what would happen without writing
+          # Returns @{ action = created | updated | would-create | would-update; productId; optionalFieldsDropped }.
+          function Set-CrPlannerCard {
+              param([int]$CompanyId, [string]$Subject, [hashtable]$Fields = @{}, [string]$Key = '', $Existing = $null, [switch]$Preview)
+              if ([string]::IsNullOrWhiteSpace($Subject)) { throw 'Set-CrPlannerCard needs a subject.' }
+              $cards = if ($null -ne $Existing) { @($Existing) } else { @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $CompanyId") }
+              $want = $Subject.Trim()
+              $card = @($cards | Where-Object {
+                      $null -ne $_ -and ($null -eq (Get-CrProp $_ 'companyId') -or [int](Get-CrProp $_ 'companyId') -eq $CompanyId) -and (
+                          ([string](Get-CrProp $_ 'subject')).Trim() -ieq $want -or ($Key -and ([string](Get-CrProp $_ 'body')).Contains($Key)))
+                  }) | Select-Object -First 1
+              $f = [ordered]@{ subject = $want }
+              foreach ($k in $Fields.Keys) { if ($k -ne 'subject') { $f[$k] = $Fields[$k] } }
+              if ($Key -and $f.Contains('body') -and -not ([string]$f['body']).Contains($Key)) { $f['body'] = "$($f['body'])<p><em>$Key</em></p>" }
+              $optional = @('notes', 'productType', 'scheduledQuarter', 'quarterOffset')
+              $dropped = $false
+
+              if ($null -ne $card) {
+                  $id = [string](Get-CrProp $card 'productId')
+                  if ($Preview) { return @{ action = 'would-update'; productId = $id; optionalFieldsDropped = $false } }
+                  $ops = @($f.GetEnumerator() | ForEach-Object { @{ op = 'replace'; path = "/$($_.Key)"; value = $_.Value } })
+                  try { $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $ops -ContentType 'application/json-patch+json' }
+                  catch {
+                      # Older portals may not take notes or the roadmap fields: write the card without them.
+                      $core = @($ops | Where-Object { $_.path.TrimStart('/') -notin $optional })
+                      if ($core.Count -eq $ops.Count) { throw }
+                      $null = Invoke-CrApi -Path "/v2/product/$id" -Method PATCH -Body $core -ContentType 'application/json-patch+json'
+                      $dropped = $true
+                  }
+                  return @{ action = 'updated'; productId = $id; optionalFieldsDropped = $dropped }
+              }
+
+              if ($Preview) { return @{ action = 'would-create'; productId = ''; optionalFieldsDropped = $false } }
+              $body = [ordered]@{ companyId = $CompanyId; datePublished = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); isRequired = $false; isShowPrice = $false; isClientVisible = $false; status = 0 }
+              foreach ($k in $f.Keys) { $body[$k] = $f[$k] }
+              if ([string]::IsNullOrWhiteSpace([string]$body['category'])) { $body['category'] = $CrState.CardCategory }
+              if (-not $body.Contains('productCategoryId') -or $null -eq $body['productCategoryId']) { $body['productCategoryId'] = $CrState.CardProductCategoryId }
+              $new = $null
+              try { $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body }
+              catch {
+                  $had = @($optional | Where-Object { $body.Contains($_) })
+                  if (-not $had.Count) { throw }
+                  foreach ($k in $had) { $body.Remove($k) }
+                  $new = Invoke-CrApi -Path '/v2/product' -Method POST -Body $body
+                  $dropped = $true
+              }
+              # POST replies { success, message, data = { productId, ... } }.
+              $newId = Get-CrId $new @('productId', 'data.productId')
+              return @{ action = 'created'; productId = $(if ($newId) { [string]$newId } else { '' }); optionalFieldsDropped = $dropped }
+          }
+
+          # Finds a company's report archive folder by name, and creates it with -Create.
+          # Returns @{ id; companyId; name; inboundAddress } or $null.
+          # Uses the v2 archive folder API: GET /v2/odata/archivefolder filtered to the company, and POST /v2/archivefolder,
+          # which validates the name like the portal and gives the folder its inbound email address. Portals that answer the v2
+          # routes with 404 or 405 fall back to the legacy /api/beta/archive list (which ignores companyId, so it is filtered
+          # here) for the rest of the run. Names match case-insensitively, as the portal does.
+          function Test-CrMissingRoute { param([string]$Message) return ($Message -match '\(HTTP (404|405)\)') }
+          function Get-CrArchive {
+              param([int]$CompanyId, [string]$Name, [switch]$Create, [string]$Category = 'AutomationAI')
+              if (-not $CrState.ContainsKey('ArchiveApi')) { $CrState['ArchiveApi'] = 'v2' }
+              $match = { param($rows) @($rows | Where-Object {
+                          $n = [string](Get-CrProp $_ 'name'); if (-not $n) { $n = [string](Get-CrProp $_ 'archiveName') }
+                          $c = Get-CrProp $_ 'companyId'
+                          $n.Trim() -ieq $Name.Trim() -and ($null -eq $c -or [int]$c -eq $CompanyId)
+                      }) | Select-Object -First 1 }
+              $find = {
+                  if ($CrState['ArchiveApi'] -eq 'v2') {
+                      try { return (& $match @(Get-CrAll "/v2/odata/archivefolder?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId"))")) }
+                      catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $CrState['ArchiveApi'] = 'beta' }
+                  }
+                  return (& $match @(Get-CrBetaAll '/api/beta/archive'))
+              }
+              $hit = & $find
+              if ($null -eq $hit -and $Create) {
+                  $resp = $null
+                  $body = [ordered]@{ companyId = $CompanyId; name = $Name; category = $Category }
+                  try {
+                      if ($CrState['ArchiveApi'] -eq 'v2') {
+                          try { $resp = Invoke-CrApi -Path '/v2/archivefolder' -Method POST -Body $body }
+                          catch { if (-not (Test-CrMissingRoute $_.Exception.Message)) { throw }; $CrState['ArchiveApi'] = 'beta' }
+                      }
+                      if ($CrState['ArchiveApi'] -eq 'beta') { $resp = Invoke-CrApi -Path '/api/beta/archive' -Method POST -Body $body }
+                  }
+                  # A 400 can mean the folder already exists (another run made it just now), so look again before giving up.
+                  catch { $again = & $find; if ($null -eq $again) { throw "Couldn't create or find the '$Name' report archive: $($_.Exception.Message)" }; $resp = $again }
+                  # v2 replies { success, data = { archiveFolderId, inboundEmailAddress, ... } }; the legacy create may reply with a bare id.
+                  $id = Get-CrId $resp @('data.archiveFolderId', 'archiveFolderId', 'companyReportFolderId', 'id', 'archiveId', 'data.id', 'data.archiveId')
+                  if (-not $id -and ([string]$resp -match '^\d+$')) { $id = [int][string]$resp }
+                  $inb = [string](Get-CrProp (Get-CrProp $resp 'data') 'inboundEmailAddress'); if (-not $inb) { $inb = [string](Get-CrProp $resp 'inboundEmailAddress') }
+                  $hit = if ($id) { [pscustomobject]@{ id = $id; companyId = $CompanyId; name = $Name; inboundEmailAddress = $inb } } else { & $find }
+              }
+              if ($null -eq $hit) { return $null }
+              $aid = Get-CrId $hit @('archiveFolderId', 'companyReportFolderId', 'id', 'archiveId')
+              if (-not $aid) { throw "Found the '$Name' archive but couldn't read its id." }
+              $inbound = [string](Get-CrProp $hit 'inboundEmailAddress'); if (-not $inbound) { $inbound = [string](Get-CrProp $hit 'inboundAddress') }
+              return @{ id = $aid; companyId = $CompanyId; name = $Name; inboundAddress = $inbound }
+          }
+
+          # Writes an HTML report into a company's Report Archive (Compliance > Reports, admins only), creating the archive
+          # when needed. An item with the same subject is replaced, so a re-run updates the report instead of piling up.
+          # Never falls back to a knowledge base article: if this throws, keep the report in the run output.
+          # Returns @{ action = created | updated | would-write; archiveId; itemId; location }.
+          function Add-CrArchiveReport {
+              param([int]$CompanyId, [string]$ArchiveName, [string]$Subject, [string]$Html, [string]$Category = 'AutomationAI', [switch]$IsError, [switch]$Preview)
+              if ([string]::IsNullOrWhiteSpace($ArchiveName) -or [string]::IsNullOrWhiteSpace($Subject)) { throw 'Add-CrArchiveReport needs an archive name and a subject.' }
+              $where = "Report archive '$ArchiveName' (Compliance > Reports, admins only), item '$Subject'"
+              $arch = Get-CrArchive -CompanyId $CompanyId -Name $ArchiveName -Create:(-not $Preview) -Category $Category
+              if ($Preview) { return @{ action = 'would-write'; archiveId = $(if ($arch) { $arch.id } else { 0 }); itemId = 0; location = $where } }
+              $aid = [int]$arch.id
+              $esc = $Subject.Replace("'", "''")
+              $prev = $null
+              try { $prev = @(Get-CrAll "/v2/odata/archiveitem?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId and companyReportFolderId eq $aid and subject eq '$esc'"))&`$select=companyReportItemId,subject") | Where-Object { ([string](Get-CrProp $_ 'subject')) -eq $Subject } | Select-Object -First 1 } catch { $prev = $null }
+              $item = [ordered]@{ companyId = $CompanyId; archiveId = $aid; subject = $Subject; text = $Html; isHtml = $true; isError = [bool]$IsError }
+              $iid = Get-CrId $prev @('companyReportItemId')
+              if ($iid) {
+                  $null = Invoke-CrApi -Path "/v2/archiveitem/$aid/$iid" -Method PUT -Body $item
+                  return @{ action = 'updated'; archiveId = $aid; itemId = $iid; location = $where }
+              }
+              $r = Invoke-CrApi -Path '/v2/archiveitem' -Method POST -Body $item
+              return @{ action = 'created'; archiveId = $aid; itemId = (Get-CrId $r @('companyReportItemId', 'id', 'data.companyReportItemId', 'data.id')); location = $where }
+          }
+
+          # The answer options a synced multiple-choice question offers in the portal, so every value an automation writes
+          # (2 compliant, 1 partial, 0 not applicable, -1 not determined, -2 not compliant) can also be picked by hand.
+          $CrState['AssessmentOptions'] = @(
+              [ordered]@{ label = 'Yes'; value = 2 }, [ordered]@{ label = 'Partial'; value = 1 }, [ordered]@{ label = 'No'; value = -2 },
+              [ordered]@{ label = 'Not Applicable'; value = 0 }, [ordered]@{ label = 'Not Determined'; value = -1 })
+
+          # Creates or refreshes one company assessment from JSON, answers it, and optionally runs it, so the portal shows a
+          # dated, scored run linked to the assessment. No workbook upload.
+          #   -Title      the assessment's title. The company's assessment (type 20) with this title is refreshed in place;
+          #               without one, it is created.
+          #   -Questions  each a hashtable: updateKey (a stable text such as a control name, so a re-run updates the same
+          #               question), label, category, value (2 compliant, 1 partial, 0 not applicable, -1 not determined,
+          #               -2 not compliant), and optionally textValue, publicNotes, privateNotes, isFlagged, explanation,
+          #               evaluationInfo, remediationInfo, remediationLineItem, controlType, likelihood, risk, riskCost,
+          #               riskImpact, order, type (80 choice, the default, or 0 text) and answerOptions.
+          #   -Category, -Description, -Recommendations   the assessment's own fields, set when it is created
+          #   -Visibility     0 partner only (the default) or 2 client visible, set when it is created
+          #   -RemoveMissing  soft-delete the assessment's questions that aren't in -Questions
+          #   -RunName        also create a run with this name, a dated snapshot that the portal's Assessments list shows
+          #   -Preview        work out what would happen without writing
+          # Returns @{ action = created | updated | would-create | would-update; assessmentId; runId; added; updated; removed; scores }.
+          function Sync-CrAssessment {
+              param([int]$CompanyId, [string]$Title, [object[]]$Questions, [string]$Category = '', [string]$Description = '', [string]$Recommendations = '',
+                  [int]$Visibility = 0, [switch]$RemoveMissing, [string]$RunName = '', [switch]$Preview)
+              if ($CompanyId -le 0 -or [string]::IsNullOrWhiteSpace($Title)) { throw 'Sync-CrAssessment needs a company id and a title.' }
+              $qs = @($Questions | Where-Object { $null -ne $_ })
+              if (-not $qs.Count) { throw "Sync-CrAssessment has no questions for '$Title'." }
+              $keys = @{}
+              foreach ($q in $qs) {
+                  $k = [string](Get-CrProp $q 'updateKey'); $l = [string](Get-CrProp $q 'label')
+                  if (-not $k -or -not $l) { throw "Every question of '$Title' needs an updateKey and a label." }
+                  if ($keys.ContainsKey($k.ToLowerInvariant())) { throw "Two questions of '$Title' share the updateKey '$k'." }
+                  $keys[$k.ToLowerInvariant()] = $true
+              }
+              $structure = @('updateKey', 'category', 'label', 'type', 'answerOptions', 'explanation', 'evaluationInfo', 'remediationInfo', 'remediationLineItem',
+                  'remediationMonthlyUnits', 'remediationMonthlyUnitPrice', 'remediationProjectUnits', 'remediationProjectUnitPrice', 'controlType', 'likelihood', 'risk', 'riskCost', 'riskImpact', 'order')
+              $answerFields = @('value', 'textValue', 'publicNotes', 'privateNotes', 'isFlagged', 'owner')
+              $qBodies = @(foreach ($q in $qs) {
+                      $b = [ordered]@{}
+                      foreach ($f in $structure) { $v = Get-CrProp $q $f; if ($null -ne $v -and [string]$v -ne '') { $b[$f] = $v } }
+                      if (-not $b.Contains('type')) { $b['type'] = 80 }
+                      if ([int]$b['type'] -eq 80 -and -not $b.Contains('answerOptions')) { $b['answerOptions'] = $CrState['AssessmentOptions'] }
+                      , $b
+                  })
+              $aBodies = @(foreach ($q in $qs) {
+                      $b = [ordered]@{ updateKey = [string](Get-CrProp $q 'updateKey') }
+                      foreach ($f in $answerFields) { $v = Get-CrProp $q $f; if ($null -ne $v) { $b[$f] = $v } }
+                      if ($b.Count -gt 1) { , $b }
+                  })
+              $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId"))") | Where-Object {
+                  $t = [string](Get-CrProp $_ 'type')
+                  ([string](Get-CrProp $_ 'title')).Trim() -ieq $Title.Trim() -and ($t -eq '20' -or $t -eq 'Assessment') -and -not (Get-CrProp $_ 'isDeleted')
+              } | Sort-Object { [int](Get-CrProp $_ 'assessmentId') } | Select-Object -First 1
+              $aid = Get-CrId $existing @('assessmentId')
+              $res = @{ action = ''; assessmentId = $aid; runId = 0; added = 0; updated = 0; removed = 0; scores = $null }
+              if ($Preview) { $res.action = $(if ($aid) { 'would-update' } else { 'would-create' }); return $res }
+              $chunk = 1000
+              $slice = { param($list, [int]$from) @($list[$from..([Math]::Min($from + $chunk, $list.Count) - 1)]) }
+              if ($aid) {
+                  $res.action = 'updated'
+                  for ($i = 0; $i -lt $qBodies.Count; $i += $chunk) {
+                      # removeMissing only when every question fits in one call, or a later chunk would delete an earlier one's questions.
+                      $r = Invoke-CrApi -Path "/v2/assessment/$aid/questions?companyId=$CompanyId" -Method PUT -Body ([ordered]@{ questions = (& $slice $qBodies $i); removeMissing = [bool]($RemoveMissing -and $qBodies.Count -le $chunk) })
+                      $d = Get-CrProp $r 'data'; if ($null -eq $d) { $d = $r }
+                      $res.added += [int](Get-CrProp $d 'added'); $res.updated += [int](Get-CrProp $d 'updated'); $res.removed += [int](Get-CrProp $d 'removed')
+                  }
+              }
+              else {
+                  $res.action = 'created'
+                  $first = & $slice $qBodies 0
+                  $r = Invoke-CrApi -Path '/v2/assessment' -Method POST -Body ([ordered]@{ companyId = $CompanyId; title = $Title; type = 20; category = $Category; description = $Description; recommendations = $Recommendations; visibility = $Visibility; questions = $first })
+                  $aid = Get-CrId $r @('data.assessmentId', 'assessmentId')
+                  if (-not $aid) { throw "CloudRadial created the assessment '$Title' but its reply had no assessmentId." }
+                  $res.assessmentId = $aid; $res.added = $first.Count
+                  for ($i = $chunk; $i -lt $qBodies.Count; $i += $chunk) {
+                      $part = & $slice $qBodies $i
+                      $null = Invoke-CrApi -Path "/v2/assessment/$aid/questions?companyId=$CompanyId" -Method PUT -Body ([ordered]@{ questions = $part })
+                      $res.added += $part.Count
+                  }
+              }
+              for ($i = 0; $i -lt $aBodies.Count; $i += $chunk) {
+                  $r = Invoke-CrApi -Path "/v2/assessment/$aid/answers?companyId=$CompanyId" -Method PATCH -Body ([ordered]@{ answers = (& $slice $aBodies $i) })
+                  $d = Get-CrProp $r 'data'; if ($null -eq $d) { $d = $r }
+                  $s = Get-CrProp $d 'scores'; if ($null -ne $s) { $res.scores = $s }
+              }
+              if ($RunName) {
+                  $run = Invoke-CrApi -Path "/v2/assessment/$aid/run" -Method POST -Body ([ordered]@{ companyId = $CompanyId; name = $RunName })
+                  $res.runId = Get-CrId $run @('data.assessmentId', 'assessmentId')
+                  $rd = Get-CrProp $run 'data'; if ($null -eq $rd) { $rd = $run }
+                  if ($null -ne (Get-CrProp $rd 'totalScore')) { $res.scores = [ordered]@{ totalScore = Get-CrProp $rd 'totalScore'; compliantScore = Get-CrProp $rd 'compliantScore'; partialScore = Get-CrProp $rd 'partialScore'; maxScore = Get-CrProp $rd 'maxScore'; questionCount = Get-CrProp $rd 'questionCount' } }
+              }
+              return $res
+          }
+          # ---------- end _shared/cloudradial.ps1 ----------
+          # <<< _shared/cloudradial.ps1
 
           # ---- Microsoft Graph: token + Secure Score ----
           $tokUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
@@ -245,13 +495,14 @@ definition:
           $active = @($profiles | Where-Object { -not $_.deprecated })
           if ($active.Count -eq 0) { throw 'No active Secure Score control profiles returned.' }
 
-          # ---- build the 15-column assessment rows ----
+          # ---- one question per control, keyed on the control id so a rerun updates the same question ----
           $catOrder = @{ 'Identity'=1; 'Device'=2; 'Apps'=3; 'Data'=4; 'Infrastructure'=5 }
           $sorted = $active | Sort-Object @(
               @{ Expression = { $k=[string]$_.controlCategory; if ($catOrder.ContainsKey($k)) { $catOrder[$k] } else { 99 } } },
               @{ Expression = { $_.rank } }
           )
-          $rows = New-Object System.Collections.ArrayList
+          $today = Get-Date -Format 'yyyy-MM-dd'
+          $questions = New-Object System.Collections.ArrayList
           $order = 0; $compliantCount = 0
           foreach ($c in $sorted) {
               $order += 10
@@ -261,59 +512,44 @@ definition:
               $max = if ($c.maxScore) { [double]$c.maxScore } else { 0 }
               $isCompliant = ($cur -ge $max) -and ($max -gt 0)
               if ($isCompliant) { $compliantCount++ }
-              $answer = if ($isCompliant) { 2 } else { -2 }
-              $txt = if ($isCompliant) { 'Compliant' } else { 'Not compliant' }
-              $flag = if ($isCompliant) { 'No' } else { 'Yes' }
               $pct = if ($tenantMax -gt 0) { [math]::Round(($max / $tenantMax) * 100, 2) } else { 0 }
               $rem = if ($c.remediation) { ($c.remediation -replace '<[^>]+>','') } else { '' }
-              $remSum = if ($rem) { $rem.Substring(0, [math]::Min(200, $rem.Length)) } else { '' }
-              $null = $rows.Add(@(
-                  $cat, [string]$c.title, $order,
-                  "Service: $($c.service) | Score impact: $pct% | Points: $cur / $max", 'List',
-                  $answer, $txt, 'Compliant,Partially Compliant+,N/A=,Missing*,Not Compliant-', $flag, '',
-                  'Review this control in the Microsoft 365 Defender portal under Secure Score.',
-                  $remSum, $rem, "Microsoft Secure Score - $($c.service)", ''
-              ))
+              $null = $questions.Add([ordered]@{
+                  updateKey = [string]$c.id; category = $cat; label = [string]$c.title; order = $order
+                  explanation = "Service: $($c.service) | Score impact: $pct% | Points: $cur / $max"
+                  evaluationInfo = 'Review this control in the Microsoft 365 Defender portal under Secure Score.'
+                  remediationInfo = $rem
+                  value = $(if ($isCompliant) { 2 } else { -2 }); isFlagged = (-not $isCompliant)
+                  privateNotes = "Microsoft Secure Score - $($c.service): $cur of $max points on $today."
+              })
           }
 
-          $titleFinal = "$title ($(Get-Date -Format 'yyyy-MM-dd'))"
-          $summary = "$($rows.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
-
-          # ---- duplicate check ----
-          $existing = @(); $dupe = $false
-          try { $existing = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { }
-          foreach ($a in $existing) { if (([string](Get-Prop $a 'title')) -eq $titleFinal) { $dupe = $true } }
-
-          if ($dupe) {
-              Set-NodeOutput ([ordered]@{ status='skipped'; message="An assessment titled '$titleFinal' already exists for companyId $companyId - not re-created."; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
-          }
-          elseif ($mode -eq 'plan') {
-              Set-NodeOutput ([ordered]@{ status='plan'; message="DRY RUN - would create '$titleFinal' with $($rows.Count) questions. $summary"; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
-          }
-          else {
-              # The v2 API has no create endpoint (POST /v2/assessment returns 404). Like the portal's Import Assessment
-              # dialog, the upload creates the assessment when assessmentId is 0 (type 20 = an assessment the portal lists)
-              # and returns 204 with no body, so the new row is found afterwards by title and type.
-              $bytes = New-XlsxBytes -Header $TemplateColumns -Rows (ConvertTo-TemplateRows $rows.ToArray())
-              $data = ([ordered]@{ name = $titleFinal; assessmentId = 0; type = 20; companyId = [int]$companyId } | ConvertTo-Json -Compress)
-              # A large upload (hundreds of controls) can outlast CloudRadial's gateway, which answers 502/503/504 while
-              # the import still finishes. So a 5xx or timeout only means "look for it longer"; other errors stop the run.
-              $uploadErr = $null
-              try { $null = Send-CrMultipart -Path '/v2/assessment/upload' -DataJson $data -FileBytes $bytes -FileName 'secure-score.xlsx' }
-              catch { $uploadErr = $_.Exception.Message; if ($uploadErr -notmatch 'HTTP 5\d\d|time(d)? ?out|canceled') { throw } }
-              $waits = if ($uploadErr) { @(0, 15, 30, 60, 90) } else { @(0, 3, 10) }
-              $aid = $null
-              foreach ($wait in $waits) {
-                  if ($wait) { Start-Sleep -Seconds $wait }
-                  $seen = @(); try { $seen = @(Get-CrAll "/v2/odata/assessment?`$filter=companyId eq $companyId") } catch { continue }
-                  $hit = @($seen | Where-Object { ([string](Get-Prop $_ 'title')) -eq $titleFinal -and [int](Get-Prop $_ 'type') -eq 20 } | Sort-Object { [int](Get-Prop $_ 'assessmentId') } -Descending) | Select-Object -First 1
-                  if ($hit) { $aid = Get-Prop $hit 'assessmentId'; break }
+          # The portal names a run "<assessment> - M/d/yy"; a run with today's name means this already ran today.
+          $runName = "$title - $((Get-Date).ToString('M/d/yy', [Globalization.CultureInfo]::InvariantCulture))"
+          $summary = "$($questions.Count) controls ($compliantCount compliant). Tenant score $tenantCur / $tenantMax."
+          $facts = [ordered]@{ controls = $questions.Count; compliant = $compliantCount; tenantScore = "$tenantCur / $tenantMax" }
+          function Send-ScoreOut { param($o) foreach ($k in $facts.Keys) { $o[$k] = $facts[$k] }; Set-NodeOutput $o }
+          try {
+              $null = Connect-Cr
+              $runs = @(Get-CrAll "/v2/odata/assessment?`$filter=$([uri]::EscapeDataString("companyId eq $companyId"))") | Where-Object { ([string](Get-Prop $_ 'title')).Trim() -ieq $runName -and -not (Get-Prop $_ 'isDeleted') }
+              if (@($runs).Count) {
+                  Send-ScoreOut ([ordered]@{ status='skipped'; message="Today's run '$runName' already exists for companyId $companyId, so nothing was changed."; assessmentId=[int](Get-Prop @($runs)[0] 'assessmentId') })
               }
-              if (-not $aid) {
-                  $m = $(if ($uploadErr) { "The upload didn't answer in time ($uploadErr) and no assessment titled '$titleFinal' appeared for companyId $companyId within about 3 minutes. It may still appear; check the company's assessments before running again (a rerun skips it once it exists)." } else { "CloudRadial accepted the upload but no assessment titled '$titleFinal' appeared for companyId $companyId. Check the company's assessments before running again." })
-                  Set-NodeOutput @{ status = 'error'; message = $m }; throw $m
+              elseif ($mode -eq 'plan') {
+                  $p = Sync-CrAssessment -CompanyId ([int]$companyId) -Title $title -Questions $questions.ToArray() -Preview
+                  $what = if ($p.action -eq 'would-update') { "refresh the assessment '$title' (assessmentId $($p.assessmentId)) in place" } else { "create the assessment '$title'" }
+                  Send-ScoreOut ([ordered]@{ status='plan'; message="DRY RUN - would $what with $($questions.Count) questions and add the run '$runName'. $summary"; assessmentId=[int]$p.assessmentId })
               }
-              Set-NodeOutput ([ordered]@{ status='created'; message="Created assessment '$titleFinal' (assessmentId $aid) with $($rows.Count) questions. $summary"; assessmentId=[int]$aid; controls=$rows.Count; compliant=$compliantCount; tenantScore="$tenantCur / $tenantMax" })
+              else {
+                  $r = Sync-CrAssessment -CompanyId ([int]$companyId) -Title $title -Questions $questions.ToArray() -Category 'Security' -Description 'Microsoft Secure Score controls for this Microsoft 365 tenant, refreshed by AutomationAI.' -Visibility 2 -RemoveMissing -RunName $runName
+                  $did = if ($r.action -eq 'created') { "Created the assessment '$title'" } else { "Refreshed the assessment '$title'" }
+                  $sc = if ($r.scores) { " Assessment score $(Get-Prop $r.scores 'totalScore') of $(Get-Prop $r.scores 'maxScore')." } else { '' }
+                  Send-ScoreOut ([ordered]@{ status='created'; message="$did (assessmentId $($r.assessmentId)) with $($questions.Count) questions and added the run '$runName' (assessmentId $($r.runId)). $summary$sc"; assessmentId=[int]$r.assessmentId; runId=[int]$r.runId; assessmentAction=$r.action; runName=$runName })
+              }
+          }
+          catch {
+              $m = "Couldn't write the Secure Score assessment for companyId ${companyId}: $($_.Exception.Message)"
+              Send-ScoreOut ([ordered]@{ status='error'; message=$m }); throw $m
           }
         timeoutSeconds: 600
         retryCount: 0

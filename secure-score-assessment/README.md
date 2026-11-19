@@ -4,7 +4,7 @@ Turn a client's Microsoft Secure Score into a CloudRadial assessment in one run.
 
 ## What happens
 
-Your team runs it for one client at a time. When it finishes, a new assessment appears under that client in CloudRadial, named with the date it was taken.
+Your team runs it for one client at a time. When it finishes, the client's **Microsoft Secure Score** assessment in CloudRadial is up to date, with a dated run that shows today's score in the Assessments list. The first run creates the assessment; later runs refresh the same one, so the client's history builds up as runs.
 
 - Each Microsoft Secure Score control is one question, grouped by category.
 - Controls that are fully in place are marked **Compliant**. The rest are marked **Not compliant** and flagged, so they stand out for review.
@@ -13,8 +13,8 @@ Your team runs it for one client at a time. When it finishes, a new assessment a
 ## What happens behind the scenes
 
 - **It only reads from Microsoft 365.** Nothing in the client's tenant is changed.
-- **No duplicates.** If an assessment with the same name and date already exists for that client, it's skipped.
-- **Retired controls are left out.** Microsoft's deprecated controls don't clutter the assessment.
+- **No duplicates.** There's one assessment per client, refreshed in place, and at most one run a day: if today's run already exists, nothing is changed.
+- **Retired controls are left out.** Microsoft's deprecated controls don't clutter the assessment, and they're removed from it when Microsoft retires them.
 - **Preview first if you like.** You can do a dry run that shows the counts without creating anything.
 - **The right client every time.** You name the client, and it uses that client's own Microsoft 365 connection and CloudRadial details. If the client isn't set up in AutomationAI, or a tenant you type doesn't match theirs, it stops before reading or writing anything.
 
@@ -31,7 +31,7 @@ Microsoft 365 and CloudRadial. No PSA is needed.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.1.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.2.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 
@@ -51,15 +51,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sec
 
 ## Technical details
 
-**Formerly:** Secure Score Assessment script | **Marketplace ID:** AAI-00001 | **Type:** Workflow | **Version:** 1.1.0
+**Formerly:** Secure Score Assessment script | **Marketplace ID:** AAI-00001 | **Type:** Workflow | **Version:** 1.2.0
 
 ## Files
 
-Each version is published as a release, with `secure-score-assessment.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.1.0).
+Each version is published as a release, with `secure-score-assessment.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.2.0).
 
 | What | Link |
 |---|---|
-| Download `secure-score-assessment.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.1.0) |
+| Download `secure-score-assessment.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/secure-score-assessment/v1.2.0) |
 | View the current source | [`secure-score-assessment.yml`](https://github.com/cloudradial/Automations/blob/main/secure-score-assessment/secure-score-assessment.yml) |
 | All files in this automation | [secure-score-assessment](https://github.com/cloudradial/Automations/tree/main/secure-score-assessment) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/secure-score-assessment) |
@@ -67,14 +67,14 @@ Each version is published as a release, with `secure-score-assessment.yml` attac
 
 ## How it works
 
-Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control to a CloudRadial assessment question, and **creates + uploads** the assessment, the automated replacement for the old `Import-SecureScoreAssessment.ps1` / manual-import flow. This is a **deterministic PowerShell workflow** (not an agent): the spreadsheet is built in memory and uploaded, nothing is written to disk.
+Pulls a client tenant's **Microsoft Secure Score** from Graph, maps each control to a CloudRadial assessment question, and keeps one CloudRadial assessment per client current through the **JSON assessment API**, then adds a dated run. It's the automated replacement for the old `Import-SecureScoreAssessment.ps1` / manual-import flow. This is a **deterministic PowerShell workflow** (not an agent), and nothing is written to disk.
 
 `Start → Import Secure Score (single PowerShell node) → End`:
 
 1. Switches to the client the run names (`company`), so every secret it reads is that client's, and takes the tenant from that client's `M365-TenantID`. Then gets a Microsoft Graph app-only token for that tenant.
 2. Reads `GET /security/secureScores?$top=1` and every `secureScoreControlProfiles` (paged), dropping deprecated controls.
-3. Maps each control to an assessment question (Compliant when its current score meets its max), sorted by category then rank.
-4. Skips if an assessment with the same title already exists for the company, then builds the xlsx in memory and sends it to **`POST /v2/assessment/upload`** (multipart) with `assessmentId: 0` and `type: 20`, which creates the assessment with every question and answer. The upload returns no body, so the new assessment is found afterwards by title. A large tenant can make the upload outlast CloudRadial's gateway (HTTP 504) while the import still finishes, so a 5xx or timeout means it keeps looking for up to about 3 minutes before reporting an error.
+3. Maps each control to an assessment question keyed on the control's id (Compliant when its current score meets its max), sorted by category then rank.
+4. Skips if today's run (`<assessmentTitle> - M/d/yy`) already exists. Otherwise [`Sync-CrAssessment`](https://github.com/cloudradial/Automations/blob/main/_shared/cloudradial.ps1) creates the client-visible assessment with `POST /v2/assessment`, or refreshes the existing one with `PUT /v2/assessment/{id}/questions` (retired controls removed), sets every answer with one `PATCH /v2/assessment/{id}/answers`, and creates the run with `POST /v2/assessment/{id}/run`. The run copies the answers and the assessment's `updateKey`, so the portal links the two.
 
 ## Install / run
 
@@ -101,12 +101,12 @@ A step's **Company** decides whose secrets it reads: the client's Microsoft 365 
 - `company`: the AutomationAI company (name, external id or alias) whose secrets to use. Leave it out to use the step's own Company setting.
 - `companyId`: the CloudRadial company the assessment is created under (required).
 - `tenantId`: optional. Defaults to the company's `M365-TenantID` secret; when both are set they must match.
-- `assessmentTitle`: optional; the date is appended, and that title is the idempotency key.
+- `assessmentTitle`: optional, default `Microsoft Secure Score`. The assessment with this title is refreshed in place, and each run is named `<assessmentTitle> - M/d/yy`.
 - `mode`: `apply` (default) writes; `plan` previews the counts without creating anything.
 
 ## Notes
 
-- **Idempotent by title:** a same-titled assessment for the company is skipped, so re-runs don't duplicate. (Change `assessmentTitle` for a fresh snapshot.)
-- The v2 API has no create endpoint: `POST /v2/assessment` returns 404. `POST /v2/assessment/upload` with `assessmentId: 0` creates the assessment, the same way the portal's Import Assessment dialog does and the same way [Microsoft Security Assessment](https://github.com/cloudradial/Automations/tree/main/microsoft-security-assessment) works. The upload is file-based, so this workflow does it in PowerShell.
+- **Idempotent:** one assessment per title and company, refreshed in place, and one run a day. A same-day rerun changes nothing. Assessments named with a date by version 1.1.0 and earlier are left as they are.
+- **No workbook upload.** Version 1.2.0 uses the JSON assessment API added to the CloudRadial API on 2026-11-13, so there's no spreadsheet, no wait for the import and no gateway timeout to work around.
 - **Requires:** AutomationAI + the CloudRadial API secrets + your Microsoft 365 app with `SecurityEvents.Read.All` added. No custom extension needed.
 - **If Graph refuses** (HTTP 403), the step stops before creating anything and names the app id and the application permissions its token holds in that tenant, so you can see whether `SecurityEvents.Read.All` is missing, Delegated instead of Application, or not consented yet.

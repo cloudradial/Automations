@@ -42,7 +42,7 @@ ConnectWise PSA, Datto RMM and Microsoft 365.
 {"companyId": 1, "psaCompanyId": 250, "tenantId": "<client's Microsoft 365 tenant id>", "confirm": true}
 ```
 
-**In your UCP portal, add the dashboard** for the client: **Account > Dashboards > Add Dashboard**, named **Quarterly Business Review**, then four **Custom HTML** widgets (2 wide by 3 high, in a 2x2 grid) with the HTML from [widgets/widgets.json](widgets/widgets.json). Or use `POST /v2/dashboard` and `POST /v2/dashboard/{id}/widget?companyId=`.
+**In your UCP portal, add the dashboard** for the client: **Account > Dashboards > Add Dashboard**, named **Quarterly Business Review**, then four **Custom HTML** widgets (2 wide by 3 high, in a 2x2 grid) with the HTML from [widgets/widgets.json](https://github.com/cloudradial/Automations/blob/main/qbr-dashboard/widgets/widgets.json). Or use `POST /v2/dashboard` and `POST /v2/dashboard/{id}/widget?companyId=`.
 
 **Test it.** Reload the dashboard: no `@CH` text should show.
 
@@ -54,7 +54,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/qbr
 
 ## Technical details
 
-**Marketplace ID:** Not yet listed | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
+**Marketplace ID:** CRA-00022 | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
 
 Built on the [Client Health](../client-health/) dashboard template, filled by a plain script instead of an agent.
 

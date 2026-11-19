@@ -24,7 +24,7 @@ Datto RMM (Windows components) and ConnectWise PSA for the ticket note. Signal n
 - A UCP portal with **Actions** on your request forms
 - AutomationAI, with Datto RMM, ConnectWise and CloudRadial connected
 - The ComStore components for each app added to your Datto RMM component library (the defaults are **Google Chrome [WIN]**, **Zoom Workplace [WIN]**, **7-Zip [WIN]** and **Notepad++ [WIN]**)
-- An `@endpoints` company token listing each client's computers. [Let Users Pick Their Computer on Portal Forms](../endpoint-names-token/) keeps it current.
+- An `@endpoints` company token listing each client's computers. [Let Users Pick Their Computer on Portal Forms](https://github.com/cloudradial/Automations/tree/main/endpoint-names-token) keeps it current.
 
 ## Set it up
 
@@ -57,7 +57,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sof
 
 ## Technical details
 
-**Marketplace ID:** Not yet listed | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
+**Marketplace ID:** CRA-00019 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
 
 ## Files
 

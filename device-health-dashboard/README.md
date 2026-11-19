@@ -43,7 +43,7 @@ Datto RMM. Signal for the optional summary.
 {"companyId": 1, "sites": ["Contoso Ltd"], "remediateDevices": ["CONTOSO-LT-031"], "notifyUsers": [], "confirm": true}
 ```
 
-**In your UCP portal, add the dashboard** for the client: **Account > Dashboards > Add Dashboard**, named **Device Health**, then four **Custom HTML** widgets (2 wide by 3 high, in a 2x2 grid) with the HTML from [widgets/widgets.json](widgets/widgets.json). Or create it through the API: `POST /v2/dashboard`, then `POST /v2/dashboard/{id}/widget?companyId=` for each widget with `{"type": 2, "title", "html", "width": 2, "height": 3, "x", "y"}`.
+**In your UCP portal, add the dashboard** for the client: **Account > Dashboards > Add Dashboard**, named **Device Health**, then four **Custom HTML** widgets (2 wide by 3 high, in a 2x2 grid) with the HTML from [widgets/widgets.json](https://github.com/cloudradial/Automations/blob/main/device-health-dashboard/widgets/widgets.json). Or create it through the API: `POST /v2/dashboard`, then `POST /v2/dashboard/{id}/widget?companyId=` for each widget with `{"type": 2, "title", "html", "width": 2, "height": 3, "x", "y"}`.
 
 **Test it.** Reload the dashboard: no `@DH` text should show, and the Updated time should match your run.
 
@@ -55,7 +55,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/dev
 
 ## Technical details
 
-**Marketplace ID:** Not yet listed | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
+**Marketplace ID:** CRA-00021 | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
 
 ## Files
 

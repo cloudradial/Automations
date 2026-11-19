@@ -14,7 +14,7 @@ When Zoom, Microsoft, Google, Slack or another service your clients rely on has 
 - **Remembers what it already announced,** so each incident is announced once and cleared once.
 - **Ignores old news:** resolved incidents and scheduled maintenance are skipped.
 - **Easy to change:** the list of services lives in a portal token, one line per service.
-- **Three modes:** `direct` does everything itself (recommended); `approve` only alerts your technicians; `auto` hands each incident to [Outage / Incident Broadcast](../outage-broadcast/).
+- **Three modes:** `direct` does everything itself (recommended); `approve` only alerts your technicians; `auto` hands each incident to [Outage / Incident Broadcast](https://github.com/cloudradial/Automations/tree/main/outage-broadcast).
 - **No AI.** It's a plain script, so running it every 10 minutes costs no AI usage.
 
 ## Works with
@@ -66,7 +66,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sta
 
 ## Technical details
 
-**Marketplace ID:** Not yet listed | **Type:** Workflow (one PowerShell step, no AI), run every 10 minutes by a Routine | **Version:** 1.0.0
+**Marketplace ID:** CRA-00018 | **Type:** Workflow (one PowerShell step, no AI), run every 10 minutes by a Routine | **Version:** 1.0.0
 
 ## Files
 

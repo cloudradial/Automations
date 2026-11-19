@@ -14,6 +14,7 @@ A **Request Software** form with two dropdowns: **Which app do you need?** (for 
 - **Already installed?** It says so instead of reporting a failure.
 - **Offline computer?** Nothing is installed, and the requester is told to turn it on and resubmit.
 - **Notes the ticket** with the app, the computer, the result and the Datto job id, and **sends the requester a Signal**.
+- **Flags requests for someone else's computer:** if the computer's last signed-in user in Datto RMM isn't the requester, the ticket note says so in capitals, so a technician can check the request was expected.
 
 ## Works with
 

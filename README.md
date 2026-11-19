@@ -42,7 +42,9 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`connectwise-board-types-setup/`](connectwise-board-types-setup/) | ConnectWise Board Types Setup | Workflow (one PowerShell step, no AI) | Not listed |
 | [`create-halo-ticket-from-template/`](create-halo-ticket-from-template/) | Create a Halo Ticket from a Template | Workflow (one PowerShell step, no AI) | Not listed |
 | [`deliver-result/`](deliver-result/) | Send Automation Results Wherever Your Team Works | Agent | [AAI-00039](https://automations.cloudradial.com/marketplace/AAI-00039) |
+| [`device-health-dashboard/`](device-health-dashboard/) | Show Each Client's Device Health from Datto RMM, with Automatic Fixes | Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | Not listed |
 | [`domain-expiration-report/`](domain-expiration-report/) | Never Let a Client Domain Expire | Workflow | [AAI-00023](https://automations.cloudradial.com/marketplace/AAI-00023) |
+| [`employee-leave/`](employee-leave/) | Pause a Microsoft 365 Account for Employee Leave from One Form | Workflow (one PowerShell step, no AI) | Not listed |
 | [`endpoint-lifecycle-manager/`](endpoint-lifecycle-manager/) | Keep Every Client's Hardware Refresh Plan Current | Workflow (an optional AI agent version is included) | [AAI-00021](https://automations.cloudradial.com/marketplace/AAI-00021) |
 | [`endpoint-names-token/`](endpoint-names-token/) | Let Users Pick Their Computer on Portal Forms | Workflow | [AAI-00005](https://automations.cloudradial.com/marketplace/AAI-00005) |
 | [`escalation-handoff-summary/`](escalation-handoff-summary/) | Hand Off Escalated Tickets Without Rereading the Whole History | Workflow (PowerShell steps plus one AI Prompt step) | Not listed |
@@ -75,6 +77,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`post-close-feedback/`](post-close-feedback/) | Ask Every Requester How It Went, and Hear About Bad Scores the Same Day | Workflow (PowerShell steps, no AI) | [AAI-00056](https://automations.cloudradial.com/marketplace/AAI-00056) |
 | [`priority-scoring/`](priority-scoring/) | Raise Ticket Priority to Match Its Real Impact | Workflow (PowerShell steps, no AI) | [AAI-00058](https://automations.cloudradial.com/marketplace/AAI-00058) |
 | [`psa-hygiene/`](psa-hygiene/) | Keep Your PSA Clean: Stale Tickets, Missing Contacts and Wrong Statuses | Workflow (run weekly by a Routine, or by hand) | [AAI-00050](https://automations.cloudradial.com/marketplace/AAI-00050) |
+| [`qbr-dashboard/`](qbr-dashboard/) | Keep a Live QBR Dashboard in Every Client's Portal | Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | Not listed |
 | [`qbr-data-pack/`](qbr-data-pack/) | Have Every Client's QBR Numbers Ready on One Planner Card | Workflow (PowerShell, no AI, read-only except one internal Planner card) | [AAI-00065](https://automations.cloudradial.com/marketplace/AAI-00065) |
 | [`related-ticket-detection/`](related-ticket-detection/) | Spot Duplicate and Related Tickets as They Arrive | Workflow (PowerShell steps plus one AI Prompt step) | [AAI-00052](https://automations.cloudradial.com/marketplace/AAI-00052) |
 | [`remove-empty-flexible-asset-type/`](remove-empty-flexible-asset-type/) | Remove a Flexible Asset Type You No Longer Use | Workflow | [AAI-00041](https://automations.cloudradial.com/marketplace/AAI-00041) |
@@ -89,9 +92,11 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`shared-mailbox-dl/`](shared-mailbox-dl/) | Create Shared Mailboxes and Distribution Lists on Request | Workflow | Not listed |
 | [`sla-breach-report/`](sla-breach-report/) | See Every SLA Breach Before Your Clients Do | Workflow (PowerShell steps, no AI), run weekly by a Routine | [AAI-00049](https://automations.cloudradial.com/marketplace/AAI-00049) |
 | [`smart-acknowledgement/`](smart-acknowledgement/) | Acknowledge Every New Ticket Personally | Workflow (PowerShell steps plus one AI Prompt step) | [AAI-00059](https://automations.cloudradial.com/marketplace/AAI-00059) |
+| [`software-install-datto/`](software-install-datto/) | Install Requested Software Through Datto RMM | Workflow (one PowerShell step, no AI) | Not listed |
 | [`split-request-two-tickets/`](split-request-two-tickets/) | Turn One Request into a Service Ticket and a Quote | Workflow + Agent | [AAI-00034](https://automations.cloudradial.com/marketplace/AAI-00034) |
 | [`stale-guest-cleanup/`](stale-guest-cleanup/) | Find and Clean Up Unused Microsoft 365 Accounts and Guests | Workflow (run monthly by a Routine, or by hand) | [AAI-00064](https://automations.cloudradial.com/marketplace/AAI-00064) |
 | [`status-change-updates/`](status-change-updates/) | Tell Requesters in Plain Language When Their Ticket Changes Status | Workflow (PowerShell steps plus one AI Prompt step) | [AAI-00054](https://automations.cloudradial.com/marketplace/AAI-00054) |
+| [`status-page-watcher/`](status-page-watcher/) | Alert Clients When a Vendor Has an Outage | Workflow (one PowerShell step, no AI), run every 10 minutes by a Routine | Not listed |
 | [`thank-you-close/`](thank-you-close/) | Close Tickets When the Client Says Thanks | Workflow (one PowerShell step) | Not listed |
 | [`ticket-routing/`](ticket-routing/) | Send Every Ticket to the Right Engineer | Agent + Workflow (ServiceAI Triage Action) | Not listed |
 | [`ticket-triage-form/`](ticket-triage-form/) | Ticket Triage from Portal Forms | Workflow (PowerShell plus one AI prompt) | Not listed |
@@ -102,6 +107,7 @@ Extensions aren't kept here. AutomationAI ships them as default (catalog) extens
 | [`user-offboarding/`](user-offboarding/) | Offboard a Departing Employee in One Reviewed Run | Workflow (two PowerShell steps, no AI) | [CRA-00003](https://automations.cloudradial.com/marketplace/CRA-00003) |
 | [`vip-ticket-alert/`](vip-ticket-alert/) | Alert the Account Manager When a VIP Client Opens a Ticket | Workflow (PowerShell steps, no AI) | [AAI-00047](https://automations.cloudradial.com/marketplace/AAI-00047) |
 | [`waiting-on-client-nudge/`](waiting-on-client-nudge/) | Nudge Clients Who Haven't Replied, Then Close the Ticket | Workflow (PowerShell, no AI, runs on a schedule) | [AAI-00060](https://automations.cloudradial.com/marketplace/AAI-00060) |
+| [`weekly-client-summary/`](weekly-client-summary/) | Send Each Client a Weekly Ticket Summary on Their Desktop | Workflow (one PowerShell step, no AI) | Not listed |
 | [`weekly-fleet-audit/`](weekly-fleet-audit/) | Get a Weekly List of Warranty and Ownership Gaps | Workflow (PowerShell audit + Deliver Result agent) | [AAI-00032](https://automations.cloudradial.com/marketplace/AAI-00032) |
 
 ## Conventions

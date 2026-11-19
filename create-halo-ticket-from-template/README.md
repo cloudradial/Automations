@@ -2,7 +2,7 @@
 
 When a client submits a CloudRadial request form, the HaloPSA ticket is created exactly as its Halo ticket template would create it: the right ticket type, team, priority and status, with every answer in its Halo custom field. Halo's mandatory fields no longer reject the ticket.
 
-**Marketplace ID:** TBD | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
+**Marketplace ID:** CRA-00015 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 
 ## Files
 
@@ -85,14 +85,17 @@ None.
 
 > The step logic lives in `src/create.ps1`. Run `node src/build.js` (it pastes `_shared/psa.ps1`) and `pwsh -NoProfile -File src/test.ps1` after changing it. Never edit the `.yml` by hand.
 
+### Proven live
+
+- **The read side.** The Halo template, ticket type, field group and custom field reads use the shapes proven by the migration workflow against a live Halo (2026-10-16 to 10-19), including "Visible - Required" being 3.
+- **The whole route from a real form submission (2026-11-03).** The "New Starter Request" form made by the migration has an AutomationAI Action question pointing at this workflow. A client submission started run 6ef747e7 (integration trigger, version 0.0.4), which created Halo ticket 14956 from the "New Starter Request" template. Halo accepted the custom field shape (`{id, name, value}`) and the answers sent with it.
+- **The mandatory-field case.** An earlier submission (run 4a95bf16) was rejected by Halo with "Justification is mandatory", the case described under Map the answers. The run failed with Halo's message and created nothing.
+- **A manual run** (run 4cce7131, 2026-10-19) created Halo ticket 14743 with every custom field filled.
+
 ### Not yet proven live
 
-- **The read side is proven.** The Halo template, ticket type, field group and custom field reads use the shapes proven by the migration workflow against a live Halo (2026-10-16 to 10-19), including "Visible - Required" being 3.
-- **The ticket create is not proven yet.** That covers:
-  - the custom field shape (`{id, name, value}`)
-  - list values (the option id, and several ids joined with commas)
-  - checkboxes (`true`/`false`)
-
-  The first live submission will confirm them.
-- **The AutomationAI Action payload** is assumed to be CloudRadial's form JSON. A flat body works too.
+- **Each value type, checked field by field in Halo.** The ticket was accepted, but list values (the option id, and several ids joined with commas) and checkboxes (`true`/`false`) haven't each been checked on the Halo ticket.
+- **Fields Halo marks required that the form didn't answer.** Run 6ef747e7 warned about three (Access Type, Shared File Path, Administrator Rights Justification). This Halo didn't enforce them; one that does will reject the ticket and name the field.
+- **A reporter email with no single Halo user** under the client files the ticket under Halo's general user (seen in run 6ef747e7). Add the user in Halo if the ticket should be reported by them.
+- **The AutomationAI Action payload** shape is CloudRadial's form JSON, as proven by run 6ef747e7. A flat body works too.
 - **A retried submission can create a second ticket.** Check Halo before resubmitting a failed run.

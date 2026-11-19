@@ -1,0 +1,33 @@
+{
+  "_source": "Tool names this agent relies on, from microsoft-365-security 0.1.0 (custom), microsoft-entra-id 1.1.0, cloudradial-v2-services 0.2.0, cloudradial-v2-compliance 0.3.0 and cloudradial-v2-feedback 0.3.0, read 2026-11-16. toolCount is each extension's whole tool count, which the runner exposes to the model.",
+  "extensions": {
+    "microsoft-365-security": { "toolCount": 6, "catalog": false },
+    "microsoft-entra-id": { "toolCount": 16, "catalog": true },
+    "cloudradial-v2-services": { "toolCount": 18, "catalog": true },
+    "cloudradial-v2-compliance": { "toolCount": 49, "catalog": true },
+    "cloudradial-v2-feedback": { "toolCount": 23, "catalog": true }
+  },
+  "read": [
+    "m365sec_get_secure_score",
+    "m365sec_list_secure_score_controls",
+    "m365sec_list_auth_method_registration",
+    "m365sec_list_risky_users",
+    "m365sec_list_conditional_access_policies",
+    "entra_list_group_members",
+    "cr_list_product",
+    "cr_list_flexible_asset_type",
+    "cr_list_flexible_asset",
+    "cr_list_archive_folder"
+  ],
+  "write": [
+    "cr_create_product",
+    "cr_patch_product",
+    "cr_create_flexible_asset_type",
+    "cr_create_flexible_asset",
+    "cr_patch_flexible_asset",
+    "cr_create_archive_item",
+    "entra_add_group_member",
+    "entra_revoke_sign_in_sessions",
+    "entra_disable_account"
+  ]
+}

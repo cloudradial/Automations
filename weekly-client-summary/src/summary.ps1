@@ -1,0 +1,37 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Off
+# === NODE: Send the weekly ticket summary ===
+# Counts a client's ConnectWise tickets for the last 7 days (resolved, still open, waiting on the client) and sends
+# the summary as a Signal. Input: companyId (CloudRadial), psaCompanyId (ConnectWise), users (CloudRadial user ids),
+# waitingStatus (default 'Waiting on Client'), confirm (default true).
+function P { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
+function Sec { param([string[]]$names) foreach ($n in $names) { $v = [string](Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue); if ($v) { return $v.Trim() } }; return '' }
+$in = Get-NodeInput; $trig = P $in 'trigger'; if ($trig -is [string]) { $trig = $trig | ConvertFrom-Json }; if ($null -eq $trig) { $trig = $in }
+$companyId = [int](P $trig 'companyId')
+$psaId = [int](P $trig 'psaCompanyId')
+if ($companyId -le 0 -or $psaId -le 0) { throw 'Send companyId (the CloudRadial company) and psaCompanyId (the same client in ConnectWise).' }
+$users = @(P $trig 'users' | ForEach-Object { [string]$_ } | Where-Object { $_ })
+$waiting = [string](P $trig 'waitingStatus'); if (-not $waiting) { $waiting = 'Waiting on Client' }
+$confirm = -not ([string](P $trig 'confirm') -match '^(?i)(false|0|no)$')
+$crSuffix = [string](P $trig 'cloudradial_company'); $sfx = if ($crSuffix) { "-$crSuffix" } else { '' }
+
+$cwApi = (Sec @('CW-ApiUrl')).TrimEnd('/'); $pair = "{0}+{1}:{2}" -f (Sec @('CW-CompanyID')), (Sec @('CW-PublicKey')), (Sec @('CW-PrivateKey'))
+$h = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair)); clientId = (Sec @('CW-ClientId')); Accept = 'application/json' }
+function CwCount { param([string]$cond) $r = Invoke-RestMethod -Method Get -Uri "$cwApi/service/tickets/count?conditions=$([uri]::EscapeDataString($cond))" -Headers $h; return [int]$r.count }
+$since = (Get-Date).ToUniversalTime().AddDays(-7).ToString('yyyy-MM-ddT00:00:00Z')
+$resolved = CwCount "company/id=$psaId and closedFlag=true and closedDate>[$since]"
+$opened = CwCount "company/id=$psaId and dateEntered>[$since]"
+$open = CwCount "company/id=$psaId and closedFlag=false and dateEntered>[$since]"
+$wait = CwCount "company/id=$psaId and closedFlag=false and status/name=""$waiting"""
+$title = "Your week with IT: $resolved resolved"
+$body = "This week we resolved $resolved ticket$(if ($resolved -ne 1) { 's' }) and received $opened new request$(if ($opened -ne 1) { 's' }). $open of them $(if ($open -eq 1) { 'is' } else { 'are' }) still open$(if ($wait) { ", and $wait $(if ($wait -eq 1) { 'is' } else { 'are' }) waiting on a reply from you" }). Open the portal to see them."
+$sent = $false; $warn = ''
+if ($confirm -and $users.Count) {
+    try {
+        $crB = (Sec @("CloudRadial-BaseUrl$sfx", 'CloudRadial-BaseUrl')).TrimEnd('/'); $crPu = Sec @("CloudRadial-PublicKey$sfx", 'CloudRadial-PublicKey'); $crPr = Sec @("CloudRadial-PrivateKey$sfx", 'CloudRadial-PrivateKey')
+        $crH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPu):$($crPr)")); Accept = 'application/json' }
+        $sb = @{ companyIds = @($companyId); users = @($users); priority = $(if ($wait) { 1 } else { 0 }); title = $title; body = $body; expiresAt = (Get-Date).ToUniversalTime().AddDays(3).ToString('o'); dedupeKey = "weekly-$companyId-$((Get-Date).ToString('yyyyMMddHHmm'))" } | ConvertTo-Json -Depth 4
+        $null = Invoke-RestMethod -Method Post -Uri "$crB/v2/signalmessage" -Headers $crH -ContentType 'application/json' -Body $sb; $sent = $true
+    } catch { $warn = "Signal not sent: $($_.Exception.Message)" }
+}
+Set-NodeOutput ([ordered]@{ status = $(if ($confirm) { 'success' } else { 'preview' }); title = $title; message = $body; resolved = $resolved; opened = $opened; open = $open; waiting = $wait; signalSent = $sent; warning = $warn; internal_note = "Weekly summary for company $($companyId): $body" })

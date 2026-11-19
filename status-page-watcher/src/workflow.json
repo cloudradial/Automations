@@ -1,0 +1,62 @@
+{
+  "name": "Status Page Watcher",
+  "description": "Checks vendor status pages on a schedule (Zoom, Google Workspace, Slack, Fathom, Dropbox, Atlassian, CloudRadial, Microsoft Azure, and optionally Microsoft 365 service health). In direct mode one run alerts your technicians and tells clients (portal banner, pinned Service Status article, Signal), then clears it all when the incident is resolved. The service list lives in the @StatusWatcherFeeds token. No AI.",
+  "version": "1.0.0",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "Start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "watch",
+        "type": "powershell-script",
+        "name": "Check the status pages",
+        "position": {
+          "x": 300,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:watch.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": [],
+          "testInput": "{\n  \"mode\": \"direct\",\n  \"confirm\": false,\n  \"simulate\": \"Zoom\",\n  \"notifyCompanyId\": 1,\n  \"notifyUserIds\": [\n    \"00000000-0000-0000-0000-000000000000\"\n  ],\n  \"broadcastCompanyIds\": [\n    1\n  ],\n  \"clientUserIds\": [\n    \"00000000-0000-0000-0000-000000000000\"\n  ]\n}"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "End",
+        "position": {
+          "x": 500,
+          "y": 80
+        },
+        "properties": {}
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "watch",
+        "sourceHandle": null
+      },
+      {
+        "source": "watch",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "name": "Device Health Refresh (Datto RMM)",
+  "description": "Reads Datto RMM device, patch and antivirus health, starts a Windows Update repair on named devices with patch problems, and updates the @DH tokens behind the Device Health dashboard. No AI.",
+  "version": "1.0.0",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "Start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "refresh",
+        "type": "powershell-script",
+        "name": "Refresh the Device Health dashboard",
+        "position": {
+          "x": 300,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:refresh.ps1",
+          "timeoutSeconds": 600,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": [],
+          "testInput": "{\n  \"companyId\": 1,\n  \"remediate\": true,\n  \"remediateDevices\": [\n    \"CONTOSO-LAPTOP-01\"\n  ],\n  \"maxFixes\": 3,\n  \"notifyUsers\": [\n    \"00000000-0000-0000-0000-000000000000\"\n  ],\n  \"confirm\": false\n}"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "End",
+        "position": {
+          "x": 500,
+          "y": 80
+        },
+        "properties": {}
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "refresh",
+        "sourceHandle": null
+      },
+      {
+        "source": "refresh",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

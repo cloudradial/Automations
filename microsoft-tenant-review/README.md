@@ -55,7 +55,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/mic
 
 ## Technical details
 
-**Formerly:** Microsoft Security Assessment (form version) | **Marketplace ID:** Not yet listed | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
+**Formerly:** Microsoft Security Assessment (form version) | **Marketplace ID:** CRA-00005 | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
 
 This is the portal-form version that builds the assessment from Secure Score. [microsoft-security-assessment](../microsoft-security-assessment/) is the manually run version that scores 11 Graph checks.
 

@@ -8,6 +8,8 @@ When a service goes down, a technician tells ServiceAI what is down and what to 
 
 **Your clients see it in their portal.** Each affected client's home page banner shows the notice, and a pinned **Service status** article on their portal holds the full message. A later update replaces the article instead of adding another.
 
+**Their desktops get a Signal notice.** Each affected client's signed-in users get a Signal desktop notice with the update, and a "Resolved" notice when it's over. Turn it off with `signal: false`.
+
 **Primary contacts can get an email.** If you turn it on, each client's primary contact gets their own email with the notice.
 
 **When it's fixed, tell them in one step too.** A "resolved" run clears the banner, marks the article resolved and unpins it.
@@ -151,6 +153,9 @@ None. This workflow doesn't call Microsoft Graph. The CloudRadial API keys need 
 | `bannerToken` | No (default `ServiceStatus`) | The token name, without the `@`. |
 | `articleCategory` | No (default `Service Status`) | The knowledge base category for the article. |
 | `maxCompanies` | No (default `50`) | The run stops if more companies match. |
+| `signal` | No (default `true`) | Send each company a Signal desktop notice. `false` skips it. |
+| `signalUsers` | No | CloudRadial user ids to limit the Signal to. Empty means every signed-in user at the company. |
+| `cloudradial_company` | No | Use that portal's `CloudRadial-*-<name>` runner secrets instead of the shared CloudRadial keys. |
 | `psa` | No | Overrides the `PSA-Type` secret. |
 | `triggerSource` | No | `serviceai-ai`, `chatai` or `manual`. Recorded in the note. |
 

@@ -1,0 +1,62 @@
+{
+  "name": "Employee Leave (Microsoft 365)",
+  "description": "From the Employee Leave portal form: disables the employee in Microsoft 365 and signs them out everywhere (or turns sign-in back on for \"Returning from leave\"), notes the ticket and sends the manager a Signal. No AI.",
+  "version": "1.0.0",
+  "definition": {
+    "schemaVersion": 1,
+    "activities": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "Start",
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "properties": {
+          "webhookEnabled": false
+        }
+      },
+      {
+        "id": "leave",
+        "type": "powershell-script",
+        "name": "Put the employee on leave",
+        "position": {
+          "x": 300,
+          "y": 80
+        },
+        "properties": {
+          "script": "@file:leave.ps1",
+          "timeoutSeconds": 300,
+          "retryCount": 0,
+          "parameters": [],
+          "aiExtensions": [],
+          "testInput": "{\n  \"leaveUser\": \"adele.vance@contoso.com\",\n  \"leaveType\": \"Leave of absence\",\n  \"returnDate\": \"2026-12-15\",\n  \"confirm\": false,\n  \"company\": {\n    \"id\": 1,\n    \"name\": \"Contoso Ltd\",\n    \"tenantId\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "End",
+        "position": {
+          "x": 500,
+          "y": 80
+        },
+        "properties": {}
+      }
+    ],
+    "connections": [
+      {
+        "source": "start",
+        "target": "leave",
+        "sourceHandle": null
+      },
+      {
+        "source": "leave",
+        "target": "end",
+        "sourceHandle": null
+      }
+    ],
+    "startActivityId": "start"
+  }
+}

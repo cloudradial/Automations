@@ -1,0 +1,79 @@
+{
+ "item": {
+  "catalogUsage": "Request",
+  "category": "Software",
+  "description": "Pick the app you need and we will install it on your computer automatically. You will get a desktop notification when it is ready.",
+  "subject": "Request Software",
+  "shortDescription": "Request Software",
+  "icon": "fas fa-download",
+  "iconColor": "#ffffff",
+  "isAllowedCompanyChanges": false,
+  "isFileUpload": false,
+  "isNeedsApproval": false,
+  "isShowPrice": false,
+  "isShowMonthly": false,
+  "order": 0,
+  "price": 0,
+  "psaBoard": "@DefaultBoard",
+  "psaStatus": "@DefaultStatus",
+  "psaPriority": "@DefaultPriority",
+  "estimatedTime": 0,
+  "selectText": "Request Software",
+  "isPartnerManaged": false,
+  "isSignature": false,
+  "isAppendSubject": true,
+  "teamsPartnerWebhook": "@DefaultPartnerTeams",
+  "teamsWebhook": "@DefaultTeams",
+  "isSendSubmitter": false,
+  "isIncludeDescription": true,
+  "isSendToPsa": true,
+  "isSelfApproval": true,
+  "hideActionButtons": false,
+  "groups": "Everyone",
+  "thankYou": "<p>Your app is installing now. You will get a desktop notification the moment it is ready. Ticket #@TicketId.</p>"
+ },
+ "questions": [
+  {
+   "label": "Header",
+   "defaultValue": "<div style=\"background:linear-gradient(135deg,#0f1f3d 0%,#1e3a8a 55%,#0d9488 100%);color:#fff;padding:20px 24px;border-radius:12px;box-shadow:0 4px 14px rgba(15,31,61,.3)\"><div style=\"font-size:22px;font-weight:600\"><i class=\"fal fa-download\"></i>&nbsp; Request software</div><div style=\"font-size:15px;opacity:.9;margin-top:6px\">Pick an app from the list and it installs on your computer automatically. We will send you a desktop notification the moment it is ready.</div></div>",
+   "order": 1,
+   "type": "Comment",
+   "isIncludeInTicket": false
+  },
+  {
+   "label": "Subject",
+   "defaultValue": "Software request",
+   "order": 10,
+   "type": "Comment",
+   "isSubject": true,
+   "isIncludeInTicket": true
+  },
+  {
+   "label": "Which app do you need?",
+   "info": "Pick one. It installs automatically.",
+   "options": "Google Chrome,Zoom,7-Zip,Notepad++",
+   "order": 20,
+   "type": "MultiChoiceDropdown",
+   "isRequired": true,
+   "jsonId": "softwareApp",
+   "isIncludeInTicket": true
+  },
+  {
+   "label": "Which computer?",
+   "info": "Pick the computer to install it on.",
+   "options": "@endpoints",
+   "order": 30,
+   "type": "MultiChoiceDropdown",
+   "isRequired": true,
+   "jsonId": "deviceName",
+   "isIncludeInTicket": true
+  },
+  {
+   "label": "Install the software",
+   "defaultValue": "workflow:<id of your imported Software Install (Datto RMM) workflow>",
+   "order": 40,
+   "type": "Action",
+   "isIncludeInTicket": true
+  }
+ ]
+}

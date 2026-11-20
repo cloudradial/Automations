@@ -23,6 +23,7 @@ These links point at the `main` branch, so they always open the current version.
 | Onboard **one new client** end to end: company, PSA link, domain, group, checklist ticket and the Microsoft 365 baseline | **This workflow** |
 | Add **many companies at once** from a list, with nothing else | [Add Companies to the Portal](../add-companies-to-portal/) |
 | Add **portal users** to a company from a list (when its Microsoft 365 or PSA sync isn't used) | [Onboard Users into the Portal](../onboard-users-to-portal/) |
+| Set up a **prospect** in the portal before they sign, with recommended Planner cards and no PSA | [Set Up a Prospect in the Portal](../prospect-portal-setup/) (built from this folder's `src/`) |
 
 They work together. If a company was already created with Add Companies to the Portal, run this workflow with `company_id` set to that company, and it skips the create and does the rest.
 
@@ -136,6 +137,12 @@ If a permission is missing, the run stops before changing anything, with a sente
 | `tenant_id` | the tenant that owns `primary_domain` | The client's Microsoft 365 tenant id |
 | `include_m365` | `true` | `false` skips the Microsoft 365 baseline preview |
 | `psa` | `PSA-Type` secret | Which PSA (`connectwise`, `autotask`, `halopsa`, `kaseyabms`, `syncro`, `zendesk`) |
+| `create_psa_company` | `false` | ConnectWise only. `true`: when ConnectWise has no company with exactly this name, create it (with a free identifier) instead of stopping. |
+| `primary_contact_name`, `primary_contact_email` | empty | With a ConnectWise create: the client's main contact, created and set as the company's default contact. A managed services agreement is created too. Without a contact, neither is created. |
+| `agreement_type`, `agreement_name` | first type with "managed" in its name; `<company_name> Managed Services` | The ConnectWise agreement created with the company |
+| `products` | empty | The services the client bought, comma separated. Used by the `planner` step. |
+| `cloudradial_company` | empty (the shared CloudRadial secrets) | An AutomationAI company whose company-scoped `CloudRadial-*` secrets point at the portal to set up |
+| `steps` | `psa,portal,ticket` | Run only these parts, comma separated: `psa` (ConnectWise company, contact, agreement), `portal` (CloudRadial company, link, domain, group), `ticket`, `planner` (Planner cards: the agreement and `products` as done, Onboarding project in progress, Connect Microsoft 365 recommended) and `landcards` (prospect cards, see [Set Up a Prospect](../prospect-portal-setup/)). The PSA isn't read when neither `psa` nor `ticket` is included. |
 | `confirm` | `false` | `false`: preview only, nothing changes. `true`: create the company and open the ticket. |
 
 Default checklist:
@@ -162,4 +169,4 @@ Default checklist:
 3. Run again with `confirm` true. Check the new company in CloudRadial (name, PSA link, domain, group), the ticket and its checklist in the PSA, the internal note, and the "Microsoft 365 security baseline (preview)" item in the company's Onboarding report archive. Confirm that no group or policy was created in the client's tenant.
 4. Run the same input again: it should be rejected because the company now exists.
 
-To change the steps, edit `src/*.ps1`, then run `node src/build.js` (it pastes in the shared libraries) and `pwsh -NoProfile -File src/test.ps1`. Never edit the `.yml` by hand.
+To change the steps, edit `src/*.ps1`, then run `node src/build.js` (it pastes in the shared libraries) and `pwsh -NoProfile -File src/test.ps1`. Never edit the `.yml` by hand. `build.js` also writes [Set Up a Prospect in the Portal](../prospect-portal-setup/prospect-portal-setup.yml) from the same steps, with `steps` defaulting to `portal,landcards`, so a change here reaches both.

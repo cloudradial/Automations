@@ -13,10 +13,22 @@
 #   ticket_queue     optional board / queue / team / issue type / group id for the ticket
 #   tenant_id        optional Microsoft 365 tenant id. Default: the tenant that owns primary_domain
 #   include_m365     false skips the Microsoft 365 baseline preview (default true)
+#   create_psa_company  ConnectWise only: when no company has exactly this name, create it (default false)
+#   primary_contact_name, primary_contact_email  the client's main contact. With a ConnectWise create, the
+#                    contact and a managed services agreement are created too
+#   agreement_type   optional ConnectWise agreement type name. Default: the first type with 'managed' in its name
+#   agreement_name   optional agreement name. Default: '<company_name> Managed Services'
+#   cloudradial_company  optional AutomationAI company id (e.g. Contoso MSP) whose company-scoped CloudRadial
+#                    keys point at the portal to set up. Empty = the shared CloudRadial keys
+#   products         optional: the services the client bought, comma or line separated (the Planner step adds them)
+#   steps            optional: run only these parts, comma separated: psa, portal, ticket, planner, landcards.
+#                    Default: psa, portal and ticket (the Set Up a Prospect workflow defaults to portal, landcards)
 #   psa              optional PSA override (connectwise, autotask, halopsa, kaseyabms, syncro, zendesk)
 #   confirm          false (default) = preview only, nothing changes. true = create and open the ticket
 # A value CloudRadial left as a literal @token (for example "@company_name") counts as not given.
 $ErrorActionPreference = 'Stop'
+# The parts a run does when no steps input is given. build.js sets 'portal,landcards' for Set Up a Prospect.
+$NcoDefaultSteps = ''
 function Get-NcoProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function Get-NcoText {
     param($o, [string[]]$Names)
@@ -115,6 +127,14 @@ Set-NodeOutput ([ordered]@{
             tenant_id         = $tenantIn
             include_m365      = (Test-NcoYes (Get-NcoText $runIn @('include_m365', 'includeM365')) $true)
             psa               = (Get-NcoText $runIn @('psa', 'PSA'))
+            create_psa_company = (Test-NcoYes (Get-NcoText $runIn @('create_psa_company', 'createPsaCompany')) $false)
+            primary_contact_name = (Get-NcoText $runIn @('primary_contact_name', 'primaryContactName', 'contact_name'))
+            primary_contact_email = (Get-NcoText $runIn @('primary_contact_email', 'primaryContactEmail', 'contact_email')).ToLowerInvariant()
+            agreement_type = (Get-NcoText $runIn @('agreement_type', 'agreementType'))
+            agreement_name = (Get-NcoText $runIn @('agreement_name', 'agreementName'))
+            products = (Get-NcoText $runIn @('products', 'services'))
+            cloudradial_company = (Get-NcoText $runIn @('cloudradial_company', 'cloudradialCompany'))
+            nco_step = $(if (Get-NcoText $runIn @('steps', 'nco_step')) { (Get-NcoText $runIn @('steps', 'nco_step')).ToLowerInvariant() } else { $NcoDefaultSteps })
             confirm           = (Test-NcoYes (Get-NcoText $runIn @('confirm', 'approvedToWrite')) $false)
         }
     })

@@ -31,6 +31,7 @@ function Stop-NcoCheck {
     Set-NodeOutput $nco
     throw $Msg
 }
+function Get-NcoCwIdentifier { param([string]$n) $i = ($n -replace '[^A-Za-z0-9]', ''); if ($i.Length -gt 25) { $i = $i.Substring(0, 25) }; if ($i -eq '') { $i = 'Client' + (Get-Date -Format 'yyMMddHHmm') }; return $i }
 function Get-NcoPlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1) { return "1 $one" }; return "$n $many" }
 
 $nco = Read-NcoState @('inputs')
@@ -41,6 +42,7 @@ $existingId = [string](Get-NcoProp $opt 'company_id')
 $groupName = [string](Get-NcoProp $opt 'company_group')
 $warnings = @($nco['warnings'])
 
+$global:NcoCrSecretSuffix = (([string](Get-NcoProp $opt 'cloudradial_company')).Trim().ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
 # ---- CloudRadial ----
 try { $null = Connect-Cr }
 catch { Stop-NcoCheck 'error' "CloudRadial isn't set up on this runner. $($_.Exception.Message.TrimEnd('.')). Nothing was changed." }
@@ -49,6 +51,7 @@ $ncoCr = [ordered]@{ existing = $false; company_id = 0; company_name = $name; ps
 $companies = @(Get-CrAll "/v2/odata/company?`$select=companyId,name,psaKey,psaIdentifier,endpointCount")
 $domainRows = @(Get-CrAll "/v2/odata/domain?`$filter=$([uri]::EscapeDataString("name eq '$domain'"))&`$select=companyDomainId,companyId,name" | Where-Object { ([string](Get-NcoProp $_ 'name')).Trim().ToLowerInvariant() -eq $domain -and -not [bool](Get-NcoProp $_ 'isDeleted') })
 $byName = @($companies | Where-Object { ([string](Get-NcoProp $_ 'name')).Trim() -ieq $name })
+if ($existingId -eq '' -and [string](Get-NcoProp $opt 'nco_step') -and @($byName).Count -eq 1) { $existingId = [string](Get-NcoProp $byName[0] 'companyId'); $warnings += "Step run: using CloudRadial company $existingId, found by its exact name." }
 
 if ($existingId -ne '') {
     $co = @($companies | Where-Object { [string](Get-NcoProp $_ 'companyId') -eq $existingId }) | Select-Object -First 1
@@ -82,6 +85,17 @@ if ($groupName -ne '') {
 }
 
 # ---- PSA ----
+# Skipped when this run's steps need no PSA (for example Set Up a Prospect: portal, landcards).
+$ncoSteps = @(([string](Get-NcoProp $opt 'nco_step')) -split '\s*,\s*' | Where-Object { $_ })
+$ncoNeedsPsa = ($ncoSteps.Count -eq 0) -or ($ncoSteps -contains 'psa') -or ($ncoSteps -contains 'ticket')
+if (-not $ncoNeedsPsa) {
+    $nco['warnings'] = @(Get-NcoWarnings $warnings)
+    $nco['cloudradial'] = $ncoCr
+    $nco['psa'] = [ordered]@{ type = ''; name = ''; company_id = ''; company_name = ''; identifier = ''; found_by = 'skipped'; open_ticket = '' }
+    $nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id). The PSA isn't used in this run." } else { "$name is not in CloudRadial yet. The PSA isn't used in this run." })
+    Set-NodeOutput $nco
+    return
+}
 $psaType = ''
 try { $psaType = Get-PsaType ([string](Get-NcoProp $opt 'psa')) } catch { Stop-NcoCheck 'incomplete' "$($_.Exception.Message) Nothing was changed." }
 if (-not $psaType) { Stop-NcoCheck 'error' 'No PSA is set up on this runner, so the onboarding ticket cannot be opened. Add the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro or zendesk) and that PSA''s secrets. Nothing was changed.' }
@@ -91,15 +105,24 @@ $psaName = Get-PsaName
 
 $ncoPsa = [ordered]@{ type = $psaType; name = $psaName; company_id = [string](Get-NcoProp $opt 'psa_company_id'); company_name = ''; identifier = ''; found_by = 'input' }
 if ($ncoPsa.company_id -eq '') {
+    $ncoCanCreate = ($psaType -eq 'connectwise') -and [bool](Get-NcoProp $opt 'create_psa_company')
     $hits = @(Find-PsaCompany -Name $name)
     $exact = @($hits | Where-Object { $_.exact })
-    if ($exact.Count -eq 0) {
+    if ($exact.Count -eq 0 -and -not $ncoCanCreate) {
         $near = @($hits | Select-Object -First 5 | ForEach-Object { "$($_.name) ($($_.id))" })
         Stop-NcoCheck 'incomplete' "$psaName has no company named exactly '$name'.$(if ($near.Count) { " Close matches: $($near -join ', ')." }) Add the client in $psaName first, or pass psa_company_id. Nothing was changed."
     }
     if ($exact.Count -gt 1) { Stop-NcoCheck 'incomplete' "$psaName has $($exact.Count) companies named '$name' (ids $(@($exact | ForEach-Object { $_.id }) -join ', ')). Pass psa_company_id to pick one. Nothing was changed." }
-    $ncoPsa.company_id = [string]$exact[0].id; $ncoPsa.company_name = [string]$exact[0].name; $ncoPsa.found_by = 'name'
-    if ($psaType -eq 'connectwise') { $ncoPsa.identifier = [string](Get-NcoProp $exact[0].raw 'identifier') }
+    if ($exact.Count -eq 0) {
+        # ConnectWise has no such company yet: plan to create it in the apply step (it needs a free identifier).
+        $ident = Get-NcoCwIdentifier $name
+        $taken = @(Invoke-Psa GET "/company/companies?conditions=$(ConvertTo-PsaQuery ('identifier="' + $ident + '"'))&fields=id,identifier,name&pageSize=5" | Where-Object { $null -ne $_ })
+        if ($taken.Count) { Stop-NcoCheck 'incomplete' "ConnectWise already uses the company identifier $ident (company $(Get-NcoProp $taken[0] 'id'), $(Get-NcoProp $taken[0] 'name')). Pass psa_company_id to use that company. Nothing was changed." }
+        $ncoPsa.company_id = ''; $ncoPsa.company_name = $name; $ncoPsa.identifier = $ident; $ncoPsa.found_by = 'create'
+        $warnings += "ConnectWise has no company named exactly '$name', so it will be created (identifier $ident) when the run is confirmed."
+    }
+    else { $ncoPsa.company_id = [string]$exact[0].id; $ncoPsa.company_name = [string]$exact[0].name; $ncoPsa.found_by = 'name' }
+    if ($psaType -eq 'connectwise' -and $exact.Count) { $ncoPsa.identifier = [string](Get-NcoProp $exact[0].raw 'identifier') }
 }
 if ($ncoPsa.identifier -eq '') { $ncoPsa.identifier = $ncoPsa.company_id }
 
@@ -118,7 +141,7 @@ if ([string](Get-NcoProp $opt 'ticket_id') -eq '' -and $ncoPsa.company_id -match
 # The PSA company must not already be linked to a different CloudRadial company.
 $linked = @($companies | Where-Object {
         $cid = [string](Get-NcoProp $_ 'companyId')
-        $cid -ne $existingId -and (([string](Get-NcoProp $_ 'psaKey')) -eq $ncoPsa.company_id -or (([string](Get-NcoProp $_ 'psaIdentifier')) -ne '' -and ([string](Get-NcoProp $_ 'psaIdentifier')) -ieq $ncoPsa.identifier))
+        $cid -ne $existingId -and (($ncoPsa.company_id -ne '' -and ([string](Get-NcoProp $_ 'psaKey')) -eq $ncoPsa.company_id) -or (([string](Get-NcoProp $_ 'psaIdentifier')) -ne '' -and ([string](Get-NcoProp $_ 'psaIdentifier')) -ieq $ncoPsa.identifier))
     }) | Select-Object -First 1
 if ($null -ne $linked) { Stop-NcoCheck 'rejected' "$psaName company $($ncoPsa.company_id) is already linked to CloudRadial company $(Get-NcoProp $linked 'companyId') ($(Get-NcoProp $linked 'name')). Nothing was changed." }
 if ($ncoCr.existing -and $ncoCr.psa_key -ne '' -and $ncoCr.psa_key -ne $ncoPsa.company_id) { $warnings += "CloudRadial company $($ncoCr.company_id) is already linked to $psaName company $($ncoCr.psa_key), not $($ncoPsa.company_id). The link was left as it is." }
@@ -126,5 +149,5 @@ if ($ncoCr.existing -and $ncoCr.psa_key -ne '' -and $ncoCr.psa_key -ne $ncoPsa.c
 $nco['warnings'] = @(Get-NcoWarnings $warnings)
 $nco['cloudradial'] = $ncoCr
 $nco['psa'] = $ncoPsa
-$nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id) and $psaName company $($ncoPsa.company_id)." } else { "$name is not in CloudRadial yet. Found $psaName company $($ncoPsa.company_id)." })
+$nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id) and $psaName company $($ncoPsa.company_id)." } else { "$name is not in CloudRadial yet. $(if ($ncoPsa.found_by -eq 'create') { "$psaName company $name will be created." } else { "Found $psaName company $($ncoPsa.company_id)." })" })
 Set-NodeOutput $nco

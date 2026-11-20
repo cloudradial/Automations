@@ -47,7 +47,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/pro
 
 ## Technical details
 
-**Formerly:** Land: Set Up Prospect in Portal (Nick's Test) | **Marketplace ID:** CRA-00027 | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
+**Formerly:** Land: Set Up Prospect in Portal (Nick's Test) | **Marketplace ID:** AAI-00092 | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
 
 ## Files (always the latest version)
 

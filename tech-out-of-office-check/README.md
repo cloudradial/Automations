@@ -43,7 +43,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/tec
 
 ## Technical details
 
-**Marketplace ID:** CRA-00026 | **Type:** Workflow (PowerShell steps, no AI), run every few minutes by a Routine | **PSA:** ConnectWise PSA only | **Version:** 1.0.0
+**Marketplace ID:** AAI-00091 | **Type:** Workflow (PowerShell steps, no AI), run every few minutes by a Routine | **PSA:** ConnectWise PSA only | **Version:** 1.0.0
 
 ## Files (always the latest version)
 

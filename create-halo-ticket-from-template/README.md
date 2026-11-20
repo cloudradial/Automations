@@ -2,7 +2,7 @@
 
 When a client submits a CloudRadial request form, the HaloPSA ticket is created exactly as its Halo ticket template would create it: the right ticket type, team, priority and status, with every answer in its Halo custom field. Halo's mandatory fields no longer reject the ticket.
 
-**Marketplace ID:** CRA-00015 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
+**Marketplace ID:** AAI-00080 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 
 ## Files
 

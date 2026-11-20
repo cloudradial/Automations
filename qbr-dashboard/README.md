@@ -54,7 +54,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/qbr
 
 ## Technical details
 
-**Marketplace ID:** CRA-00022 | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
+**Marketplace ID:** AAI-00087 | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
 
 Built on the [Client Health](../client-health/) dashboard template, filled by a plain script instead of an agent.
 

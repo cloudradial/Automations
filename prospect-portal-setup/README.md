@@ -108,5 +108,9 @@ pwsh -NoProfile -File src/test.ps1    # strict-mode harness; the "prospect" chec
 
 ## Tested
 
-- `new-client-onboarding/src/test.ps1`: 93 checks pass under strict mode, 11 of them for this workflow. With no PSA secrets on the runner, a preview plans exactly the company, the domain and the prospect cards, and makes no PSA call. A confirm creates the company with no PSA link and four client-visible cards on it.
-- Live: the copy deployed in Nick's Test ("Land: Set Up Prospect in Portal") succeeded on 2026-11-11. That copy had demo defaults (confirm on, a fixed portal); this version previews by default and uses the shared CloudRadial secrets.
+- `new-client-onboarding/src/test.ps1`: 94 checks pass under strict mode, 12 of them for this workflow. With no PSA secrets on the runner, a preview plans exactly the company, the domain and the prospect cards, and makes no PSA call. A confirm creates the company with no PSA link and four client-visible cards on it.
+- **Live, 2026-11-20 (this version, imported from `main` into a test tenant, run on a production runner, demo portal):**
+  - **Preview:** `pending_confirmation`, with the three planned changes and nothing written.
+  - **Confirm:** created the test company with no PSA link, added the domain as its default, and added the four client-visible cards.
+  - **Same confirm again:** found the company by its exact name, updated the same four cards, and created nothing new.
+  - The first run's message read "linked to  company ." when there was no PSA; that is fixed here.

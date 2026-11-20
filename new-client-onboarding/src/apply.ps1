@@ -295,7 +295,7 @@ elseif ($null -ne $failed) {
 else {
     $status = 'success'
     $bits = @()
-    if ($run.company_created) { $bits += "Created CloudRadial company $($run.company_id) for $name, linked to $psaName company $psaCompanyId" } else { $bits += "Used CloudRadial company $($run.company_id)" }
+    if ($run.company_created) { $bits += "Created CloudRadial company $($run.company_id) for $name$(if ($psaCompanyId) { ", linked to $psaName company $psaCompanyId" })" } else { $bits += "Used CloudRadial company $($run.company_id)" }
     if ($run.ticket_opened) { $bits += "opened onboarding ticket $($run.ticket_id) with a $($checklist.Count)-item checklist" } elseif ($run.ticket_id) { $bits += "used ticket $($run.ticket_id)" }
     $message = ($bits -join ' and ') + '.'
     if ($m365Read) { $message += ' The Microsoft 365 baseline was prepared but not applied.' }

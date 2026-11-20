@@ -55,7 +55,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/dev
 
 ## Technical details
 
-**Marketplace ID:** CRA-00021 | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
+**Marketplace ID:** AAI-00086 | **Type:** Workflow (one PowerShell step, no AI) plus a 4-widget dashboard | **Version:** 1.0.0
 
 ## Files
 

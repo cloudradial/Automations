@@ -66,7 +66,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sta
 
 ## Technical details
 
-**Marketplace ID:** CRA-00018 | **Type:** Workflow (one PowerShell step, no AI), run every 10 minutes by a Routine | **Version:** 1.0.0
+**Marketplace ID:** AAI-00083 | **Type:** Workflow (one PowerShell step, no AI), run every 10 minutes by a Routine | **Version:** 1.0.0
 
 ## Files
 

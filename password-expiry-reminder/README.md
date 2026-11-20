@@ -1,8 +1,55 @@
 # Remind People Before Their Microsoft 365 Password Expires
 
-Every day, email each person whose Microsoft 365 password is about to expire, with the date and how to change it, so nobody gets locked out and raises a ticket.
+Every day, each person whose Microsoft 365 password is about to expire gets a short email with the date and how to change it. Nobody gets locked out on a Monday morning, and your service desk gets fewer "my password expired" tickets.
 
-**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** TBD | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
+## What your clients see
+
+- **A friendly email 14, 7 and 1 days before their password expires** (you choose the days). It greets them by first name, gives the exact expiry date and time, and explains three ways to change it: Ctrl+Alt+Del on a work PC, Outlook on the web, or the reset page.
+- **It comes from a mailbox they recognise,** such as `it-notices@contoso.com`, and says IT will never ask for their password. It never contains a password.
+- **One email per reminder day,** never the same email two days running.
+
+## What happens behind the scenes
+
+- It reads the client's Microsoft 365 password policy and every user's last password change. Nothing in the tenant is changed.
+- If the tenant's passwords never expire (Microsoft's default for new tenants), it stops there, sends nothing and says so.
+- It skips disabled accounts, guests, accounts set to never expire, accounts with no mailbox and passwords that have already expired.
+- Accounts synced from on-premises Active Directory are never emailed, because their real expiry date lives in Active Directory. The result lists them so you can remind them another way.
+- Running it twice in one day doesn't email anyone twice when it sends through Microsoft 365.
+- A first run can preview everyone it would email, without sending.
+
+## Works with
+
+Any Microsoft 365 tenant. It doesn't use a PSA and opens no tickets. Run one copy, on one schedule, per client.
+
+## What you need
+
+- AutomationAI with a runner
+- A Microsoft 365 app registration for the client, with permission to read users and domains and to send mail
+- A mailbox to send from, or a Postmark account
+
+## Set it up
+
+1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/password-expiry-reminder/password-expiry-reminder.yml) (right-click > Save link as).
+2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
+3. Add the client's Microsoft 365 details and the sending mailbox to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder#required-runner-key-vault-secrets) list exactly what to add and which permissions the app needs.
+4. **Preview.** Open the workflow, click **Run** with this input and check who it would email. Nothing is sent.
+
+   ```json
+   {"preview": true}
+   ```
+
+5. **Try it on one person** whose password expires soon, for example `{"onlyUsers": "pat.doe@contoso.com", "daysBeforeExpiry": "5"}`, and check the email reads well.
+6. **Schedule it.** Under **Routines**, run it every day, weekends included, with no input.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder#technical-details) cover every setting, the email rules, what the result reports and how it was tested.
+
+---
+
+## Technical details
+
+**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** Not listed yet | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
 
 ## Files (always the latest version)
 
@@ -44,7 +91,7 @@ The workflow runs against one Microsoft 365 tenant: the one whose app secrets ar
 
 **Download the workflow:** [`password-expiry-reminder.yml`](https://raw.githubusercontent.com/cloudradial/Automations/main/password-expiry-reminder/password-expiry-reminder.yml)
 
-Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), **Publish**, **Deploy** to the runner that holds that client's secrets, and attach a daily **Routine** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
+Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder#required-runner-key-vault-secrets), **Publish**, **Deploy** to the runner that holds that client's secrets, and attach a daily **Routine** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 
 ## Required runner Key Vault secrets
 
@@ -128,7 +175,7 @@ Both need js-yaml: set `JS_YAML_PATH`, or run `npm install` in `_shared`.
 
 ## Not yet proven live
 
-Tested only against the mock tenant in `src/test.ps1`. Check these on the first preview and test runs:
+A live preview in a test tenant on 2026-10-29 ran cleanly, but that tenant has no password expiry policy, so it ended early as designed and nothing was sent. The steps below were tested only against the mock tenant in `src/test.ps1`. Check them on the first preview and test runs in a tenant with an expiry policy:
 
 - **`passwordValidityPeriodInDays`** on `/domains`: that a never-expire domain reads `2147483647` (or empty) and an expiring one reads its days.
 - **`lastPasswordChangeDateTime`**, `passwordPolicies` and `onPremisesSyncEnabled` come back with `User.Read.All` on `$select`.

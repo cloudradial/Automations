@@ -360,6 +360,7 @@ Check 'prospect preview: no PSA calls' (@($Mock.Calls | Where-Object { $_.Uri -l
 $r = Invoke-Workflow @{ steps = 'portal,landcards'; include_m365 = 'false'; confirm = 'true' } $NoPsa
 $o = $r.out
 Check 'prospect confirm: success' ($r.error -eq '' -and $o.status -eq 'success') "$($r.error) $($o.status) $($o.message)"
+Check 'prospect confirm: message names no PSA link' ($o.message -like 'Created CloudRadial company 9001 for Contoso Ltd*' -and $o.message -notlike '*linked to*') $o.message
 $cb = (Get-Calls POST "$CR/v2/company")[0].Body | ConvertFrom-Json
 Check 'prospect confirm: company created with no PSA link' ($cb.name -eq 'Contoso Ltd' -and -not $cb.PSObject.Properties['psaKey'] -and -not $cb.PSObject.Properties['psaIdentifier']) ($cb | ConvertTo-Json -Compress)
 $cards = @(Get-Calls POST "$CR/v2/product" | ForEach-Object { $_.Body | ConvertFrom-Json })

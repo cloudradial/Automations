@@ -49,7 +49,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/pas
 
 ## Technical details
 
-**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** Not listed yet | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
+**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** CRA-00025 | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
 
 ## Files (always the latest version)
 

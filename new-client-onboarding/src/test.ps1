@@ -85,6 +85,8 @@ function Invoke-RestMethod {
     if ($u -eq "$CR/v2/archivefolder" -and $m -eq 'POST') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ archiveFolderId = 66 } } }
     if ($u -like "$CR/v2/odata/archiveitem*") { return [pscustomobject]@{ value = @() } }
     if ($u -eq "$CR/v2/archiveitem" -and $m -eq 'POST') { return [pscustomobject]@{ companyReportItemId = 777 } }
+    if ($u -like "$CR/v2/odata/product[?]*" -and $m -eq 'GET') { return (& $page @()) }
+    if ($u -eq "$CR/v2/product" -and $m -eq 'POST') { return [pscustomobject]@{ success = $true; data = [pscustomobject]@{ productId = 700 + @(Get-Calls POST "$CR/v2/product").Count } } }
     # ---- ConnectWise ----
     if ($u -like "$CW/company/companies[?]*") {
         if ($Mock.Opt.Contains('PsaNone')) { return , @() }
@@ -346,6 +348,30 @@ $o = $r.out
 $tk = @(Get-Calls POST "$CW/service/tickets")
 Check 'shared warning: the ticket still opens, with no priority set' ($r.error -eq '' -and $o.status -eq 'success' -and $tk.Count -eq 1 -and $null -eq ($tk[0].Body | ConvertFrom-Json).PSObject.Properties['priority']) "$($r.error) $($o.status)"
 Check 'shared warning: $PsaState.Warnings reaches the output warnings, once' (@($o.warnings | Where-Object { $_ -like "ConnectWise wouldn't list ticket priorities*" }).Count -eq 1) (@($o.warnings) -join ' | ')
+
+# Set Up a Prospect: steps portal,landcards. No PSA secrets on the runner, so any PSA call would fail the run.
+$NoPsa = @{ 'PSA-Type' = $null; 'CW-ApiUrl' = $null; 'CW-CompanyID' = $null; 'CW-PublicKey' = $null; 'CW-PrivateKey' = $null; 'CW-ClientId' = $null; 'Halo-ApiUrl' = $null; 'Halo-ClientId' = $null; 'Halo-ClientSecret' = $null }
+$r = Invoke-Workflow @{ steps = 'portal,landcards'; include_m365 = 'false' } $NoPsa
+$o = $r.out
+Check 'prospect preview: no error without a PSA' ($r.error -eq '') "$($r.step): $($r.error)"
+Check 'prospect preview: pending_confirmation, nothing written' ($o.status -eq 'pending_confirmation' -and @(Get-Writes).Count -eq 0) "$($o.status) $(@(Get-Writes).Count)"
+Check 'prospect preview: company, domain and prospect cards planned, no ticket' ((@($o.planned) -join ' | ') -eq 'Create the CloudRadial company Contoso Ltd | Add the domain contoso.com to the company | Add prospect Planner cards: Managed Services proposal, Email security review, Microsoft 365 security baseline, Portal access') (@($o.planned) -join ' | ')
+Check 'prospect preview: no PSA calls' (@($Mock.Calls | Where-Object { $_.Uri -like "$CW*" -or $_.Uri -like "$HALO*" }).Count -eq 0) ''
+$r = Invoke-Workflow @{ steps = 'portal,landcards'; include_m365 = 'false'; confirm = 'true' } $NoPsa
+$o = $r.out
+Check 'prospect confirm: success' ($r.error -eq '' -and $o.status -eq 'success') "$($r.error) $($o.status) $($o.message)"
+$cb = (Get-Calls POST "$CR/v2/company")[0].Body | ConvertFrom-Json
+Check 'prospect confirm: company created with no PSA link' ($cb.name -eq 'Contoso Ltd' -and -not $cb.PSObject.Properties['psaKey'] -and -not $cb.PSObject.Properties['psaIdentifier']) ($cb | ConvertTo-Json -Compress)
+$cards = @(Get-Calls POST "$CR/v2/product" | ForEach-Object { $_.Body | ConvertFrom-Json })
+Check 'prospect confirm: four client-visible cards on the new company' ($cards.Count -eq 4 -and @($cards | Where-Object { $_.companyId -eq 9001 -and $_.isClientVisible }).Count -eq 4) (@($cards | ForEach-Object { $_.subject }) -join ', ')
+Check 'prospect confirm: email card names the domain' (@($cards | Where-Object { $_.subject -eq 'Email security review' -and $_.summary -like '*contoso.com*' }).Count -eq 1) ''
+Check 'prospect confirm: no ticket and no PSA calls' (@($Mock.Calls | Where-Object { $_.Uri -like "$CW*" -or $_.Uri -like "$HALO*" }).Count -eq 0) ''
+# A default New Client Onboarding run never plans Planner cards.
+$r = Invoke-Workflow @{ company_group = 'managed clients' }
+Check 'default steps: no Planner cards planned' (@($r.out.planned | Where-Object { $_ -like 'Add *Planner cards*' }).Count -eq 0) (@($r.out.planned) -join ' | ')
+# The Set Up a Prospect build defaults its steps to portal,landcards.
+$prospectYml = Get-Content -Raw (Join-Path $PSScriptRoot '..\..\prospect-portal-setup\prospect-portal-setup.yml')
+Check 'prospect build: default steps portal,landcards' ($prospectYml.Contains("`$NcoDefaultSteps = 'portal,landcards'")) ''
 
 Write-Host "$($Tally.pass) passed, $($Tally.fail) failed"
 if ($Tally.fail) { exit 1 }

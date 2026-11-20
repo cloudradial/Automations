@@ -36,10 +36,22 @@ definition:
         #   ticket_queue     optional board / queue / team / issue type / group id for the ticket
         #   tenant_id        optional Microsoft 365 tenant id. Default: the tenant that owns primary_domain
         #   include_m365     false skips the Microsoft 365 baseline preview (default true)
+        #   create_psa_company  ConnectWise only: when no company has exactly this name, create it (default false)
+        #   primary_contact_name, primary_contact_email  the client's main contact. With a ConnectWise create, the
+        #                    contact and a managed services agreement are created too
+        #   agreement_type   optional ConnectWise agreement type name. Default: the first type with 'managed' in its name
+        #   agreement_name   optional agreement name. Default: '<company_name> Managed Services'
+        #   cloudradial_company  optional AutomationAI company id (e.g. Contoso MSP) whose company-scoped CloudRadial
+        #                    keys point at the portal to set up. Empty = the shared CloudRadial keys
+        #   products         optional: the services the client bought, comma or line separated (the Planner step adds them)
+        #   steps            optional: run only these parts, comma separated: psa, portal, ticket, planner, landcards.
+        #                    Default: psa, portal and ticket (the Set Up a Prospect workflow defaults to portal, landcards)
         #   psa              optional PSA override (connectwise, autotask, halopsa, kaseyabms, syncro, zendesk)
         #   confirm          false (default) = preview only, nothing changes. true = create and open the ticket
         # A value CloudRadial left as a literal @token (for example "@company_name") counts as not given.
         $ErrorActionPreference = 'Stop'
+        # The parts a run does when no steps input is given. build.js sets 'portal,landcards' for Set Up a Prospect.
+        $NcoDefaultSteps = ''
         function Get-NcoProp { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
         function Get-NcoText {
             param($o, [string[]]$Names)
@@ -138,6 +150,14 @@ definition:
                     tenant_id         = $tenantIn
                     include_m365      = (Test-NcoYes (Get-NcoText $runIn @('include_m365', 'includeM365')) $true)
                     psa               = (Get-NcoText $runIn @('psa', 'PSA'))
+                    create_psa_company = (Test-NcoYes (Get-NcoText $runIn @('create_psa_company', 'createPsaCompany')) $false)
+                    primary_contact_name = (Get-NcoText $runIn @('primary_contact_name', 'primaryContactName', 'contact_name'))
+                    primary_contact_email = (Get-NcoText $runIn @('primary_contact_email', 'primaryContactEmail', 'contact_email')).ToLowerInvariant()
+                    agreement_type = (Get-NcoText $runIn @('agreement_type', 'agreementType'))
+                    agreement_name = (Get-NcoText $runIn @('agreement_name', 'agreementName'))
+                    products = (Get-NcoText $runIn @('products', 'services'))
+                    cloudradial_company = (Get-NcoText $runIn @('cloudradial_company', 'cloudradialCompany'))
+                    nco_step = $(if (Get-NcoText $runIn @('steps', 'nco_step')) { (Get-NcoText $runIn @('steps', 'nco_step')).ToLowerInvariant() } else { $NcoDefaultSteps })
                     confirm           = (Test-NcoYes (Get-NcoText $runIn @('confirm', 'approvedToWrite')) $false)
                 }
             })
@@ -2982,6 +3002,7 @@ definition:
             Set-NodeOutput $nco
             throw $Msg
         }
+        function Get-NcoCwIdentifier { param([string]$n) $i = ($n -replace '[^A-Za-z0-9]', ''); if ($i.Length -gt 25) { $i = $i.Substring(0, 25) }; if ($i -eq '') { $i = 'Client' + (Get-Date -Format 'yyMMddHHmm') }; return $i }
         function Get-NcoPlural { param([int]$n, [string]$one, [string]$many) if ($n -eq 1) { return "1 $one" }; return "$n $many" }
 
         $nco = Read-NcoState @('inputs')
@@ -2992,6 +3013,7 @@ definition:
         $groupName = [string](Get-NcoProp $opt 'company_group')
         $warnings = @($nco['warnings'])
 
+        $global:NcoCrSecretSuffix = (([string](Get-NcoProp $opt 'cloudradial_company')).Trim().ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
         # ---- CloudRadial ----
         try { $null = Connect-Cr }
         catch { Stop-NcoCheck 'error' "CloudRadial isn't set up on this runner. $($_.Exception.Message.TrimEnd('.')). Nothing was changed." }
@@ -3000,6 +3022,7 @@ definition:
         $companies = @(Get-CrAll "/v2/odata/company?`$select=companyId,name,psaKey,psaIdentifier,endpointCount")
         $domainRows = @(Get-CrAll "/v2/odata/domain?`$filter=$([uri]::EscapeDataString("name eq '$domain'"))&`$select=companyDomainId,companyId,name" | Where-Object { ([string](Get-NcoProp $_ 'name')).Trim().ToLowerInvariant() -eq $domain -and -not [bool](Get-NcoProp $_ 'isDeleted') })
         $byName = @($companies | Where-Object { ([string](Get-NcoProp $_ 'name')).Trim() -ieq $name })
+        if ($existingId -eq '' -and [string](Get-NcoProp $opt 'nco_step') -and @($byName).Count -eq 1) { $existingId = [string](Get-NcoProp $byName[0] 'companyId'); $warnings += "Step run: using CloudRadial company $existingId, found by its exact name." }
 
         if ($existingId -ne '') {
             $co = @($companies | Where-Object { [string](Get-NcoProp $_ 'companyId') -eq $existingId }) | Select-Object -First 1
@@ -3033,6 +3056,17 @@ definition:
         }
 
         # ---- PSA ----
+        # Skipped when this run's steps need no PSA (for example Set Up a Prospect: portal, landcards).
+        $ncoSteps = @(([string](Get-NcoProp $opt 'nco_step')) -split '\s*,\s*' | Where-Object { $_ })
+        $ncoNeedsPsa = ($ncoSteps.Count -eq 0) -or ($ncoSteps -contains 'psa') -or ($ncoSteps -contains 'ticket')
+        if (-not $ncoNeedsPsa) {
+            $nco['warnings'] = @(Get-NcoWarnings $warnings)
+            $nco['cloudradial'] = $ncoCr
+            $nco['psa'] = [ordered]@{ type = ''; name = ''; company_id = ''; company_name = ''; identifier = ''; found_by = 'skipped'; open_ticket = '' }
+            $nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id). The PSA isn't used in this run." } else { "$name is not in CloudRadial yet. The PSA isn't used in this run." })
+            Set-NodeOutput $nco
+            return
+        }
         $psaType = ''
         try { $psaType = Get-PsaType ([string](Get-NcoProp $opt 'psa')) } catch { Stop-NcoCheck 'incomplete' "$($_.Exception.Message) Nothing was changed." }
         if (-not $psaType) { Stop-NcoCheck 'error' 'No PSA is set up on this runner, so the onboarding ticket cannot be opened. Add the PSA-Type secret (connectwise, autotask, halopsa, kaseyabms, syncro or zendesk) and that PSA''s secrets. Nothing was changed.' }
@@ -3042,15 +3076,24 @@ definition:
 
         $ncoPsa = [ordered]@{ type = $psaType; name = $psaName; company_id = [string](Get-NcoProp $opt 'psa_company_id'); company_name = ''; identifier = ''; found_by = 'input' }
         if ($ncoPsa.company_id -eq '') {
+            $ncoCanCreate = ($psaType -eq 'connectwise') -and [bool](Get-NcoProp $opt 'create_psa_company')
             $hits = @(Find-PsaCompany -Name $name)
             $exact = @($hits | Where-Object { $_.exact })
-            if ($exact.Count -eq 0) {
+            if ($exact.Count -eq 0 -and -not $ncoCanCreate) {
                 $near = @($hits | Select-Object -First 5 | ForEach-Object { "$($_.name) ($($_.id))" })
                 Stop-NcoCheck 'incomplete' "$psaName has no company named exactly '$name'.$(if ($near.Count) { " Close matches: $($near -join ', ')." }) Add the client in $psaName first, or pass psa_company_id. Nothing was changed."
             }
             if ($exact.Count -gt 1) { Stop-NcoCheck 'incomplete' "$psaName has $($exact.Count) companies named '$name' (ids $(@($exact | ForEach-Object { $_.id }) -join ', ')). Pass psa_company_id to pick one. Nothing was changed." }
-            $ncoPsa.company_id = [string]$exact[0].id; $ncoPsa.company_name = [string]$exact[0].name; $ncoPsa.found_by = 'name'
-            if ($psaType -eq 'connectwise') { $ncoPsa.identifier = [string](Get-NcoProp $exact[0].raw 'identifier') }
+            if ($exact.Count -eq 0) {
+                # ConnectWise has no such company yet: plan to create it in the apply step (it needs a free identifier).
+                $ident = Get-NcoCwIdentifier $name
+                $taken = @(Invoke-Psa GET "/company/companies?conditions=$(ConvertTo-PsaQuery ('identifier="' + $ident + '"'))&fields=id,identifier,name&pageSize=5" | Where-Object { $null -ne $_ })
+                if ($taken.Count) { Stop-NcoCheck 'incomplete' "ConnectWise already uses the company identifier $ident (company $(Get-NcoProp $taken[0] 'id'), $(Get-NcoProp $taken[0] 'name')). Pass psa_company_id to use that company. Nothing was changed." }
+                $ncoPsa.company_id = ''; $ncoPsa.company_name = $name; $ncoPsa.identifier = $ident; $ncoPsa.found_by = 'create'
+                $warnings += "ConnectWise has no company named exactly '$name', so it will be created (identifier $ident) when the run is confirmed."
+            }
+            else { $ncoPsa.company_id = [string]$exact[0].id; $ncoPsa.company_name = [string]$exact[0].name; $ncoPsa.found_by = 'name' }
+            if ($psaType -eq 'connectwise' -and $exact.Count) { $ncoPsa.identifier = [string](Get-NcoProp $exact[0].raw 'identifier') }
         }
         if ($ncoPsa.identifier -eq '') { $ncoPsa.identifier = $ncoPsa.company_id }
 
@@ -3069,7 +3112,7 @@ definition:
         # The PSA company must not already be linked to a different CloudRadial company.
         $linked = @($companies | Where-Object {
                 $cid = [string](Get-NcoProp $_ 'companyId')
-                $cid -ne $existingId -and (([string](Get-NcoProp $_ 'psaKey')) -eq $ncoPsa.company_id -or (([string](Get-NcoProp $_ 'psaIdentifier')) -ne '' -and ([string](Get-NcoProp $_ 'psaIdentifier')) -ieq $ncoPsa.identifier))
+                $cid -ne $existingId -and (($ncoPsa.company_id -ne '' -and ([string](Get-NcoProp $_ 'psaKey')) -eq $ncoPsa.company_id) -or (([string](Get-NcoProp $_ 'psaIdentifier')) -ne '' -and ([string](Get-NcoProp $_ 'psaIdentifier')) -ieq $ncoPsa.identifier))
             }) | Select-Object -First 1
         if ($null -ne $linked) { Stop-NcoCheck 'rejected' "$psaName company $($ncoPsa.company_id) is already linked to CloudRadial company $(Get-NcoProp $linked 'companyId') ($(Get-NcoProp $linked 'name')). Nothing was changed." }
         if ($ncoCr.existing -and $ncoCr.psa_key -ne '' -and $ncoCr.psa_key -ne $ncoPsa.company_id) { $warnings += "CloudRadial company $($ncoCr.company_id) is already linked to $psaName company $($ncoCr.psa_key), not $($ncoPsa.company_id). The link was left as it is." }
@@ -3077,7 +3120,7 @@ definition:
         $nco['warnings'] = @(Get-NcoWarnings $warnings)
         $nco['cloudradial'] = $ncoCr
         $nco['psa'] = $ncoPsa
-        $nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id) and $psaName company $($ncoPsa.company_id)." } else { "$name is not in CloudRadial yet. Found $psaName company $($ncoPsa.company_id)." })
+        $nco['message'] = $(if ($ncoCr.existing) { "Found CloudRadial company $($ncoCr.company_id) and $psaName company $($ncoPsa.company_id)." } else { "$name is not in CloudRadial yet. $(if ($ncoPsa.found_by -eq 'create') { "$psaName company $name will be created." } else { "Found $psaName company $($ncoPsa.company_id)." })" })
         Set-NodeOutput $nco
       timeoutSeconds: 300
       retryCount: 0
@@ -5493,12 +5536,13 @@ definition:
         $m365Read = [string](Get-NcoProp $m365 'status') -eq 'read'
 
         # Values the changes fill in as they run (a hashtable, changed in place).
-        $run = @{ company_id = [int](Get-NcoProp $ncoCr 'company_id'); ticket_id = [string](Get-NcoProp $opt 'ticket_id'); company_created = $false; ticket_opened = $false }
+        $run = @{ company_id = [int](Get-NcoProp $ncoCr 'company_id'); ticket_id = [string](Get-NcoProp $opt 'ticket_id'); company_created = $false; ticket_opened = $false; psa_company_id = ''; psa_created = $false; psa_contact_id = ''; psa_agreement_id = '' }
         $openTicket = [string](Get-NcoProp $ncoPsa 'open_ticket')
         if (-not $run.ticket_id -and $openTicket) { $run.ticket_id = $openTicket }
 
+        $global:NcoCrSecretSuffix = (([string](Get-NcoProp $opt 'cloudradial_company')).Trim().ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
         $null = Connect-Cr
-        $null = Connect-Psa -Psa ([string](Get-NcoProp $ncoPsa 'type'))
+        if ([string](Get-NcoProp $ncoPsa 'type')) { $null = Connect-Psa -Psa ([string](Get-NcoProp $ncoPsa 'type')) }
 
         # ---- The ticket text ----
         $summary = "New client onboarding: $name"
@@ -5508,13 +5552,93 @@ definition:
 
         # ---- The plan ----
         $plan = New-ChangePlan "New client onboarding: $name"
+        # ---- Step filter: a run does only the parts in nco_step (default psa, portal and ticket, as before) ----
+        $NcoStep = [string](Get-NcoProp $opt 'nco_step')
+        if (-not $NcoStep) { $NcoStep = 'psa,portal,ticket,other' }
+        if ($NcoStep) {
+            ${function:NcoAddPlannedChangeAll} = ${function:Add-PlannedChange}
+            function Add-PlannedChange {
+                param($Plan, [string]$Description, [scriptblock]$Action, [object[]]$Arguments = @())
+                $cat = 'other'
+                if ($Description -match '^Create the \S+ (company|contact|agreement) ' -and $Description -notmatch '^Create the CloudRadial') { $cat = 'psa' }
+                elseif ($Description -match '^(Create the CloudRadial company|Link CloudRadial company|Add the domain|Add the company to the company group)') { $cat = 'portal' }
+                elseif ($Description -match '^Add Planner cards') { $cat = 'planner' }
+                elseif ($Description -match '^Add prospect Planner cards') { $cat = 'landcards' }
+                elseif ($Description -match 'ticket') { $cat = 'ticket' }
+                if (@($NcoStep -split '\s*,\s*') -contains $cat) { NcoAddPlannedChangeAll -Plan $Plan -Description $Description -Action $Action -Arguments $Arguments }
+            }
+        }
+        # ---- ConnectWise company, contact and agreement (only when the check step found no company) ----
+        $psaFoundBy = [string](Get-NcoProp $ncoPsa 'found_by')
+        if ($psaFoundBy -eq 'create') {
+            $contactName = [string](Get-NcoProp $opt 'primary_contact_name')
+            $contactEmail = [string](Get-NcoProp $opt 'primary_contact_email')
+            $agType = [string](Get-NcoProp $opt 'agreement_type')
+            $agName = [string](Get-NcoProp $opt 'agreement_name'); if (-not $agName) { $agName = "$name Managed Services" }
+            Add-PlannedChange $plan "Create the $psaName company $name (identifier $psaIdentifier)" {
+                param($State, $Name, $Ident)
+                $find = { param($i) @(Invoke-Psa GET "/company/companies?conditions=$(ConvertTo-PsaQuery ('identifier="' + $i + '"'))&fields=id,identifier&pageSize=1" | Where-Object { $null -ne $_ }) | Select-Object -First 1 }
+                $b = [ordered]@{ identifier = $Ident; name = $Name; site = @{ name = 'Main' } }
+                $id = $null
+                $PsaState.LastWriteRedirect = $null
+                try { $r = Invoke-Psa POST '/company/companies' $b; $id = Get-PsaProp $r 'id' }
+                catch { if ($null -eq $PsaState.LastWriteRedirect) { throw }; Start-Sleep -Seconds 3 }
+                if (-not $id) { $hit = & $find $Ident; if ($hit) { $id = Get-PsaProp $hit 'id' } }
+                if (-not $id) { throw "ConnectWise did not return the new company's id, and no company with identifier $Ident was found." }
+                $State.psa_company_id = [string]$id; $State.psa_created = $true
+                return $id
+            } -Arguments @($run, $name, $psaIdentifier)
+            if ($contactName) {
+                Add-PlannedChange $plan "Create the $psaName contact $contactName$(if ($contactEmail) { " ($contactEmail)" })" {
+                    param($State, $Full, $Email)
+                    $parts = @($Full.Trim() -split '\s+', 2)
+                    $b = [ordered]@{ firstName = $parts[0]; company = @{ id = [int]$State.psa_company_id } }
+                    if ($parts.Count -gt 1) { $b.lastName = $parts[1] }
+                    if ($Email) {
+                        $types = @(Invoke-Psa GET '/company/communicationTypes?pageSize=100' | Where-Object { $null -ne $_ })
+                        $et = @($types | Where-Object { [string](Get-PsaProp $_ 'description') -match '(?i)^e-?mail$' -or [bool](Get-PsaProp $_ 'emailFlag') }) | Select-Object -First 1
+                        if ($et) { $b.communicationItems = @(@{ type = @{ id = [int](Get-PsaProp $et 'id') }; value = $Email; defaultFlag = $true; communicationType = 'Email' }) }
+                    }
+                    $PsaState.LastWriteRedirect = $null
+                    $id = $null
+                    try { $r = Invoke-Psa POST '/company/contacts' $b; $id = Get-PsaProp $r 'id' }
+                    catch { if ($null -eq $PsaState.LastWriteRedirect) { throw }; Start-Sleep -Seconds 3 }
+                    if (-not $id) { $hit = @(Invoke-Psa GET "/company/contacts?conditions=$(ConvertTo-PsaQuery ('company/id=' + [int]$State.psa_company_id))&fields=id&orderBy=$(ConvertTo-PsaQuery 'id desc')&pageSize=1" | Where-Object { $null -ne $_ }) | Select-Object -First 1; if ($hit) { $id = Get-PsaProp $hit 'id' } }
+                    if (-not $id) { throw 'ConnectWise did not return the new contact id.' }
+                    $State.psa_contact_id = [string]$id
+                    try { $null = Invoke-Psa PATCH "/company/companies/$($State.psa_company_id)" @(@{ op = 'replace'; path = 'defaultContact'; value = @{ id = [int]$id } }) } catch { }
+                    return $id
+                } -Arguments @($run, $contactName, $contactEmail)
+                Add-PlannedChange $plan "Create the $psaName agreement $agName" {
+                    param($State, $AgName, $AgType)
+                    $types = @(Invoke-Psa GET '/finance/agreements/types?pageSize=100' | Where-Object { $null -ne $_ -and -not [bool](Get-PsaProp $_ 'inactiveFlag') })
+                    if (-not $types.Count) { throw 'ConnectWise has no active agreement types.' }
+                    $t = $null
+                    if ($AgType) { $t = @($types | Where-Object { ([string](Get-PsaProp $_ 'name')).Trim() -ieq $AgType.Trim() }) | Select-Object -First 1; if (-not $t) { throw "ConnectWise has no agreement type named '$AgType'." } }
+                    if (-not $t) { $t = @($types | Where-Object { [string](Get-PsaProp $_ 'name') -match '(?i)managed' }) | Select-Object -First 1 }
+                    if (-not $t) { $t = $types[0] }
+                    $b = [ordered]@{ name = $AgName; type = @{ id = [int](Get-PsaProp $t 'id') }; company = @{ id = [int]$State.psa_company_id }; contact = @{ id = [int]$State.psa_contact_id }; startDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddT00:00:00Z'); noEndingDateFlag = $true; employeeCompNotExceed = 'Billing' }
+                    $PsaState.LastWriteRedirect = $null
+                    $id = $null
+                    try { $r = Invoke-Psa POST '/finance/agreements' $b; $id = Get-PsaProp $r 'id' }
+                    catch { if ($null -eq $PsaState.LastWriteRedirect) { throw }; Start-Sleep -Seconds 3 }
+                    if (-not $id) { $hit = @(Invoke-Psa GET "/finance/agreements?conditions=$(ConvertTo-PsaQuery ('company/id=' + [int]$State.psa_company_id))&fields=id&orderBy=$(ConvertTo-PsaQuery 'id desc')&pageSize=1" | Where-Object { $null -ne $_ }) | Select-Object -First 1; if ($hit) { $id = Get-PsaProp $hit 'id' } }
+                    if (-not $id) { throw 'ConnectWise did not return the new agreement id.' }
+                    $State.psa_agreement_id = [string]$id
+                    return $id
+                } -Arguments @($run, $agName, $agType)
+            }
+            else { $warnings += "No primary_contact_name was given, so no $psaName contact or agreement is created. ConnectWise needs a contact on every agreement." }
+        }
         if (-not $existing) {
-            $body = [ordered]@{ name = $name; psaIdentifier = $psaIdentifier }
+            $body = [ordered]@{ name = $name }
+            if ($psaIdentifier) { $body['psaIdentifier'] = $psaIdentifier }
             if ($psaCompanyId -match '^\d+$') { $body['psaKey'] = [long]$psaCompanyId }
             $am = [string](Get-NcoProp $opt 'account_manager'); if ($am) { $body['accountManager'] = $am }
             $te = [string](Get-NcoProp $opt 'territory'); if ($te) { $body['territory'] = $te }
-            Add-PlannedChange $plan "Create the CloudRadial company $name, linked to $psaName company $psaCompanyId" {
+            Add-PlannedChange $plan "Create the CloudRadial company $name$(if ($psaCompanyId -or $psaIdentifier) { ", linked to $psaName company $(if ($psaCompanyId) { $psaCompanyId } else { $psaIdentifier })" })" {
                 param($State, $Body, $Name)
+            if ([string]$State.psa_company_id -match '^\d+$') { $Body['psaKey'] = [long]$State.psa_company_id }
                 $r = Invoke-CrApi -Path '/v2/company' -Method POST -Body $Body
                 $id = Get-CrId $r @('companyId', 'data.companyId', 'id', 'data.id', 'value.companyId')
                 if (-not $id) {
@@ -5528,7 +5652,7 @@ definition:
                 return $id
             } -Arguments @($run, $body, $name)
         }
-        elseif (-not [string](Get-NcoProp $ncoCr 'psa_key') -and -not [string](Get-NcoProp $ncoCr 'psa_identifier')) {
+        elseif (($psaCompanyId -or $psaIdentifier) -and ([string](Get-NcoProp $ncoCr 'psa_key')) -notmatch '^[1-9]\d*$' -and ($psaCompanyId -match '^[1-9]\d*$' -or -not [string](Get-NcoProp $ncoCr 'psa_identifier'))) {
             $ops = @(@{ op = 'replace'; path = '/psaIdentifier'; value = $psaIdentifier })
             if ($psaCompanyId -match '^\d+$') { $ops += @{ op = 'replace'; path = '/psaKey'; value = [long]$psaCompanyId } }
             Add-PlannedChange $plan "Link CloudRadial company $($run.company_id) to $psaName company $psaCompanyId" {
@@ -5548,14 +5672,48 @@ definition:
         if (-not $run.ticket_id) {
             Add-PlannedChange $plan "Open the onboarding checklist ticket in $psaName ($($checklist.Count) items)" {
                 param($State, $CompanyId, $Summary, $Description, $Queue)
+            if ([string]$State.psa_company_id) { $CompanyId = [string]$State.psa_company_id }
                 $t = New-PsaTicket -CompanyId $CompanyId -Summary $Summary -Description $Description -Priority 'medium' -Queue $Queue
                 $State.ticket_id = [string]$t.id; $State.ticket_opened = $true
                 return $t.id
             } -Arguments @($run, $psaCompanyId, $summary, $description, ([string](Get-NcoProp $opt 'ticket_queue')))
         }
+        # ---- Land: recommended Planner cards for a prospect (no PSA, no Microsoft 365 access needed) ----
+        Add-PlannedChange $plan "Add prospect Planner cards: Managed Services proposal, Email security review, Microsoft 365 security baseline, Portal access" {
+            param($State, $Domain)
+            $cid = [int]$State.company_id
+            if ($cid -le 0) { throw 'No CloudRadial company id for the prospect Planner cards.' }
+            $existing = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $cid")
+            $made = @()
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject 'Managed Services proposal' -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = 'Recommended: our managed services plan for your team.'; body = '<p>Recommended: day-to-day support, monitoring and patching for every user and device, with tickets, training and reports in this portal.</p>' } -Key 'nco:land:proposal' -Existing $existing
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject 'Email security review' -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = "Recommended: check SPF, DKIM and DMARC for $Domain."; body = "<p>Recommended: review how $Domain protects against spoofed email (SPF, DKIM, DMARC) and fix any gaps. We can check this from the outside before you sign.</p>" } -Key 'nco:land:email' -Existing $existing
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject 'Microsoft 365 security baseline' -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = 'Recommended: Secure Score assessment once Microsoft 365 is connected.'; body = '<p>Recommended: once you connect Microsoft 365, we run a Secure Score assessment and turn every gap into a plan in this Planner.</p>' } -Key 'nco:land:m365' -Existing $existing
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject 'Portal access for your team' -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = 'Recommended: give your team one place for tickets, training and reports.'; body = '<p>Recommended: every user gets this portal for tickets, requests, training and reports from day one.</p>' } -Key 'nco:land:portal' -Existing $existing
+            $State.planner_cards = @($made | ForEach-Object { [string]$_.productId })
+            return @($made).Count
+        } -Arguments @($run, $domain)
+        # ---- Planner cards: what the client already agreed to, what is in progress, and the next recommendation ----
+        $plannerProducts = @(([string](Get-NcoProp $opt 'products')) -split '[,\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $plannerAg = [string](Get-NcoProp $opt 'agreement_name'); if (-not $plannerAg) { $plannerAg = "$name Managed Services" }
+        Add-PlannedChange $plan "Add Planner cards: $plannerAg$(if ($plannerProducts.Count) { ', ' + ($plannerProducts -join ', ') }), Onboarding project, Connect Microsoft 365" {
+            param($State, $Ag, $Products)
+            $cid = [int]$State.company_id
+            if ($cid -le 0) { throw 'No CloudRadial company id for the Planner cards.' }
+            $existing = @(Get-CrAll "/v2/odata/product?`$filter=companyId eq $cid")
+            $made = @()
+            $agBody = '<p>Done: signed and active.</p>' + $(if ($State.psa_agreement_id) { "<p>ConnectWise agreement #$($State.psa_agreement_id).</p>" } else { '' })
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject $Ag -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = 'Done: managed services agreement signed and active.'; body = $agBody } -Key 'nco:agreement' -Existing $existing
+            foreach ($p in @($Products)) { $made += Set-CrPlannerCard -CompanyId $cid -Subject $p -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = "Done: included in $Ag."; body = "<p>Done: included in $Ag.</p>" } -Key ('nco:service:' + $p.ToLowerInvariant()) -Existing $existing }
+            $obBody = '<p>In progress: onboarding has started.</p>' + $(if ($State.ticket_id) { "<p>Onboarding ticket #$($State.ticket_id) tracks the checklist.</p>" } else { '' })
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject 'Onboarding project' -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = 'In progress: onboarding has started.'; body = $obBody } -Key 'nco:onboarding' -Existing $existing
+            $made += Set-CrPlannerCard -CompanyId $cid -Subject 'Connect Microsoft 365' -Fields @{ isClientVisible = $true; category = 'Efficiency'; productCategoryId = 7; summary = 'Recommended: connect Microsoft 365 to your portal.'; body = '<p>Recommended next step: approve the Microsoft 365 connection in your portal so licensing, security and reporting data start flowing.</p>' } -Key 'nco:m365' -Existing $existing
+            $State.planner_cards = @($made | ForEach-Object { [string]$_.productId })
+            return @($made).Count
+        } -Arguments @($run, $plannerAg, $plannerProducts)
         $result = Invoke-ChangePlan $plan -Confirm:$confirm
         foreach ($r in @($result.ran)) { $actions += "$($r.description)." }
         $failed = $result.failed
+        if ($run.psa_company_id) { $psaCompanyId = [string]$run.psa_company_id }
 
         # ---- Integrations (what this workflow can and can't do about users and endpoints) ----
         $users = [int](Get-NcoProp $ncoCr 'users'); $endpoints = [int](Get-NcoProp $ncoCr 'endpoints')
@@ -5657,6 +5815,7 @@ definition:
             report        = $report
         }
         if ($m365Read -and -not $reportOk) { $out['report_html'] = $html }
+        $out['inputs'] = $opt
         Set-NodeOutput $out
       timeoutSeconds: 600
       retryCount: 0

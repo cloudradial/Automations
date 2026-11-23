@@ -1,7 +1,7 @@
 {
   "name": "Employee Leave (Microsoft 365)",
-  "description": "From the Employee Leave portal form: disables the employee in Microsoft 365 and signs them out everywhere (or turns sign-in back on for \"Returning from leave\"), notes the ticket and sends the manager a Signal. No AI.",
-  "version": "1.0.0",
+  "description": "From the Employee Leave portal form, for a colleague or for yourself: pauses the employee's Microsoft 365 access now or on a chosen start date, turns it back on at the return date, notes the ticket and sends the requester a Signal. A daily Routine with {\"mode\": \"scheduled\"} applies the scheduled changes. No AI.",
+  "version": "1.1.0",
   "definition": {
     "schemaVersion": 1,
     "activities": [
@@ -31,7 +31,7 @@
           "retryCount": 0,
           "parameters": [],
           "aiExtensions": [],
-          "testInput": "{\n  \"leaveUser\": \"adele.vance@contoso.com\",\n  \"leaveType\": \"Leave of absence\",\n  \"returnDate\": \"2026-12-15\",\n  \"confirm\": false,\n  \"company\": {\n    \"id\": 1,\n    \"name\": \"Contoso Ltd\",\n    \"tenantId\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}"
+          "testInput": "{\n  \"leaveUser\": \"adele.vance@contoso.com\",\n  \"leaveType\": \"Leave of absence\",\n  \"leaveStart\": \"2026-12-01\",\n  \"returnDate\": \"2026-12-15\",\n  \"confirm\": false,\n  \"company\": {\n    \"id\": 1,\n    \"name\": \"Contoso Ltd\",\n    \"tenantId\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}"
         }
       },
       {

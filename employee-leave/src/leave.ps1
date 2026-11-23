@@ -1,11 +1,19 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Off
 # === NODE: Put the employee on leave ===
-# Runs from the "Employee Leave" portal form (Action question). Disables the employee's Microsoft 365 sign-in
-# and signs them out everywhere, then writes an internal note on the request ticket and sends the manager a Signal.
-# Form Field IDs: leaveUser (employee email), leaveType, returnDate. A leave type containing "return" turns sign-in
-# back on. Optional input: cloudradial_company (use that portal's CloudRadial-*-<suffix> secrets). A run with
-# "confirm": false previews only.
+# Runs from the "Employee Leave" portal form (Action question), for a colleague or for yourself.
+# Form Field IDs: leaveUser (employee email), leaveType, leaveStart (optional), returnDate (optional).
+#   - No start date, or a start date of today or earlier: disables the employee's Microsoft 365 sign-in and signs
+#     them out of every device right away.
+#   - A start date in the future: nothing changes yet; the leave is saved in the company's @EmployeeLeaveSchedule
+#     token and a scheduled run pauses access on that day.
+#   - A return date: a scheduled run turns sign-in back on that day.
+#   - A leave type containing "return": turns sign-in back on now and cancels anything scheduled for that person.
+# Scheduled run (a daily Routine): input {"mode": "scheduled"} applies every leave start and return that is due,
+# across all companies with an @EmployeeLeaveSchedule token (or only "companyIds").
+# Every change writes an internal note on the request ticket and sends the requester a Signal.
+# Optional input: cloudradial_company (use that portal's CloudRadial-*-<suffix> secrets), timeZone (IANA, default
+# America/New_York, decides what "today" is). A run with "confirm": false previews only.
 function P { param($o, [string]$n) if ($null -eq $o) { return $null }; if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($n)) { return $o[$n] }; return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value }; return $null }
 function J { param($x) if ($x -is [string]) { try { return ($x | ConvertFrom-Json) } catch { return $null } }; return $x }
 function Sec { param([string[]]$names) foreach ($n in $names) { $v = [string](Get-AzKeyVaultSecret -VaultName $env:RUNNER_KV_NAME -Name $n -AsPlainText -ErrorAction SilentlyContinue); if ($v) { return $v.Trim() } }; return '' }
@@ -14,79 +22,211 @@ function ErrText { param($e) $t = $e.Exception.Message; if ($e.ErrorDetails -and
 $in = Get-NodeInput; $trig = J (P $in 'trigger'); if ($null -eq $trig) { $trig = $in }
 function Ans { param([string]$key, [string]$label) $v = P $trig $key; if ($null -eq $v -or [string]$v -eq '') { $qs = @(P (P $trig 'Ticket') 'Questions'); foreach ($q in $qs) { if ([string](P $q 'Id') -eq $key -or [string](P $q 'Label') -eq $label) { $v = P $q 'Value' } } }; $s = ([string]$v).Trim(); if ($s -match '^@') { $s = '' }; return $s }
 
-$target = Ans 'leaveUser' 'Employee going on leave'
-$leaveType = Ans 'leaveType' 'Type of leave'; if (-not $leaveType) { $leaveType = 'Leave' }
-$returnDate = Ans 'returnDate' 'Expected return date'
-$returnTxt = ''; if ($returnDate) { try { $returnTxt = ([datetime]$returnDate).ToString('MMMM d, yyyy') } catch { $returnTxt = $returnDate } }
+$mode = ([string](P $trig 'mode')).Trim().ToLower(); if ($mode -ne 'scheduled') { $mode = 'form' }
 $confirmTxt = [string](P $trig 'confirm'); $confirm = -not ($confirmTxt -match '^(?i)(false|0|no)$')
-$ticketId = [string](P (P $trig 'ticket') 'id'); if (-not $ticketId) { $ticketId = [string](P $trig 'ticketId') }
-$company = P $trig 'company'; $companyId = [int](P $company 'id'); $companyName = [string](P $company 'name')
-$tenantId = [string](P $company 'tenantId'); if (-not $tenantId) { $tenantId = [string](P $trig 'tenantId') }
-$user = P $trig 'user'; $userId = [string](P $user 'id'); $userName = [string](P $user 'name'); $userEmail = [string](P $user 'email')
 $crSuffix = [string](P $trig 'cloudradial_company')
 $crSuffix = ($crSuffix.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
+$schedToken = [string](P $trig 'scheduleToken'); if (-not $schedToken) { $schedToken = 'EmployeeLeaveSchedule' }
+$tzId = [string](P $trig 'timeZone'); if (-not $tzId) { $tzId = 'America/New_York' }
+$tz = $null; try { $tz = [TimeZoneInfo]::FindSystemTimeZoneById($tzId) } catch { }
+$today = $(if ($tz) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz) } else { [datetime]::UtcNow }).Date
+$inv = [Globalization.CultureInfo]::InvariantCulture
+function Day { param([string]$s) if (-not $s) { return $null }; if ($s -match '^(\d{4}-\d{2}-\d{2})') { return [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd', $inv) }; try { return ([datetime]::Parse($s, [Globalization.CultureInfo]::GetCultureInfo('en-US'))).Date } catch { return $null } }
+function Nice { param($d) if ($null -eq $d) { return '' }; return $d.ToString('MMMM d, yyyy', $inv) }
 
-$status = 'error'; $msg = ''; $done = New-Object System.Collections.Generic.List[string]; $warnings = New-Object System.Collections.Generic.List[string]; $display = $target
+$warnings = New-Object System.Collections.Generic.List[string]
 
-if (-not $target -or $target -notmatch '@') { $msg = 'Nothing was changed. Enter the email address of the employee going on leave.' }
-elseif (-not $tenantId) { $msg = "Nothing was changed. $companyName has no Microsoft 365 tenant ID saved in the portal." }
-elseif ($userEmail -and $target -ieq $userEmail) { $msg = 'Nothing was changed. You can''t put your own account on leave from this form.' }
-else {
-    try {
-        $cid = Sec @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId'); $csec = Sec @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret')
-        if (-not $cid -or -not $csec) { throw 'The M365-ClientId or M365-ClientSecret runner secret is missing.' }
-        try { $tok = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" -Body @{ client_id = $cid; client_secret = $csec; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' } }
-        catch { throw "Couldn't sign in to the client's Microsoft 365 tenant: $(ErrText $_)" }
-        $gh = @{ Authorization = "Bearer $($tok.access_token)"; 'Content-Type' = 'application/json' }
-        $g = 'https://graph.microsoft.com/v1.0'
-        try { $u = Invoke-RestMethod -Method GET -Uri "$g/users/$([uri]::EscapeDataString($target))?`$select=id,displayName,userPrincipalName,accountEnabled" -Headers $gh }
-        catch { throw "There is no Microsoft 365 user $target in $($companyName)'s tenant." }
-        $display = "$($u.displayName) ($($u.userPrincipalName))"
-        $returning = $leaveType -match '(?i)return|back'
-        if ($returning) {
-            if (-not $confirm) { $status = 'preview'; $msg = "Preview: would turn Microsoft 365 sign-in back on for $display." }
-            else { if (-not $u.accountEnabled) { try { $null = Invoke-RestMethod -Method PATCH -Uri "$g/users/$($u.id)" -Headers $gh -Body (@{ accountEnabled = $true } | ConvertTo-Json); $done.Add('Microsoft 365 sign-in turned back on') } catch { throw "Microsoft 365 didn't turn sign-in back on: $(ErrText $_)" } } else { $done.Add('Microsoft 365 sign-in was already on') }
-                $status = 'success'; $msg = "Welcome back, $($u.displayName): $($done -join ', ')." }
-        }
-        elseif (-not $confirm) { $status = 'preview'; $msg = "Preview: would disable Microsoft 365 sign-in for $display and sign them out of every device$(if (-not $u.accountEnabled) { ' (sign-in is already disabled)' })." }
-        else {
-            if ($u.accountEnabled) { try { $null = Invoke-RestMethod -Method PATCH -Uri "$g/users/$($u.id)" -Headers $gh -Body (@{ accountEnabled = $false } | ConvertTo-Json) ; $done.Add('Microsoft 365 sign-in disabled') } catch { throw "Microsoft 365 didn't disable sign-in: $(ErrText $_)" } }
-            else { $done.Add('Microsoft 365 sign-in was already disabled') }
-            try { $null = Invoke-RestMethod -Method POST -Uri "$g/users/$($u.id)/revokeSignInSessions" -Headers $gh; $done.Add('signed out of every device') } catch { $warnings.Add("Sessions not revoked: $(ErrText $_)") }
-            $status = 'success'
-            $msg = "$($u.displayName) is set up for $($leaveType.ToLower()): $($done -join ', ').$(if ($returnTxt) { " Expected back $returnTxt." })"
-        }
-    } catch { $status = 'error'; $msg = "Nothing was changed. $($_.Exception.Message)" }
+# ---- CloudRadial ----
+$sfx = if ($crSuffix) { "-$crSuffix" } else { '' }
+$crB = ''; $crH = $null
+function Cr { param([string]$Path, [string]$Method = 'GET', $Body = $null)
+    if (-not $script:crH) {
+        $script:crB = (Sec @("CloudRadial-BaseUrl$sfx", 'CloudRadial-BaseUrl')).TrimEnd('/'); $pu = Sec @("CloudRadial-PublicKey$sfx", 'CloudRadial-PublicKey'); $pr = Sec @("CloudRadial-PrivateKey$sfx", 'CloudRadial-PrivateKey')
+        if (-not $script:crB -or -not $pu -or -not $pr) { throw 'The CloudRadial-BaseUrl, CloudRadial-PublicKey or CloudRadial-PrivateKey runner secret is missing.' }
+        $script:crH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($pu):$($pr)")); Accept = 'application/json' }
+    }
+    $a = @{ Uri = "$script:crB$Path"; Method = $Method; Headers = $script:crH; ContentType = 'application/json'; ErrorAction = 'Stop' }
+    if ($null -ne $Body) { $a.Body = ConvertTo-Json -InputObject $Body -Depth 10 -Compress }
+    return Invoke-RestMethod @a
+}
+function Get-Schedule { param([int]$CompanyId)
+    $r = Cr "/v2/odata/token?`$filter=$([uri]::EscapeDataString("companyId eq $CompanyId and name eq '$schedToken'"))"
+    $t = @(P $r 'value') | Select-Object -First 1; $list = New-Object System.Collections.Generic.List[object]
+    if ($t -and [string](P $t 'value')) { foreach ($e in @(J ([string](P $t 'value')))) { if ($e) { $list.Add($e) } } }
+    return , $list
+}
+function Save-Schedule { param([int]$CompanyId, $List)
+    $null = Cr '/v2/token' 'POST' ([ordered]@{ companyId = $CompanyId; token = $schedToken; value = (ConvertTo-Json -InputObject ([object[]]$List.ToArray()) -Depth 5 -Compress); type = 'String' })
+}
+function Send-Signal { param([int]$CompanyId, [string]$UserId, [string]$Title, [string]$Body, [string]$Key, [int]$Priority = 0)
+    if ($CompanyId -le 0 -or -not $UserId) { return $false }
+    try { $null = Cr '/v2/signalmessage' 'POST' ([ordered]@{ companyIds = @($CompanyId); users = @($UserId); priority = $Priority; title = $Title; body = $Body; expiresAt = (Get-Date).ToUniversalTime().AddDays(1).ToString('o'); dedupeKey = $Key }); return $true }
+    catch { $warnings.Add("Signal not sent: $($_.Exception.Message) $(if ($_.ErrorDetails) { $_.ErrorDetails.Message })"); return $false }
 }
 
-# ---- Internal note on the request ticket (ConnectWise) ----
-$noted = $false
-if ($ticketId -match '^\d+$' -and [int64]$ticketId -gt 0 -and $status -ne 'preview') {
+# ---- ConnectWise internal note ----
+function Add-TicketNote { param([string]$TicketId, [string]$Text)
+    if (-not ($TicketId -match '^\d+$' -and [int64]$TicketId -gt 0)) { return $false }
     try {
         $cwApiUrl = (Sec @('CW-ApiUrl')).TrimEnd('/'); $pair = "{0}+{1}:{2}" -f (Sec @('CW-CompanyID')), (Sec @('CW-PublicKey')), (Sec @('CW-PrivateKey'))
         $cwH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair)); clientId = (Sec @('CW-ClientId')); Accept = 'application/json' }
         try { $rawB = Invoke-WebRequest -Method Get -Uri "$cwApiUrl/service/boards?pageSize=1" -Headers $cwH; $mB = [regex]::Match([string]$rawB.Content, 'https://[^/"]+/[^/"]+/apis/3\.0'); if ($mB.Success) { $cwApiUrl = $mB.Value } } catch { }
-        $note = "Employee leave (AutomationAI)`nRequested by: $userName`nEmployee: $display`nLeave: $leaveType$(if ($returnTxt) { ", back $returnTxt" })`nResult: $msg$(if ($warnings.Count) { "`nWarnings: $($warnings -join '; ')" })"
-        $nb = @{ text = $note; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false } | ConvertTo-Json
-        try { $null = Invoke-WebRequest -Method Post -Uri "$cwApiUrl/service/tickets/$ticketId/notes" -Headers $cwH -ContentType 'application/json' -Body $nb -MaximumRedirection 0 -SkipHttpErrorCheck; $noted = $true } catch { if ($_.Exception.Message -match '(?i)redirect|current state of the object') { $noted = $true } else { throw } }
-    } catch { $warnings.Add("Ticket note not added: $($_.Exception.Message)") }
+        $nb = @{ text = $Text; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false } | ConvertTo-Json
+        try { $null = Invoke-WebRequest -Method Post -Uri "$cwApiUrl/service/tickets/$TicketId/notes" -Headers $cwH -ContentType 'application/json' -Body $nb -MaximumRedirection 0 -SkipHttpErrorCheck; return $true } catch { if ($_.Exception.Message -match '(?i)redirect|current state of the object') { return $true } else { throw } }
+    } catch { $warnings.Add("Ticket note not added: $($_.Exception.Message)"); return $false }
 }
 
-# ---- Signal to the manager who submitted the form ----
+# ---- Microsoft 365 ----
+function Connect-Tenant { param([string]$TenantId)
+    $cid = Sec @('M365-ClientId', 'M365-ClientID', 'Entra-ClientID', 'Graph-ClientId'); $csec = Sec @('M365-ClientSecret', 'Entra-ClientSecret', 'Graph-ClientSecret')
+    if (-not $cid -or -not $csec) { throw 'The M365-ClientId or M365-ClientSecret runner secret is missing.' }
+    try { $tok = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body @{ client_id = $cid; client_secret = $csec; scope = 'https://graph.microsoft.com/.default'; grant_type = 'client_credentials' } }
+    catch { throw "Couldn't sign in to the client's Microsoft 365 tenant: $(ErrText $_)" }
+    return @{ Authorization = "Bearer $($tok.access_token)"; 'Content-Type' = 'application/json' }
+}
+$g = 'https://graph.microsoft.com/v1.0'
+function Get-M365User { param($Gh, [string]$Upn, [string]$CompanyName)
+    try { return Invoke-RestMethod -Method GET -Uri "$g/users/$([uri]::EscapeDataString($Upn))?`$select=id,displayName,userPrincipalName,accountEnabled" -Headers $Gh }
+    catch { throw "There is no Microsoft 365 user $Upn in $($CompanyName)'s tenant." }
+}
+function Stop-Access { param($Gh, $U)
+    $d = New-Object System.Collections.Generic.List[string]
+    if ($U.accountEnabled) { try { $null = Invoke-RestMethod -Method PATCH -Uri "$g/users/$($U.id)" -Headers $Gh -Body (@{ accountEnabled = $false } | ConvertTo-Json); $d.Add('Microsoft 365 sign-in disabled') } catch { throw "Microsoft 365 didn't disable sign-in: $(ErrText $_)" } }
+    else { $d.Add('Microsoft 365 sign-in was already disabled') }
+    try { $null = Invoke-RestMethod -Method POST -Uri "$g/users/$($U.id)/revokeSignInSessions" -Headers $Gh; $d.Add('signed out of every device') } catch { $warnings.Add("Sessions not revoked: $(ErrText $_)") }
+    return , $d
+}
+function Start-Access { param($Gh, $U)
+    $d = New-Object System.Collections.Generic.List[string]
+    if (-not $U.accountEnabled) { try { $null = Invoke-RestMethod -Method PATCH -Uri "$g/users/$($U.id)" -Headers $Gh -Body (@{ accountEnabled = $true } | ConvertTo-Json); $d.Add('Microsoft 365 sign-in turned back on') } catch { throw "Microsoft 365 didn't turn sign-in back on: $(ErrText $_)" } }
+    else { $d.Add('Microsoft 365 sign-in was already on') }
+    return , $d
+}
+function Short { param([string]$s) $ix = $s.IndexOf(' ('); if ($ix -gt 0) { return $s.Substring(0, $ix) }; return $s }
+
+# =====================================================================================================
+# Scheduled run: apply every leave start and return that is due today or earlier.
+# =====================================================================================================
+if ($mode -eq 'scheduled') {
+    $applied = New-Object System.Collections.Generic.List[object]; $pending = 0; $companies = 0
+    $only = @(@(P $trig 'companyIds') | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ })
+    $status = 'success'
+    try {
+        $f = "name eq '$schedToken'"; if ($only.Count -eq 1) { $f = "companyId eq $($only[0]) and $f" }
+        $toks = @(P (Cr "/v2/odata/token?`$filter=$([uri]::EscapeDataString($f))") 'value')
+        foreach ($t in $toks) {
+            $coId = [int](P $t 'companyId'); if ($only.Count -and $only -notcontains $coId) { continue }
+            $list = New-Object System.Collections.Generic.List[object]; foreach ($e in @(J ([string](P $t 'value')))) { if ($e) { $list.Add($e) } }
+            if (-not $list.Count) { continue }; $companies++
+            $keep = New-Object System.Collections.Generic.List[object]; $changed = $false
+            $ordered = @($list | Sort-Object @{ Expression = { [string](P $_ 'd') } }, @{ Expression = { if ((P $_ 'a') -eq 'start') { 0 } else { 1 } } })
+            foreach ($e in $ordered) {
+                $d = Day ([string](P $e 'd')); $act = [string](P $e 'a'); $upn = [string](P $e 'u')
+                if ($null -eq $d -or $d -gt $today) { $keep.Add($e); $pending++; continue }
+                $row = [ordered]@{ companyId = $coId; company = [string](P $e 'cn'); employee = $upn; action = $act; due = (Nice $d); result = '' }
+                if (-not $confirm) { $row.result = "Preview: would $(if ($act -eq 'start') { 'pause' } else { 'turn back on' }) Microsoft 365 access."; $applied.Add($row); $keep.Add($e); continue }
+                try {
+                    $gh = Connect-Tenant ([string](P $e 'tid')); $u = Get-M365User $gh $upn ([string](P $e 'cn'))
+                    $disp = "$($u.displayName) ($($u.userPrincipalName))"
+                    if ($act -eq 'start') { $done = Stop-Access $gh $u; $title = "$($u.displayName)'s leave has started"; $body = "$($u.displayName) is on $(([string](P $e 'lt')).ToLower()): $($done -join ', ').$(if ([string](P $e 'rd')) { " Access turns back on automatically on $([string](P $e 'rd'))." })" }
+                    else { $done = Start-Access $gh $u; $title = "$($u.displayName) is back"; $body = "Welcome back, $($u.displayName): $($done -join ', ')." }
+                    $row.result = $body; $changed = $true
+                    $null = Add-TicketNote ([string](P $e 't')) "Scheduled employee leave (AutomationAI)`nEmployee: $disp`nLeave: $([string](P $e 'lt'))`nRequested by: $([string](P $e 'rn'))`nResult: $body"
+                    $null = Send-Signal $coId ([string](P $e 'r')) $title $body "leave-$($e.t)-$act" 0
+                } catch {
+                    $row.result = "Not done, will retry next run: $($_.Exception.Message)"; $keep.Add($e); $status = 'incomplete'
+                    $warnings.Add("$upn ($act, $([string](P $e 'cn'))): $($_.Exception.Message)")
+                }
+                $applied.Add($row)
+            }
+            if ($changed) { try { Save-Schedule $coId $keep } catch { $warnings.Add("Couldn't save @$schedToken for company $($coId): $($_.Exception.Message). Done items may run again next time (they are safe to repeat)."); $status = 'incomplete' } }
+        }
+    } catch { $status = 'error'; $warnings.Add("Couldn't read the @$schedToken tokens: $($_.Exception.Message)") }
+    $msg = if ($status -eq 'error') { 'Nothing was changed.' } elseif ($applied.Count) { "$($applied.Count) scheduled change$(if ($applied.Count -ne 1) { 's' }) $(if ($confirm) { 'applied' } else { 'due (preview)' }); $pending still scheduled." } else { "Nothing due today; $pending still scheduled." }
+    Set-NodeOutput ([ordered]@{
+        status = $status; mode = 'scheduled'; today = (Nice $today); message = $msg; applied = ([object[]]$applied.ToArray()); stillScheduled = $pending; companies = $companies; warnings = @($warnings)
+        internal_note = "Employee leave scheduled run ($(Nice $today)): $msg"
+    })
+    return
+}
+
+# =====================================================================================================
+# Form run
+# =====================================================================================================
+$target = Ans 'leaveUser' 'Employee going on leave'
+$leaveType = Ans 'leaveType' 'Type of leave'; if (-not $leaveType) { $leaveType = 'Leave' }
+$startDay = Day (Ans 'leaveStart' 'Leave starts')
+$returnDay = Day (Ans 'returnDate' 'Expected return date')
+$returnTxt = Nice $returnDay
+$ticketId = [string](P (P $trig 'ticket') 'id'); if (-not $ticketId) { $ticketId = [string](P $trig 'ticketId') }
+$company = P $trig 'company'; $companyId = [int](P $company 'id'); $companyName = [string](P $company 'name')
+$tenantId = [string](P $company 'tenantId'); if (-not $tenantId) { $tenantId = [string](P $trig 'tenantId') }
+$user = P $trig 'user'; $userId = [string](P $user 'id'); $userName = [string](P $user 'name'); $userEmail = [string](P $user 'email')
+$self = [bool]($userEmail -and $target -ieq $userEmail)
+
+$status = 'error'; $msg = ''; $done = New-Object System.Collections.Generic.List[string]; $display = $target; $scheduled = New-Object System.Collections.Generic.List[string]
+$returning = $leaveType -match '(?i)return|back'
+
+if (-not $target -or $target -notmatch '@') { $msg = 'Nothing was changed. Enter the email address of the employee going on leave.' }
+elseif (-not $tenantId) { $msg = "Nothing was changed. $companyName has no Microsoft 365 tenant ID saved in the portal." }
+elseif (-not $returning -and $returnDay -and $startDay -and $returnDay -le $startDay) { $msg = "Nothing was changed. The return date ($returnTxt) must be after the start date ($(Nice $startDay))." }
+else {
+    try {
+        $gh = Connect-Tenant $tenantId
+        $u = Get-M365User $gh $target $companyName
+        $display = "$($u.displayName) ($($u.userPrincipalName))"; $upn = [string]$u.userPrincipalName
+        $future = [bool]($startDay -and $startDay -gt $today)
+        $autoReturn = [bool]($returnDay -and $returnDay -gt $today)
+        if ($returnDay -and -not $autoReturn -and -not $returning) { $warnings.Add("The return date $returnTxt isn't in the future, so access won't be turned back on automatically.") }
+
+        if ($returning) {
+            if (-not $confirm) { $status = 'preview'; $msg = "Preview: would turn Microsoft 365 sign-in back on for $display and cancel any scheduled leave." }
+            else { $done = Start-Access $gh $u; $status = 'success'; $msg = "Welcome back, $($u.displayName): $($done -join ', ')." }
+        }
+        elseif ($future) {
+            $msg = "$($u.displayName)'s $($leaveType.ToLower()) is scheduled: Microsoft 365 access pauses on $(Nice $startDay)$(if ($autoReturn) { " and turns back on automatically on $returnTxt" }). Nothing changes before then."
+            if (-not $confirm) { $status = 'preview'; $msg = "Preview: $msg" } else { $status = 'success'; $scheduled.Add("pause on $(Nice $startDay)"); if ($autoReturn) { $scheduled.Add("back on $returnTxt") } }
+        }
+        else {
+            if (-not $confirm) { $status = 'preview'; $msg = "Preview: would disable Microsoft 365 sign-in for $display and sign them out of every device now$(if (-not $u.accountEnabled) { ' (sign-in is already disabled)' })$(if ($autoReturn) { ", and turn it back on automatically on $returnTxt" })." }
+            else {
+                $done = Stop-Access $gh $u; $status = 'success'; if ($autoReturn) { $scheduled.Add("back on $returnTxt") }
+                $msg = "$($u.displayName) is set up for $($leaveType.ToLower()): $($done -join ', ').$(if ($autoReturn) { " Access turns back on automatically on $returnTxt." } elseif ($returnTxt) { " Expected back $returnTxt." })"
+            }
+        }
+
+        # Save (or clear) this person's scheduled changes in the company's @EmployeeLeaveSchedule token.
+        if ($status -eq 'success') {
+            try {
+                $list = Get-Schedule $companyId; $had = @($list | Where-Object { ([string](P $_ 'u')) -ieq $upn }).Count
+                $keep = New-Object System.Collections.Generic.List[object]; foreach ($e in $list) { if (([string](P $e 'u')) -ine $upn) { $keep.Add($e) } }
+                $base = [ordered]@{ u = $upn; t = $ticketId; r = $userId; rn = $userName; lt = $leaveType; tid = $tenantId; cn = $companyName; rd = $returnTxt }
+                if (-not $returning -and $future) { $e1 = [ordered]@{ a = 'start'; d = $startDay.ToString('yyyy-MM-dd', $inv) }; foreach ($k in $base.Keys) { $e1[$k] = $base[$k] }; $keep.Add($e1) }
+                if (-not $returning -and $autoReturn) { $e2 = [ordered]@{ a = 'return'; d = $returnDay.ToString('yyyy-MM-dd', $inv) }; foreach ($k in $base.Keys) { $e2[$k] = $base[$k] }; $keep.Add($e2) }
+                if ($had -or $keep.Count -ne $list.Count -or $scheduled.Count) { Save-Schedule $companyId $keep }
+                if ($had -and $returning) { $done.Add('scheduled leave cancelled') }
+            } catch {
+                if ($scheduled.Count) { $status = 'error'; $msg = "$(if ($future) { 'Nothing was changed. ' } else { "$msg " })Couldn't save the schedule: $($_.Exception.Message). A technician needs to $(if ($future) { 'set this up' } else { 'turn access back on' }) by hand."; $scheduled.Clear() }
+                else { $warnings.Add("Couldn't update @$($schedToken): $($_.Exception.Message)") }
+            }
+        }
+    } catch { $status = 'error'; $msg = "Nothing was changed. $($_.Exception.Message)" }
+}
+
+$noted = $false
+if ($status -ne 'preview') {
+    $noted = Add-TicketNote $ticketId "Employee leave (AutomationAI)`nRequested by: $userName$(if ($self) { ' (for themselves)' })`nEmployee: $display`nLeave: $leaveType$(if ($startDay -and -not $returning) { ", starts $(Nice $startDay)" })$(if ($returnTxt -and -not $returning) { ", back $returnTxt" })`nResult: $msg$(if ($warnings.Count) { "`nWarnings: $($warnings -join '; ')" })"
+}
 $signaled = $false
 if ($status -ne 'preview' -and $companyId -gt 0 -and $userId) {
-    try {
-        $sfx = if ($crSuffix) { "-$crSuffix" } else { '' }; $crB = (Sec @("CloudRadial-BaseUrl$sfx", 'CloudRadial-BaseUrl')).TrimEnd('/'); $crPu = Sec @("CloudRadial-PublicKey$sfx", 'CloudRadial-PublicKey'); $crPr = Sec @("CloudRadial-PrivateKey$sfx", 'CloudRadial-PrivateKey')
-        $crH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($crPu):$($crPr)")); Accept = 'application/json' }
-        $short = $display; $ix = $short.IndexOf(' ('); if ($ix -gt 0) { $short = $short.Substring(0, $ix) }
-        $title = if ($status -eq 'success' -and $leaveType -match '(?i)return|back') { "$short is back" } elseif ($status -eq 'success') { "Leave is set up for $short" } else { 'Your leave request needs a technician' }
-        $sb = @{ companyIds = @($companyId); users = @($userId); priority = $(if ($status -eq 'success') { 0 } else { 1 }); title = $title; body = $msg; expiresAt = (Get-Date).ToUniversalTime().AddDays(1).ToString('o'); dedupeKey = "leave-$ticketId-$status" } | ConvertTo-Json -Depth 5
-        $null = Invoke-RestMethod -Method Post -Uri "$crB/v2/signalmessage" -Headers $crH -ContentType 'application/json' -Body $sb; $signaled = $true
-    } catch { $warnings.Add("Signal not sent: $($_.Exception.Message) $(if ($_.ErrorDetails) { $_.ErrorDetails.Message })") }
+    $short = Short $display
+    $title = if ($status -ne 'success') { 'Your leave request needs a technician' } elseif ($returning) { "$short is back" } elseif ($scheduled.Count -and $startDay -and $startDay -gt $today) { "Leave is scheduled for $short" } else { "Leave is set up for $short" }
+    try { $signaled = Send-Signal $companyId $userId $title $msg "leave-$ticketId-$status" $(if ($status -eq 'success') { 0 } else { 1 }) } catch { $warnings.Add("Signal not sent: $($_.Exception.Message)") }
 }
 
 Set-NodeOutput ([ordered]@{
-    status = $status; message = $msg; employee = $display; leaveType = $leaveType; returnDate = $returnTxt
+    status = $status; mode = 'form'; message = $msg; employee = $display; forThemselves = $self; leaveType = $leaveType
+    leaveStart = (Nice $startDay); returnDate = $returnTxt; scheduled = @($scheduled)
     ticketId = $ticketId; ticketNoted = $noted; signalSent = $signaled; done = @($done); warnings = @($warnings)
     internal_note = "Employee leave for $display requested by $userName ($companyName): $msg"
 })

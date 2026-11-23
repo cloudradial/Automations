@@ -2,7 +2,7 @@
  "item": {
   "catalogUsage": "Request",
   "category": "Employees",
-  "description": "Tell us who is going on leave. Their Microsoft 365 access is paused right away and turned back on when they return.",
+  "description": "Tell us who is going on leave, you or a colleague. Microsoft 365 access is paused on the start date (or right away) and turned back on when they return.",
   "subject": "Employee Leave",
   "shortDescription": "Employee Leave",
   "icon": "fas fa-umbrella-beach",
@@ -30,12 +30,12 @@
   "isSelfApproval": true,
   "hideActionButtons": false,
   "groups": "Everyone",
-  "thankYou": "<p>Their access is being updated now. You will get a desktop notification the moment it is done. Ticket #@TicketId.</p>"
+  "thankYou": "<p>We're setting this up now. You'll get a desktop notification when it's done or scheduled. Ticket #@TicketId.</p>"
  },
  "questions": [
   {
    "label": "Header",
-   "defaultValue": "<div style=\"background:linear-gradient(135deg,#0f1f3d 0%,#1e3a8a 55%,#0d9488 100%);color:#fff;padding:20px 24px;border-radius:12px;box-shadow:0 4px 14px rgba(15,31,61,.3)\"><div style=\"font-size:22px;font-weight:600\"><i class=\"fal fa-umbrella-beach\"></i>&nbsp; Employee leave</div><div style=\"font-size:15px;opacity:.9;margin-top:6px\">Someone going on leave? Their Microsoft 365 access is paused securely the moment you submit, and turned back on when they return.</div></div>",
+   "defaultValue": "<div style=\"background:linear-gradient(135deg,#0f1f3d 0%,#1e3a8a 55%,#0d9488 100%);color:#fff;padding:20px 24px;border-radius:12px;box-shadow:0 4px 14px rgba(15,31,61,.3)\"><div style=\"font-size:22px;font-weight:600\"><i class=\"fal fa-umbrella-beach\"></i>&nbsp; Employee leave</div><div style=\"font-size:15px;opacity:.9;margin-top:6px\">Going on leave, or is someone on your team? Microsoft 365 access is paused securely on the start date (or right away), and turned back on when they return.</div></div>",
    "order": 1,
    "type": "Comment",
    "isIncludeInTicket": false
@@ -50,7 +50,7 @@
   },
   {
    "label": "Employee going on leave",
-   "info": "Their work email address.",
+   "info": "Their work email address, or your own if the leave is yours.",
    "order": 20,
    "type": "EmailField",
    "isRequired": true,
@@ -68,11 +68,20 @@
    "isIncludeInTicket": true
   },
   {
+   "label": "Leave starts",
+   "info": "Leave blank to pause access as soon as you submit. Pick a later date to schedule it, even for your own leave.",
+   "order": 35,
+   "type": "DateField",
+   "jsonId": "leaveStart",
+   "isIncludeInTicket": true
+  },
+  {
    "label": "Expected return date",
    "order": 40,
    "type": "DateField",
    "jsonId": "returnDate",
-   "isIncludeInTicket": true
+   "isIncludeInTicket": true,
+   "info": "Optional. Access turns back on automatically that morning."
   },
   {
    "label": "Update their access",

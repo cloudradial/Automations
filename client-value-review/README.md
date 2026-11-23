@@ -33,7 +33,7 @@ ConnectWise PSA. Other PSAs aren't supported yet.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/client-value-review/client-value-review.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/client-value-review/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Optionally set your hourly rate, logo and tagline (see the [technical details](https://github.com/cloudradial/Automations/tree/main/client-value-review#technical-details)).
@@ -64,7 +64,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cli
 | What | Link |
 |---|---|
 | View `client-value-review.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/client-value-review/client-value-review.yml) |
-| Download `client-value-review.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/client-value-review/client-value-review.yml) |
+| Download `client-value-review.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/client-value-review/v1.0.0) |
 | Portal form | [forms/client-value-review.json](https://github.com/cloudradial/Automations/blob/main/client-value-review/forms/client-value-review.json) |
 | Step sources and build script | [src/](https://github.com/cloudradial/Automations/tree/main/client-value-review/src) |
 | All files in this automation | [client-value-review](https://github.com/cloudradial/Automations/tree/main/client-value-review) |

@@ -33,7 +33,7 @@ KnowBe4, CloudRadial, and any of these PSAs: ConnectWise PSA, Autotask, HaloPSA,
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.2.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.2.1).
 2. Go to **Workflows > Import** and upload it.
 3. Add your KnowBe4 API details, your CloudRadial connection and your PSA connection to your runner's secure settings. Optionally add the board or queue the ticket should land on.
 4. Tell it which client the records belong to: start each run with the client's CloudRadial company id, or save it in the runner's settings as `CloudRadial-CompanyId`. The workflow handles one client per KnowBe4 account, so set up a copy for each client you run it for.
@@ -52,15 +52,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/kno
 
 ## Technical details
 
-**Formerly:** KnowBe4 Training Sync | **Marketplace ID:** AAI-00029 | **Type:** Workflow | **Version:** 1.2.0
+**Formerly:** KnowBe4 Training Sync | **Marketplace ID:** AAI-00029 | **Type:** Workflow | **Version:** 1.2.1
 
 ## Files
 
-Each version is published as a release, with `knowbe4.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.2.0).
+Each version is published as a release, with `knowbe4.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.2.1).
 
 | What | Link |
 |---|---|
-| Download `knowbe4.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.2.0) |
+| Download `knowbe4.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/knowbe4/v1.2.1) |
 | View the current source | [`knowbe4.yml`](https://github.com/cloudradial/Automations/blob/main/knowbe4/knowbe4.yml) |
 | Source of the built steps | [`src/`](https://github.com/cloudradial/Automations/tree/main/knowbe4/src): `company.ps1`, `records.ps1`, `ticket.ps1`, `build.js`, `test.ps1` |
 | All files in this automation | [knowbe4](https://github.com/cloudradial/Automations/tree/main/knowbe4) |

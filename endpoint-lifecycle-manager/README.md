@@ -38,7 +38,7 @@ Your team also gets an internal note on each card that clients never see. When a
 
 ## Set it up
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.1.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy** to your runner.
 4. Add your CloudRadial API keys to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/endpoint-lifecycle-manager#install--run) list exactly what to add.
@@ -64,11 +64,11 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/end
 
 ## Technical details
 
-**Formerly:** Endpoint LifeCycle Manager | **Marketplace ID:** AAI-00021 | **Type:** Workflow (an optional AI agent version is included) | **Version:** 1.0.0
+**Formerly:** Endpoint LifeCycle Manager | **Marketplace ID:** AAI-00021 | **Type:** Workflow (an optional AI agent version is included) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.0.0).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.1.0).
 
 **Start with** [`endpoint-lifecycle-manager.yml`](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) on **Workflows → Import**. It doesn't need an agent.
 
@@ -77,11 +77,11 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `endpoint-lifecycle-manager.yml` (start here) | [GitHub](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager.yml) |
-| Download `endpoint-lifecycle-manager.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.0.0) |
+| Download `endpoint-lifecycle-manager.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.1.0) |
 | View `endpoint-lifecycle-manager.agent.yml` (agent) | [GitHub](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager.agent.yml) |
-| Download `endpoint-lifecycle-manager.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.0.0) |
+| Download `endpoint-lifecycle-manager.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.1.0) |
 | View `endpoint-lifecycle-manager-ai.yml` (optional) | [GitHub](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/endpoint-lifecycle-manager-ai.yml) |
-| Download `endpoint-lifecycle-manager-ai.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.0.0) |
+| Download `endpoint-lifecycle-manager-ai.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/endpoint-lifecycle-manager/v1.1.0) |
 | View `knowledge/endpoint-refresh-standards.md` (upload to Knowledge) | [GitHub](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
 | Download `knowledge/endpoint-refresh-standards.md` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/endpoint-lifecycle-manager/knowledge/endpoint-refresh-standards.md) |
 | View `knowledge/endpoint-refresh-pricing.md` (your pricing, and the Routine input to paste) | [GitHub](https://github.com/cloudradial/Automations/blob/main/endpoint-lifecycle-manager/knowledge/endpoint-refresh-pricing.md) |

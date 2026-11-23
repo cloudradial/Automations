@@ -41,7 +41,7 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, for the prob
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.1.0).
 2. Go to **Workflows > Import** and upload it.
 3. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
 
@@ -67,17 +67,17 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Technical details
 
-**Marketplace ID:** AAI-00061 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00061 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.1.0
 
 When a service goes down, a technician tells ServiceAI what is down and what to say, and every affected client's portal shows the notice, with an optional email to each primary contact and a full record on the problem ticket.
 
 ## Files
 
-Each version is published as a release, with `outage-broadcast.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0).
+Each version is published as a release, with `outage-broadcast.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `outage-broadcast.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0) |
+| Download `outage-broadcast.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.1.0) |
 | View the current source | [`outage-broadcast.yml`](https://github.com/cloudradial/Automations/blob/main/outage-broadcast/outage-broadcast.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/outage-broadcast/src) |
 | All files in this automation | [outage-broadcast](https://github.com/cloudradial/Automations/tree/main/outage-broadcast) |
@@ -108,7 +108,7 @@ Three PowerShell steps, no AI. It previews by default and changes nothing until 
 
 ## Download & import
 
-**Download the workflow:** [`outage-broadcast.yml`](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.0.0)
+**Download the workflow:** [`outage-broadcast.yml`](https://github.com/cloudradial/Automations/releases/tag/outage-broadcast/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the MSP's runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

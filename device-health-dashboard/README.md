@@ -33,7 +33,7 @@ Datto RMM. Signal for the optional summary.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/device-health-dashboard/device-health-dashboard.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/device-health-dashboard/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Run it once with **Test** and `"confirm": true` for your client (input below). That creates the tokens.
@@ -62,7 +62,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/dev
 | What | Link |
 |---|---|
 | View `device-health-dashboard.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/device-health-dashboard/device-health-dashboard.yml) |
-| Download `device-health-dashboard.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/device-health-dashboard/device-health-dashboard.yml) |
+| Download `device-health-dashboard.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/device-health-dashboard/v1.0.0) |
 | Widget HTML and demo token values | [widgets/](https://github.com/cloudradial/Automations/tree/main/device-health-dashboard/widgets) |
 | Step source, widget template builder and build script | [src/](https://github.com/cloudradial/Automations/tree/main/device-health-dashboard/src) |
 

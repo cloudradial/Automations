@@ -32,7 +32,7 @@ Microsoft 365 (Entra ID), with your multi-tenant app consented in the client's t
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/employee-leave/employee-leave.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/employee-leave/v1.1.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Add a **Routine**: daily at 6:00 AM, with this input:
@@ -69,7 +69,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/emp
 | What | Link |
 |---|---|
 | View `employee-leave.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/employee-leave/employee-leave.yml) |
-| Download `employee-leave.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/employee-leave/employee-leave.yml) |
+| Download `employee-leave.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/employee-leave/v1.1.0) |
 | Portal form | [forms/employee-leave.json](https://github.com/cloudradial/Automations/blob/main/employee-leave/forms/employee-leave.json) |
 | Step source, tests and build script | [src/](https://github.com/cloudradial/Automations/tree/main/employee-leave/src) |
 

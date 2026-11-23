@@ -33,7 +33,7 @@ Microsoft 365 (Entra ID), for the password reset itself. The notes go on the tic
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.1.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 
@@ -56,15 +56,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/pas
 
 ## Technical details
 
-**Formerly:** Password Reset (Self-Service) | **Marketplace ID:** AAI-00027 | **Type:** Workflow | **Version:** 1.0.0
+**Formerly:** Password Reset (Self-Service) | **Marketplace ID:** AAI-00027 | **Type:** Workflow | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with `password-reset.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0).
+Each version is published as a release, with `password-reset.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.1.0).
 
 | What | Link |
 |---|---|
-| Download `password-reset.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0) |
+| Download `password-reset.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.1.0) |
 | View the current source | [`password-reset.yml`](https://github.com/cloudradial/Automations/blob/main/password-reset/password-reset.yml) |
 | Test harness for the Parse & Validate step | [`src/test-parse.ps1`](https://github.com/cloudradial/Automations/blob/main/password-reset/src/test-parse.ps1) |
 | Test harness for the Finish step (notes on all six PSAs) | [`src/test-finish.ps1`](https://github.com/cloudradial/Automations/blob/main/password-reset/src/test-finish.ps1) |
@@ -82,7 +82,7 @@ Nodes: **Parse & Validate → Resolve & Ownership Gate → Safety Gates → Rese
 
 ## Download & import
 
-**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.0.0)
+**Download the workflow:** [`password-reset.yml`](https://github.com/cloudradial/Automations/releases/tag/password-reset/v1.1.0)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), enable the webhook in **Properties** (the portal mints the URL + secret), then publish and deploy. Full steps are under [Import & test](#import--test) below.
 

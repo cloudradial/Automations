@@ -31,7 +31,7 @@ Any portal. Signal needs to be turned on in your portal for the desktop notices.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/status-page-watcher/status-page-watcher.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/status-page-watcher/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Add a **Routine**: every 10 minutes, with this input (your partner company id, the user ids of the technicians to alert, and the client companies to tell):
@@ -73,7 +73,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sta
 | What | Link |
 |---|---|
 | View `status-page-watcher.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/status-page-watcher/status-page-watcher.yml) |
-| Download `status-page-watcher.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/status-page-watcher/status-page-watcher.yml) |
+| Download `status-page-watcher.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/status-page-watcher/v1.0.0) |
 | Step source and build script | [src/](https://github.com/cloudradial/Automations/tree/main/status-page-watcher/src) |
 
 ## Inputs

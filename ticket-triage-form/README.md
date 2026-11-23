@@ -30,7 +30,7 @@ ConnectWise PSA. Other PSAs aren't supported yet.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-triage-form/ticket-triage-form.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/ticket-triage-form/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Set up [Ticket Triage Settings](../ticket-triage-settings/) and submit it once to pick your triage board and priority.
@@ -60,7 +60,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/tic
 | What | Link |
 |---|---|
 | View `ticket-triage-form.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/ticket-triage-form/ticket-triage-form.yml) |
-| Download `ticket-triage-form.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-triage-form/ticket-triage-form.yml) |
+| Download `ticket-triage-form.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/ticket-triage-form/v1.0.0) |
 | Problem report forms | [forms/](https://github.com/cloudradial/Automations/tree/main/ticket-triage-form/forms) |
 | Step sources and build script | [src/](https://github.com/cloudradial/Automations/tree/main/ticket-triage-form/src) |
 | All files in this automation | [ticket-triage-form](https://github.com/cloudradial/Automations/tree/main/ticket-triage-form) |

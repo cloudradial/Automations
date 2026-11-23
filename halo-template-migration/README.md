@@ -2,7 +2,7 @@
 
 Every HaloPSA ticket template becomes a CloudRadial Service Request or Problem Report form that raises the same kind of ticket, with the questions a requester actually needs to answer, so moving to the CloudRadial portal doesn't mean rebuilding your forms by hand.
 
-**Marketplace ID:** CRA-00016 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
+**Marketplace ID:** CRA-00016 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.1
 
 ## Files
 

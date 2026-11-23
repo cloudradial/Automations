@@ -25,7 +25,7 @@ ConnectWise PSA.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-triage-settings/ticket-triage-settings.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/ticket-triage-settings/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 
@@ -58,7 +58,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/tic
 | What | Link |
 |---|---|
 | View `ticket-triage-settings.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/ticket-triage-settings/ticket-triage-settings.yml) |
-| Download `ticket-triage-settings.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-triage-settings/ticket-triage-settings.yml) |
+| Download `ticket-triage-settings.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/ticket-triage-settings/v1.0.0) |
 | Portal form | [forms/ticket-triage-settings.json](https://github.com/cloudradial/Automations/blob/main/ticket-triage-settings/forms/ticket-triage-settings.json) |
 | Step sources and build script | [src/](https://github.com/cloudradial/Automations/tree/main/ticket-triage-settings/src) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/ticket-triage-settings) |

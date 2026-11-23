@@ -29,12 +29,24 @@ $confirmTxt = [string](P $trig 'confirm'); $confirm = -not ($confirmTxt -match '
 $waitMinutes = 6; $w = [string](P $trig 'waitMinutes'); if ($w -match '^\d+$') { $waitMinutes = [int]$w }
 $ticketId = [string](P (P $trig 'ticket') 'id'); if (-not $ticketId) { $ticketId = [string](P (P $trig 'Ticket') 'TicketId') }; if (-not $ticketId) { $ticketId = [string](P $trig 'ticketId') }
 $company = P $trig 'company'; $companyId = [int](P $company 'id'); $companyName = [string](P $company 'name')
-$user = P $trig 'user'; $userId = [string](P $user 'id'); $userName = [string](P $user 'name')
+$user = P $trig 'user'; $userId = [string](P $user 'id'); $userName = [string](P $user 'name'); $userEmail = [string](P $user 'email')
 $crSuffix = [string](P $trig 'cloudradial_company')
 $crSuffix = ($crSuffix.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
 
 $steps = New-Object System.Collections.Generic.List[string]; $warnings = New-Object System.Collections.Generic.List[string]
 $status = 'error'; $msg = ''; $jobUid = $null; $result = $null
+$deviceUser = ''; $forSomeoneElse = $false; $ownerNote = ''
+# Whose computer is it? Compares the Datto RMM device's last signed-in user with the requester's name and email.
+function Norm { param([string]$s) return ($s.ToLower() -replace '[^a-z0-9]', '') }
+function Test-SameUser { param([string]$DeviceUser, [string]$Name, [string]$Email)
+    $du = ($DeviceUser -split '\\')[-1]; if ($du -match '@') { $du = $du.Split('@')[0] }; $du = Norm $du
+    if (-not $du) { return $null }
+    $local = if ($Email -match '@') { $Email.Split('@')[0] } else { '' }
+    $parts = @($Name -split '\s+' | Where-Object { $_ })
+    $cands = @((Norm $Name), (Norm $local)); if ($parts.Count -ge 2) { $cands += @((Norm "$($parts[0][0])$($parts[-1])"), (Norm "$($parts[0])$($parts[-1][0])"), (Norm "$($parts[0]).$($parts[-1])")) }
+    foreach ($c in @($cands | Where-Object { $_.Length -ge 3 })) { if ($du -eq $c -or $du.StartsWith($c) -or $c.StartsWith($du)) { return $true } }
+    return $false
+}
 
 # Match the app (exact, then contains)
 $key = $null; foreach ($k in $catalog.Keys) { if ($k -ieq $app) { $key = $k } }
@@ -65,6 +77,11 @@ else {
         $dev = @($hits | Sort-Object @{ Expression = { [bool]$_.online }; Descending = $true }, @{ Expression = { [int64]$_.lastSeen }; Descending = $true }) | Select-Object -First 1
         if (-not $dev) { throw "There is no Datto RMM device named '$device'." }
         $steps.Add("Device: $($dev.hostname) at site $($dev.siteName), $(if ($dev.online) { 'online' } else { 'offline' })")
+        $deviceUser = [string]$dev.lastLoggedInUser
+        $same = Test-SameUser $deviceUser $userName $userEmail
+        if ($same -eq $false) { $forSomeoneElse = $true; $ownerNote = "Requested for someone else's computer: $($dev.hostname) was last signed in to by $deviceUser, not by the requester ($userName). Check that this request was expected." }
+        elseif ($null -eq $same -and $userName) { $ownerNote = "Datto RMM doesn't show who last signed in to $($dev.hostname), so it couldn't be checked against the requester." }
+        if ($ownerNote) { $steps.Add($ownerNote) }
 
         if (-not $dev.online) {
             $status = 'offline'
@@ -110,7 +127,7 @@ if ($ticketId -match '^\d+$' -and [int64]$ticketId -gt 0 -and $status -ne 'previ
         $cwApiUrl = (Sec 'CW-ApiUrl').Trim().TrimEnd('/'); $pair = "{0}+{1}:{2}" -f (Sec 'CW-CompanyID').Trim(), (Sec 'CW-PublicKey').Trim(), (Sec 'CW-PrivateKey').Trim()
         $cwH = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair)); clientId = (Sec 'CW-ClientId').Trim(); Accept = 'application/json' }
         try { $rawB = Invoke-WebRequest -Method Get -Uri "$cwApiUrl/service/boards?pageSize=1" -Headers $cwH; $mB = [regex]::Match([string]$rawB.Content, 'https://[^/"]+/[^/"]+/apis/3\.0'); if ($mB.Success) { $cwApiUrl = $mB.Value } } catch { }
-        $note = "Software request (AutomationAI)`nRequested by: $userName`nSoftware: $(if ($key) { $key } else { $app })`nComputer: $device`nResult: $msg$(if ($jobUid) { "`nDatto RMM job: $jobUid" })"
+        $note = "Software request (AutomationAI)`nRequested by: $userName$(if ($userEmail) { " ($userEmail)" })$(if ($forSomeoneElse) { "`n*** FOR SOMEONE ELSE'S COMPUTER ***" })`nSoftware: $(if ($key) { $key } else { $app })`nComputer: $device$(if ($deviceUser) { " (last signed in: $deviceUser)" })`nResult: $msg$(if ($ownerNote) { "`nOwner check: $ownerNote" })$(if ($jobUid) { "`nDatto RMM job: $jobUid" })"
         $nb = @{ text = $note; internalAnalysisFlag = $true; detailDescriptionFlag = $false; resolutionFlag = $false } | ConvertTo-Json
         try { $null = Invoke-WebRequest -Method Post -Uri "$cwApiUrl/service/tickets/$ticketId/notes" -Headers $cwH -ContentType 'application/json' -Body $nb -MaximumRedirection 0 -SkipHttpErrorCheck; $noted = $true } catch { if ($_.Exception.Message -match '(?i)redirect|current state of the object') { $noted = $true } else { throw } }
     } catch { $warnings.Add("Ticket note not added: $($_.Exception.Message)") }
@@ -132,6 +149,7 @@ if ($status -ne 'preview' -and $companyId -gt 0 -and $userId) {
 Set-NodeOutput ([ordered]@{
     status = $status; message = $msg; software = $key; device = $device; jobUid = $jobUid
     componentStatus = [string](P (@(P $result 'componentResults') | Select-Object -First 1) 'componentStatus')
+    deviceLastUser = $deviceUser; forSomeoneElse = $forSomeoneElse; ownerCheck = $ownerNote
     ticketId = $ticketId; ticketNoted = $noted; signalSent = $signaled; steps = @($steps); warnings = @($warnings)
     catalog = @($catalog.Keys)
     internal_note = "Software request for $(if ($key) { $key } else { $app }) on $device by $userName ($companyName): $msg"

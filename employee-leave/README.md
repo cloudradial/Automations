@@ -62,7 +62,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/emp
 
 ## Technical details
 
-**Marketplace ID:** CRA-00020 | **Type:** Workflow (one PowerShell step, no AI), plus a daily Routine | **Version:** 1.1.0
+**Marketplace ID:** AAI-00085 | **Type:** Workflow (one PowerShell step, no AI), plus a daily Routine | **Version:** 1.1.0
 
 ## Files
 

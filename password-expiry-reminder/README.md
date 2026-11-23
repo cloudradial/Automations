@@ -49,7 +49,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/pas
 
 ## Technical details
 
-**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** CRA-00025 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
+**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** AAI-00090 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
 ## Files
 
 Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/password-expiry-reminder/v1.0.0).

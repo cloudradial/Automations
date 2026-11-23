@@ -37,7 +37,7 @@ Your clients just notice that small problems get fixed quickly, and your technic
 **Once, in AutomationAI:**
 
 1. Import the [agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) on **Agents > Custom > Import**, if it isn't installed already. When you deploy it, enter your Datto disk cleanup component.
-2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.0).
+2. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.1).
 3. Go to **Workflows > Import** and upload it.
 4. Click **Publish**, then **Deploy**.
 5. Open the workflow's **Properties > Webhook** and turn on **Enable webhook**. It arrives switched off.
@@ -61,13 +61,13 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/rmm
 
 ## Technical details
 
-**Formerly:** RMM Auto-Remediation | **Marketplace ID:** AAI-00036 | **Type:** Workflow (agent plus one PowerShell step) | **Version:** 1.1.0
+**Formerly:** RMM Auto-Remediation | **Marketplace ID:** AAI-00036 | **Type:** Workflow (agent plus one PowerShell step) | **Version:** 1.1.1
 
 Workstation RMM alerts get a safe fix, a re-check and are resolved after you approve, and anything that can't be fixed safely becomes a ticket in your PSA: ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.0).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.1).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -77,7 +77,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `rmm-auto-remediation.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/rmm-auto-remediation/rmm-auto-remediation.yml) |
-| Download `rmm-auto-remediation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.0) |
+| Download `rmm-auto-remediation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/rmm-auto-remediation/v1.1.1) |
 | Needs the agent | [RMM Agent](https://github.com/cloudradial/Automations/tree/main/rmm-agent) (1.1.0 or later) |
 | Source of the ticket step | [`src/`](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation/src): `ticket.ps1`, `build.js`, `test.ps1` |
 | All files in this automation | [rmm-auto-remediation](https://github.com/cloudradial/Automations/tree/main/rmm-auto-remediation) |

@@ -23,7 +23,7 @@ ConnectWise PSA.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/connectwise-board-types-setup/connectwise-board-types-setup.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/connectwise-board-types-setup/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
 3. Run it with your board's name:
 
@@ -48,7 +48,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/con
 | What | Link |
 |---|---|
 | View `connectwise-board-types-setup.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/connectwise-board-types-setup/connectwise-board-types-setup.yml) |
-| Download `connectwise-board-types-setup.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/connectwise-board-types-setup/connectwise-board-types-setup.yml) |
+| Download `connectwise-board-types-setup.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/connectwise-board-types-setup/v1.0.0) |
 | Step sources and build script | [src/](https://github.com/cloudradial/Automations/tree/main/connectwise-board-types-setup/src) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/connectwise-board-types-setup) |
 

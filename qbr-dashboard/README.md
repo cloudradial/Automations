@@ -33,7 +33,7 @@ ConnectWise PSA, Datto RMM and Microsoft 365.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/qbr-dashboard/qbr-dashboard.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/qbr-dashboard/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Run it once with **Test** for your client (input below), then add a daily **Routine** with the same input.
@@ -63,7 +63,7 @@ Built on the [Client Health](../client-health/) dashboard template, filled by a 
 | What | Link |
 |---|---|
 | View `qbr-dashboard.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/qbr-dashboard/qbr-dashboard.yml) |
-| Download `qbr-dashboard.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/qbr-dashboard/qbr-dashboard.yml) |
+| Download `qbr-dashboard.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/qbr-dashboard/v1.0.0) |
 | Widget HTML and demo token values | [widgets/](https://github.com/cloudradial/Automations/tree/main/qbr-dashboard/widgets) |
 | Step source, widget template builder and build script | [src/](https://github.com/cloudradial/Automations/tree/main/qbr-dashboard/src) |
 

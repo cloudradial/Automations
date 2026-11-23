@@ -23,7 +23,7 @@ ConnectWise PSA. Signal needs to be turned on in your portal.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/weekly-client-summary/weekly-client-summary.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/weekly-client-summary/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 4. Add a **Routine** for each client with this input:
@@ -45,7 +45,7 @@ ConnectWise PSA. Signal needs to be turned on in your portal.
 | What | Link |
 |---|---|
 | View `weekly-client-summary.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/weekly-client-summary/weekly-client-summary.yml) |
-| Download `weekly-client-summary.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/weekly-client-summary/weekly-client-summary.yml) |
+| Download `weekly-client-summary.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/weekly-client-summary/v1.0.0) |
 | Step source and build script | [src/](https://github.com/cloudradial/Automations/tree/main/weekly-client-summary/src) |
 
 ## Inputs

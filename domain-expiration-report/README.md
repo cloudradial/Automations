@@ -32,7 +32,7 @@ Your UCP portal on its own. It reads the domains already recorded for each clien
 
 ## Set it up
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.1).
 2. In AutomationAI, go to **Workflows > Import** and upload it.
 3. Add your CloudRadial API key to AutomationAI.
 4. Click **Publish**, then **Deploy**.
@@ -50,15 +50,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/dom
 
 ## Technical details
 
-**Formerly:** Domain Expiration Report | **Marketplace ID:** AAI-00023 | **Type:** Workflow | **Version:** 1.0.0
+**Formerly:** Domain Expiration Report | **Marketplace ID:** AAI-00023 | **Type:** Workflow | **Version:** 1.0.1
 
 ## Files
 
-Each version is published as a release, with `domain-expiration-report.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0).
+Each version is published as a release, with `domain-expiration-report.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.1).
 
 | What | Link |
 |---|---|
-| Download `domain-expiration-report.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0) |
+| Download `domain-expiration-report.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.1) |
 | View the current source | [`domain-expiration-report.yml`](https://github.com/cloudradial/Automations/blob/main/domain-expiration-report/domain-expiration-report.yml) |
 | All files in this automation | [domain-expiration-report](https://github.com/cloudradial/Automations/tree/main/domain-expiration-report) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/domain-expiration-report) |
@@ -70,7 +70,7 @@ A CloudRadial **AutomationAI workflow** that checks every company's managed doma
 
 ## Download & import
 
-**Download the workflow:** [`domain-expiration-report.yml`](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.0)
+**Download the workflow:** [`domain-expiration-report.yml`](https://github.com/cloudradial/Automations/releases/tag/domain-expiration-report/v1.0.1)
 
 In AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **deploy** it to your runner. Run it on demand with **Test**, or attach a **Routine** to run it on a schedule (e.g. weekly). No trigger input is required, it covers all companies.
 

@@ -28,7 +28,7 @@ ConnectWise PSA. It works alongside ServiceAI Triage, which keeps assigning tick
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/tech-out-of-office-check/tech-out-of-office-check.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/tech-out-of-office-check/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
 3. Add your boards, time zone and dispatcher email to the runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/tech-out-of-office-check#settings) list exactly what to add.
 4. **Preview.** Open the workflow, click **Run** with `{"confirm": "false"}` and check which tickets it would move and to whom. Nothing changes.
@@ -45,14 +45,14 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/tec
 
 **Marketplace ID:** CRA-00026 | **Type:** Workflow (PowerShell steps, no AI), run every few minutes by a Routine | **PSA:** ConnectWise PSA only | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/tech-out-of-office-check/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `tech-out-of-office-check.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/tech-out-of-office-check/tech-out-of-office-check.yml) |
-| Download `tech-out-of-office-check.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/tech-out-of-office-check/tech-out-of-office-check.yml) |
+| Download `tech-out-of-office-check.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/tech-out-of-office-check/v1.0.0) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/tech-out-of-office-check/src) |
 | All files in this automation | [tech-out-of-office-check](https://github.com/cloudradial/Automations/tree/main/tech-out-of-office-check) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/tech-out-of-office-check) |
@@ -117,7 +117,7 @@ Until live mode is on, every run is a **preview**: it returns `status: pending_c
 
 ## Download & import
 
-1. **Workflows > Import**, upload [`tech-out-of-office-check.yml`](https://raw.githubusercontent.com/cloudradial/Automations/main/tech-out-of-office-check/tech-out-of-office-check.yml).
+1. **Workflows > Import**, upload [`tech-out-of-office-check.yml`](https://github.com/cloudradial/Automations/releases/tag/tech-out-of-office-check/v1.0.0).
 2. Check the [settings](#settings). The ConnectWise secrets are the same as the ConnectWise Manage extension's, so they're usually already on the runner.
 3. **Publish** and **Deploy** to that runner.
 4. Run a preview (see [Test](#test)), then attach the [Routine](#schedule-it).

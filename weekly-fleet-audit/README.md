@@ -44,7 +44,7 @@ Your team gets one email with the headline numbers, a "Start here" list, a table
 1. Import the [Deliver Result agent](https://github.com/cloudradial/Automations/tree/main/deliver-result) on **Agents > Custom > Import**, if you don't have it yet.
 2. Install and connect the **Postmark** extension, and set the sender address Deliver Result should use.
 3. Take Deliver Result out of preview mode. It starts out describing the email without sending it. Its [guide](https://github.com/cloudradial/Automations/blob/main/deliver-result/README.md#dry-run-and-going-live) shows how to go live.
-4. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.0.0).
+4. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.1.0).
 5. Go to **Workflows > Import** and upload it.
 6. Click **Publish**, then **Deploy**.
 7. Add your CloudRadial API details to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit#required-runner-key-vault-secrets) list exactly what to add.
@@ -60,11 +60,11 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/wee
 
 ## Technical details
 
-**Formerly:** Weekly Fleet Audit | **Marketplace ID:** AAI-00032 | **Type:** Workflow (PowerShell audit + Deliver Result agent) | **Version:** 1.0.0
+**Formerly:** Weekly Fleet Audit | **Marketplace ID:** AAI-00032 | **Type:** Workflow (PowerShell audit + Deliver Result agent) | **Version:** 1.1.0
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.0.0).
+Each version is published as a release, with this automation's `.yml` file(s) attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.1.0).
 
 **Import in this order.** A workflow can't find its agent until the agent is imported.
 
@@ -74,7 +74,7 @@ Each version is published as a release, with this automation's `.yml` file(s) at
 | What | Link |
 |---|---|
 | View `weekly-fleet-audit.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/weekly-fleet-audit/weekly-fleet-audit.yml) |
-| Download `weekly-fleet-audit.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.0.0) |
+| Download `weekly-fleet-audit.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/weekly-fleet-audit/v1.1.0) |
 | Needs the agent | [Deliver Result](https://github.com/cloudradial/Automations/tree/main/deliver-result) |
 | All files in this automation | [weekly-fleet-audit](https://github.com/cloudradial/Automations/tree/main/weekly-fleet-audit) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/weekly-fleet-audit) |

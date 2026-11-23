@@ -29,7 +29,7 @@ ScalePad Lifecycle Manager and any UCP portal.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/scalepad-warranty-sync/scalepad-warranty-sync.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/scalepad-warranty-sync/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
 3. Add your CloudRadial and ScalePad API details to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/scalepad-warranty-sync#secrets) list exactly what to add.
 4. **Preview.** Open the workflow, click **Run** and leave the input empty. Nothing changes: the result lists every date it would update and every card it would write.
@@ -53,14 +53,14 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sca
 
 **Formerly:** none (new) | **Marketplace ID:** CRA-00023 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/scalepad-warranty-sync/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `scalepad-warranty-sync.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/scalepad-warranty-sync/scalepad-warranty-sync.yml) |
-| Download `scalepad-warranty-sync.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/scalepad-warranty-sync/scalepad-warranty-sync.yml) |
+| Download `scalepad-warranty-sync.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/scalepad-warranty-sync/v1.0.0) |
 | Source and tests (for maintainers) | [src/](https://github.com/cloudradial/Automations/tree/main/scalepad-warranty-sync/src) |
 | All files in this automation | [scalepad-warranty-sync](https://github.com/cloudradial/Automations/tree/main/scalepad-warranty-sync) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/scalepad-warranty-sync) |

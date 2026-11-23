@@ -36,7 +36,7 @@ Microsoft 365 (Entra ID and Exchange Online). The notes go on the ticket in Conn
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.1).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy** to the runner that holds the client's Microsoft 365 connection.
 4. Give the Microsoft 365 app the permissions and role in the [technical details](https://github.com/cloudradial/Automations/tree/main/user-offboarding#required-microsoft-graph-permissions).
@@ -63,16 +63,16 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/use
 
 ## Technical details
 
-**Formerly:** User offboarding | **Marketplace ID:** CRA-00003 | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.1.0
+**Formerly:** User offboarding | **Marketplace ID:** CRA-00003 | **Type:** Workflow (two PowerShell steps, no AI) | **Version:** 1.1.1
 
 ## Files
 
-Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0).
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.1).
 
 | What | Link |
 |---|---|
 | View `user-offboarding.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/user-offboarding/user-offboarding.yml) |
-| Download `user-offboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0) |
+| Download `user-offboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.1) |
 | Source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/user-offboarding/src) |
 | All files in this automation | [user-offboarding](https://github.com/cloudradial/Automations/tree/main/user-offboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/user-offboarding) |
@@ -147,7 +147,7 @@ Set-Mailbox -Identity 'sam.doe@contoso.com' -ForwardingAddress 'alex.kim@contoso
 
 ## Download & import
 
-**Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.0)
+**Download the workflow:** [`user-offboarding.yml`](https://github.com/cloudradial/Automations/releases/tag/user-offboarding/v1.1.1)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [secrets](#required-runner-key-vault-secrets), grant the [permissions](#required-microsoft-graph-permissions), then publish and deploy. Full steps are under [Import & test](#import--test).
 

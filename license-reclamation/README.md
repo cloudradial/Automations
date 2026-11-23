@@ -34,7 +34,7 @@ Microsoft 365 and CloudRadial Planner. No PSA needed.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.1).
 2. In AutomationAI, go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy** to the runner that has this client's Microsoft 365 connection.
 4. Add a monthly **Routine** for the workflow, for example at 7am on the 1st. Add it again after any fresh import, because the schedule isn't part of the file.
@@ -52,15 +52,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/lic
 
 ## Technical details
 
-**Marketplace ID:** AAI-00048 | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365) | **Version:** 1.2.0
+**Marketplace ID:** AAI-00048 | **Type:** Workflow (PowerShell, no AI, read-only in Microsoft 365) | **Version:** 1.2.1
 
 ## Files
 
-Each version is published as a release, with `license-reclamation.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.0).
+Each version is published as a release, with `license-reclamation.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.1).
 
 | What | Link |
 |---|---|
-| Download `license-reclamation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.0) |
+| Download `license-reclamation.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.1) |
 | View the current source | [`license-reclamation.yml`](https://github.com/cloudradial/Automations/blob/main/license-reclamation/license-reclamation.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/license-reclamation/src) |
 | All files in this automation | [license-reclamation](https://github.com/cloudradial/Automations/tree/main/license-reclamation) |
@@ -103,7 +103,7 @@ If the chosen company is linked to a different Microsoft 365 tenant, the run sto
 
 ## Download & import
 
-**Download the workflow:** [`license-reclamation.yml`](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.0)
+**Download the workflow:** [`license-reclamation.yml`](https://github.com/cloudradial/Automations/releases/tag/license-reclamation/v1.2.1)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then **Publish** and **Deploy** it to the runner that holds this company's Microsoft 365 secrets. Then attach the monthly Routine (see [Import & test](#import--test)). A Routine isn't part of the export, so it has to be added after every fresh import.
 

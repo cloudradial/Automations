@@ -33,7 +33,7 @@ Datto RMM (Windows components) and ConnectWise PSA for the ticket note. Signal n
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/software-install-datto/software-install-datto.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/software-install-datto/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 
@@ -65,7 +65,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sof
 | What | Link |
 |---|---|
 | View `software-install-datto.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/software-install-datto/software-install-datto.yml) |
-| Download `software-install-datto.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/software-install-datto/software-install-datto.yml) |
+| Download `software-install-datto.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/software-install-datto/v1.0.0) |
 | Portal form | [forms/request-software.json](https://github.com/cloudradial/Automations/blob/main/software-install-datto/forms/request-software.json) |
 | Step source and build script | [src/](https://github.com/cloudradial/Automations/tree/main/software-install-datto/src) |
 

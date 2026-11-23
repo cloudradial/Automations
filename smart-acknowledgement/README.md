@@ -38,7 +38,7 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
 
 **In AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.1).
 2. Go to **Workflows > Import** and upload it.
 3. Turn on the webhook in **Properties**.
 4. Click **Publish**, then **Deploy**.
@@ -66,15 +66,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sma
 
 ## Technical details
 
-**Marketplace ID:** AAI-00059 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00059 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.1
 
 ## Files
 
-Each version is published as a release, with `smart-acknowledgement.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0).
+Each version is published as a release, with `smart-acknowledgement.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.1).
 
 | What | Link |
 |---|---|
-| Download `smart-acknowledgement.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0) |
+| Download `smart-acknowledgement.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.1) |
 | View the current source | [`smart-acknowledgement.yml`](https://github.com/cloudradial/Automations/blob/main/smart-acknowledgement/smart-acknowledgement.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/smart-acknowledgement/src) |
 | All files in this automation | [smart-acknowledgement](https://github.com/cloudradial/Automations/tree/main/smart-acknowledgement) |
@@ -117,7 +117,7 @@ ServiceAI already posts a customer auto-response from its Auto-Response Template
 
 ## Download & import
 
-**Download the workflow:** [`smart-acknowledgement.yml`](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.0)
+**Download the workflow:** [`smart-acknowledgement.yml`](https://github.com/cloudradial/Automations/releases/tag/smart-acknowledgement/v1.0.1)
 
 Then in AutomationAI:
 1. **Workflows → Import**, and upload the `.yml`.

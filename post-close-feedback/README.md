@@ -41,7 +41,7 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk.
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.1).
 2. Go to **Workflows > Import** and upload it.
 3. Add your survey page link, your service manager's email address and your PSA connection to the runner.
 4. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
@@ -64,15 +64,15 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Technical details
 
-**Marketplace ID:** AAI-00056 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.1.0
+**Marketplace ID:** AAI-00056 | **Type:** Workflow (PowerShell steps, no AI) | **Version:** 1.1.1
 
 ## Files
 
-Each version is published as a release, with `post-close-feedback.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0).
+Each version is published as a release, with `post-close-feedback.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.1).
 
 | What | Link |
 |---|---|
-| Download `post-close-feedback.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0) |
+| Download `post-close-feedback.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.1) |
 | View the current source | [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/blob/main/post-close-feedback/post-close-feedback.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/post-close-feedback/src) |
 | All files in this automation | [post-close-feedback](https://github.com/cloudradial/Automations/tree/main/post-close-feedback) |
@@ -127,7 +127,7 @@ What this workflow does with it: in score mode, when `cr_company_id` (the CloudR
 
 ## Download & import
 
-**Download the workflow:** [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.0)
+**Download the workflow:** [`post-close-feedback.yml`](https://github.com/cloudradial/Automations/releases/tag/post-close-feedback/v1.1.1)
 
 Then in AutomationAI: **Workflows → Import**, upload the `.yml`, add the [required secrets](#required-runner-key-vault-secrets) to the runner, enable the webhook in **Properties**, then **Publish** and **Deploy**. Full steps are under [Import & test](#import--test).
 

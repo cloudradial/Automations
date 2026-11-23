@@ -29,7 +29,7 @@ Any Microsoft 365 tenant. It doesn't use a PSA and opens no tickets. Run one cop
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/password-expiry-reminder/password-expiry-reminder.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/password-expiry-reminder/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
 3. Add the client's Microsoft 365 details and the sending mailbox to your runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder#required-runner-key-vault-secrets) list exactly what to add and which permissions the app needs.
 4. **Preview.** Open the workflow, click **Run** with this input and check who it would email. Nothing is sent.
@@ -49,16 +49,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/pas
 
 ## Technical details
 
-**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** CRA-00025 | **Type:** Workflow (PowerShell, no AI, runs on a schedule)
+**Formerly:** Password Expiry Reminder to End User (tracker 9.6) | **Marketplace ID:** CRA-00025 | **Type:** Workflow (PowerShell, no AI, runs on a schedule) | **Version:** 1.0.0
+## Files
 
-## Files (always the latest version)
-
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/password-expiry-reminder/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `password-expiry-reminder.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/password-expiry-reminder/password-expiry-reminder.yml) |
-| Download `password-expiry-reminder.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/password-expiry-reminder/password-expiry-reminder.yml) |
+| Download `password-expiry-reminder.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/password-expiry-reminder/v1.0.0) |
 | Step source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder/src) |
 | All files in this automation | [password-expiry-reminder](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/password-expiry-reminder) |
@@ -89,7 +88,7 @@ The workflow runs against one Microsoft 365 tenant: the one whose app secrets ar
 
 ## Download & import
 
-**Download the workflow:** [`password-expiry-reminder.yml`](https://raw.githubusercontent.com/cloudradial/Automations/main/password-expiry-reminder/password-expiry-reminder.yml)
+**Download the workflow:** [`password-expiry-reminder.yml`](https://github.com/cloudradial/Automations/releases/tag/password-expiry-reminder/v1.0.0)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](https://github.com/cloudradial/Automations/tree/main/password-expiry-reminder#required-runner-key-vault-secrets), **Publish**, **Deploy** to the runner that holds that client's secrets, and attach a daily **Routine** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

@@ -34,7 +34,7 @@ Microsoft 365. For the optional ticket note: ConnectWise PSA, Autotask, HaloPSA,
 
 ## Set it up
 
-1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.1).
 2. In AutomationAI, go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy** to the runner that has this client's Microsoft 365 connection.
 4. Give the runner the client's CloudRadial company number, so the scheduled run knows where to save the report.
@@ -52,15 +52,15 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sta
 
 ## Technical details
 
-**Marketplace ID:** AAI-00064 | **Type:** Workflow (run monthly by a Routine, or by hand) | **Version:** 1.0.0
+**Marketplace ID:** AAI-00064 | **Type:** Workflow (run monthly by a Routine, or by hand) | **Version:** 1.0.1
 
 ## Files
 
-Each version is published as a release, with `stale-guest-cleanup.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0).
+Each version is published as a release, with `stale-guest-cleanup.yml` attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.1).
 
 | What | Link |
 |---|---|
-| Download `stale-guest-cleanup.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0) |
+| Download `stale-guest-cleanup.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.1) |
 | View the current source | [`stale-guest-cleanup.yml`](https://github.com/cloudradial/Automations/blob/main/stale-guest-cleanup/stale-guest-cleanup.yml) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/stale-guest-cleanup/src) |
 | All files in this automation | [stale-guest-cleanup](https://github.com/cloudradial/Automations/tree/main/stale-guest-cleanup) |
@@ -88,7 +88,7 @@ If the report or note can't be written, the run still finishes, says so in `warn
 
 ## Download & import
 
-**Download the workflow:** [`stale-guest-cleanup.yml`](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.0)
+**Download the workflow:** [`stale-guest-cleanup.yml`](https://github.com/cloudradial/Automations/releases/tag/stale-guest-cleanup/v1.0.1)
 
 Then in AutomationAI: **Workflows > Import**, upload the `.yml`, add the [required runner secrets](#required-runner-key-vault-secrets), then publish and deploy it to the runner that holds that client's secrets. **Attach a monthly Routine after import** (the schedule isn't part of the export). Full steps are under [Import & test](#import--test).
 

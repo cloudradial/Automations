@@ -28,7 +28,7 @@ Any UCP portal. No PSA or Microsoft 365 connection is needed.
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/prospect-portal-setup/prospect-portal-setup.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/prospect-portal-setup/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
 3. **Preview.** Open the workflow, click **Run** with the prospect's name and domain. Nothing changes: the result lists what it would create.
 
@@ -49,14 +49,14 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/pro
 
 **Formerly:** Land: Set Up Prospect in Portal (Nick's Test) | **Marketplace ID:** CRA-00027 | **Type:** Workflow (PowerShell, no AI) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/prospect-portal-setup/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `prospect-portal-setup.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/prospect-portal-setup/prospect-portal-setup.yml) |
-| Download `prospect-portal-setup.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/prospect-portal-setup/prospect-portal-setup.yml) |
+| Download `prospect-portal-setup.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/prospect-portal-setup/v1.0.0) |
 | Step source, build script and test harness (shared with New Client Onboarding) | [new-client-onboarding/src/](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding/src) |
 | All files in this automation | [prospect-portal-setup](https://github.com/cloudradial/Automations/tree/main/prospect-portal-setup) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/prospect-portal-setup) |

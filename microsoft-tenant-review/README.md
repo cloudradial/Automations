@@ -33,7 +33,7 @@ Microsoft 365, with your multi-tenant app consented in the client's tenant. Any 
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/microsoft-tenant-review/microsoft-tenant-review.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/microsoft-tenant-review/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 
@@ -64,7 +64,7 @@ This is the portal-form version that builds the assessment from Secure Score. [m
 | What | Link |
 |---|---|
 | View `microsoft-tenant-review.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/microsoft-tenant-review/microsoft-tenant-review.yml) |
-| Download `microsoft-tenant-review.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/microsoft-tenant-review/microsoft-tenant-review.yml) |
+| Download `microsoft-tenant-review.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/microsoft-tenant-review/v1.0.0) |
 | Portal form | [forms/microsoft-tenant-review.json](https://github.com/cloudradial/Automations/blob/main/microsoft-tenant-review/forms/microsoft-tenant-review.json) |
 | Step sources and build script | [src/](https://github.com/cloudradial/Automations/tree/main/microsoft-tenant-review/src) |
 | All files in this automation | [microsoft-tenant-review](https://github.com/cloudradial/Automations/tree/main/microsoft-tenant-review) |

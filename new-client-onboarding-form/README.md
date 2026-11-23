@@ -35,7 +35,7 @@ ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk (the same PSA
 
 **Once, in AutomationAI:**
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/new-client-onboarding-form/new-client-onboarding-form.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/new-client-onboarding-form/v1.0.0).
 2. Go to **Workflows > Import** and upload it.
 3. Click **Publish**, then **Deploy**.
 
@@ -68,7 +68,7 @@ This is the portal-form version of [New Client Onboarding](../new-client-onboard
 | What | Link |
 |---|---|
 | View `new-client-onboarding-form.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-client-onboarding-form/new-client-onboarding-form.yml) |
-| Download `new-client-onboarding-form.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/new-client-onboarding-form/new-client-onboarding-form.yml) |
+| Download `new-client-onboarding-form.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-client-onboarding-form/v1.0.0) |
 | Portal form | [forms/onboard-a-new-client.json](https://github.com/cloudradial/Automations/blob/main/new-client-onboarding-form/forms/onboard-a-new-client.json) |
 | Step sources and build script | [src/](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding-form/src) |
 | All files in this automation | [new-client-onboarding-form](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding-form) |

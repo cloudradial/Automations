@@ -1,6 +1,55 @@
 # Move HaloPSA Ticket Templates into CloudRadial Request Forms
 
-Every HaloPSA ticket template becomes a CloudRadial Service Request or Problem Report form that raises the same kind of ticket, with the questions a requester actually needs to answer, so moving to the CloudRadial portal doesn't mean rebuilding your forms by hand.
+Turn every HaloPSA ticket template into a CloudRadial request form that raises the same kind of ticket, asking only what a requester needs to answer, so moving to the UCP portal doesn't mean rebuilding your forms by hand.
+
+## What happens
+
+Your team runs it in AutomationAI, a few templates at a time:
+
+- **It reads your Halo templates:** each one's ticket type, team, priority and the custom fields it uses.
+- **AI drafts the form.** It keeps the questions a requester should answer and leaves out technician-only fields such as asset tags or billing codes. It also writes friendly labels, short hints and a one-line description.
+- **The forms are created in your own company**, as Service Requests or Problem Reports, each ending with an "Anything else we should know?" box that becomes the ticket description.
+- **You review them, then publish** them to your clients through a Partner Content package.
+
+Your clients then see familiar request forms in the portal, and each submission becomes the right Halo ticket through [Create a Halo Ticket from a Template](https://github.com/cloudradial/Automations/tree/main/create-halo-ticket-from-template).
+
+## What it protects
+
+- **Preview first.** The first run creates nothing and lists each form it would make, with its questions.
+- **Halo has the final say.** Every field Halo makes mandatory is on the form and required, the question types come from Halo rather than the AI, and a field the AI invents is dropped.
+- **Nothing is changed in Halo,** and no existing CloudRadial form is changed or deleted.
+- **No duplicates.** Each form is tagged with its Halo template, so a rerun skips templates already moved.
+
+## Works with
+
+- **HaloPSA** and the CloudRadial portal.
+- **Proven live:** three Halo templates moved into forms, and a client's submission of a migrated form created the right Halo ticket.
+- **Not yet proven on other Halo setups:** templates that use parts of Halo the tested templates didn't. Preview a few templates first.
+
+## What you need
+
+- AutomationAI, with your Halo API details and your CloudRadial API keys on the runner
+- [Create a Halo Ticket from a Template](https://github.com/cloudradial/Automations/tree/main/create-halo-ticket-from-template), which turns each submission into the Halo ticket
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases?q=halo-template-migration&expanded=true).
+2. Go to **Workflows > Import** and upload it.
+3. Add your Halo and CloudRadial details to the runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/halo-template-migration#required-runner-key-vault-secrets) list exactly what to add.
+4. Click **Publish**, then **Deploy**.
+5. **Preview** two or three templates into your own company. Then run it again to create them, and review the new forms in the portal.
+6. On each new form, add an **Action** question and pick **Create a Halo Ticket from a Template**.
+7. Run it again until every template is moved, then add the forms to a package under **Partner > Content** and **Publish** it.
+
+**Test it.** Submit one migrated form, then check the Halo ticket's type, team, priority and custom fields, and that there's only one ticket.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/halo-template-migration#technical-details) cover how templates map to forms, how tickets reach Halo, every run setting, and what has been proven live.
+
+---
+
+## Technical details
 
 **Marketplace ID:** CRA-00016 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.1
 

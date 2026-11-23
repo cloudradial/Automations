@@ -1,6 +1,56 @@
 # Create a Halo Ticket from a Template
 
-When a client submits a CloudRadial request form, the HaloPSA ticket is created exactly as its Halo ticket template would create it: the right ticket type, team, priority and status, with every answer in its Halo custom field. Halo's mandatory fields no longer reject the ticket.
+When a client submits a request form in your UCP portal, the HaloPSA ticket is created exactly as its Halo ticket template would create it, with every answer in its Halo custom field. Halo's mandatory fields no longer reject the request.
+
+## What your clients see in the portal
+
+**The request form they already use.** The client fills in a form, for example a New Starter Request, and submits it.
+
+**A ticket that's right first time.** The Halo ticket gets the template's ticket type, team, priority and status, and each answer lands in its own Halo field instead of the ticket description. Your technicians see the same ticket they'd get from Halo itself.
+
+**No more silent failures.** CloudRadial's own submission can't fill Halo custom fields, so Halo rejects a ticket when one of them is mandatory, while the client still sees "submitted". This creates the ticket through Halo instead, so it gets through.
+
+## What it protects
+
+- **Mandatory answers are checked first.** If Halo needs an answer the form didn't give, no half-filled ticket is created, and the run names the missing field.
+- **Halo's own choices.** A list answer must match one of Halo's options, and anything that doesn't is reported.
+- **Built for migrated forms.** It reads each question's Field ID as the Halo custom field name, as the forms made by [Move HaloPSA Ticket Templates into CloudRadial Request Forms](https://github.com/cloudradial/Automations/tree/main/halo-template-migration) are set up.
+
+## Works with
+
+- **HaloPSA** only, by design: it reads Halo's ticket templates and custom fields.
+- **Proven live:** a client's real form submission created a Halo ticket from its template, with the custom fields filled in.
+- **Not yet checked one by one:** every kind of list and checkbox value on the finished ticket, so check your first ticket from each form.
+
+## What you need
+
+- A UCP portal with **Actions** on your request forms
+- AutomationAI, with your Halo API details on the runner
+- Request forms whose questions use the Halo custom field names as their Field IDs (the migration workflow makes these for you)
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases?q=create-halo-ticket-from-template&expanded=true).
+2. Go to **Workflows > Import** and upload it.
+3. Add your Halo API details to the runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/create-halo-ticket-from-template#required-runner-key-vault-secrets) list exactly what to add.
+4. Click **Publish**, then **Deploy**.
+
+**In your UCP portal, on each Halo request form:**
+
+1. At the end of the form, add an **Action** question and pick **Create a Halo Ticket from a Template**.
+2. Forms made by the migration workflow are set not to send their own ticket to the PSA. For any other form, check the first submission doesn't create two tickets.
+
+**Test it.** Submit the form once, then check the Halo ticket's type, team, priority and custom fields, and that there's only one ticket.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/create-halo-ticket-from-template#technical-details) cover how answers are matched to Halo fields, the mandatory-field checks, manual runs, and what has been proven live.
+
+---
+
+## Technical details
 
 **Marketplace ID:** CRA-00015 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 

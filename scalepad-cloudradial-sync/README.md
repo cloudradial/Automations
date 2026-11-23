@@ -1,6 +1,61 @@
 # Move Off ScalePad Without Losing Your Data
 
-Moves every matched client's devices, other hardware, software, assessments, roadmap, budget, SaaS, insights and QBR documents from ScalePad into CloudRadial, and is safe to re-run.
+Move every client from ScalePad Lifecycle Manager into CloudRadial in one run: their computers and servers, other hardware, software, SaaS subscriptions, assessments, roadmap and budget, insights, meeting notes and QBR documents. Run it again whenever you like; it never duplicates anything.
+
+## What happens
+
+Your team runs it in AutomationAI. It pairs each ScalePad client with the CloudRadial company of the same name, then moves that client's data:
+
+- **Computers and servers** are matched by serial number. Ones CloudRadial already has get their blanks filled, such as warranty end, purchase date, model and operating system. Missing ones are added.
+- **Other hardware** (network gear, mobile devices, printers, and devices with no serial) becomes flexible assets, grouped by kind of device.
+- **SaaS subscriptions** (Microsoft 365, Google Workspace and so on) become a SaaS list with seats, term and renewal date.
+- **Installed software** is added to the devices that don't already get a software list from your RMM.
+- **Completed assessments** become CloudRadial assessments with their answers and score.
+- **Initiatives and contracts** become Planner cards with their budget and quarter, and **insights** become proposed Planner cards that close themselves when the issue clears.
+- **QBR documents and meeting notes** go into the client's admin-only Report Archives.
+
+Each client gets a migration report in its admin-only Report Archives: what moved, what needs a look, and a checklist of what ScalePad has that CloudRadial can't take yet, such as goals and meeting schedules.
+
+## What it protects
+
+- **Preview first.** A preview run shows what would move for each client and writes nothing.
+- **Safe to run again.** Everything is matched before it's written, so a rerun updates or skips instead of duplicating. Run it on a schedule to keep CloudRadial current while you finish the move.
+- **Your changes are kept.** It never deletes anything in CloudRadial, never overwrites a warranty date unless you ask, and leaves the status and priority you set on a Planner card alone.
+- **RMM software is left alone.** Devices that already have software from your RMM keep their own list.
+- **Clients see none of the working.** Reports and documents go to admin-only Report Archives, never the knowledge base.
+
+## Works with
+
+- **ScalePad Lifecycle Manager:** the source.
+- **CloudRadial:** the destination. No PSA is needed.
+- **Proven live:** a full move of a real client, and a rerun that wrote no duplicates. Assessments moved to CloudRadial's new assessment API in version 1.1.0 and haven't been rerun live since, so preview a client with assessments first.
+
+## What you need
+
+- AutomationAI, with a runner holding your ScalePad API key and your CloudRadial API keys
+- ScalePad client names that match your CloudRadial company names, or the ScalePad id for any that differ
+- Optional: the [ScalePad to CloudRadial Alignment](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-alignment) agent, for a reviewed plan first when your data is messy
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/scalepad-cloudradial-sync/v1.1.0).
+2. Go to **Workflows > Import** and upload it.
+3. Add your ScalePad and CloudRadial keys to the runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync#install--run) list exactly what to add, and the first step names anything missing.
+4. Click **Publish**, then **Deploy** to that runner.
+5. Click **Run** with the input `{"mode": "plan"}` to preview every matched client. Read the counts, then run it again with no input to move them.
+6. Optional: schedule it as a **Routine** to keep CloudRadial current until you switch off ScalePad.
+
+**One client at a time.** Send the CloudRadial company number, for example `{"companyId": 123}`, to move just that client. The technical details show how to pair a client whose names differ.
+
+**Test it.** Preview one client, then move it, and check its devices, Planner cards and migration report in the portal.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/scalepad-cloudradial-sync#technical-details) cover each area it moves and how, what it can't move yet, every run setting, and what reruns change.
+
+---
+
+## Technical details
 
 **Formerly:** ScalePad to CloudRadial Sync | **Marketplace ID:** AAI-00030 | **Type:** Workflow | **Version:** 1.1.0
 
@@ -133,7 +188,7 @@ All optional. With none, every name-matched company is migrated in apply mode.
   - A portal that answers the v2 routes with 404 or 405 gets the legacy `/api/beta/archive` routes for the rest of the step.
   - If a create reply carries no id, the folder is looked up again by name before uploading. A first live run uploaded to archive 0 and failed with "Sequence contains no elements".
   - The v2 upload was checked live on 2026-11-13: one PDF uploaded to a test folder on a demo portal became one item with the run's subject and the PDF attached. `test-upload.ps1` checks the request it sends.
-- **`POST /v2/assessment`** isn't in the published v2 spec (the Microsoft Security Assessment workflow uses it). If it fails, create the assessment once in the portal and pass its id.
+- **Assessments** use the JSON assessment API (`POST /v2/assessment`, `PATCH /v2/assessment/{id}/answers` and `POST /v2/assessment/{id}/run`), added to the CloudRadial API on 2026-11-13.
 - **Currency.** CloudRadial stores prices as plain numbers. The run warns when ScalePad amounts are in another currency (for example GBP).
 - **Devices created from ScalePad** have no RMM agent until one is deployed, they carry ScalePad's data, not live telemetry, and are tagged `ScalePad`.
 

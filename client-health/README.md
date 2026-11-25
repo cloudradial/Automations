@@ -70,7 +70,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cli
 
 ## Technical details
 
-**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent per PSA, plus a goal workflow to run it by hand) | **Version:** 1.0.1
+**Marketplace ID:** AAI-00093 | **Type:** Pulsar (custom agent per PSA, plus a goal workflow to run it by hand) | **Version:** 1.0.1
 
 ## Files
 

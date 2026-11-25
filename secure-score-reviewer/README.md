@@ -64,7 +64,7 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Technical details
 
-**Marketplace ID:** Not listed yet | **Type:** Pulsar (custom agent plus a goal workflow) | **Version:** 0.2.0
+**Marketplace ID:** AAI-00097 | **Type:** Pulsar (custom agent plus a goal workflow) | **Version:** 0.2.0
 
 ## Files
 

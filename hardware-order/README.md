@@ -45,7 +45,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/har
 
 ## Technical details
 
-**Formerly:** none (new) | **Marketplace ID:** Not listed yet | **Type:** Workflow (PowerShell steps and two agent steps) | **Version:** 1.0.0
+**Formerly:** none (new) | **Marketplace ID:** AAI-00096 | **Type:** Workflow (PowerShell steps and two agent steps) | **Version:** 1.0.0
 
 ## Files
 

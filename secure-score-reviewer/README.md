@@ -31,7 +31,7 @@ Microsoft 365 and the CloudRadial portal. One Pulsar per client.
 
 **1. Add the agent and your settings.**
 
-1. Download the agent from the [technical details](https://github.com/cloudradial/Automations/tree/main/secure-score-reviewer#technical-details) and upload it on **Agents > Custom**.
+1. **Download** the agent and workflow from the [release](https://github.com/cloudradial/Automations/releases/tag/secure-score-reviewer/v0.2.0), and upload the agent on **Agents > Custom**.
 2. Fill in the **Secure Score Settings** template for the client: its CloudRadial company id, your Planner product category id, your MFA enforcement group, service accounts to leave alone and any accepted-risk controls.
 3. In **Knowledge**, create a folder called **Secure Score - Contoso** (use the client's name) and upload the document to it.
 
@@ -68,8 +68,11 @@ See the [technical details](https://github.com/cloudradial/Automations/tree/main
 
 ## Files
 
+Each version is published as a release, with the agent and the goal workflow attached. Download them from the [**release**](https://github.com/cloudradial/Automations/releases/tag/secure-score-reviewer/v0.2.0).
+
 | What | Link |
 |---|---|
+| Download the agent and workflow | [Release](https://github.com/cloudradial/Automations/releases/tag/secure-score-reviewer/v0.2.0) |
 | Agent | [`secure-score-reviewer.agent.yml`](https://github.com/cloudradial/Automations/blob/main/secure-score-reviewer/secure-score-reviewer.agent.yml) |
 | Goal workflow | [`secure-score-reviewer.yml`](https://github.com/cloudradial/Automations/blob/main/secure-score-reviewer/secure-score-reviewer.yml) |
 | Knowledge template | [knowledge/](https://github.com/cloudradial/Automations/tree/main/secure-score-reviewer/knowledge) |

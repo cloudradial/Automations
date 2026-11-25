@@ -65,7 +65,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/rec
 
 ## Technical details
 
-**Formerly:** none (new) | **Marketplace ID:** to be assigned | **Type:** Pulsar (setup guide) + Agent + Workflow | **Version:** 1.0.1
+**Formerly:** none (new) | **Marketplace ID:** AAI-00094 | **Type:** Pulsar (setup guide) + Agent + Workflow | **Version:** 1.0.1
 
 ## Files
 

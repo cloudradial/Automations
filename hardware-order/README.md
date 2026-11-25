@@ -31,7 +31,7 @@ Ingram Micro and TD SYNNEX (US accounts), and any PSA the shared library support
 
 ## Set it up
 
-1. **Download** the [workflow file](https://raw.githubusercontent.com/cloudradial/Automations/main/hardware-order/hardware-order.yml) (right-click > Save link as).
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/hardware-order/v1.0.0).
 2. In AutomationAI, go to **Workflows > Import** and upload it. Click **Publish**, then **Deploy**.
 3. In your UCP portal, create a request form called **Order Hardware** with the questions in the [technical details](https://github.com/cloudradial/Automations/tree/main/hardware-order#the-form), and add an **Action** question that picks **Order Computer Hardware**.
 4. **Preview.** Open the workflow, click **Run** with its test input. You get the quote back, and nothing is noted or ordered.
@@ -47,14 +47,14 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/har
 
 **Formerly:** none (new) | **Marketplace ID:** Not listed yet | **Type:** Workflow (PowerShell steps and two agent steps) | **Version:** 1.0.0
 
-## Files (always the latest version)
+## Files
 
-These links point at the `main` branch, so they always open the current version.
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/hardware-order/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `hardware-order.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/hardware-order/hardware-order.yml) |
-| Download `hardware-order.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/hardware-order/hardware-order.yml) |
+| Download `hardware-order.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/hardware-order/v1.0.0) |
 | Step sources, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/hardware-order/src) |
 | All files in this automation | [hardware-order](https://github.com/cloudradial/Automations/tree/main/hardware-order) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/hardware-order) |

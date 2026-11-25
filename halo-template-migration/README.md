@@ -51,7 +51,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/hal
 
 ## Technical details
 
-**Marketplace ID:** CRA-00016 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.1
+**Marketplace ID:** AAI-00081 | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.1
 
 ## Files
 

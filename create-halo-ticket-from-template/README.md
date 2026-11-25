@@ -52,7 +52,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/cre
 
 ## Technical details
 
-**Marketplace ID:** CRA-00015 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
+**Marketplace ID:** AAI-00080 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.1.0
 
 ## Files
 

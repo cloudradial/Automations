@@ -45,7 +45,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/fir
 
 ## Technical details
 
-**Marketplace ID:** CRA-00011 | **Type:** Workflow (PowerShell) | **Version:** 1.1.0
+**Marketplace ID:** AAI-00076 | **Type:** Workflow (PowerShell) | **Version:** 1.1.0
 
 ## Files
 

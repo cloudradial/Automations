@@ -51,7 +51,7 @@ The [technical details](https://github.com/cloudradial/Automations/tree/main/sca
 
 ## Technical details
 
-**Formerly:** none (new) | **Marketplace ID:** CRA-00023 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
+**Formerly:** none (new) | **Marketplace ID:** AAI-00088 | **Type:** Workflow (one PowerShell step, no AI) | **Version:** 1.0.0
 
 ## Files
 

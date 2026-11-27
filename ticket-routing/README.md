@@ -1,18 +1,68 @@
 # Send Every Ticket to the Right Engineer
 
-New tickets are assigned to an engineer who has the right skill, chosen by the rule you set (least busy, round robin, listed order or random), and every assignment leaves a note saying why.
+New tickets are assigned to an engineer who has the right skill, chosen by the rule you set, and every assignment leaves a note saying why.
 
-**Formerly:** Queue / Technician Routing | **Marketplace ID:** not yet listed | **Type:** Agent + Workflow (ServiceAI Triage Action)
+## What happens
 
-## Files (always the latest version)
+ServiceAI triages each new ticket as it does today: it replies, and sets the board, type and priority. Then it hands the ticket to this automation, which picks the person:
 
-These links point at the `main` branch, so they always open the current version.
+- **AI reads the ticket and picks the skill it needs** from your list of skills, such as "Network Firewall Fortinet" or "Microsoft 365 licensing".
+- **Your routing table decides who.** It finds every active engineer with that skill, skips anyone already at their limit of open tickets, and picks one by your rule: least busy, round robin, listed order or random.
+- **The ticket is assigned in your PSA,** with an internal note naming the skill, the engineers considered and why this one was picked.
+
+You keep the routing table yourself: a simple list of engineers and skills you can build in Excel. The AI only chooses the skill, so a large table costs no more than a small one.
+
+## What it protects
+
+- **Preview until you're ready.** It starts in preview: it shows who it would pick and writes nothing until you switch it on.
+- **Only your engineers.** It never assigns anyone who isn't in your table, is marked inactive, or is at their limit.
+- **No invented skills.** An answer that isn't in your skills list counts as no match.
+- **Assigned tickets are left alone.** A ticket that already has someone stays with them.
+- **Safe to retry.** A retried request finds the ticket already assigned and changes nothing.
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, with ServiceAI's triage.
+
+- **Kaseya BMS** can't count open tickets per engineer, so it uses your listed order instead.
+- **Not yet run against a real PSA.** Leave it in preview for a few days and check its picks before switching it on.
+
+## What you need
+
+- ServiceAI, with triage on
+- AutomationAI, with your PSA connected on the runner
+- Your engineers and the skills each one covers
+
+## Set it up
+
+1. **Download** the [workflow and the skill agent](https://github.com/cloudradial/Automations/releases/tag/ticket-routing/v1.0.0), plus the [engineers and skills templates](https://github.com/cloudradial/Automations/tree/main/ticket-routing).
+2. Go to **Agents > Custom > Import** and upload the agent, then **Workflows > Import** and upload the workflow.
+3. Fill in your engineers and skills, then paste them into the workflow's **Routing table** step. The [routing table guide](https://github.com/cloudradial/Automations/blob/main/ticket-routing/ROUTING-TABLE.md) explains each column.
+4. Add your PSA details to the runner, then click **Publish** and **Deploy**.
+5. In **ServiceAI > Settings > Actions**, add an **Assign Engineer** Action used in triage, and tell triage to run it after it sets the board and priority. The [technical details](https://github.com/cloudradial/Automations/tree/main/ticket-routing#serviceai-action) give the exact settings and wording.
+6. Watch the picks in **Action Runs**. When they look right, switch the routing table's live setting on.
+
+**Test it.** Let a few new tickets through in preview and check each pick and its reason.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/ticket-routing#technical-details) cover the routing table, where else it can live (your portal or AutomationAI Knowledge), every setting, and each PSA's specifics.
+
+---
+
+## Technical details
+
+**Formerly:** Queue / Technician Routing | **Marketplace ID:** not yet listed | **Type:** Agent + Workflow (ServiceAI Triage Action) | **Version:** 1.0.0
+
+## Files
+
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/ticket-routing/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `ticket-routing.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/ticket-routing/ticket-routing.yml) |
-| Download `ticket-routing.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-routing/ticket-routing.yml) |
-| Download `ticket-skill-classifier.agent.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-routing/ticket-skill-classifier.agent.yml) |
+| Download `ticket-routing.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/ticket-routing/v1.0.0) |
+| Download `ticket-skill-classifier.agent.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/ticket-routing/v1.0.0) |
 | Download the **Ticket Routing: Engineers and Settings** KB article (UCP partners only) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-routing/kb-articles/ticket-routing-engineers-and-settings.txt) |
 | Download the **Ticket Routing: Skills** KB article (UCP partners only) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-routing/kb-articles/ticket-routing-skills.txt) |
 | Download `engineers-template.csv` (build the table in Excel, then paste it into the Routing table step) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/ticket-routing/engineers-template.csv) |
@@ -94,7 +144,7 @@ The workflow calls each PSA's API directly from its script steps, using the **sa
 4. Put in your routing table. Check it first with `Test-RoutingTable.ps1`, and see [ROUTING-TABLE.md](https://github.com/cloudradial/Automations/blob/main/ticket-routing/ROUTING-TABLE.md) for every column and setting.
    - **inline (default):** open the **Routing table (edit me)** step in the Designer and replace the sample settings, engineers and skills with yours.
    - **knowledge:** do the same for settings and engineers, set `$TableSource = 'knowledge'`, upload your skills CSV to a Knowledge folder, and ground the **Pick the skill** node on that folder. Grounding uses tenant ids, so it's never in the import.
-   - **ucp:** set `$TableSource = 'ucp'` and publish the two [KB article templates](#files-always-the-latest-version) in your own (MSP) company, with the subjects shown.
+   - **ucp:** set `$TableSource = 'ucp'` and publish the two [KB article templates](#files) in your own (MSP) company, with the subjects shown.
 5. **Publish** the workflow and **deploy** it to that runner.
 6. Turn on the webhook under **Properties → Webhook**, which mints the URL and secret, then redeploy.
 7. Wire the ServiceAI Action (below).

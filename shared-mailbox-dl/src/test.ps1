@@ -386,4 +386,30 @@ $r = Invoke-Request (New-Body @{ preview = 'true' })
 $sw = @(@($r.out.warnings) | Where-Object { $_ -match 'answered the note on ticket 12345 with a redirect; reading the ticket back showed the note was saved' })
 Check 'shared warning: a redirected note POST that was saved is in the output warnings once' ($r.out.status -eq 'pending_confirmation' -and $Sc.notes.Count -eq 1 -and $sw.Count -eq 1) "$($r.out.status) / $(@($r.out.warnings) -join ' | ')"
 
+# =================== portal form Action (answers at the top level beside ticket, company and user) ===================
+function New-Action {
+    param([hashtable]$Answers = @{}, [string]$UserEmail = 'alex.kim@contoso.com', [string]$Tenant = $TenantGuid)
+    $b = [ordered]@{ kind = 'Shared mailbox'; display_name = 'Contoso Sales Team'; members = 'sam.doe@contoso.com' }
+    foreach ($k in $Answers.Keys) { $b[$k] = $Answers[$k] }
+    $b['ticket'] = [pscustomobject]@{ id = 12345; reference = '12345'; subject = 'New shared mailbox'; description = '' }
+    $b['company'] = [pscustomobject]@{ id = 7; name = 'Contoso'; psaId = 42; tenantId = $Tenant }
+    $b['user'] = [pscustomobject]@{ id = 'u-1'; name = 'Alex Kim'; email = $UserEmail; psaId = 501 }
+    return ([pscustomobject]$b | ConvertTo-Json -Depth 5 | ConvertFrom-Json)
+}
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Request (New-Action)
+Check 'Action: created on ticket.id, requester from user.email is the owner' ($r.out.status -eq 'success' -and $r.read.ticket_id -eq '12345' -and (Get-PVal (Get-ExoCall 'Add-MailboxPermission' 0) 'User') -eq 'alex.kim@contoso.com' -and @(Get-PsaNotes).Count -eq 2) "$($r.out.status) $($r.out.message) $($r.err)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Request (New-Action @{ members = 'pat.lee@contoso.com'; confirm = 'true'; requester_email = 'pat.lee@contoso.com'; ticket_id = '999'; company_tenant_id = '11111111-2222-4333-8444-555555555555' })
+Check 'Action: answers that try to set confirm, the requester, the ticket or the tenant are ignored, so the request waits' ($r.out.status -eq 'pending_confirmation' -and $r.read.confirm -eq $false -and $r.read.ticket_id -eq '12345' -and $r.read.requester.upn -eq 'alex.kim@contoso.com' -and @(Get-ExoWrites).Count -eq 0) "$($r.out.status) $($r.read.ticket_id) $($r.out.message)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Request (New-Action @{ preview = 'true' })
+Check 'Action: a preview answer is ignored, so the request is created' ($r.out.status -eq 'success' -and @(Get-ExoWrites).Count -ge 1) "$($r.out.status) $($r.out.message)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Request (New-Action @{} 'alex.kim@contoso.com' '11111111-2222-4333-8444-555555555555')
+Check 'Action: company.tenantId for another tenant is refused' ($r.out.status -eq 'rejected' -and $r.err -match 'tenant' -and @(Get-ExoWrites).Count -eq 0) "$($r.out.status) $($r.err)"
+New-Scenario 'connectwise' 'rest'
+$r = Invoke-Request (New-Action @{} 'not-an-email')
+Check 'Action: no usable user.email means no owner, nothing created' ($r.out.status -eq 'incomplete' -and $r.out.message -match 'requester_email' -and @(Get-ExoWrites).Count -eq 0) "$($r.out.status) $($r.out.message)"
+
 Complete-Test

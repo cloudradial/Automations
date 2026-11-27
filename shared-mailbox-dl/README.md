@@ -1,17 +1,77 @@
 # Create Shared Mailboxes and Distribution Lists on Request
 
-When someone asks for a shared mailbox or a distribution list, it is created in Microsoft 365 with the right name, members and owner, and the ticket gets the new address, while anything unusual waits for a technician.
+When someone asks for a shared mailbox or a distribution list in your UCP portal, it's created in Microsoft 365 with the right name, members and owner, and the ticket gets the new address, while anything unusual waits for a technician.
 
-**Formerly:** Shared mailbox / distribution list request | **Marketplace ID:** TBD | **Type:** Workflow
+## What your clients see in the portal
 
-## Files (always the latest version)
+**A Shared Mailbox or Distribution List form.** The client picks which one they need, names it, and lists who should have it. A ticket is created, as with any other request.
 
-These links point at the `main` branch, so they always open the current version.
+**Ready in moments for an everyday request.** When everyone on the list is in the requester's own department, it's created straight away, with the requester as the owner. The ticket gets a reply such as "The new shared mailbox Contoso Sales Team is ready at contoso-sales-team@contoso.com."
+
+**Anything unusual waits for a technician.** People from another department, or more than 25 members, put the request on hold with a note saying why. A technician confirms it, and it's created then.
+
+## What it protects
+
+- **The person asking is the owner,** and a form answer can't change who asked.
+- **No clashes.** A name or address that's already used anywhere in Microsoft 365 is refused, and nothing is created.
+- **Only real people.** Every member must be a user in the client's tenant with a mailbox.
+- **Distribution lists only take mail from inside the company,** unless the request says otherwise.
+- **Nothing is ever deleted,** and a retried request doesn't create anything twice.
+
+## Works with
+
+Microsoft 365 (Exchange Online). The notes go on the ticket in ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk.
+
+- **Not yet run against a real account.** Try it on a test tenant first.
+
+## What you need
+
+- A UCP portal with **Actions** on your request forms
+- AutomationAI, with the client's Microsoft 365 and Exchange Online connected (the same connection the Microsoft Exchange extension uses)
+- Your PSA connected in AutomationAI, so the notes reach the ticket
+
+## Set it up
+
+**Once, in AutomationAI:**
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/shared-mailbox-dl/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds the client's Microsoft 365 connection.
+4. Give the Microsoft 365 app the permissions in the [technical details](https://github.com/cloudradial/Automations/tree/main/shared-mailbox-dl#required-microsoft-graph-permissions).
+
+If a client's Microsoft 365 connection is saved under that company rather than shared, open the workflow, set **Company** to that client on both steps, then publish and deploy. Do this again after every import.
+
+**In your UCP portal, create the form:**
+
+1. Create a request form called **New Shared Mailbox or Distribution List**.
+2. Add a choice question, "What do you need?", with Field ID `kind` and the options Shared mailbox and Distribution list.
+3. Add a **Text** question, "What should it be called?", with Field ID `display_name`.
+4. Add a **Text** question, "Who should have it?", with Field ID `members`, for email addresses separated by commas.
+5. At the end of the form, add an **Action** question and pick **Create a Shared Mailbox or Distribution List**.
+6. Make sure the company's Microsoft 365 tenant is set in the portal, and the form still sends tickets to your PSA.
+
+**Confirming a waiting request.** Open the workflow's **Test**, enter the same answers with the ticket number, the requester's email and `confirm` set to true, and run it.
+
+**Test it.** Submit the form for a test shared mailbox with people from your own department, and check it's created and the ticket gets its address. Remove it by hand afterwards.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/shared-mailbox-dl#technical-details) cover what's created and in what order, when a technician has to confirm, what happens without Exchange Online, and every run setting.
+
+---
+
+## Technical details
+
+**Formerly:** Shared mailbox / distribution list request | **Marketplace ID:** TBD | **Type:** Workflow | **Version:** 1.0.0
+
+## Files
+
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/shared-mailbox-dl/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `shared-mailbox-dl.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/shared-mailbox-dl/shared-mailbox-dl.yml) |
-| Download `shared-mailbox-dl.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/shared-mailbox-dl/shared-mailbox-dl.yml) |
+| Download `shared-mailbox-dl.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/shared-mailbox-dl/v1.0.0) |
 | Source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/shared-mailbox-dl/src) |
 | All files in this automation | [shared-mailbox-dl](https://github.com/cloudradial/Automations/tree/main/shared-mailbox-dl) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/shared-mailbox-dl) |
@@ -147,6 +207,15 @@ Send a flat JSON body, or the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Va
 
 **From a portal form, always send `confirm: false`.** A request that needs confirmation then waits on the ticket, and a technician reruns it with `confirm: true` (Run dialog, or a ServiceAI Action in AI mode).
 
+### Starting it from a form Action
+
+On portals with Actions, add a question of type **Action** to the form and pick **Create a Shared Mailbox or Distribution List**. There's nothing to map. The portal sends each answer under its Field ID (so the form needs `kind`, `display_name` and, usually, `members` questions, and optionally `send_as`, `alias`, `domain` and `external_allowed`), plus its own `ticket`, `company` and `user` objects. From an Action:
+
+- **The requester** (the owner) is the portal's `user.email`, **the ticket** is `ticket.id` (the ticket the form creates), and **the tenant** is `company.tenantId`.
+- **An everyday request is created straight away.** One that needs a technician waits on the ticket as `pending_confirmation`.
+- **A form answer can't set** `confirm`, `preview`, `requester_email`, `ticket_id`, `company_tenant_id` or `psa`. Answers with those Field IDs are ignored, so a requester can't skip the confirmation or make someone else the owner.
+- **To create a waiting request,** a technician runs the workflow from **Test** with a flat body: the same answers, `requester_email`, `ticket_id` and `confirm` true.
+
 ## Output
 
 ```json
@@ -168,7 +237,7 @@ Send a flat JSON body, or the CloudRadial `{Ticket:{TicketId, Questions:[{Id, Va
 4. Open the first step's **Test Input**. It ships with `preview` as `"true"`. Set `requester_email` and `members` to real test users in the tenant and run it. Check the address, the plan and the ticket note. Nothing should change in Microsoft 365.
 5. Set `preview` to `"false"` and run again with members from the requester's department. Check the shared mailbox exists, each member has full access, send-as is set, and the ticket has the internal note and the public note with the address.
 6. Run once more with a member from another department and a new `display_name`. The run should return `pending_confirmation` and create nothing. Rerun with `confirm` as `"true"` to create it.
-7. To start it from the portal, turn on the webhook under **Properties → Webhook** (it mints the URL and secret), redeploy, and add a Webhook activity to the request form's Automation that posts the inputs (with `requester_email` set to `@UserEmail`, `ticket_id` to `@TicketId`, `company_tenant_id` to `@CompanyTenantId` and `confirm` false) with the `X-Crauto-Webhook-Secret` header.
+7. To start it from the portal, add an **Action** question to the request form and pick **Create a Shared Mailbox or Distribution List** (see [Starting it from a form Action](#starting-it-from-a-form-action)), then submit it as a test user. On a portal without Actions, turn on the webhook under **Properties → Webhook** (it mints the URL and secret), redeploy, and add a Webhook activity to the request form's Automation that posts the inputs (with `requester_email` set to `@UserEmail`, `ticket_id` to `@TicketId`, `company_tenant_id` to `@CompanyTenantId` and `confirm` false) with the `X-Crauto-Webhook-Secret` header.
 
 > Webhook secrets are stripped from this export, so the portal issues a new URL and secret on import. The workflow never deletes anything; remove test mailboxes and lists by hand.
 

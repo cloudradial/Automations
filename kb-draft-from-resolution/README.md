@@ -2,6 +2,57 @@
 
 When a ticket is fixed, the fix becomes a clean, general knowledge base article draft in your CloudRadial portal, with every client name, person, address and password taken out, waiting for a technician to review and publish.
 
+## What happens
+
+When a ticket closes, ServiceAI (or your PSA) starts the workflow with the ticket number:
+
+- **It reads how the ticket was fixed:** the resolution, or the technicians' notes when there's no resolution.
+- **It takes out anything private** before the AI sees it: client and people's names, email addresses and domains, phone numbers, IP addresses, server paths, passwords, PINs and product keys.
+- **AI drafts a general article:** what it applies to, the symptoms, the cause and numbered steps to fix it. It writes only what the notes support, and it skips one-off fixes that aren't worth an article.
+- **The draft is saved in your own CloudRadial company,** marked "Draft for review" and dated far in the future, so clients don't see it. An internal note on the ticket names the draft.
+
+A technician reads the draft, moves it to the right company, sets a real publish date and removes the draft banner.
+
+## What it protects
+
+- **Private details never reach the AI,** and the draft is cleaned again after the AI writes it, in case a detail came back.
+- **Drafts stay out of clients' sight.** They're saved under your own company, never a client's and never MSP-wide.
+- **Preview first.** A preview run shows the draft and saves nothing.
+- **One draft per ticket.** A rerun for the same ticket doesn't make a second draft.
+- **Nothing is posted to the client.**
+
+## Works with
+
+ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro and Zendesk, and your CloudRadial portal's knowledge base.
+
+- **Not yet run against a real ticket.** Check with a client login that a saved draft really is hidden before you rely on it.
+- **Cleaning out private details is a safety net, not a guarantee.** Read every draft before publishing it.
+
+## What you need
+
+- AutomationAI, with your PSA and CloudRadial connected on the runner
+- Your own CloudRadial company's number, where drafts wait for review
+- ServiceAI, or your PSA's ticket-closed callback, to start it when a ticket closes
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases?q=kb-draft-from-resolution&expanded=true).
+2. Go to **Workflows > Import** and upload it.
+3. Add your PSA and CloudRadial details and your own company's number to the runner. The [technical details](https://github.com/cloudradial/Automations/tree/main/kb-draft-from-resolution#required-runner-key-vault-secrets) list exactly what to add.
+4. Turn on the webhook in **Properties**, then click **Publish** and **Deploy**.
+5. Preview a closed ticket from **Test**, then save one draft and check it in your company's knowledge base.
+6. Start it when a ticket closes: add a ServiceAI Action that calls the webhook with the ticket number, or call it from your PSA. The technical details show the body to send.
+
+**Test it.** Open the portal as a client user and check the saved draft isn't visible.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/kb-draft-from-resolution#technical-details) cover where the fix is read from, exactly what is taken out, how drafts stay hidden, and every run setting.
+
+---
+
+## Technical details
+
 **Marketplace ID:** TBD | **Type:** Workflow (PowerShell steps plus one AI Prompt step) | **Version:** 1.0.0
 
 ## Files

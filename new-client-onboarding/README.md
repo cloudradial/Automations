@@ -1,17 +1,65 @@
 # Onboard a New Client in CloudRadial, the PSA and Microsoft 365
 
-Bring on a new client in one run: create their CloudRadial company linked to the PSA, open an onboarding checklist ticket, and see the Microsoft 365 security baseline you would apply before anything touches their tenant.
+Bring on a new client in one run: create their CloudRadial company linked to the PSA, open an onboarding checklist ticket, and see the Microsoft 365 security baseline you'd apply before anything touches their tenant.
 
-**Marketplace ID:** TBD | **Type:** Workflow (run by hand, MSP-wide)
+## What happens
 
-## Files (always the latest version)
+Your team runs it by hand for each new client, with the client's name and email domain:
 
-These links point at the `main` branch, so they always open the current version.
+- **It checks first.** It makes sure the client isn't already in CloudRadial and finds them in your PSA.
+- **It sets up the client in CloudRadial:** a new company linked to their PSA company, with their domain, and added to a company group if you name one.
+- **It opens one onboarding ticket** in your PSA with a checklist, from the signed agreement and admin access through the RMM rollout and backups to the 30-day check-in. You can use your own checklist instead.
+- **It previews a Microsoft 365 security baseline:** the standard security groups and sign-in policies you'd add, and which ones the client already has. It changes nothing in their tenant.
+- **The baseline report goes into the client's admin-only Report Archives,** and an internal note on the ticket says what was set up.
+
+## What it protects
+
+- **Preview first.** The first run shows every change and makes none. Run it again to make them.
+- **No duplicates.** A client who's already in CloudRadial is refused, and a rerun reuses the open onboarding ticket rather than opening another.
+- **The right client.** It needs exactly one matching company in your PSA, and the Microsoft 365 tenant must own the client's domain, so one client is never reported under another.
+- **Their tenant is never changed.** The security baseline is a preview, because a sign-in policy switched on too early can lock everyone out.
+
+## Works with
+
+CloudRadial, and ConnectWise PSA, Autotask, HaloPSA, Kaseya BMS, Syncro or Zendesk. Microsoft 365 is optional.
+
+- **Not yet run against a real PSA and tenant.** Try it on a test client first.
+- **Some things stay in the portal:** linking the company to its Microsoft 365 tenant, the RMM agent and portal branding have no API. They're on the checklist.
+- **For a form your clients or sales team fill in,** use [Onboard a New Client from One Form](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding-form) instead.
+
+## What you need
+
+- AutomationAI, with your CloudRadial and PSA keys on the runner
+- Optional: a Microsoft 365 app your clients consent to, for the baseline preview
+
+## Set it up
+
+1. **Download** the [workflow file](https://github.com/cloudradial/Automations/releases/tag/new-client-onboarding/v1.0.0).
+2. Go to **Workflows > Import** and upload it.
+3. Click **Publish**, then **Deploy** to the runner that holds your CloudRadial and PSA keys. The [technical details](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding#required-runner-key-vault-secrets) list exactly what it needs.
+4. Run it from **Test** with the client's name and domain. Read the planned changes and the baseline.
+5. Run it again with `"confirm": true` to create the company and open the ticket.
+
+**Test it.** Use a test client that exists in your PSA, then check the new company, the ticket's checklist and the baseline report.
+
+## Need more detail?
+
+The [technical details](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding#technical-details) cover every check, what the CloudRadial API can and can't set, the security baseline in full, and every run setting.
+
+---
+
+## Technical details
+
+**Marketplace ID:** TBD | **Type:** Workflow (run by hand, MSP-wide) | **Version:** 1.0.0
+
+## Files
+
+Each version is published as a release, with this automation's `.yml` file attached. Download it from the [**release**](https://github.com/cloudradial/Automations/releases/tag/new-client-onboarding/v1.0.0).
 
 | What | Link |
 |---|---|
 | View `new-client-onboarding.yml` | [GitHub](https://github.com/cloudradial/Automations/blob/main/new-client-onboarding/new-client-onboarding.yml) |
-| Download `new-client-onboarding.yml` (right-click > Save link as) | [Raw file](https://raw.githubusercontent.com/cloudradial/Automations/main/new-client-onboarding/new-client-onboarding.yml) |
+| Download `new-client-onboarding.yml` | [Release](https://github.com/cloudradial/Automations/releases/tag/new-client-onboarding/v1.0.0) |
 | Step source, build script and test harness | [src/](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding/src) |
 | All files in this automation | [new-client-onboarding](https://github.com/cloudradial/Automations/tree/main/new-client-onboarding) |
 | Change history | [Commits](https://github.com/cloudradial/Automations/commits/main/new-client-onboarding) |
